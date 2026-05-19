@@ -217,6 +217,10 @@ $status = [
                 <textarea data-key="custom_header" style="height: 100px; font-family: monospace;"><?php echo Core::escape($core->setting('custom_header')); ?></textarea>
             </div>
             <div class="field">
+                <label>Footer HTML (before &lt;/body&gt;)</label>
+                <textarea data-key="custom_footer" style="height: 100px; font-family: monospace;"><?php echo Core::escape($core->setting('custom_footer')); ?></textarea>
+            </div>
+            <div class="field">
                 <label>Custom CSS</label>
                 <textarea data-key="custom_css" style="height: 100px; font-family: monospace;"><?php echo Core::escape($core->setting('custom_css')); ?></textarea>
             </div>

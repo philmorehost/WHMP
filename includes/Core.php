@@ -219,10 +219,24 @@ class Core {
     }
 
     public function render_head_injection() {
-        return $this->setting('header_injection', '');
+        $injection = $this->setting('custom_header', '');
+        if (empty($injection)) {
+            $injection = $this->setting('header_injection', '');
+        }
+        
+        $css = $this->setting('custom_css', '');
+        if (!empty($css)) {
+            $injection .= "\n<style>\n" . $css . "\n</style>\n";
+        }
+        
+        return $injection;
     }
 
     public function render_footer_injection() {
-        return $this->setting('footer_injection', '');
+        $injection = $this->setting('custom_footer', '');
+        if (empty($injection)) {
+            $injection = $this->setting('footer_injection', '');
+        }
+        return $injection;
     }
 }
