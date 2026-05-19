@@ -205,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 stopAudio();
             });
 
-            audioTimer = setTimeout(stopAudio, 120000); 
+            audioTimer = setTimeout(stopAudio, 40000); 
             currentAudio.onended = stopAudio;
         }
     });
