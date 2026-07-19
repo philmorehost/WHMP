@@ -1,0 +1,23 @@
+/* RTL overrides (blueprint §5 localization) — loaded only when the active
+   language is flagged is_rtl in the languages table (see Translation::isRtl()).
+   Flips the handful of directional rules the base stylesheets assume LTR for;
+   logical properties (margin-inline-*, etc.) in tokens.css/components.css
+   already flip automatically and don't need an override here. */
+
+.cv-topbar {
+    flex-direction: row-reverse;
+}
+
+.cv-datatable__toolbar {
+    flex-direction: row-reverse;
+}
+
+.cv-table th,
+.cv-table td {
+    text-align: right;
+}
+
+.cv-field-error,
+.cv-label {
+    text-align: right;
+}

@@ -1,0 +1,52 @@
+<?php
+
+declare(strict_types=1);
+
+namespace CodeVault\Downloads;
+
+use CodeVault\Database;
+use DateTimeImmutable;
+
+final class DownloadCategoryRepository
+{
+    public function __construct(
+        private readonly Database $db
+    ) {
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function all(): array
+    {
+        return $this->db->select('SELECT * FROM download_categories ORDER BY sort_order, name');
+    }
+
+    /** @return array<string, mixed>|null */
+    public function find(int $id): ?array
+    {
+        return $this->db->selectOne('SELECT * FROM download_categories WHERE id = ?', [$id]);
+    }
+
+    public function create(string $name, int $sortOrder = 0): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return (int) $this->db->insert(
+            'INSERT INTO download_categories (name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            [$name, $sortOrder, $now, $now]
+        );
+    }
+
+    /** @return bool true if deleted, false if the category still has downloads */
+    public function delete(int $id): bool
+    {
+        $count = (int) ($this->db->selectOne('SELECT COUNT(*) AS c FROM downloads WHERE category_id = ?', [$id])['c'] ?? 0);
+
+        if ($count > 0) {
+            return false;
+        }
+
+        $this->db->delete('DELETE FROM download_categories WHERE id = ?', [$id]);
+
+        return true;
+    }
+}

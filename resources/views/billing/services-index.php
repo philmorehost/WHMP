@@ -1,0 +1,47 @@
+<?php
+/** @var array<int, array<string, mixed>> $services */
+/** @var string $statusFilter */
+?>
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h1 class="cv-card__title">Services</h1>
+    <p><a href="/admin">&larr; Back to dashboard</a></p>
+    <div style="margin-top:var(--cv-space-2);">
+        <a class="cv-btn <?= $statusFilter === '' ? '' : 'cv-btn--secondary' ?>" href="/admin/services">All</a>
+        <a class="cv-btn <?= $statusFilter === 'active' ? '' : 'cv-btn--secondary' ?>" href="/admin/services?status=active">Active</a>
+        <a class="cv-btn <?= $statusFilter === 'suspended' ? '' : 'cv-btn--secondary' ?>" href="/admin/services?status=suspended">Suspended</a>
+        <a class="cv-btn <?= $statusFilter === 'pending' ? '' : 'cv-btn--secondary' ?>" href="/admin/services?status=pending">Pending</a>
+    </div>
+</div>
+
+<div class="cv-card">
+    <div class="cv-datatable__toolbar">
+        <?= $view->partial('partials.table-search', ['target' => '#services-table', 'placeholder' => 'Search services...']) ?>
+    </div>
+    <table class="cv-table" id="services-table">
+        <thead><tr><th>Client</th><th>Product</th><th>Cycle</th><th>Amount</th><th>Next Due</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($services as $service): ?>
+            <tr>
+                <td><?= e($service['first_name'] . ' ' . $service['last_name']) ?> (<?= e($service['client_email']) ?>)</td>
+                <td><?= e($service['product_name']) ?></td>
+                <td><?= e($service['billing_cycle']) ?></td>
+                <td>$<?= number_format((float) $service['amount'], 2) ?></td>
+                <td><?= e($service['next_due_date']) ?></td>
+                <td>
+                    <?php if ($service['status'] === 'active'): ?>
+                        <span class="cv-badge cv-badge--success">Active</span>
+                    <?php elseif ($service['status'] === 'suspended'): ?>
+                        <span class="cv-badge cv-badge--danger">Suspended</span>
+                    <?php else: ?>
+                        <span class="cv-badge cv-badge--neutral"><?= e($service['status']) ?></span>
+                    <?php endif; ?>
+                </td>
+                <td><a class="cv-btn cv-btn--secondary" href="/admin/services/<?= (int) $service['id'] ?>">Manage</a></td>
+            </tr>
+        <?php endforeach; ?>
+        <?php if ($services === []): ?>
+            <tr><td colspan="7" style="color:var(--cv-text-secondary);">No services yet.</td></tr>
+        <?php endif; ?>
+        </tbody>
+    </table>
+</div>

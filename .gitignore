@@ -1,0 +1,13 @@
+/vendor/
+/node_modules/
+.env
+*.log
+/storage/cache/*
+/storage/sessions/*
+/storage/system/*
+/storage/backups/*
+!/storage/cache/.gitkeep
+!/storage/sessions/.gitkeep
+!/storage/system/.gitkeep
+!/storage/backups/.gitkeep
+/.installed.lock

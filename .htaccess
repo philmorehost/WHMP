@@ -1,26 +1,36 @@
-Options -MultiViews
-RewriteEngine On
+# Root .htaccess — for deployments where the web server's document root is
+# this repo root rather than public/ (very common on shared/cPanel hosting,
+# where the account's document root or an addon domain's folder can't
+# always be pointed at a subdirectory). Without this file, every request —
+# including a bare "/" — falls through to Apache's directory listing,
+# exposing storage/, database/, core/, vendor/, composer.json/lock, etc.
+# directly to the internet. If your host lets you set the document root to
+# the public/ folder instead, do that too — it's the more correct setup —
+# but this file makes the app safe and fully functional either way.
 
-# Redirect /index.php to /
-RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\ /index\.php\ HTTP/
-RewriteRule ^index\.php$ / [R=301,L]
-
-# Redirect /page.php to /page (but exclude API endpoints to keep POST data)
-RewriteCond %{REQUEST_URI} !/api/
-RewriteCond %{REQUEST_URI} !/admin/api/
-RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\ /([^\ ]+)\.php\ HTTP/
-RewriteRule ^(.+)\.php$ $1 [R=301,L]
-
-# Internally rewrite /page to /page.php
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_FILENAME}\.php -f
-RewriteRule ^(.*)$ $1.php [L]
-
-# Security
+# Belt-and-suspenders: even if mod_rewrite below is somehow inactive
+# (AllowOverride restricted), never list directory contents.
 Options -Indexes
-<IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-XSS-Protection "1; mode=block"
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set Referrer-Policy "strict-origin-when-cross-origin"
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Rewrite every request to the same path under public/. Since public/
+    # is the only directory whose contents this makes reachable, everything
+    # else (storage/, database/, core/, vendor/, tests/, composer.json,
+    # .env, ...) becomes structurally unreachable from the web — a request
+    # for /storage/cache/php-error.log becomes an internal lookup for
+    # public/storage/cache/php-error.log, which doesn't exist, so Apache
+    # 404s it. public/.htaccess then applies its own front-controller
+    # rewrite (serve real files under public/ directly, everything else to
+    # public/index.php) exactly as it already does when public/ is the
+    # real document root.
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>
+
+# Defense in depth in case mod_rewrite is unavailable on this host: still
+# never serve a stray .env file if one ends up somewhere web-reachable.
+<FilesMatch "^\.env">
+    Require all denied
+</FilesMatch>

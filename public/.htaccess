@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Serve real files/directories (assets) directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Everything else goes through the front controller
+RewriteRule ^ index.php [L]

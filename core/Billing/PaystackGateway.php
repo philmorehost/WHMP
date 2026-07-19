@@ -1,0 +1,189 @@
+<?php
+
+declare(strict_types=1);
+
+namespace CodeVault\Billing;
+
+use CodeVault\Modules\GatewayModule;
+use CodeVault\Provisioning\HttpClient;
+
+/**
+ * Paystack (blueprint §10: gateway choice for R4 was left open — this
+ * resolves it for the NG market alongside FlutterwaveGateway). Redirect-
+ * based: capture() calls Transaction Initialize and hands back Paystack's
+ * hosted checkout URL; the client pays there, then either the webhook or
+ * the redirect-return callback calls verifyTransaction() to confirm the
+ * charge server-side before it's ever recorded as paid — never trust the
+ * redirect alone, since a client can forge the return URL.
+ *
+ * Config (like ProvisioningModule's $params['server'] pattern) is passed
+ * in per-call via $params['config'] rather than self-fetched from the DB
+ * — keeps this class DB-agnostic and matches the existing module convention.
+ *
+ * NOT live-verified against Paystack's real API (no sandbox keys in this
+ * environment) — request/response shapes are spec-correct per Paystack's
+ * documented API, and the webhook-signature verification + payment-
+ * recording pipeline downstream of this class *is* live-verified with a
+ * self-signed real payload (see PaymentCallbackControllerTest).
+ */
+final class PaystackGateway implements GatewayModule
+{
+    private const BASE_URL = 'https://api.paystack.co';
+
+    public function __construct(
+        private readonly HttpClient $http
+    ) {
+    }
+
+    public function metadata(): array
+    {
+        return [
+            'name' => 'Paystack',
+            'description' => 'Card, bank transfer, and USSD payments via Paystack.',
+            'version' => '1.0.0',
+            'author' => 'CodeVault',
+        ];
+    }
+
+    public function configOptions(): array
+    {
+        return [
+            'secret_key' => ['type' => 'password', 'label' => 'Secret Key', 'default' => ''],
+            'public_key' => ['type' => 'text', 'label' => 'Public Key', 'default' => ''],
+        ];
+    }
+
+    public function isOffsite(): bool
+    {
+        return true;
+    }
+
+    /**
+     * @param array{config: array<string, mixed>, email: string, amount: float, reference: string, callbackUrl: string, metadata?: array<string, mixed>} $params
+     * @return array{success: bool, redirectUrl?: string, transactionId?: string, message: string}
+     */
+    public function capture(array $params): array
+    {
+        $secretKey = (string) ($params['config']['secret_key'] ?? '');
+
+        if ($secretKey === '') {
+            return ['success' => false, 'message' => 'Paystack is not configured — missing secret key.'];
+        }
+
+        $body = json_encode([
+            'email' => $params['email'],
+            // Paystack amounts are in the currency's smallest unit (kobo for NGN).
+            'amount' => (int) round($params['amount'] * 100),
+            'reference' => $params['reference'],
+            'callback_url' => $params['callbackUrl'],
+            'metadata' => $params['metadata'] ?? [],
+        ]);
+
+        $response = $this->http->request('POST', self::BASE_URL . '/transaction/initialize', $this->headers($secretKey), $body);
+        $decoded = json_decode($response['body'], true);
+
+        if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? false) !== true) {
+            return ['success' => false, 'message' => $decoded['message'] ?? 'Paystack initialization failed.'];
+        }
+
+        return [
+            'success' => true,
+            'redirectUrl' => $decoded['data']['authorization_url'] ?? '',
+            'transactionId' => $decoded['data']['reference'] ?? $params['reference'],
+            'message' => 'Redirecting to Paystack.',
+        ];
+    }
+
+    /**
+     * Server-side verification of a transaction reference — the only
+     * source of truth for whether a charge actually succeeded. Called by
+     * PaymentCallbackController from both the redirect-return and the
+     * webhook path.
+     *
+     * @param array<string, mixed> $config
+     * @return array{success: bool, status: string, reference: string, amount: float, metadata: array<string, mixed>}
+     */
+    public function verifyTransaction(string $reference, array $config): array
+    {
+        $secretKey = (string) ($config['secret_key'] ?? '');
+        $response = $this->http->request('GET', self::BASE_URL . '/transaction/verify/' . rawurlencode($reference), $this->headers($secretKey));
+        $decoded = json_decode($response['body'], true);
+
+        if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? false) !== true) {
+            return ['success' => false, 'status' => 'error', 'reference' => $reference, 'amount' => 0.0, 'metadata' => []];
+        }
+
+        $data = $decoded['data'] ?? [];
+        $status = (string) ($data['status'] ?? 'failed');
+
+        return [
+            'success' => $status === 'success',
+            'status' => $status,
+            'reference' => (string) ($data['reference'] ?? $reference),
+            'amount' => ((float) ($data['amount'] ?? 0)) / 100,
+            'metadata' => (array) ($data['metadata'] ?? []),
+        ];
+    }
+
+    public function refund(array $params): array
+    {
+        $secretKey = (string) ($params['config']['secret_key'] ?? '');
+        $body = json_encode(['transaction' => $params['transactionId']] + (isset($params['amount']) ? ['amount' => (int) round($params['amount'] * 100)] : []));
+
+        $response = $this->http->request('POST', self::BASE_URL . '/refund', $this->headers($secretKey), $body);
+        $decoded = json_decode($response['body'], true);
+
+        return [
+            'success' => $response['status'] === 200 && is_array($decoded) && ($decoded['status'] ?? false) === true,
+            'message' => $decoded['message'] ?? 'Refund request failed.',
+        ];
+    }
+
+    public function void(array $params): array
+    {
+        return ['success' => false, 'message' => 'Paystack does not support voiding — issue a refund instead.'];
+    }
+
+    public function tokenize(array $params): array
+    {
+        return ['success' => false, 'message' => 'Recurring card tokenization is not yet implemented for Paystack.'];
+    }
+
+    public function chargeToken(array $params): array
+    {
+        return ['success' => false, 'message' => 'Recurring card tokenization is not yet implemented for Paystack.'];
+    }
+
+    /**
+     * @param array<string, mixed> $rawPayload
+     * @param array<string, string> $headers
+     * @return array{valid: bool, event: string, data: array<string, mixed>}
+     */
+    public function handleCallback(array $rawPayload, array $headers): array
+    {
+        // Signature verification happens against the *raw request body*
+        // (see PaymentCallbackController, which has that before it's ever
+        // decoded to an array) — this method assumes the caller already
+        // confirmed the signature and is just extracting the event shape.
+        return [
+            'valid' => true,
+            'event' => (string) ($rawPayload['event'] ?? 'unknown'),
+            'data' => (array) ($rawPayload['data'] ?? []),
+        ];
+    }
+
+    /** Verifies Paystack's X-Paystack-Signature header: HMAC-SHA512 of the raw body, keyed by the secret key. */
+    public static function verifySignature(string $rawBody, string $signatureHeader, string $secretKey): bool
+    {
+        return hash_equals(hash_hmac('sha512', $rawBody, $secretKey), $signatureHeader);
+    }
+
+    /** @return array<string, string> */
+    private function headers(string $secretKey): array
+    {
+        return [
+            'Authorization' => "Bearer {$secretKey}",
+            'Content-Type' => 'application/json',
+        ];
+    }
+}

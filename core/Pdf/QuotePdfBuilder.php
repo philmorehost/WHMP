@@ -1,0 +1,92 @@
+<?php
+
+declare(strict_types=1);
+
+namespace CodeVault\Pdf;
+
+use CodeVault\Billing\CurrencyService;
+
+/**
+ * Lays out a quote onto a single-page PdfDocument — mirrors
+ * CreditNotePdfBuilder's/InvoicePdfBuilder's exact shape (blueprint §4.1
+ * "My Quotes", R23). Amounts render at the quote's own locked currency,
+ * same reasoning as invoices/credit notes: a document a client is deciding
+ * against must never re-price under them while it's outstanding.
+ */
+final class QuotePdfBuilder
+{
+    public function __construct(
+        private readonly CurrencyService $currency
+    ) {
+    }
+
+    /**
+     * @param array<string, mixed> $quote
+     * @param array<int, array<string, mixed>> $items
+     * @param array<string, mixed> $client
+     */
+    public function build(array $quote, array $items, array $client): string
+    {
+        $pdf = new PdfDocument();
+        $rate = (float) $quote['currency_rate'];
+        $currencyId = $quote['currency_id'] !== null ? (int) $quote['currency_id'] : null;
+        $money = fn (float $amount): string => $this->currency->formatLocked($amount, $currencyId, $rate);
+
+        $y = 800.0;
+
+        $pdf->text(50, $y, 'CodeVault', 20, true);
+        $pdf->text(420, $y, 'QUOTE', 20, true);
+        $y -= 30;
+
+        $pdf->text(50, $y, "Quote #Q-{$quote['id']}", 12, true);
+        $y -= 16;
+
+        $pdf->text(50, $y, 'Issued: ' . substr((string) $quote['created_at'], 0, 10));
+
+        if (!empty($quote['valid_until'])) {
+            $pdf->text(300, $y, 'Valid Until: ' . substr((string) $quote['valid_until'], 0, 10));
+        }
+
+        $y -= 30;
+
+        $pdf->text(50, $y, 'Issued To:', 11, true);
+        $y -= 14;
+        $pdf->text(50, $y, trim("{$client['first_name']} {$client['last_name']}"));
+        $y -= 14;
+        $pdf->text(50, $y, (string) $client['email']);
+
+        if (!empty($client['company_name'])) {
+            $y -= 14;
+            $pdf->text(50, $y, (string) $client['company_name']);
+        }
+
+        $y -= 30;
+
+        $pdf->text(50, $y, 'Subject:', 11, true);
+        $pdf->text(120, $y, (string) $quote['subject']);
+        $y -= 30;
+
+        $pdf->line(50, $y, 545, $y);
+        $y -= 16;
+        $pdf->text(50, $y, 'Description', 10, true);
+        $pdf->text(480, $y, 'Amount', 10, true);
+        $y -= 6;
+        $pdf->line(50, $y, 545, $y);
+        $y -= 16;
+
+        foreach ($items as $item) {
+            $pdf->text(50, $y, (string) $item['description']);
+            $pdf->text(480, $y, $money((float) $item['amount']));
+            $y -= 16;
+        }
+
+        $y -= 4;
+        $pdf->line(50, $y, 545, $y);
+        $y -= 18;
+
+        $pdf->text(400, $y, 'Total:', 11, true);
+        $pdf->text(480, $y, $money((float) $quote['total']), 11, true);
+
+        return $pdf->render();
+    }
+}

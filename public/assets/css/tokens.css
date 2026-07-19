@@ -1,0 +1,181 @@
+/*
+ * Design tokens — the single source of truth for color, spacing, type,
+ * radii, and shadow across every surface (installer, client area, cart,
+ * admin). Blueprint §2: both theme skins consume these same variables;
+ * nothing downstream hardcodes a color or a pixel value.
+ */
+
+:root {
+    /* --- Color primitives -------------------------------------------- */
+    --cv-color-brand-50: #fff5eb;
+    --cv-color-brand-100: #ffe6cc;
+    --cv-color-brand-200: #ffd1a4;
+    --cv-color-brand-300: #ffb370;
+    --cv-color-brand-400: #ff9d42;
+    --cv-color-brand-500: #ff8f28; /* PhilmoreHost Orange */
+    --cv-color-brand-600: #e07616;
+    --cv-color-brand-700: #b85a08;
+    --cv-color-brand-900: #7c3a00;
+
+    /* Secondary accent — chart-series variety and premium-feel gradient
+       pairings (stat-tile icon chips, sidebar header) without leaning on
+       the primary brand hue for everything. */
+    --cv-color-violet-400: #a78bfa;
+    --cv-color-violet-500: #8b5cf6;
+    --cv-color-violet-600: #7c3aed;
+    --cv-color-teal-400: #2dd4bf;
+    --cv-color-teal-500: #14b8a6;
+    --cv-color-amber-400: #fbbf24;
+    --cv-color-amber-500: #f59e0b;
+
+    --cv-color-neutral-0: #ffffff;
+    --cv-color-neutral-50: #f7f8fa;
+    --cv-color-neutral-100: #eef0f3;
+    --cv-color-neutral-200: #dde1e6;
+    --cv-color-neutral-400: #9aa3af;
+    --cv-color-neutral-600: #5b6472;
+    --cv-color-neutral-800: #2a2f37;
+    --cv-color-neutral-950: #14171c;
+
+    --cv-color-success-500: #1f9d55;
+    --cv-color-success-600: #16803d;
+    --cv-color-warning-500: #d97706;
+    --cv-color-danger-500: #dc2626;
+    --cv-color-danger-600: #b91c1c;
+
+    /* King (BruteGuard auto-whitelist) badge — always this green, in both themes */
+    --cv-color-king-badge: #16a34a;
+
+    /* Qualitative chart palette — for multi-series charts (revenue by
+       gateway, product breakdown). Ordered for maximum adjacent contrast;
+       distinct in both light and dark since these are fixed hex, not
+       theme-derived. */
+    --cv-chart-1: var(--cv-color-brand-500);
+    --cv-chart-2: var(--cv-color-violet-500);
+    --cv-chart-3: var(--cv-color-teal-500);
+    --cv-chart-4: var(--cv-color-amber-500);
+    --cv-chart-5: #ec4899;
+
+    /* --- Semantic tokens (theme-aware) --------------------------------- */
+    --cv-bg-page: var(--cv-color-neutral-50);
+    --cv-bg-surface: var(--cv-color-neutral-0);
+    --cv-bg-surface-raised: var(--cv-color-neutral-0);
+    --cv-bg-surface-sunken: var(--cv-color-neutral-50);
+    --cv-text-primary: var(--cv-color-neutral-950);
+    --cv-text-secondary: var(--cv-color-neutral-600);
+    --cv-text-tertiary: var(--cv-color-neutral-400);
+    --cv-border-default: var(--cv-color-neutral-200);
+    --cv-border-subtle: var(--cv-color-neutral-100);
+    --cv-color-accent: var(--cv-color-brand-500);
+    --cv-color-accent-hover: var(--cv-color-brand-600);
+    --cv-gradient-accent: linear-gradient(135deg, var(--cv-color-brand-500), var(--cv-color-violet-600));
+    --cv-gradient-accent-soft: linear-gradient(135deg, var(--cv-color-brand-50), var(--cv-color-violet-400) 180%);
+    --cv-sidenav-active-bg: var(--cv-color-brand-50);
+
+    /* --- Spacing scale (4px base) --------------------------------------- */
+    --cv-space-1: 0.25rem;
+    --cv-space-2: 0.5rem;
+    --cv-space-3: 0.75rem;
+    --cv-space-4: 1rem;
+    --cv-space-5: 1.5rem;
+    --cv-space-6: 2rem;
+    --cv-space-8: 3rem;
+
+    /* --- Type scale ------------------------------------------------- */
+    --cv-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --cv-font-heading: 'Hanken Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --cv-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --cv-text-xs: 0.75rem;
+    --cv-text-sm: 0.875rem;
+    --cv-text-base: 1rem;
+    --cv-text-lg: 1.125rem;
+    --cv-text-xl: 1.5rem;
+    --cv-text-2xl: 2rem;
+    --cv-text-3xl: 2.5rem;
+
+    /* --- Radii + shadow --------------------------------------------- */
+    --cv-radius-sm: 4px;
+    --cv-radius-md: 8px;
+    --cv-radius-lg: 14px;
+    --cv-radius-xl: 20px;
+    --cv-radius-full: 999px;
+    --cv-shadow-xs: 0 1px 2px rgba(20, 23, 28, 0.04);
+    --cv-shadow-sm: 0 1px 3px rgba(20, 23, 28, 0.07), 0 1px 2px rgba(20, 23, 28, 0.04);
+    --cv-shadow-md: 0 4px 16px rgba(20, 23, 28, 0.09), 0 2px 6px rgba(20, 23, 28, 0.05);
+    --cv-shadow-lg: 0 16px 40px rgba(20, 23, 28, 0.16), 0 4px 12px rgba(20, 23, 28, 0.08);
+    --cv-shadow-accent: 0 8px 20px rgba(255, 143, 40, 0.28);
+
+    /* --- Motion -------------------------------------------------------- */
+    --cv-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+    --cv-transition-fast: 120ms var(--cv-ease);
+    --cv-transition-base: 200ms var(--cv-ease);
+
+    /* --- Layout density (overridden per skin — see admin/client layouts) */
+    --cv-density-row-height: 44px;
+    --cv-density-control-padding-y: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --cv-bg-page: #020C1B;
+        --cv-bg-surface: #0a192f;
+        --cv-bg-surface-raised: #172a45;
+        --cv-bg-surface-sunken: #050e1e;
+        --cv-text-primary: #ffffff;
+        --cv-text-secondary: #D9E2FF;
+        --cv-text-tertiary: #8892b0;
+        --cv-border-default: rgba(255, 255, 255, 0.1);
+        --cv-border-subtle: rgba(255, 255, 255, 0.05);
+        --cv-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --cv-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+        --cv-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.5);
+        --cv-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.5);
+        --cv-sidenav-active-bg: rgba(255, 143, 40, 0.16);
+    }
+}
+
+:root[data-theme='dark'] {
+    --cv-bg-page: #020C1B;
+    --cv-bg-surface: #0a192f;
+    --cv-bg-surface-raised: #172a45;
+    --cv-bg-surface-sunken: #050e1e;
+    --cv-text-primary: #ffffff;
+    --cv-text-secondary: #D9E2FF;
+    --cv-text-tertiary: #8892b0;
+    --cv-border-default: rgba(255, 255, 255, 0.1);
+    --cv-border-subtle: rgba(255, 255, 255, 0.05);
+    --cv-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --cv-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --cv-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.5);
+    --cv-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.5);
+    --cv-sidenav-active-bg: rgba(255, 143, 40, 0.16);
+}
+
+:root[data-theme='light'] {
+    --cv-bg-page: #f8fafc;
+    --cv-bg-surface: var(--cv-color-neutral-0);
+    --cv-bg-surface-raised: var(--cv-color-neutral-0);
+    --cv-bg-surface-sunken: #f1f5f9;
+    --cv-text-primary: #0f172a;
+    --cv-text-secondary: #334155;
+    --cv-text-tertiary: #64748b;
+    --cv-border-default: #cbd5e1;
+    --cv-border-subtle: #e2e8f0;
+    --cv-shadow-xs: 0 1px 2px rgba(20, 23, 28, 0.04);
+    --cv-shadow-sm: 0 1px 3px rgba(20, 23, 28, 0.07), 0 1px 2px rgba(20, 23, 28, 0.04);
+    --cv-shadow-md: 0 4px 16px rgba(20, 23, 28, 0.09), 0 2px 6px rgba(20, 23, 28, 0.05);
+    --cv-shadow-lg: 0 16px 40px rgba(20, 23, 28, 0.16), 0 4px 12px rgba(20, 23, 28, 0.08);
+    --cv-sidenav-active-bg: var(--cv-color-brand-50);
+}
+
+/* Admin skin: denser layout, same tokens */
+[data-skin='admin'] {
+    --cv-density-row-height: 36px;
+    --cv-density-control-padding-y: 0.375rem;
+}
+
+/* Client/cart skin: roomier layout, same tokens */
+[data-skin='client'] {
+    --cv-density-row-height: 52px;
+    --cv-density-control-padding-y: 0.625rem;
+}
