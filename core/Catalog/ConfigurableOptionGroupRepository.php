@@ -36,6 +36,14 @@ final class ConfigurableOptionGroupRepository
         );
     }
 
+    public function update(int $id, string $name): void
+    {
+        $this->db->update(
+            'UPDATE configurable_option_groups SET name = ?, updated_at = ? WHERE id = ?',
+            [$name, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM configurable_option_groups WHERE id = ?', [$id]);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Billing;
 
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Config;
 use CodeVault\Database;
 use CodeVault\Modules\GatewayModule;
 use CodeVault\Modules\ModuleManager;
@@ -21,7 +22,8 @@ final class GatewayController
         private readonly View $view,
         private readonly PaymentGatewayRepository $gateways,
         private readonly Database $db,
-        private readonly ModuleManager $modules
+        private readonly ModuleManager $modules,
+        private readonly Config $config
     ) {
     }
 
@@ -31,7 +33,10 @@ final class GatewayController
             return $denied;
         }
 
-        return $this->render('billing.gateways-index', ['gateways' => $this->gateways->all()]);
+        return $this->render('billing.gateways-index', [
+            'gateways' => $this->gateways->all(),
+            'baseUrl' => rtrim((string) $this->config->env('APP_URL', ''), '/'),
+        ]);
     }
 
     public function toggle(Request $request, array $params): Response

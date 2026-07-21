@@ -17,7 +17,9 @@ final class ClientTicketController
         private readonly TicketRepository $tickets,
         private readonly TicketReplyRepository $replies,
         private readonly DepartmentRepository $departments,
-        private readonly TicketService $ticketService
+        private readonly TicketService $ticketService,
+        private readonly TicketAttachmentRepository $attachments,
+        private readonly TicketAttachmentService $attachmentService
     ) {
     }
 
@@ -72,6 +74,13 @@ final class ClientTicketController
             $message
         );
 
+        // Attachments on the opening message belong to the ticket itself
+        // (no reply row) — reply_id null, group key 0.
+        $filesEntry = $request->file('attachments');
+        if ($this->attachmentService->hasRealUpload($filesEntry)) {
+            $this->attachmentService->storeFromFilesEntry($filesEntry, $ticketId, null, 'client');
+        }
+
         return Response::redirect("/client/tickets/{$ticketId}");
     }
 
@@ -86,7 +95,39 @@ final class ClientTicketController
         return $this->page('support.client-ticket-show', [
             'ticket' => $ticket,
             'replies' => $this->replies->forTicket((int) $ticket['id'], includePrivate: false),
+            'attachments' => $this->attachments->forTicketGroupedByReply((int) $ticket['id']),
         ]);
+    }
+
+    public function attachment(Request $request, array $params): Response
+    {
+        $ticket = $this->ownedTicket($params);
+
+        if ($ticket === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $attachment = $this->attachments->find((int) $params['attId']);
+
+        if ($attachment === null || (int) $attachment['ticket_id'] !== (int) $ticket['id']) {
+            return $this->deniedOrNotFound();
+        }
+
+        $file = $this->attachmentService->fileFor($attachment);
+
+        if ($file === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $previewable = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'application/pdf'];
+        $disposition = in_array($file['mime'], $previewable, true) ? 'inline' : 'attachment';
+        $bytes = (string) file_get_contents($file['path']);
+
+        return (new Response($bytes, 200))
+            ->withHeader('Content-Type', $file['mime'])
+            ->withHeader('X-Content-Type-Options', 'nosniff')
+            ->withHeader('Content-Disposition', $disposition . '; filename="' . str_replace('"', '', $file['name']) . '"')
+            ->withHeader('Content-Length', (string) strlen($bytes));
     }
 
     public function reply(Request $request, array $params): Response
@@ -99,15 +140,21 @@ final class ClientTicketController
         }
 
         $message = trim((string) $request->input('message', ''));
+        $filesEntry = $request->file('attachments');
+        $hasFiles = $this->attachmentService->hasRealUpload($filesEntry);
 
-        if ($message !== '') {
-            $this->ticketService->reply(
+        if ($message !== '' || $hasFiles) {
+            $replyId = $this->ticketService->reply(
                 (int) $ticket['id'],
                 'client',
                 (int) $client['id'],
                 (string) $client['first_name'] . ' ' . (string) $client['last_name'],
                 $message
             );
+
+            if ($hasFiles) {
+                $this->attachmentService->storeFromFilesEntry($filesEntry, (int) $ticket['id'], $replyId, 'client');
+            }
         }
 
         return Response::redirect("/client/tickets/{$ticket['id']}");

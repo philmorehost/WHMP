@@ -69,6 +69,10 @@ final class DomainPricingController
             'register_price' => $registerPrice,
             'transfer_price' => $transferPrice,
             'renew_price' => $renewPrice,
+            'spinner_enabled' => $request->input('spinner_enabled') ? 1 : 0,
+            'category' => trim((string) $request->input('category', 'Popular')),
+            'autosetup_registration' => (string) $request->input('autosetup_registration', 'payment'),
+            'autosetup_transfer' => (string) $request->input('autosetup_transfer', 'payment'),
         ]);
 
         return Response::redirect('/admin/domain-pricing');

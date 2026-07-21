@@ -88,6 +88,9 @@ final class CartService
                 'options_total' => $optionsTotal,
                 'line_total' => $lineTotal + $setupFee,
                 'in_stock' => $this->products->hasUnlimitedOrAvailableStock((int) $product['id']),
+                'domain_options' => $item['domain_options'] ?? null,
+                'server_options' => $item['server_options'] ?? null,
+                'custom_fields' => $item['custom_fields'] ?? null,
             ];
 
             $subtotal += $lineTotal;

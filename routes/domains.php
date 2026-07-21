@@ -9,6 +9,7 @@ use CodeVault\Domains\DomainPricingController;
 /** @var CodeVault\Router $router */
 
 $router->get('/admin/domains', [DomainController::class, 'index']);
+$router->post('/admin/domains/nameservers', [DomainController::class, 'updateDefaultNameservers']);
 $router->get('/admin/domains/create', [DomainController::class, 'createForm']);
 $router->post('/admin/domains', [DomainController::class, 'store']);
 $router->get('/admin/domains/{id}', [DomainController::class, 'show']);

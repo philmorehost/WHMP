@@ -90,6 +90,7 @@ final class ClientDomainController
             trim((string) $request->input('ns3', '')),
             trim((string) $request->input('ns4', '')),
             trim((string) $request->input('ns5', '')),
+            trim((string) $request->input('ns6', '')),
         ]));
 
         $this->domainService->saveNameservers((int) $domain['id'], $ns);

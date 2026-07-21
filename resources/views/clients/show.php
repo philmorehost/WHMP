@@ -11,19 +11,19 @@ $tabs = ['summary' => 'Summary', 'profile' => 'Profile', 'contacts' => 'Contacts
 $id = (int) $client['id'];
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <div style="display:flex;justify-content:space-between;align-items:start;">
+    <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:var(--cv-space-3);">
         <div>
             <h1 class="cv-card__title"><?= e($client['first_name'] . ' ' . $client['last_name']) ?></h1>
             <p style="color:var(--cv-text-secondary);"><?= e($client['email']) ?></p>
         </div>
-        <div style="display:flex;gap:var(--cv-space-2);">
+        <div style="display:flex;gap:var(--cv-space-2);flex-wrap:wrap;">
             <form method="post" action="/admin/clients/<?= $id ?>/login-as"><?= csrf_field() ?>
-                <button class="cv-btn" type="submit" style="background:var(--cv-color-brand-500);color:#ffffff;border:none;">Login as Client</button>
+                <button class="cv-btn" type="submit" style="background:var(--cv-color-brand-500);color:#ffffff;border:none;" title="Login as Client">🔑<span class="cv-hide-mobile"> Login as Client</span></button>
             </form>
-            <a class="cv-btn cv-btn--secondary" href="/admin/clients/<?= $id ?>/edit">Edit</a>
+            <a class="cv-btn cv-btn--secondary" href="/admin/clients/<?= $id ?>/edit" title="Edit">✏️<span class="cv-hide-mobile"> Edit</span></a>
             <?php if ($client['status'] !== 'closed'): ?>
             <form method="post" action="/admin/clients/<?= $id ?>/close"><?= csrf_field() ?>
-                <button class="cv-btn cv-btn--danger" type="submit">Close Account</button>
+                <button class="cv-btn cv-btn--danger" type="submit" title="Close Account">🛑<span class="cv-hide-mobile"> Close Account</span></button>
             </form>
             <?php endif; ?>
         </div>
@@ -52,7 +52,7 @@ $id = (int) $client['id'];
         <p><strong>Group:</strong> <?= e((string) ($client['group_name'] ?? 'None')) ?></p>
         <p><strong>Company:</strong> <?= e((string) ($client['company_name'] ?? '-')) ?></p>
         <p><strong>Client since:</strong> <?= e($client['created_at']) ?></p>
-        <p><strong>Credit balance:</strong> $<?= number_format($creditBalance, 2) ?></p>
+        <p><strong>Credit balance:</strong> <?= e($client['currency_symbol'] ?? '$') ?><?= number_format($creditBalance, 2) ?></p>
         <p><strong>Active services:</strong> <?= count(array_filter($services, fn ($s) => $s['status'] === 'active')) ?></p>
         <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Domains and tickets will appear here once those engines land (R7-R8).</p>
     </div>
@@ -113,7 +113,7 @@ $id = (int) $client['id'];
                 <tr>
                     <td><?= e($service['product_name']) ?></td>
                     <td><?= e($service['billing_cycle']) ?></td>
-                    <td>$<?= number_format((float) $service['amount'], 2) ?></td>
+                    <td><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $service['amount'], 2) ?></td>
                     <td><?= e($service['next_due_date']) ?></td>
                     <td><span class="cv-badge cv-badge--neutral"><?= e($service['status']) ?></span></td>
                     <td><a class="cv-btn cv-btn--secondary" href="/admin/services/<?= (int) $service['id'] ?>">Manage</a></td>
@@ -134,7 +134,7 @@ $id = (int) $client['id'];
             <?php foreach ($invoices as $invoice): ?>
                 <tr>
                     <td><a href="/admin/invoices/<?= (int) $invoice['id'] ?>">INV-<?= (int) $invoice['id'] ?></a></td>
-                    <td>$<?= number_format((float) $invoice['total'], 2) ?></td>
+                    <td><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $invoice['total'], 2) ?></td>
                     <td><?= e($invoice['due_date']) ?></td>
                     <td><span class="cv-badge <?= $invoice['status'] === 'paid' ? 'cv-badge--success' : 'cv-badge--danger' ?>"><?= e($invoice['status']) ?></span></td>
                 </tr>
@@ -147,14 +147,30 @@ $id = (int) $client['id'];
     </div>
 
     <div class="cv-card">
-        <h2 class="cv-card__title">Account Credit — Balance: $<?= number_format($creditBalance, 2) ?></h2>
+        <h2 class="cv-card__title">Account Credit — Balance: <?= e($currency['symbol'] ?? '$') ?><?= number_format($creditBalance, 2) ?></h2>
+        
+        <form method="post" action="/admin/clients/<?= $id ?>/credit" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;margin-bottom:var(--cv-space-4);"><?= csrf_field() ?>
+            <div class="cv-field" style="margin-bottom:0;flex:1;min-width:150px;">
+                <label class="cv-label">Grant Amount</label>
+                <div style="position:relative;">
+                    <span style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:var(--cv-text-secondary);"><?= e($currency['symbol'] ?? '$') ?></span>
+                    <input class="cv-input" type="number" step="0.01" name="amount" style="padding-left:2rem;" required>
+                </div>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;flex:2;min-width:200px;">
+                <label class="cv-label">Reason</label>
+                <input class="cv-input" name="reason" required>
+            </div>
+            <button class="cv-btn" type="submit">Grant Credit</button>
+        </form>
+
         <table class="cv-table">
             <thead><tr><th>Date</th><th>Amount</th><th>Reason</th></tr></thead>
             <tbody>
             <?php foreach ($creditLedger as $entry): ?>
                 <tr>
                     <td><?= e($entry['created_at']) ?></td>
-                    <td><?= (float) $entry['amount'] >= 0 ? '+' : '' ?>$<?= number_format((float) $entry['amount'], 2) ?></td>
+                    <td><?= (float) $entry['amount'] >= 0 ? '+' : '' ?><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $entry['amount'], 2) ?></td>
                     <td><?= e($entry['reason']) ?></td>
                 </tr>
             <?php endforeach; ?>
@@ -163,17 +179,6 @@ $id = (int) $client['id'];
             <?php endif; ?>
             </tbody>
         </table>
-        <form method="post" action="/admin/clients/<?= $id ?>/credit" style="margin-top:var(--cv-space-4);display:flex;gap:var(--cv-space-2);align-items:end;"><?= csrf_field() ?>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Grant Amount</label>
-                <input class="cv-input" type="number" step="0.01" name="amount" style="width:8rem;">
-            </div>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Reason</label>
-                <input class="cv-input" name="reason">
-            </div>
-            <button class="cv-btn" type="submit">Grant Credit</button>
-        </form>
     </div>
 <?php elseif ($tab === 'log'): ?>
     <div class="cv-card">

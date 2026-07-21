@@ -23,7 +23,17 @@ final class ServiceRepository
     /** @return array<int, array<string, mixed>> */
     public function forClient(int $clientId): array
     {
-        return $this->db->select('SELECT * FROM services WHERE client_id = ? ORDER BY id DESC', [$clientId]);
+        return $this->db->select(
+            <<<SQL
+            SELECT s.*, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            FROM services s
+            JOIN clients c ON c.id = s.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            WHERE s.client_id = ? 
+            ORDER BY s.id DESC
+            SQL,
+            [$clientId]
+        );
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -40,14 +50,45 @@ final class ServiceRepository
 
         return $this->db->select(
             <<<SQL
-            SELECT s.*, c.email AS client_email, c.first_name, c.last_name
+            SELECT s.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM services s
             JOIN clients c ON c.id = s.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
             ORDER BY s.next_due_date
             SQL,
             $bindings
         );
+    }
+
+    /**
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 20): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        $where = $status !== null ? 'WHERE s.status = ?' : '';
+        $bindings = $status !== null ? [$status] : [];
+
+        $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM services s {$where}", $bindings)['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT s.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            FROM services s
+            JOIN clients c ON c.id = s.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            {$where}
+            ORDER BY s.id DESC
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
     }
 
     /**
@@ -85,7 +126,7 @@ final class ServiceRepository
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
-            'INSERT INTO services (client_id, order_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO services (client_id, order_id, product_id, product_name, billing_cycle, amount, domain, hostname, password, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $fields['client_id'],
                 $fields['order_id'] ?? null,
@@ -93,6 +134,9 @@ final class ServiceRepository
                 $fields['product_name'],
                 $fields['billing_cycle'],
                 $fields['amount'],
+                $fields['domain'] ?? null,
+                $fields['hostname'] ?? null,
+                $fields['password'] ?? null,
                 $fields['status'] ?? 'pending',
                 $fields['next_due_date'],
                 $now,

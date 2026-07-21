@@ -175,4 +175,94 @@ final class PaystackGatewayTest extends TestCase
         $this->assertFalse($gateway->tokenize([])['success']);
         $this->assertFalse($gateway->chargeToken([])['success']);
     }
+
+    public function test_verify_transaction_surfaces_a_reusable_authorization_for_saving(): void
+    {
+        $http = new FakeHttpClient(200, json_encode([
+            'status' => true,
+            'data' => [
+                'status' => 'success',
+                'reference' => 'ref',
+                'amount' => 2550,
+                'metadata' => ['client_id' => 7],
+                'authorization' => [
+                    'authorization_code' => 'AUTH_abc123',
+                    'reusable' => true,
+                    'card_type' => 'visa',
+                    'last4' => '4081',
+                    'exp_month' => '12',
+                    'exp_year' => '2030',
+                ],
+            ],
+        ]));
+
+        $result = (new PaystackGateway($http))->verifyTransaction('ref', ['secret_key' => 'sk_test_123']);
+
+        $this->assertNotNull($result['authorization']);
+        $this->assertSame('AUTH_abc123', $result['authorization']['token']);
+        $this->assertSame('visa', $result['authorization']['brand']);
+        $this->assertSame('4081', $result['authorization']['last4']);
+    }
+
+    public function test_verify_transaction_omits_a_non_reusable_authorization(): void
+    {
+        $http = new FakeHttpClient(200, json_encode([
+            'status' => true,
+            'data' => [
+                'status' => 'success',
+                'reference' => 'ref',
+                'amount' => 2550,
+                'metadata' => [],
+                'authorization' => ['authorization_code' => 'AUTH_x', 'reusable' => false],
+            ],
+        ]));
+
+        $result = (new PaystackGateway($http))->verifyTransaction('ref', ['secret_key' => 'sk_test_123']);
+
+        $this->assertNull($result['authorization']);
+    }
+
+    public function test_charge_token_charges_a_saved_authorization(): void
+    {
+        $http = new FakeHttpClient(200, json_encode([
+            'status' => true,
+            'data' => ['status' => 'success', 'reference' => 'cv-auto-paystack-9-abc'],
+        ]));
+        $gateway = new PaystackGateway($http);
+
+        $result = $gateway->chargeToken([
+            'config' => ['secret_key' => 'sk_test_123'],
+            'token' => 'AUTH_abc123',
+            'email' => 'client@example.test',
+            'amount' => 40.00,
+            'reference' => 'cv-auto-paystack-9-abc',
+        ]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('cv-auto-paystack-9-abc', $result['transactionId']);
+
+        $sent = $http->lastRequest();
+        $this->assertSame('https://api.paystack.co/transaction/charge_authorization', $sent['url']);
+        $body = json_decode((string) $sent['body'], true);
+        $this->assertSame('AUTH_abc123', $body['authorization_code']);
+        $this->assertSame(4000, $body['amount']); // 40.00 => 4000 kobo
+    }
+
+    public function test_charge_token_reports_failure_on_a_declined_card(): void
+    {
+        $http = new FakeHttpClient(200, json_encode([
+            'status' => true,
+            'data' => ['status' => 'failed', 'reference' => 'ref'],
+        ]));
+
+        $result = (new PaystackGateway($http))->chargeToken([
+            'config' => ['secret_key' => 'sk_test_123'],
+            'token' => 'AUTH_abc123',
+            'email' => 'client@example.test',
+            'amount' => 40.00,
+            'reference' => 'ref',
+        ]);
+
+        $this->assertFalse($result['success']);
+    }
 }

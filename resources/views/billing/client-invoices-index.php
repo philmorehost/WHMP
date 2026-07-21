@@ -3,7 +3,7 @@
 ?>
 <div class="cv-card" style="max-width:40rem;margin:0 auto;">
     <h1 class="cv-card__title">My Invoices</h1>
-    <p><a href="/client/dashboard">&larr; Back to dashboard</a></p>
+    <p><a href="/client/dashboard">&larr; Back to dashboard</a> &middot; <a href="/client/payment-methods">Manage payment methods</a></p>
 
     <div class="cv-datatable__toolbar">
         <?= $view->partial('partials.table-search', ['target' => '#my-invoices-table', 'placeholder' => 'Search invoices...']) ?>

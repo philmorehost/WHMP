@@ -51,7 +51,17 @@ final class CreditNoteRepository
     /** @return array<int, array<string, mixed>> */
     public function forClient(int $clientId): array
     {
-        return $this->db->select('SELECT * FROM credit_notes WHERE client_id = ? ORDER BY id DESC', [$clientId]);
+        return $this->db->select(
+            <<<SQL
+            SELECT cn.*, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            FROM credit_notes cn
+            JOIN clients c ON c.id = cn.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            WHERE cn.client_id = ? 
+            ORDER BY cn.id DESC
+            SQL,
+            [$clientId]
+        );
     }
 
     /** @return array<int, array<string, mixed>> newest first, joined with the client's email for the admin list */
@@ -59,9 +69,10 @@ final class CreditNoteRepository
     {
         return $this->db->select(
             <<<'SQL'
-            SELECT cn.*, c.email AS client_email, c.first_name, c.last_name
+            SELECT cn.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM credit_notes cn
             JOIN clients c ON c.id = cn.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             ORDER BY cn.id DESC
             SQL
         );

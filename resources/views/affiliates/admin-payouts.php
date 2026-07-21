@@ -20,7 +20,7 @@
         <?php foreach ($payoutRequests as $payout): ?>
             <tr>
                 <td><?= e($payout['first_name'] . ' ' . $payout['last_name']) ?> (<code><?= e($payout['code']) ?></code>)</td>
-                <td>$<?= number_format((float) $payout['amount'], 2) ?></td>
+                <td><?= e($payout['currency_symbol'] ?? '$') ?><?= number_format((float) $payout['amount'], 2) ?></td>
                 <td>
                     <?php if ($payout['status'] === 'paid'): ?>
                         <span class="cv-badge cv-badge--success">Paid</span>

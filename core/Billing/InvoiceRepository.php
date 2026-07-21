@@ -51,11 +51,18 @@ final class InvoiceRepository
 
         $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM invoices i {$where}", $bindings)['c'] ?? 0);
 
+        // currency_id IS NULL means "locked to the base currency at
+        // creation time" (see CurrencyService::lockColumns) — it must
+        // resolve to the *default* currency, never the client's current
+        // preference, or an old base-currency invoice would show the
+        // client's later-changed currency's symbol next to a total that
+        // was never actually converted into it.
         $data = $this->db->select(
             <<<SQL
-            SELECT i.*, c.email AS client_email, c.first_name, c.last_name
+            SELECT i.*, c.email AS client_email, c.first_name, c.last_name, curr.code AS currency_code, curr.symbol AS currency_symbol
             FROM invoices i
             JOIN clients c ON c.id = i.client_id
+            LEFT JOIN currencies curr ON curr.id = COALESCE(i.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
             ORDER BY i.id DESC
             LIMIT {$perPage} OFFSET {$offset}
@@ -75,6 +82,15 @@ final class InvoiceRepository
         );
     }
 
+    /** @return array<int, array<string, mixed>> unpaid invoices due on or before today — auto-charge candidates */
+    public function dueUnpaid(): array
+    {
+        return $this->db->select(
+            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date <= ? ORDER BY due_date ASC, id ASC",
+            [(new DateTimeImmutable())->format('Y-m-d')]
+        );
+    }
+
     public function markPaid(int $id): void
     {
         $this->db->update(
@@ -88,6 +104,14 @@ final class InvoiceRepository
         $this->db->update(
             'UPDATE invoices SET status = ?, updated_at = ? WHERE id = ?',
             ['cancelled', (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    public function markRefunded(int $id): void
+    {
+        $this->db->update(
+            'UPDATE invoices SET status = ?, updated_at = ? WHERE id = ?',
+            ['refunded', (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
 

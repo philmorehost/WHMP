@@ -17,4 +17,9 @@
         'action' => '/admin/servers/' . (int) $server['id'],
         'submitLabel' => 'Save Changes',
     ]) ?>
+
+    <div style="margin-top:var(--cv-space-4);padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);display:flex;align-items:center;gap:var(--cv-space-3);">
+        <button type="button" class="cv-btn cv-btn--secondary" data-test-server="<?= (int) $server['id'] ?>" data-token="<?= e(csrf_token()) ?>">Test Connection</button>
+        <span class="server-test-result" style="font-size:var(--cv-text-xs);"></span>
+    </div>
 </div>

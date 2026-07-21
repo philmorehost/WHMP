@@ -38,6 +38,37 @@ final class DomainRepository
         return $this->db->select('SELECT * FROM domains WHERE order_id = ?', [$orderId]);
     }
 
+    /** @return array{all: int, active: int, pending: int, expired: int} */
+    public function countByStatus(): array
+    {
+        $rows = $this->db->select('SELECT status, COUNT(*) AS count FROM domains GROUP BY status');
+        $counts = ['all' => 0, 'active' => 0, 'pending' => 0, 'expired' => 0];
+
+        foreach ($rows as $row) {
+            $cnt = (int) $row['count'];
+            $counts['all'] += $cnt;
+            $status = (string) $row['status'];
+            if (isset($counts[$status])) {
+                $counts[$status] += $cnt;
+            }
+        }
+
+        return $counts;
+    }
+
+    /** @return array<string, int> registrar_slug => active_domain_count */
+    public function countActiveByRegistrar(): array
+    {
+        $rows = $this->db->select("SELECT registrar_slug, COUNT(*) AS count FROM domains WHERE status = 'active' GROUP BY registrar_slug");
+        $result = [];
+
+        foreach ($rows as $row) {
+            $result[(string) $row['registrar_slug']] = (int) $row['count'];
+        }
+
+        return $result;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function all(?string $status = null): array
     {

@@ -11,11 +11,16 @@ use CodeVault\Billing\TransactionRepository;
 use CodeVault\Catalog\ConfigurableOptionGroupRepository;
 use CodeVault\Catalog\ConfigurableOptionPricingRepository;
 use CodeVault\Catalog\ConfigurableOptionRepository;
+use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientContactRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database\Migrator;
+use CodeVault\Domains\DomainPricingRepository;
+use CodeVault\Domains\DomainSettings;
+use CodeVault\Domains\RegistrarRepository;
 use CodeVault\Import\WhmcsImportService;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\DepartmentRepository;
 use CodeVault\Support\TicketReplyRepository;
 use CodeVault\Support\TicketRepository;
@@ -77,23 +82,29 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         // migrator's other steps still run against this schema and would
         // otherwise fail with "table doesn't exist" noise in every result.
         $this->remote->exec('CREATE TABLE tblservers (id INT PRIMARY KEY)');
-        $this->remote->exec('CREATE TABLE tblproducts (id INT PRIMARY KEY, name VARCHAR(191), description TEXT, hidden TINYINT DEFAULT 0)');
-        $this->remote->exec('CREATE TABLE tblhosting (id INT PRIMARY KEY)');
+        $this->remote->exec('CREATE TABLE tblservergroups (id INT PRIMARY KEY, name VARCHAR(191))');
+        $this->remote->exec('CREATE TABLE tblservergroupsrel (serverid INT, groupid INT)');
+        $this->remote->exec('CREATE TABLE tblproductgroups (id INT PRIMARY KEY, name VARCHAR(191), headline VARCHAR(191), `order` INT DEFAULT 0)');
+        $this->remote->exec('CREATE TABLE tblproducts (id INT PRIMARY KEY, gid INT, name VARCHAR(191), description TEXT, hidden TINYINT DEFAULT 0, type VARCHAR(30))');
+        $this->remote->exec('CREATE TABLE tblhosting (id INT PRIMARY KEY, userid INT, packageid INT, server INT, domain VARCHAR(191), dedicatedip VARCHAR(45), billingcycle VARCHAR(30), amount DECIMAL(10,2), domainstatus VARCHAR(30), nextduedate DATE, regdate DATETIME)');
+        $this->remote->exec('CREATE TABLE tblinvoiceitems (id INT PRIMARY KEY, invoiceid INT, description VARCHAR(255), amount DECIMAL(10,2))');
+        $this->remote->exec('CREATE TABLE tblconfiguration (setting VARCHAR(64) PRIMARY KEY, value VARCHAR(255))');
         $this->remote->exec('CREATE TABLE tbldomains (id INT PRIMARY KEY)');
-        $this->remote->exec('CREATE TABLE tblcurrencies (id INT PRIMARY KEY, code VARCHAR(3), prefix VARCHAR(5), suffix VARCHAR(5), rate DECIMAL(10,4))');
-        $this->remote->exec('CREATE TABLE tbltaxrules (id INT PRIMARY KEY, country VARCHAR(2), state VARCHAR(100), name VARCHAR(100), taxrate DECIMAL(5,2))');
+        $this->remote->exec('CREATE TABLE tblcurrencies (id INT PRIMARY KEY, code VARCHAR(3), prefix VARCHAR(5), suffix VARCHAR(5), rate DECIMAL(10,4), `default` TINYINT DEFAULT 0)');
+        $this->remote->exec('CREATE TABLE tbldomainpricing (id INT PRIMARY KEY, extension VARCHAR(20), autoreg VARCHAR(50))');
+        $this->remote->exec('CREATE TABLE tbltax (id INT PRIMARY KEY, level INT, name VARCHAR(100), state VARCHAR(100), country VARCHAR(2), taxrate DECIMAL(5,2))');
         $this->remote->exec('CREATE TABLE tblcontacts (id INT PRIMARY KEY, userid INT, firstname VARCHAR(100), lastname VARCHAR(100), email VARCHAR(191), permissions VARCHAR(255))');
         $this->remote->exec('CREATE TABLE tblproductconfiggroups (id INT PRIMARY KEY, name VARCHAR(191))');
         $this->remote->exec('CREATE TABLE tblproductconfiglinks (gid INT, pid INT)');
         $this->remote->exec('CREATE TABLE tblproductconfigoptions (id INT PRIMARY KEY, gid INT, optionname VARCHAR(191))');
         $this->remote->exec('CREATE TABLE tblproductconfigoptionssub (id INT PRIMARY KEY, configid INT, optionname VARCHAR(191))');
-        $this->remote->exec('CREATE TABLE tblpricing (id INT PRIMARY KEY, type VARCHAR(20), relid INT, monthly DECIMAL(10,2), quarterly DECIMAL(10,2), semiannually DECIMAL(10,2), annually DECIMAL(10,2), biennially DECIMAL(10,2), triennially DECIMAL(10,2))');
-        $this->remote->exec('CREATE TABLE tbldepartments (id INT PRIMARY KEY, name VARCHAR(191), email VARCHAR(191))');
-        $this->remote->exec('CREATE TABLE tbltickets (id INT PRIMARY KEY, did INT, userid INT, email VARCHAR(191), name VARCHAR(191), subject VARCHAR(255), status VARCHAR(30), priority VARCHAR(20), date DATETIME)');
-        $this->remote->exec('CREATE TABLE tblticketposts (id INT PRIMARY KEY, ticketid INT, message TEXT, name VARCHAR(191), admin VARCHAR(191), date DATETIME)');
-        $this->remote->exec('CREATE TABLE tblpromotions (id INT PRIMARY KEY, code VARCHAR(50), type VARCHAR(20), value DECIMAL(10,2), maxuses INT, uses INT, startdate DATE, expirydate DATE, status VARCHAR(20))');
+        $this->remote->exec('CREATE TABLE tblpricing (id INT PRIMARY KEY, type VARCHAR(20), relid INT, currency INT DEFAULT 1, monthly DECIMAL(10,2), quarterly DECIMAL(10,2), semiannually DECIMAL(10,2), annually DECIMAL(10,2), biennially DECIMAL(10,2), triennially DECIMAL(10,2), msetupfee DECIMAL(10,2), qsetupfee DECIMAL(10,2), ssetupfee DECIMAL(10,2), asetupfee DECIMAL(10,2), bsetupfee DECIMAL(10,2), tsetupfee DECIMAL(10,2))');
+        $this->remote->exec('CREATE TABLE tblticketdepartments (id INT PRIMARY KEY, name VARCHAR(191), email VARCHAR(191))');
+        $this->remote->exec('CREATE TABLE tbltickets (id INT PRIMARY KEY, did INT, userid INT, email VARCHAR(191), name VARCHAR(191), title VARCHAR(255), status VARCHAR(30), urgency VARCHAR(20), date DATETIME)');
+        $this->remote->exec('CREATE TABLE tblticketreplies (id INT PRIMARY KEY, tid INT, message TEXT, name VARCHAR(191), admin VARCHAR(191), date DATETIME)');
+        $this->remote->exec('CREATE TABLE tblpromotions (id INT PRIMARY KEY, code VARCHAR(50), type VARCHAR(20), value DECIMAL(10,2), maxuses INT, uses INT, startdate DATE, expirationdate DATE)');
 
-        $this->importer = new WhmcsImportService($this->db);
+        $this->importer = new WhmcsImportService($this->db, new DomainPricingRepository($this->db), new RegistrarRepository($this->db), new ProductPricingRepository($this->db), new DomainSettings(new SettingsRepository($this->db)), sys_get_temp_dir() . '/whmcs_import_test_progress.json');
     }
 
     protected function tearDown(): void
@@ -193,9 +204,9 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
 
     public function test_import_creates_tax_rules_and_skips_rows_with_no_country(): void
     {
-        $this->remote->exec("INSERT INTO tbltaxrules (id, country, state, name, taxrate) VALUES (1, 'US', NULL, 'Sales Tax', 7.25)");
-        $this->remote->exec("INSERT INTO tbltaxrules (id, country, state, name, taxrate) VALUES (2, 'US', 'CA', 'CA State Tax', 8.50)");
-        $this->remote->exec("INSERT INTO tbltaxrules (id, country, state, name, taxrate) VALUES (3, NULL, NULL, 'Bad Row', 5.00)");
+        $this->remote->exec("INSERT INTO tbltax (id, level, country, state, name, taxrate) VALUES (1, 1, 'US', NULL, 'Sales Tax', 7.25)");
+        $this->remote->exec("INSERT INTO tbltax (id, level, country, state, name, taxrate) VALUES (2, 1, 'US', 'CA', 'CA State Tax', 8.50)");
+        $this->remote->exec("INSERT INTO tbltax (id, level, country, state, name, taxrate) VALUES (3, 1, NULL, NULL, 'Bad Row', 5.00)");
 
         $result = $this->importer->import($this->credentials());
 
@@ -306,12 +317,12 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
     public function test_import_migrates_departments_tickets_and_replies(): void
     {
         $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, status, datecreated) VALUES (1, 'ticketowner@example.test', 'Ticket', 'Owner', 'Active', '2020-01-01 00:00:00')");
-        $this->remote->exec("INSERT INTO tbldepartments (id, name, email) VALUES (1, 'Sales', 'sales@example.test')");
-        $this->remote->exec("INSERT INTO tbltickets (id, did, userid, email, name, subject, status, priority, date) VALUES (100, 1, 1, 'ticketowner@example.test', 'Ticket Owner', 'Help with billing', 'Open', 'High', '2021-01-01 10:00:00')");
-        $this->remote->exec("INSERT INTO tblticketposts (id, ticketid, message, name, admin, date) VALUES (1, 100, 'Please help', 'Ticket Owner', '', '2021-01-01 10:00:00')");
-        $this->remote->exec("INSERT INTO tblticketposts (id, ticketid, message, name, admin, date) VALUES (2, 100, 'Sure, one moment', '', 'SupportAgent', '2021-01-01 11:00:00')");
+        $this->remote->exec("INSERT INTO tblticketdepartments (id, name, email) VALUES (1, 'Sales', 'sales@example.test')");
+        $this->remote->exec("INSERT INTO tbltickets (id, did, userid, email, name, title, status, urgency, date) VALUES (100, 1, 1, 'ticketowner@example.test', 'Ticket Owner', 'Help with billing', 'Open', 'High', '2021-01-01 10:00:00')");
+        $this->remote->exec("INSERT INTO tblticketreplies (id, tid, message, name, admin, date) VALUES (1, 100, 'Please help', 'Ticket Owner', '', '2021-01-01 10:00:00')");
+        $this->remote->exec("INSERT INTO tblticketreplies (id, tid, message, name, admin, date) VALUES (2, 100, 'Sure, one moment', '', 'SupportAgent', '2021-01-01 11:00:00')");
         // A ticket for a department that never migrated — must be skipped, not error the whole step.
-        $this->remote->exec("INSERT INTO tbltickets (id, did, userid, email, name, subject, status, priority, date) VALUES (101, 999, 1, 'ticketowner@example.test', 'Ticket Owner', 'Orphan dept', 'Open', 'Low', '2021-01-01 10:00:00')");
+        $this->remote->exec("INSERT INTO tbltickets (id, did, userid, email, name, title, status, urgency, date) VALUES (101, 999, 1, 'ticketowner@example.test', 'Ticket Owner', 'Orphan dept', 'Open', 'Low', '2021-01-01 10:00:00')");
 
         $result = $this->importer->import($this->credentials());
 
@@ -341,5 +352,142 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $this->assertSame('Ticket Owner', $clientReply['author_name']);
         $adminReply = array_values(array_filter($replyRows, static fn (array $r) => $r['author_type'] === 'admin'))[0];
         $this->assertSame('SupportAgent', $adminReply['author_name']);
+    }
+
+    public function test_import_migrates_domain_tld_pricing_and_resolves_a_matching_registrar(): void
+    {
+        $this->remote->exec("INSERT INTO tblcurrencies (id, code, prefix, suffix, rate, `default`) VALUES (1, 'USD', '$', '', 1.0000, 1)");
+        $this->remote->exec("INSERT INTO tbldomainpricing (id, extension, autoreg) VALUES (1, 'com', 'local')");
+        $this->remote->exec("INSERT INTO tblpricing (id, type, relid, currency, msetupfee) VALUES (1, 'domainregister', 1, 1, 12.99)");
+        $this->remote->exec("INSERT INTO tblpricing (id, type, relid, currency, msetupfee) VALUES (2, 'domaintransfer', 1, 1, 10.99)");
+        $this->remote->exec("INSERT INTO tblpricing (id, type, relid, currency, msetupfee) VALUES (3, 'domainrenew', 1, 1, 14.99)");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(1, $result['imported']['domain_pricing']);
+
+        $pricing = new DomainPricingRepository($this->db);
+        $com = $pricing->findByTld('com');
+        $this->assertNotNull($com);
+        $this->assertSame('local', $com['registrar_slug']);
+        $this->assertSame('12.99', $com['register_price']);
+        $this->assertSame('10.99', $com['transfer_price']);
+        $this->assertSame('14.99', $com['renew_price']);
+    }
+
+    public function test_import_falls_back_to_local_registrar_and_warns_when_whmcs_autoreg_module_is_unrecognized(): void
+    {
+        $this->remote->exec("INSERT INTO tblcurrencies (id, code, prefix, suffix, rate, `default`) VALUES (1, 'USD', '$', '', 1.0000, 1)");
+        $this->remote->exec("INSERT INTO tbldomainpricing (id, extension, autoreg) VALUES (1, 'net', 'enom')");
+        $this->remote->exec("INSERT INTO tblpricing (id, type, relid, currency, msetupfee) VALUES (1, 'domainregister', 1, 1, 20.00)");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertFalse($result['success']); // unmatched registrar is reported as an error, not silently mismapped
+        $this->assertSame(1, $result['imported']['domain_pricing']);
+        $this->assertStringContainsString('enom', $result['errors'][0]['reason']);
+
+        $pricing = new DomainPricingRepository($this->db);
+        $net = $pricing->findByTld('net');
+        $this->assertNotNull($net);
+        $this->assertSame('local', $net['registrar_slug']);
+        $this->assertSame('20.00', $net['register_price']);
+        $this->assertSame('0.00', $net['transfer_price']);
+    }
+
+    public function test_import_migrates_services_with_correct_product_name_domain_and_dedicated_ip_hostname(): void
+    {
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, status, datecreated) VALUES (1, 'hostingclient@example.test', 'Host', 'Ing', 'Active', '2020-01-01 00:00:00')");
+        $this->remote->exec("INSERT INTO tblproductgroups (id, name) VALUES (1, 'Web Hosting')");
+        $this->remote->exec("INSERT INTO tblproducts (id, gid, name, type, hidden) VALUES (1, 1, 'Shared Starter', 'hostingaccount', 0)");
+        $this->remote->exec("INSERT INTO tblproducts (id, gid, name, type, hidden) VALUES (2, 1, 'Dedicated Box', 'server', 0)");
+        $this->remote->exec("INSERT INTO tblhosting (id, userid, packageid, server, domain, dedicatedip, billingcycle, amount, domainstatus, nextduedate, regdate) VALUES (1, 1, 1, 0, 'shared-example.test', '', 'Monthly', 9.99, 'Active', '2026-01-01', '2020-01-01 00:00:00')");
+        $this->remote->exec("INSERT INTO tblhosting (id, userid, packageid, server, domain, dedicatedip, billingcycle, amount, domainstatus, nextduedate, regdate) VALUES (2, 1, 2, 0, 'placeholder.test', '203.0.113.7', 'Annually', 199.00, 'Active', '2027-01-01', '2020-06-01 00:00:00')");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(2, $result['imported']['services']);
+
+        $products = new ProductRepository($this->db);
+        $dedicatedProduct = $products->findByName('Dedicated Box');
+        $this->assertNotNull($dedicatedProduct);
+        $this->assertSame('dedicated', $dedicatedProduct['type']);
+
+        $services = $this->db->select('SELECT * FROM services ORDER BY id');
+        $this->assertCount(2, $services);
+
+        $this->assertSame('Shared Starter', $services[0]['product_name']);
+        $this->assertSame('shared-example.test', $services[0]['domain']);
+        $this->assertSame('monthly', $services[0]['billing_cycle']);
+        $this->assertSame('2026-01-01', $services[0]['next_due_date']);
+
+        $this->assertSame('Dedicated Box', $services[1]['product_name']);
+        $this->assertSame('placeholder.test', $services[1]['domain']);
+        $this->assertSame('203.0.113.7', $services[1]['hostname']);
+        $this->assertSame('annually', $services[1]['billing_cycle']);
+    }
+
+    public function test_import_migrates_product_pricing_per_billing_cycle_in_the_default_currency(): void
+    {
+        $this->remote->exec("INSERT INTO tblcurrencies (id, code, prefix, suffix, rate, `default`) VALUES (1, 'USD', '$', '', 1.0000, 1)");
+        $this->remote->exec("INSERT INTO tblcurrencies (id, code, prefix, suffix, rate, `default`) VALUES (2, 'EUR', '', ' EUR', 0.9200, 0)");
+        $this->remote->exec("INSERT INTO tblproductgroups (id, name) VALUES (1, 'Web Hosting')");
+        $this->remote->exec("INSERT INTO tblproducts (id, gid, name, type, hidden) VALUES (1, 1, 'Shared Starter', 'hostingaccount', 0)");
+        // A EUR row that must be ignored in favor of the USD (default) row.
+        $this->remote->exec("INSERT INTO tblpricing (id, type, relid, currency, monthly, msetupfee, annually, asetupfee) VALUES (1, 'product', 1, 2, 8.00, 0.00, 80.00, 0.00)");
+        $this->remote->exec("INSERT INTO tblpricing (id, type, relid, currency, monthly, msetupfee, annually, asetupfee) VALUES (2, 'product', 1, 1, 9.99, 5.00, 99.99, 5.00)");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertTrue($result['success']);
+
+        $products = new ProductRepository($this->db);
+        $product = $products->findByName('Shared Starter');
+        $this->assertNotNull($product);
+
+        $pricing = new ProductPricingRepository($this->db);
+        $byCycle = $pricing->forProduct((int) $product['id']);
+
+        $this->assertSame('9.99', $byCycle['monthly']['price']);
+        $this->assertSame('5.00', $byCycle['monthly']['setup_fee']);
+        $this->assertSame('99.99', $byCycle['annually']['price']);
+        $this->assertArrayNotHasKey('quarterly', $byCycle); // no column value supplied — no row created
+    }
+
+    public function test_import_migrates_default_nameservers_from_whmcs_general_settings(): void
+    {
+        $this->remote->exec("INSERT INTO tblconfiguration (setting, value) VALUES ('DomainNS1', 'ns1.example-registrar.com')");
+        $this->remote->exec("INSERT INTO tblconfiguration (setting, value) VALUES ('DomainNS2', 'ns2.example-registrar.com')");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertTrue($result['success']);
+
+        $settings = new DomainSettings(new SettingsRepository($this->db));
+        $this->assertSame(['ns1.example-registrar.com', 'ns2.example-registrar.com'], $settings->defaultNameservers());
+    }
+
+    public function test_import_migrates_invoice_line_items(): void
+    {
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, status, datecreated) VALUES (1, 'invoiceclient@example.test', 'Inv', 'Client', 'Active', '2020-01-01 00:00:00')");
+        $this->remote->exec("INSERT INTO tblinvoices (id, userid, invoicenum, subtotal, tax, tax2, total, status, date, duedate, datepaid) VALUES (10, 1, 'INV-0010', 90.00, 10.00, 0.00, 100.00, 'Paid', '2020-02-01', '2020-02-10', '2020-02-05 00:00:00')");
+        $this->remote->exec("INSERT INTO tblinvoiceitems (id, invoiceid, description, amount) VALUES (1, 10, 'Shared Starter - Monthly', 9.99)");
+        $this->remote->exec("INSERT INTO tblinvoiceitems (id, invoiceid, description, amount) VALUES (2, 10, 'Domain Registration - example.test', 12.99)");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertTrue($result['success']);
+
+        $invoices = new InvoiceRepository($this->db);
+        $client = (new ClientRepository($this->db))->findByEmail('invoiceclient@example.test');
+        $invoice = $invoices->forClient((int) $client['id'])[0];
+        $items = $invoices->items((int) $invoice['id']);
+
+        $this->assertCount(2, $items);
+        $descriptions = array_column($items, 'description');
+        $this->assertContains('Shared Starter - Monthly', $descriptions);
+        $this->assertContains('Domain Registration - example.test', $descriptions);
     }
 }

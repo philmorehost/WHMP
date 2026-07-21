@@ -5,8 +5,41 @@
 /** @var array<int, array<string, mixed>> $accountLocks */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">BruteGuard</h1>
+    <h1 class="cv-card__title">Security & Authentication Settings</h1>
     <p style="color:var(--cv-text-secondary);"><a href="/admin">&larr; Back to dashboard</a></p>
+</div>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Authentication & 2FA Configuration</h2>
+    <form method="post" action="/admin/security/settings"><?= csrf_field() ?>
+        <div class="cv-field">
+            <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                <input type="checkbox" name="two_factor_enabled" value="1" <?= (!isset($twoFactorEnabled) || $twoFactorEnabled) ? 'checked' : '' ?>>
+                Enable Two-Factor Authentication (2FA) for Client & Admin Login
+            </label>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-1);">When enabled, users with 2FA setup will be prompted for TOTP/recovery codes upon login.</p>
+        </div>
+
+        <hr style="border:0;border-top:1px solid var(--cv-border-default);margin:var(--cv-space-4) 0;">
+
+        <h3 style="margin-top:0;font-size:var(--cv-text-md);">Google OAuth 2.0 Client Setup</h3>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-bottom:var(--cv-space-3);">
+            To enable Google Sign-In: Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--cv-color-brand-500);">Google Cloud Console</a> &rsaquo; Create Credentials &rsaquo; OAuth client ID (Web Application).<br>
+            Set Authorized redirect URIs to: <code style="background:var(--cv-bg-surface-sunken);padding:2px 6px;border-radius:4px;"><?= e(rtrim((string) ($config['app']['url'] ?? 'http://localhost'), '/')) ?>/client/auth/google/callback</code>
+        </p>
+
+        <div class="cv-field">
+            <label class="cv-label">Google OAuth Client ID</label>
+            <input class="cv-input" name="google_client_id" value="<?= e($googleClientId ?? '') ?>" placeholder="e.g. 1234567890-xxx.apps.googleusercontent.com">
+        </div>
+
+        <div class="cv-field">
+            <label class="cv-label">Google OAuth Client Secret</label>
+            <input class="cv-input" type="password" name="google_client_secret" value="<?= e($googleClientSecret ?? '') ?>" placeholder="e.g. GOCSPX-xxxxxxxxxxxx">
+        </div>
+
+        <button class="cv-btn" type="submit">Save Security Settings</button>
+    </form>
 </div>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">

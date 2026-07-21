@@ -31,6 +31,16 @@ $action = $isEdit ? "/admin/products/{$product['id']}" : '/admin/products';
             </select>
         </div>
         <div class="cv-field">
+            <label class="cv-label">Product Type</label>
+            <select class="cv-select" name="type">
+                <option value="shared" <?= ($product['type'] ?? 'other') === 'shared' ? 'selected' : '' ?>>Shared Hosting</option>
+                <option value="reseller" <?= ($product['type'] ?? 'other') === 'reseller' ? 'selected' : '' ?>>Reseller Hosting</option>
+                <option value="vps" <?= ($product['type'] ?? 'other') === 'vps' ? 'selected' : '' ?>>VPS Server</option>
+                <option value="dedicated" <?= ($product['type'] ?? 'other') === 'dedicated' ? 'selected' : '' ?>>Dedicated Server</option>
+                <option value="other" <?= ($product['type'] ?? 'other') === 'other' ? 'selected' : '' ?>>Other Product/Service</option>
+            </select>
+        </div>
+        <div class="cv-field">
             <label class="cv-label">Name</label>
             <input class="cv-input" name="name" value="<?= e((string) ($product['name'] ?? '')) ?>" required>
         </div>
@@ -59,6 +69,12 @@ $action = $isEdit ? "/admin/products/{$product['id']}" : '/admin/products';
             </label>
         </div>
         <div class="cv-field">
+            <label style="display:flex;align-items:center;gap:var(--cv-space-1);">
+                <input type="checkbox" name="require_domain" value="1" <?= !empty($product['require_domain']) ? 'checked' : '' ?>>
+                Requires a domain name (prompt client for registration, transfer, or use existing during checkout)
+            </label>
+        </div>
+        <div class="cv-field">
             <label class="cv-label">Upsell Pitch (shown in cart)</label>
             <input class="cv-input" name="upsell_pitch" value="<?= e((string) ($product['upsell_pitch'] ?? '')) ?>" placeholder="e.g. Protect every page with a wildcard SSL certificate">
         </div>
@@ -71,6 +87,27 @@ $action = $isEdit ? "/admin/products/{$product['id']}" : '/admin/products';
                     <option value="<?= (int) $sg['id'] ?>" <?= ($product['server_group_id'] ?? null) == $sg['id'] ? 'selected' : '' ?>><?= e($sg['name']) ?></option>
                 <?php endforeach; ?>
             </select>
+        </div>
+
+        <div style="margin-bottom:var(--cv-space-4);background:var(--cv-bg-surface, rgba(255,255,255,0.03));padding:var(--cv-space-3);border:1px solid var(--cv-border-color, rgba(255,255,255,0.1));border-radius:6px;color:var(--cv-text-primary, inherit);">
+            <div style="display:flex;flex-direction:column;gap:var(--cv-space-2);">
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
+                    <input type="radio" name="autosetup" value="order" <?= ($product['autosetup'] ?? 'payment') === 'order' ? 'checked' : '' ?>>
+                    Automatically setup the product as soon as an order is placed
+                </label>
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
+                    <input type="radio" name="autosetup" value="payment" <?= ($product['autosetup'] ?? 'payment') === 'payment' ? 'checked' : '' ?>>
+                    Automatically setup the product as soon as the first payment is received
+                </label>
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
+                    <input type="radio" name="autosetup" value="on_accept" <?= ($product['autosetup'] ?? 'payment') === 'on_accept' ? 'checked' : '' ?>>
+                    Automatically setup the product when you manually accept a pending order
+                </label>
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
+                    <input type="radio" name="autosetup" value="off" <?= ($product['autosetup'] ?? 'payment') === 'off' ? 'checked' : '' ?>>
+                    Do not automatically setup this product
+                </label>
+            </div>
         </div>
 
         <h3>Pricing</h3>

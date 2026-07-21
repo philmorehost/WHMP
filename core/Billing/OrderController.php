@@ -96,6 +96,20 @@ final class OrderController
             }
         }
 
+        $domainRepo = \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainRepository::class);
+        $domainService = \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainService::class);
+        foreach ($domainRepo->forOrder($id) as $domain) {
+            if ($domain['status'] !== 'pending') {
+                continue;
+            }
+
+            $result = $domainService->register((int) $domain['id']);
+
+            if (!$result['success']) {
+                $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'domain.registration_failed', 'domain', (int) $domain['id'], "Domain registration failed: {$result['message']}", $request->ip());
+            }
+        }
+
         $this->hooks->fire(HookPoints::ORDER_ACCEPTED, ['orderId' => $id]);
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'order.accepted', 'order', $id, "Accepted order #{$id}", $request->ip());
 
@@ -120,6 +134,19 @@ final class OrderController
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'order.cancelled', 'order', $id, "Cancelled order #{$id}", $request->ip());
 
         return Response::redirect("/admin/orders/{$id}");
+    }
+
+    public function destroy(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'order.deleted', 'order', $id, "Deleted order #{$id}", $request->ip());
+        $this->orders->delete($id);
+
+        return Response::redirect('/admin/orders');
     }
 
     private function requirePermission(): ?Response

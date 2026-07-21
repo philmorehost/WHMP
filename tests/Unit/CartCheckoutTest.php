@@ -27,6 +27,7 @@ use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Database\Migrator;
+use CodeVault\Domains\DomainSettings;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Session\SessionManager;
 use CodeVault\Tests\Support\DatabaseTestCase;
@@ -68,7 +69,7 @@ final class CartCheckoutTest extends DatabaseTestCase
         $promotionService = new PromotionService($this->promotions);
 
         $this->cartService = new CartService($this->cart, $this->products, $pricing, $options, $optionPricing, $promotionService);
-        $this->checkout = new CheckoutService($this->cart, $this->cartService, $this->products, $clients, $services, $tax, $currency, $this->currencySelection, $this->promotions, $this->db, new HookDispatcher());
+        $this->checkout = new CheckoutService($this->cart, $this->cartService, $this->products, $clients, $services, $tax, $currency, $this->currencySelection, $this->promotions, $this->db, new HookDispatcher(), new DomainSettings(new SettingsRepository($this->db)));
 
         $groups = new ProductGroupRepository($this->db);
         $groupId = $groups->create('Hosting', null);

@@ -57,6 +57,17 @@ final class TransactionRepository
         return $this->db->select('SELECT * FROM transactions WHERE invoice_id = ? ORDER BY id', [$invoiceId]);
     }
 
+    /** @return array<string, mixed>|null */
+    public function find(int $id): ?array
+    {
+        return $this->db->selectOne('SELECT * FROM transactions WHERE id = ?', [$id]);
+    }
+
+    public function markRefunded(int $id): void
+    {
+        $this->db->update('UPDATE transactions SET status = ? WHERE id = ?', ['refunded', $id]);
+    }
+
     public function totalCompletedForInvoice(int $invoiceId): float
     {
         $row = $this->db->selectOne(

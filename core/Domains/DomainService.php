@@ -28,6 +28,40 @@ final class DomainService
     ) {
     }
 
+    /**
+     * Live availability check against the registrar assigned to this TLD
+     * in domain_pricing — used by the domain-registration search page
+     * before a client commits to buying. No domain record exists yet at
+     * this point (that only happens at checkout), so resolution is by
+     * registrar slug directly rather than through an owned domain row.
+     *
+     * @return array{success: bool, available: bool, message: string, expiryDate: ?string}
+     */
+    public function checkAvailability(string $domainName, string $registrarSlug): array
+    {
+        /** @var RegistrarModule|null $module */
+        $module = $this->modules->get(RegistrarModule::class, $registrarSlug);
+
+        if ($module === null) {
+            return ['success' => false, 'available' => false, 'message' => "Unknown registrar module \"{$registrarSlug}\".", 'expiryDate' => null];
+        }
+
+        $config = $this->registrars->configFor($registrarSlug);
+
+        try {
+            $result = $module->checkAvailability(['domain' => $domainName, 'registrar' => $config]);
+        } catch (\Throwable $e) {
+            return ['success' => false, 'available' => false, 'message' => 'Availability check failed: ' . $e->getMessage(), 'expiryDate' => null];
+        }
+
+        return [
+            'success' => (bool) ($result['success'] ?? false),
+            'available' => (bool) ($result['available'] ?? false),
+            'message' => (string) ($result['status'] ?? ($result['success'] ?? false ? 'Checked.' : 'Availability check failed.')),
+            'expiryDate' => $result['expiryDate'] ?? null,
+        ];
+    }
+
     /** @return array{success: bool, message: string} */
     public function register(int $domainId, int $years = 1): array
     {

@@ -60,6 +60,15 @@ final class BruteGuard
     }
 
     /**
+     * Clears any IP block or tracking history for a specific IP.
+     * Used for PIN-based recovery.
+     */
+    public function clearIpBlock(string $ip): void
+    {
+        $this->ipRules->clear($ip);
+    }
+
+    /**
      * @return array{accountLocked: bool, ipBlocked: bool}
      */
     public function recordFailedAttempt(string $ip, string $username, bool $userExists, ?int $adminId = null): array

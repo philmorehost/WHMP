@@ -4,15 +4,51 @@ declare(strict_types=1);
 
 namespace CodeVault\Import;
 
+use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Database;
+use CodeVault\Domains\DomainPricingRepository;
+use CodeVault\Domains\DomainSettings;
+use CodeVault\Domains\RegistrarRepository;
 use DateTimeImmutable;
 use PDO;
 
 final class WhmcsImportService
 {
+    private readonly string $progressFile;
+
+    /**
+     * Identifies the current import attempt so the frontend can tell a
+     * fresh run's progress apart from a previous run's leftover result.
+     * The progress file persists between runs, so without this a new
+     * attempt that fails before the importer runs would show the OLD
+     * run's error (wrong username/host/IP) — see the migrator JS.
+     */
+    private string $currentRunId = '';
+
     public function __construct(
-        private readonly Database $db
+        private readonly Database $db,
+        private readonly DomainPricingRepository $domainPricing,
+        private readonly RegistrarRepository $registrars,
+        private readonly ProductPricingRepository $productPricing,
+        private readonly DomainSettings $domainSettings,
+        ?string $progressFile = null
     ) {
+        // Defaults to the real admin-facing progress file, but tests must
+        // override this — otherwise running the test suite overwrites the
+        // live migrator UI's state with the test's mock import counts.
+        $this->progressFile = $progressFile ?? dirname(__DIR__, 2) . '/storage/migration_progress.json';
+    }
+
+    private function updateProgress(string $status, int $percentage, string $step, array $imported, array $errors): void
+    {
+        file_put_contents($this->progressFile, json_encode([
+            'status' => $status,
+            'percentage' => $percentage,
+            'current_step' => $step,
+            'imported' => $imported,
+            'errors' => $errors,
+            'run_id' => $this->currentRunId,
+        ], JSON_PRETTY_PRINT));
     }
 
     /**
@@ -21,8 +57,26 @@ final class WhmcsImportService
      * @param array{host: string, port: int, database: string, username: string, password: string, prefix: string} $credentials
      * @return array{success: bool, message: string, imported: array<string, int>, errors: array<int, array{row: int, reason: string}>}
      */
-    public function import(array $credentials): array
+    public function import(array $credentials, bool $overwrite = false): array
     {
+        // A real production WHMCS database can easily have thousands of
+        // clients/invoices/tickets, and this import does one row-by-row
+        // INSERT/SELECT at a time across 15 steps inside a single request
+        // — on shared hosting's default limits (commonly 30-60s execution
+        // time, 128M memory) that's a near-certain timeout or memory
+        // exhaustion, which kills the script mid-run and sends back a
+        // non-JSON (blank or host-generated error page) response — the
+        // frontend's fetch().then(r => r.json()) then throws, landing in
+        // its generic catch-all "unexpected server error" message with no
+        // useful detail, and storage/migration_progress.json never
+        // advances past whatever step was running. Neither call throws on
+        // a host that disables them, so this is safe everywhere.
+        set_time_limit(0);
+        ini_set('memory_limit', '1024M');
+        ignore_user_abort(true);
+
+        $this->currentRunId = (string) ($credentials['run_id'] ?? '');
+
         $host = $credentials['host'];
         $port = $credentials['port'];
         $dbname = $credentials['database'];
@@ -45,8 +99,25 @@ final class WhmcsImportService
             'departments' => 0,
             'tickets' => 0,
             'promotions' => 0,
+            'domain_pricing' => 0,
         ];
         $errors = [];
+
+        $this->updateProgress('running', 0, 'Connecting to remote database...', $imported, $errors);
+
+        // Pre-flight check: fast connection test using fsockopen to detect blocked ports
+        $fp = @fsockopen($host, (int)$port, $errno, $errstr, 3.0);
+        if (!$fp) {
+            $errMessage = "Could not connect to database port {$port} on host {$host} (timeout or firewall block).";
+            $this->updateProgress('failed', 0, 'Connection failed: ' . $errMessage, $imported, [['row' => 0, 'reason' => $errMessage]]);
+            return [
+                'success' => false,
+                'message' => 'Failed to connect to the remote WHMCS database: ' . $errMessage . ' Please check that your server allows remote connections on this port.',
+                'imported' => $imported,
+                'errors' => [['row' => 0, 'reason' => $errMessage]],
+            ];
+        }
+        fclose($fp);
 
         try {
             $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
@@ -56,38 +127,141 @@ final class WhmcsImportService
                 PDO::ATTR_TIMEOUT => 5,
             ]);
         } catch (\Throwable $e) {
+            $this->updateProgress('failed', 0, 'Connection failed: ' . $e->getMessage(), $imported, [['row' => 0, 'reason' => 'Connection failed: ' . $e->getMessage()]]);
             return [
                 'success' => false,
                 'message' => 'Failed to connect to the remote WHMCS database: ' . $e->getMessage(),
                 'imported' => $imported,
-                'errors' => [['row' => 0, 'reason' => 'Connection failed']],
+                'errors' => [['row' => 0, 'reason' => 'Connection failed: ' . $e->getMessage()]],
             ];
         }
 
-        // We wrap the entire migration in our local database transaction to ensure atomicity.
-        return $this->db->transaction(function () use ($remotePdo, $prefix, &$imported, &$errors) {
+        if ($overwrite) {
+            $this->updateProgress('running', 5, 'Clearing existing database tables for overwrite...', $imported, $errors);
+            try {
+                $this->db->transaction(function() {
+                    $this->db->statement('SET FOREIGN_KEY_CHECKS = 0');
+                    // NB: 'departments' is intentionally NOT truncated — it
+                    // holds a seeded default department (migration 0058) and
+                    // the departments import step is idempotent (upsert by
+                    // name), so wiping it would delete the seed for nothing.
+                    // invoice_items IS cleared so re-runs don't accumulate
+                    // orphaned line items under re-created invoices.
+                    $tables = [
+                        'transactions', 'service_custom_field_values', 'services', 'domains',
+                        'invoice_items', 'invoices',
+                        'products', 'product_groups', 'servers', 'server_groups', 'clients', 'ticket_replies',
+                        'tickets', 'promotions', 'currencies', 'tax_rules'
+                    ];
+                    foreach ($tables as $table) {
+                        $this->db->statement("TRUNCATE TABLE {$table}");
+                    }
+                    $this->db->statement('SET FOREIGN_KEY_CHECKS = 1');
+                });
+            } catch (\Throwable $e) {
+                $this->updateProgress('failed', 5, 'Failed to clear local database: ' . $e->getMessage(), $imported, [['row' => 0, 'reason' => $e->getMessage()]]);
+                return [
+                    'success' => false,
+                    'message' => 'Failed to clear local database: ' . $e->getMessage(),
+                    'imported' => $imported,
+                    'errors' => [['row' => 0, 'reason' => $e->getMessage()]],
+                ];
+            }
+        }
+
+        try {
+            $result = $this->db->transaction(function () use ($remotePdo, $prefix, &$imported, &$errors) {
             $clientMap = [];  // WHMCS Client ID => Local Client ID
             $serverMap = [];  // WHMCS Server ID => Local Server ID
             $productMap = []; // WHMCS Product ID => Local Product ID
+            $productNameMap = []; // WHMCS Product ID => product name (services step needs the real name, not the domain)
+            $productTypeMap = []; // WHMCS Product ID => local products.type ('shared'/'reseller'/'dedicated'/'other')
             $invoiceMap = []; // WHMCS Invoice ID => Local Invoice ID
             $currencyMap = []; // WHMCS Currency ID => Local Currency ID
+            $whmcsDefaultCurrencyId = null; // WHMCS tblcurrencies.id where default=1, used to pick one price row for domain TLD pricing (this app has no per-currency domain pricing)
+            
+            // Optimization Cache Maps to prevent queries inside loops
+            $pricingByProduct = [];
+            $pricingByConfigOption = [];
+            $pricingByTld = [];
+            $invoiceItemsByInvoice = [];
+            $subOptionsByConfigId = [];
+            $clientRateMap = [];
+
+            // Load existing local currency exchange rates
+            $existingCurrencies = $this->db->select('SELECT id, exchange_rate FROM currencies');
+            $localCurrencyRates = [];
+            foreach ($existingCurrencies as $c) {
+                $localCurrencyRates[(int) $c['id']] = (float) ($c['exchange_rate'] ?? 1.0000);
+            }
+
+            // Load existing local clients currency rates
+            $existingClients = $this->db->select('SELECT c.id, c.currency_id, curr.exchange_rate FROM clients c LEFT JOIN currencies curr ON c.currency_id = curr.id');
+            $clientCurrencyMap = [];
+            foreach ($existingClients as $c) {
+                $clientRateMap[(int) $c['id']] = (float) ($c['exchange_rate'] ?? 1.0000);
+                $clientCurrencyMap[(int) $c['id']] = $c['currency_id'] !== null ? (int) $c['currency_id'] : null;
+            }
+
+            // Pre-fetch remote pricing, items, and config sub-options to avoid roundtrips inside loops
+            try {
+                $pricingRows = $remotePdo->query("SELECT * FROM {$prefix}tblpricing")->fetchAll();
+                foreach ($pricingRows as $r) {
+                    $type = $r['type'];
+                    $relid = (int) $r['relid'];
+                    if ($type === 'product') {
+                        $pricingByProduct[$relid][] = $r;
+                    } elseif ($type === 'configoptions') {
+                        $pricingByConfigOption[$relid] = $r;
+                    } else {
+                        $pricingByTld[$type][$relid][] = $r;
+                    }
+                }
+            } catch (\Throwable $e) {}
+
+            try {
+                $invoiceItemRows = $remotePdo->query("SELECT * FROM {$prefix}tblinvoiceitems")->fetchAll();
+                foreach ($invoiceItemRows as $r) {
+                    $invoiceid = (int) $r['invoiceid'];
+                    $invoiceItemsByInvoice[$invoiceid][] = $r;
+                }
+            } catch (\Throwable $e) {}
+
+            try {
+                $subOptionRows = $remotePdo->query("SELECT * FROM {$prefix}tblproductconfigoptionssub")->fetchAll();
+                foreach ($subOptionRows as $r) {
+                    $configid = (int) $r['configid'];
+                    $subOptionsByConfigId[$configid][] = $r;
+                }
+            } catch (\Throwable $e) {}
 
             $nowStr = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
+            $this->updateProgress('running', 10, 'Importing currencies...', $imported, $errors);
             // 0. Currencies
             try {
                 $whmcsCurrencies = $remotePdo->query("SELECT * FROM {$prefix}tblcurrencies")->fetchAll();
                 foreach ($whmcsCurrencies as $row) {
+                    if (!empty($row['default'])) {
+                        $whmcsDefaultCurrencyId = (int) $row['id'];
+                    }
+
                     $code = strtoupper(trim((string) $row['code']));
                     $existing = $this->db->selectOne('SELECT id FROM currencies WHERE code = ?', [$code]);
                     if ($existing !== null) {
                         $currencyMap[(int) $row['id']] = (int) $existing['id'];
                     } else {
+                        // WHMCS shows the currency symbol via `prefix`
+                        // (e.g. "₦", "$"); `suffix` is usually empty or a
+                        // trailing code. Prefer prefix, then suffix, then the
+                        // ISO code as a last resort.
+                        $symbol = trim((string) ($row['prefix'] ?? '')) ?: (trim((string) ($row['suffix'] ?? '')) ?: $code);
+
                         $localCurrId = (int) $this->db->insert(
                             'INSERT INTO currencies (code, symbol, exchange_rate, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
                             [
                                 $code,
-                                $row['suffix'] ?: ($row['code'] ?? ''),
+                                $symbol,
                                 (float) ($row['rate'] ?? 1.0000),
                                 ($row['default'] ? 1 : 0),
                                 $nowStr,
@@ -101,52 +275,87 @@ final class WhmcsImportService
                 // Fail silently or log, some old installations might lack tblcurrencies
             }
 
+            $this->updateProgress('running', 20, 'Importing clients...', $imported, $errors);
             // 1. Clients
             try {
                 $whmcsClients = $remotePdo->query("SELECT * FROM {$prefix}tblclients")->fetchAll();
                 foreach ($whmcsClients as $row) {
-                    $email = strtolower(trim((string) $row['email']));
-                    // Check if client email already exists locally to avoid unique constraint crashes
-                    $existing = $this->db->selectOne('SELECT id FROM clients WHERE email = ?', [$email]);
-                    if ($existing !== null) {
-                        $clientMap[(int) $row['id']] = (int) $existing['id'];
-                        continue;
+                    // Per-row isolation: one bad client row must not abort
+                    // the whole clients step — that would also strand every
+                    // service/domain/invoice belonging to the un-imported
+                    // clients (they key off clientMap), silently gutting the
+                    // migration. Log and continue instead.
+                    try {
+                        $email = strtolower(trim((string) $row['email']));
+                        // Check if client email already exists locally to avoid unique constraint crashes
+                        $existing = $this->db->selectOne('SELECT id FROM clients WHERE email = ?', [$email]);
+                        if ($existing !== null) {
+                            $clientMap[(int) $row['id']] = (int) $existing['id'];
+                            continue;
+                        }
+
+                        // Map password hash directly (WHMCS uses bcrypt or phpass, compatible with PHP password_verify)
+                        $passwordHash = $row['password'] ?? password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
+                        $currencyId = isset($row['currency']) && isset($currencyMap[(int) $row['currency']]) ? $currencyMap[(int) $row['currency']] : null;
+
+                        $localClientId = (int) $this->db->insert(
+                            'INSERT INTO clients (email, password_hash, first_name, last_name, company_name, address1, address2, city, state, postcode, country, phone, currency_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                            [
+                                $email,
+                                $passwordHash,
+                                $row['firstname'] ?? '',
+                                $row['lastname'] ?? '',
+                                $row['companyname'] ?: null,
+                                $row['address1'] ?: null,
+                                $row['address2'] ?: null,
+                                $row['city'] ?: null,
+                                $row['state'] ?: null,
+                                $row['postcode'] ?: null,
+                                $row['country'] ?: null,
+                                $row['phonenumber'] ?: null,
+                                $currencyId,
+                                ($row['status'] === 'Active' ? 'active' : ($row['status'] === 'Closed' ? 'closed' : 'inactive')),
+                                $row['datecreated'] ?? $nowStr,
+                                $row['datecreated'] ?? $nowStr,
+                            ]
+                        );
+                        $clientMap[(int) $row['id']] = $localClientId;
+                        $clientRateMap[$localClientId] = isset($localCurrencyRates[$currencyId]) ? $localCurrencyRates[$currencyId] : 1.0000;
+                        $clientCurrencyMap[$localClientId] = $currencyId;
+                        $imported['clients']++;
+
+                        if ($imported['clients'] % 100 === 0) {
+                            $this->updateProgress('running', 20, "Importing clients... ({$imported['clients']} so far)", $imported, $errors);
+                        }
+                    } catch (\Throwable $rowError) {
+                        $errors[] = ['row' => 0, 'reason' => 'Client "' . ($row['email'] ?? ('#' . ($row['id'] ?? '?'))) . '" skipped: ' . $rowError->getMessage()];
                     }
-
-                    // Map password hash directly (WHMCS uses bcrypt or phpass, compatible with PHP password_verify)
-                    $passwordHash = $row['password'] ?? password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
-                    $currencyId = isset($row['currency']) && isset($currencyMap[(int) $row['currency']]) ? $currencyMap[(int) $row['currency']] : null;
-
-                    $localClientId = (int) $this->db->insert(
-                        'INSERT INTO clients (email, password_hash, first_name, last_name, company_name, address1, address2, city, state, postcode, country, phone, currency_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                        [
-                            $email,
-                            $passwordHash,
-                            $row['firstname'] ?? '',
-                            $row['lastname'] ?? '',
-                            $row['companyname'] ?: null,
-                            $row['address1'] ?: null,
-                            $row['address2'] ?: null,
-                            $row['city'] ?: null,
-                            $row['state'] ?: null,
-                            $row['postcode'] ?: null,
-                            $row['country'] ?: null,
-                            $row['phonenumber'] ?: null,
-                            $currencyId,
-                            ($row['status'] === 'Active' ? 'active' : ($row['status'] === 'Closed' ? 'closed' : 'inactive')),
-                            $row['datecreated'] ?? $nowStr,
-                            $row['datecreated'] ?? $nowStr,
-                        ]
-                    );
-                    $clientMap[(int) $row['id']] = $localClientId;
-                    $imported['clients']++;
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Clients migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 30, 'Importing servers and server groups...', $imported, $errors);
             // 2. Servers
             try {
+                $whmcsServerGroups = $remotePdo->query("SELECT * FROM {$prefix}tblservergroups")->fetchAll();
+                $serverGroupMap = []; // WHMCS Group ID => Local Group ID
+                foreach ($whmcsServerGroups as $sgRow) {
+                    $localGroupId = (int) $this->db->insert(
+                        'INSERT INTO server_groups (name, created_at, updated_at) VALUES (?, ?, ?)',
+                        [$sgRow['name'] ?? '', $nowStr, $nowStr]
+                    );
+                    $serverGroupMap[(int) $sgRow['id']] = $localGroupId;
+                }
+
+                $serverToGroupMap = [];
+                try {
+                    $whmcsSgRel = $remotePdo->query("SELECT serverid, groupid FROM {$prefix}tblservergroupsrel")->fetchAll();
+                    foreach ($whmcsSgRel as $rel) {
+                        $serverToGroupMap[(int) $rel['serverid']] = (int) $rel['groupid'];
+                    }
+                } catch (\Throwable $e) {}
+
                 $whmcsServers = $remotePdo->query("SELECT * FROM {$prefix}tblservers")->fetchAll();
                 foreach ($whmcsServers as $row) {
                     $moduleSlug = 'local';
@@ -157,9 +366,13 @@ final class WhmcsImportService
                         $moduleSlug = 'cyberpanel';
                     }
 
+                    $whmcsGroupId = $serverToGroupMap[(int) $row['id']] ?? null;
+                    $localServerGroupId = $whmcsGroupId !== null && isset($serverGroupMap[$whmcsGroupId]) ? $serverGroupMap[$whmcsGroupId] : null;
+
                     $localServerId = (int) $this->db->insert(
-                        'INSERT INTO servers (name, hostname, module_slug, api_username, api_token, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        'INSERT INTO servers (server_group_id, name, hostname, module_slug, api_username, api_token, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         [
+                            $localServerGroupId,
                             $row['name'] ?? '',
                             $row['ipaddress'] ?: ($row['hostname'] ?? ''),
                             $moduleSlug,
@@ -177,9 +390,26 @@ final class WhmcsImportService
                 $errors[] = ['row' => 0, 'reason' => 'Servers migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 40, 'Importing product groups and products...', $imported, $errors);
             // 3. Product Groups and Products
             try {
-                // Ensure a default product group exists locally or create one
+                $groupMap = []; // WHMCS Group ID => Local Group ID
+                
+                $whmcsGroups = $remotePdo->query("SELECT * FROM {$prefix}tblproductgroups")->fetchAll();
+                foreach ($whmcsGroups as $gRow) {
+                    $localGroupId = (int) $this->db->insert(
+                        'INSERT INTO product_groups (name, description, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                        [
+                            $gRow['name'] ?? '',
+                            $gRow['headline'] ?? ($gRow['tagline'] ?? null),
+                            (int) ($gRow['order'] ?? 0),
+                            $nowStr,
+                            $nowStr
+                        ]
+                    );
+                    $groupMap[(int) $gRow['id']] = $localGroupId;
+                }
+
                 $groupRow = $this->db->selectOne('SELECT id FROM product_groups LIMIT 1');
                 $defaultGroupId = $groupRow !== null ? (int) $groupRow['id'] : (int) $this->db->insert(
                     'INSERT INTO product_groups (name, created_at, updated_at) VALUES (?, ?, ?)',
@@ -188,28 +418,107 @@ final class WhmcsImportService
 
                 $whmcsProducts = $remotePdo->query("SELECT * FROM {$prefix}tblproducts")->fetchAll();
                 foreach ($whmcsProducts as $row) {
+                    $groupId = isset($groupMap[(int) ($row['gid'] ?? 0)]) ? $groupMap[(int) ($row['gid'] ?? 0)] : $defaultGroupId;
+
+                    // WHMCS's tblproducts.type ('hostingaccount',
+                    // 'reselleraccount', 'server', 'other') is the closest
+                    // available signal for this app's own type enum — best
+                    // documented mapping available, not a guaranteed 1:1
+                    // (WHMCS has no distinct "VPS" product type of its own;
+                    // VPS/dedicated both commonly show up as 'server').
+                    // Used below by the services step to decide whether an
+                    // imported service should show its domain or its
+                    // dedicated IP/hostname.
+                    $whmcsType = strtolower(trim((string) ($row['type'] ?? '')));
+                    $localType = match ($whmcsType) {
+                        'server' => 'dedicated',
+                        'reselleraccount' => 'reseller',
+                        'hostingaccount' => 'shared',
+                        default => 'other',
+                    };
+
+                    $productName = (string) ($row['name'] ?? '');
                     $localProductId = (int) $this->db->insert(
-                        'INSERT INTO products (product_group_id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+                        'INSERT INTO products (product_group_id, name, description, status, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
                         [
-                            $defaultGroupId,
-                            $row['name'] ?? '',
+                            $groupId,
+                            $productName,
                             $row['description'] ?: null,
                             ($row['hidden'] ? 'hidden' : 'active'),
+                            $localType,
                             $nowStr,
                             $nowStr,
                         ]
                     );
                     $productMap[(int) $row['id']] = $localProductId;
+                    $productNameMap[(int) $row['id']] = $productName;
+                    $productTypeMap[(int) $row['id']] = $localType;
                     $imported['products']++;
+
+                    // Per-billing-cycle recurring price + setup fee
+                    // (tblpricing, type='product', relid=this WHMCS
+                    // product id) — same shared-table shape as the
+                    // configoptions step above, same "best documented,
+                    // no live install to verify against" caveat. Local
+                    // product_pricing has no currency column (see
+                    // ProductPricingRepository/product_pricing migration)
+                    // — a product's catalog price is always in this
+                    // system's own default currency, converted to
+                    // whatever the shopper is viewing in at display time
+                    // (CurrencyService::format/resolveEffective, already
+                    // wired into the store/cart), so the row matching
+                    // WHMCS's OWN default currency is the one that lines
+                    // up 1:1 with that model. Falls back to whichever
+                    // currency row exists first if WHMCS's default
+                    // currency isn't priced for this product.
+                     try {
+                        $priceRows = $pricingByProduct[(int) $row['id']] ?? [];
+
+                        $priceRow = null;
+                        foreach ($priceRows as $r) {
+                            if ($whmcsDefaultCurrencyId !== null && (int) ($r['currency'] ?? 0) === $whmcsDefaultCurrencyId) {
+                                $priceRow = $r;
+                                break;
+                            }
+                        }
+                        $priceRow ??= ($priceRows[0] ?? null);
+
+                        if ($priceRow !== null) {
+                            $cycleColumns = [
+                                'monthly' => ['monthly', 'msetupfee'],
+                                'quarterly' => ['quarterly', 'qsetupfee'],
+                                'semi_annually' => ['semiannually', 'ssetupfee'],
+                                'annually' => ['annually', 'asetupfee'],
+                                'biennially' => ['biennially', 'bsetupfee'],
+                                'triennially' => ['triennially', 'tsetupfee'],
+                            ];
+
+                            foreach ($cycleColumns as $localCycle => [$priceCol, $setupCol]) {
+                                $cyclePrice = $priceRow[$priceCol] ?? null;
+
+                                if ($cyclePrice === null || $cyclePrice === '' || (float) $cyclePrice < 0) {
+                                    continue;
+                                }
+
+                                $this->productPricing->setPricing($localProductId, $localCycle, (float) ($priceRow[$setupCol] ?? 0), (float) $cyclePrice);
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        $errors[] = ['row' => 0, 'reason' => "Pricing for product \"{$productName}\" failed to import: " . $e->getMessage()];
+                    }
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Products migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 50, 'Importing client services...', $imported, $errors);
             // 4. Hosting/Services
             try {
                 $whmcsHosting = $remotePdo->query("SELECT * FROM {$prefix}tblhosting")->fetchAll();
                 foreach ($whmcsHosting as $row) {
+                    // Per-row isolation: one bad service row shouldn't abort
+                    // the whole services step and drop the rest.
+                    try {
                     $whmcsUserId = (int) $row['userid'];
                     $whmcsProductId = (int) $row['packageid'];
                     $whmcsServerId = (int) $row['server'];
@@ -246,14 +555,40 @@ final class WhmcsImportService
                         $status = 'terminated';
                     }
 
+                    // A VPS/dedicated-server product doesn't really have a
+                    // "domain" the way shared hosting does — WHMCS still
+                    // requires some value in tblhosting.domain at order
+                    // time, but the value that actually identifies the
+                    // service is the assigned dedicated IP/hostname
+                    // (tblhosting.dedicatedip). For those product types,
+                    // prefer that over the domain field.
+                    $localClientId = $clientMap[$whmcsUserId];
+                    $clientRate = $clientRateMap[$localClientId] ?? 1.0000;
+                    if ($clientRate <= 0.0) {
+                        $clientRate = 1.0000;
+                    }
+                    $baseAmount = (float) ($row['amount'] ?? 0.00) / $clientRate;
+
+                    $domainVal = trim((string) ($row['domain'] ?? ''));
+                    $hostnameVal = trim((string) ($row['dedicatedip'] ?? ''));
+                    $usernameVal = trim((string) ($row['username'] ?? ''));
+                    $passwordVal = trim((string) ($row['password'] ?? ''));
+                    $whmcsServerId = (int) $row['server'];
+                    $localServerId = $serverMap[$whmcsServerId] ?? null;
+
                     $this->db->insert(
-                        'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        'INSERT INTO services (client_id, order_id, product_id, server_id, username, product_name, billing_cycle, amount, domain, hostname, password, status, next_due_date, created_at, updated_at) VALUES (?, null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         [
-                            $clientMap[$whmcsUserId],
+                            $localClientId,
                             $productMap[$whmcsProductId],
-                            $row['domain'] ?: 'Hosting Account',
+                            $localServerId,
+                            $usernameVal !== '' ? $usernameVal : null,
+                            $productNameMap[$whmcsProductId] ?? 'Hosting Account',
                             $billingCycle,
-                            (float) ($row['amount'] ?? 0.00),
+                            $baseAmount,
+                            $domainVal !== '' ? $domainVal : null,
+                            $hostnameVal !== '' ? $hostnameVal : null,
+                            $passwordVal !== '' ? $passwordVal : null,
                             $status,
                             $row['nextduedate'] ?: $nowStr,
                             $row['regdate'] ?? $nowStr,
@@ -261,60 +596,92 @@ final class WhmcsImportService
                         ]
                     );
                     $imported['services']++;
+
+                    if ($imported['services'] % 100 === 0) {
+                        $this->updateProgress('running', 50, "Importing client services... ({$imported['services']} so far)", $imported, $errors);
+                    }
+                    } catch (\Throwable $rowError) {
+                        $errors[] = ['row' => 0, 'reason' => 'Service for WHMCS hosting #' . ($row['id'] ?? '?') . ' skipped: ' . $rowError->getMessage()];
+                    }
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Services migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 60, 'Importing client domains...', $imported, $errors);
             // 5. Domains
             try {
                 $whmcsDomains = $remotePdo->query("SELECT * FROM {$prefix}tbldomains")->fetchAll();
                 foreach ($whmcsDomains as $row) {
-                    $whmcsUserId = (int) $row['userid'];
-                    if (!isset($clientMap[$whmcsUserId])) {
-                        continue;
+                    // Per-row isolation: a single bad domain (duplicate name
+                    // hitting the UNIQUE constraint, a malformed value) must
+                    // NOT abort the whole step and drop every domain after
+                    // it — record it and keep going so the migration stays
+                    // complete.
+                    try {
+                        $whmcsUserId = (int) $row['userid'];
+                        if (!isset($clientMap[$whmcsUserId])) {
+                            continue;
+                        }
+
+                        $domainName = strtolower(trim((string) $row['domain']));
+                        $tld = substr($domainName, (int) strpos($domainName, '.') + 1);
+
+                        $status = 'pending';
+                        $whmcsStatus = strtolower((string) ($row['status'] ?? ''));
+                        if ($whmcsStatus === 'active') {
+                            $status = 'active';
+                        } elseif ($whmcsStatus === 'expired') {
+                            $status = 'expired';
+                        } elseif ($whmcsStatus === 'cancelled') {
+                            $status = 'cancelled';
+                        }
+
+                        $localClientId = $clientMap[$whmcsUserId];
+                        $clientRate = $clientRateMap[$localClientId] ?? 1.0000;
+                        if ($clientRate <= 0.0) {
+                            $clientRate = 1.0000;
+                        }
+                        $domainAmount = (float) ($row['recurringamount'] ?? 0.00) / $clientRate;
+
+                        $this->db->insert(
+                            'INSERT INTO domains (client_id, domain_name, tld, registrar_slug, status, registration_date, expiry_date, next_due_date, auto_renew, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                            [
+                                $localClientId,
+                                $domainName,
+                                $tld,
+                                ($row['registrar'] ?: 'local'),
+                                $status,
+                                $row['registrationdate'] ?: null,
+                                $row['expirydate'] ?: null,
+                                $row['nextduedate'] ?: null,
+                                ($row['donotrenew'] ? 0 : 1),
+                                $domainAmount,
+                                $nowStr,
+                                $nowStr,
+                            ]
+                        );
+                        $imported['domains']++;
+
+                        if ($imported['domains'] % 100 === 0) {
+                            $this->updateProgress('running', 60, "Importing client domains... ({$imported['domains']} so far)", $imported, $errors);
+                        }
+                    } catch (\Throwable $rowError) {
+                        $errors[] = ['row' => 0, 'reason' => 'Domain "' . ($row['domain'] ?? '?') . '" skipped: ' . $rowError->getMessage()];
                     }
-
-                    $domainName = strtolower(trim((string) $row['domain']));
-                    $tld = substr($domainName, (int) strpos($domainName, '.') + 1);
-
-                    $status = 'pending';
-                    $whmcsStatus = strtolower((string) ($row['status'] ?? ''));
-                    if ($whmcsStatus === 'active') {
-                        $status = 'active';
-                    } elseif ($whmcsStatus === 'expired') {
-                        $status = 'expired';
-                    } elseif ($whmcsStatus === 'cancelled') {
-                        $status = 'cancelled';
-                    }
-
-                    $this->db->insert(
-                        'INSERT INTO domains (client_id, domain_name, tld, registrar_slug, status, registration_date, expiry_date, next_due_date, auto_renew, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                        [
-                            $clientMap[$whmcsUserId],
-                            $domainName,
-                            $tld,
-                            ($row['registrar'] ?: 'local'),
-                            $status,
-                            $row['registrationdate'] ?: null,
-                            $row['expirydate'] ?: null,
-                            $row['nextduedate'] ?: null,
-                            ($row['donotrenew'] ? 0 : 1),
-                            (float) ($row['recurringamount'] ?? 0.00),
-                            $nowStr,
-                            $nowStr,
-                        ]
-                    );
-                    $imported['domains']++;
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Domains migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 70, 'Importing invoices...', $imported, $errors);
             // 6. Invoices
             try {
                 $whmcsInvoices = $remotePdo->query("SELECT * FROM {$prefix}tblinvoices")->fetchAll();
                 foreach ($whmcsInvoices as $row) {
+                    // Per-row isolation: one bad invoice shouldn't abort the
+                    // whole invoices step and drop the rest.
+                    try {
                     $whmcsUserId = (int) $row['userid'];
                     if (!isset($clientMap[$whmcsUserId])) {
                         continue;
@@ -330,6 +697,17 @@ final class WhmcsImportService
                         $status = 'refunded';
                     }
 
+                    $localClientId = $clientMap[$whmcsUserId];
+                    $invoiceCurrencyId = $clientCurrencyMap[$localClientId] ?? null;
+                    $invoiceCurrencyRate = $clientRateMap[$localClientId] ?? 1.0000;
+                    if ($invoiceCurrencyRate <= 0.0) {
+                        $invoiceCurrencyRate = 1.0000;
+                    }
+
+                    $baseSubtotal = (float) ($row['subtotal'] ?? 0.00) / $invoiceCurrencyRate;
+                    $baseTax = (float) (($row['tax'] ?? 0.00) + ($row['tax2'] ?? 0.00)) / $invoiceCurrencyRate;
+                    $baseTotal = (float) ($row['total'] ?? 0.00) / $invoiceCurrencyRate;
+
                     // No invoice_number column exists on the local invoices
                     // table — a real, pre-existing bug in this INSERT
                     // (invoices are numbered "INV-{id}" from the local id
@@ -337,13 +715,15 @@ final class WhmcsImportService
                     // WHMCS invoicenum has no column to land in and is
                     // dropped rather than guessing at a schema change here.
                     $localInvoiceId = (int) $this->db->insert(
-                        'INSERT INTO invoices (client_id, subtotal, tax_amount, total, status, created_at, due_date, paid_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        'INSERT INTO invoices (client_id, subtotal, tax_amount, total, status, currency_id, currency_rate, created_at, due_date, paid_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         [
-                            $clientMap[$whmcsUserId],
-                            (float) ($row['subtotal'] ?? 0.00),
-                            (float) (($row['tax'] ?? 0.00) + ($row['tax2'] ?? 0.00)),
-                            (float) ($row['total'] ?? 0.00),
+                            $localClientId,
+                            $baseSubtotal,
+                            $baseTax,
+                            $baseTotal,
                             $status,
+                            $invoiceCurrencyId,
+                            $invoiceCurrencyRate,
                             $row['date'] ?? $nowStr,
                             $row['duedate'] ?: $nowStr,
                             $row['datepaid'] ?: null,
@@ -352,11 +732,51 @@ final class WhmcsImportService
                     );
                     $invoiceMap[(int) $row['id']] = $localInvoiceId;
                     $imported['invoices']++;
+
+                    if ($imported['invoices'] % 100 === 0) {
+                        $this->updateProgress('running', 70, "Importing invoices... ({$imported['invoices']} so far)", $imported, $errors);
+                    }
+
+                    // Line items (tblinvoiceitems) — without these an
+                    // imported invoice has nothing under "Items" when an
+                    // admin opens it, even though the header total is
+                    // right. One summary line is inserted as a fallback
+                    // when WHMCS has no item rows for this invoice (a
+                    // manually-created invoice, or the table doesn't
+                    // exist on older WHMCS installs) so the invoice still
+                    // shows *something* rather than an empty items table.
+                    try {
+                        $itemRows = $invoiceItemsByInvoice[(int) $row['id']] ?? [];
+
+                        if ($itemRows === []) {
+                            $this->db->insert(
+                                'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+                                [$localInvoiceId, 'Imported invoice', $baseSubtotal]
+                            );
+                        } else {
+                            foreach ($itemRows as $itemRow) {
+                                $this->db->insert(
+                                    'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+                                    [$localInvoiceId, trim((string) ($itemRow['description'] ?? '')) ?: 'Item', (float) ($itemRow['amount'] ?? 0.00) / $invoiceCurrencyRate]
+                                );
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        // No tblinvoiceitems table on this WHMCS install — fall back to one summary line so the invoice isn't blank.
+                        $this->db->insert(
+                            'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+                            [$localInvoiceId, 'Imported invoice', (float) ($row['subtotal'] ?? $row['total'] ?? 0.00)]
+                        );
+                    }
+                    } catch (\Throwable $rowError) {
+                        $errors[] = ['row' => 0, 'reason' => 'Invoice #' . ($row['id'] ?? '?') . ' skipped: ' . $rowError->getMessage()];
+                    }
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Invoices migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 75, 'Importing payment transactions...', $imported, $errors);
             // 7. Transactions — WHMCS's payment ledger (tblaccounts). No
             // explicit status column exists there: a positive `amountout`
             // means a refund entry, otherwise it's a completed payment of
@@ -364,8 +784,12 @@ final class WhmcsImportService
             // migrated (e.g. it belonged to a client we skipped) rather than
             // guessing at a fallback invoice.
             try {
-                $whmcsTransactions = $remotePdo->query("SELECT * FROM {$prefix}tblaccounts")->fetchAll();
-                foreach ($whmcsTransactions as $row) {
+                // A payment ledger only ever grows — an established
+                // business's tblaccounts can be huge, so this streams rows
+                // one at a time (PDO's own buffered-cursor fetch) instead
+                // of fetchAll()'s "load the whole table into memory first".
+                $transactionsStmt = $remotePdo->query("SELECT * FROM {$prefix}tblaccounts");
+                while (($row = $transactionsStmt->fetch()) !== false) {
                     $whmcsInvoiceId = (int) ($row['invoiceid'] ?? 0);
                     if (!isset($invoiceMap[$whmcsInvoiceId])) {
                         continue;
@@ -386,11 +810,16 @@ final class WhmcsImportService
                         ]
                     );
                     $imported['transactions']++;
+
+                    if ($imported['transactions'] % 100 === 0) {
+                        $this->updateProgress('running', 75, "Importing payment transactions... ({$imported['transactions']} so far)", $imported, $errors);
+                    }
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Transactions migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 80, 'Importing currency configurations...', $imported, $errors);
             // 8. Currencies — platform-wide settings, no per-row client/product
             // FK remapping needed. Matched by currency code (upsert, not
             // append), so re-running the migration is safe.
@@ -423,15 +852,12 @@ final class WhmcsImportService
                 $errors[] = ['row' => 0, 'reason' => 'Currencies migration failed: ' . $e->getMessage()];
             }
 
-            // 9. Tax rules — WHMCS's per-country/state VAT rules. Table/column
-            // names here (tbltaxrules: country/state/name/taxrate) are the
-            // best-documented WHMCS shape available (no live reference
-            // install exists to confirm against, per this project's own
-            // blueprint) — wrapped in the same try/catch isolation as every
-            // other step, so a name mismatch surfaces as a clear per-step
-            // error rather than aborting the whole migration.
+            $this->updateProgress('running', 85, 'Importing tax rules...', $imported, $errors);
+            // 9. Tax rules — WHMCS's per-country/state VAT rules, stored in
+            // tbltax (columns: level/name/state/country/taxrate), confirmed
+            // against a real WHMCS database schema.
             try {
-                $whmcsTaxRules = $remotePdo->query("SELECT * FROM {$prefix}tbltaxrules")->fetchAll();
+                $whmcsTaxRules = $remotePdo->query("SELECT * FROM {$prefix}tbltax")->fetchAll();
                 foreach ($whmcsTaxRules as $row) {
                     $countryCode = strtoupper(trim((string) ($row['country'] ?? '')));
                     if (strlen($countryCode) !== 2) {
@@ -463,6 +889,7 @@ final class WhmcsImportService
                 $errors[] = ['row' => 0, 'reason' => 'Tax rules migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 90, 'Importing client sub-account contacts...', $imported, $errors);
             // 10. Contacts — WHMCS's sub-account contacts (tblcontacts),
             // remapped via $clientMap. WHMCS stores `permissions` as a
             // comma-separated string; split into the JSON array format
@@ -507,6 +934,7 @@ final class WhmcsImportService
                 $errors[] = ['row' => 0, 'reason' => 'Contacts migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 93, 'Importing configurable options groups...', $imported, $errors);
             // 11. Configurable options — the fiddliest table group (blueprint
             // §4.2 flags this explicitly), and the table/column names below
             // (tblproductconfiggroups, tblproductconfiglinks,
@@ -573,10 +1001,9 @@ final class WhmcsImportService
                     $optionName = trim((string) ($optionRow['optionname'] ?? ''));
                     $localGroupId = $optionGroupMap[$whmcsGid];
 
-                    $whmcsSubOptions = $remotePdo->prepare("SELECT * FROM {$prefix}tblproductconfigoptionssub WHERE configid = ?");
-                    $whmcsSubOptions->execute([(int) $optionRow['id']]);
+                    $subRows = $subOptionsByConfigId[(int) $optionRow['id']] ?? [];
 
-                    foreach ($whmcsSubOptions->fetchAll() as $subRow) {
+                    foreach ($subRows as $subRow) {
                         $subName = trim((string) ($subRow['optionname'] ?? ''));
                         $localName = $optionName !== '' ? "{$optionName} - {$subName}" : $subName;
 
@@ -593,9 +1020,7 @@ final class WhmcsImportService
                             [$localGroupId, $localName, $nowStr, $nowStr]
                         );
 
-                        $pricingRow = $remotePdo->prepare("SELECT * FROM {$prefix}tblpricing WHERE type = 'configoptions' AND relid = ?");
-                        $pricingRow->execute([(int) $subRow['id']]);
-                        $pricing = $pricingRow->fetch();
+                        $pricing = $pricingByConfigOption[(int) $subRow['id']] ?? false;
 
                         if ($pricing !== false) {
                             $cycleColumns = [
@@ -636,22 +1061,22 @@ final class WhmcsImportService
                 $errors[] = ['row' => 0, 'reason' => 'Configurable options migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 95, 'Importing support departments and tickets...', $imported, $errors);
             // 12. Departments + tickets — historical support data, not a
-            // live sync. Table/column names (tbldepartments: id/name/email;
-            // tbltickets: id/did/userid/email/name/subject/status/priority/
-            // admin/date; tblticketposts: id/ticketid/message/name/admin/
-            // date) are the best-documented real WHMCS shape available, same
-            // caveat as the configurable-options step above. WHMCS keeps
+            // live sync. Table/column names confirmed against a real WHMCS
+            // database: tblticketdepartments (id/name/email), tbltickets
+            // (id/did/userid/email/name/title/status/urgency/admin/date),
+            // tblticketreplies (id/tid/message/name/admin/date). WHMCS keeps
             // private admin-only notes in a separate mechanism this step
-            // doesn't have a documented table name for, so every migrated
-            // reply lands as non-private (is_private = 0) — the safe
-            // direction to default wrong in, since it under-restricts
-            // visibility rather than hiding a reply that should be visible.
+            // doesn't migrate, so every migrated reply lands as non-private
+            // (is_private = 0) — the safe direction to default wrong in,
+            // since it under-restricts visibility rather than hiding a reply
+            // that should be visible.
             $departmentMap = []; // WHMCS did => local departments.id
             $ticketMap = [];     // WHMCS ticket id => local tickets.id
 
             try {
-                $whmcsDepartments = $remotePdo->query("SELECT * FROM {$prefix}tbldepartments")->fetchAll();
+                $whmcsDepartments = $remotePdo->query("SELECT * FROM {$prefix}tblticketdepartments")->fetchAll();
                 foreach ($whmcsDepartments as $row) {
                     $name = trim((string) ($row['name'] ?? ''));
                     if ($name === '') {
@@ -689,12 +1114,17 @@ final class WhmcsImportService
                     $whmcsUserId = (int) ($row['userid'] ?? 0);
                     $clientId = $clientMap[$whmcsUserId] ?? null;
 
+                    // WHMCS ticket status values ("Open", "Answered",
+                    // "Customer-Reply", "Closed", "On Hold", "In Progress")
+                    // — anything outside our local enum falls back to 'open'.
                     $status = strtolower(trim((string) ($row['status'] ?? '')));
                     if (!in_array($status, ['open', 'answered', 'customer-reply', 'closed'], true)) {
                         $status = 'open';
                     }
 
-                    $priority = strtolower(trim((string) ($row['priority'] ?? '')));
+                    // WHMCS stores ticket priority in the `urgency` column
+                    // ("Low"/"Medium"/"High"), not `priority`.
+                    $priority = strtolower(trim((string) ($row['urgency'] ?? '')));
                     if (!in_array($priority, ['low', 'medium', 'high'], true)) {
                         $priority = 'medium';
                     }
@@ -705,7 +1135,8 @@ final class WhmcsImportService
                             $clientId,
                             $email,
                             $departmentId,
-                            trim((string) ($row['subject'] ?? '')) ?: '(no subject)',
+                            // WHMCS stores the ticket subject in `title`.
+                            trim((string) ($row['title'] ?? '')) ?: '(no subject)',
                             $status,
                             $priority,
                             $row['date'] ?? $nowStr,
@@ -714,15 +1145,24 @@ final class WhmcsImportService
                     );
                     $ticketMap[(int) $row['id']] = $localTicketId;
                     $imported['tickets']++;
+
+                    if ($imported['tickets'] % 100 === 0) {
+                        $this->updateProgress('running', 95, "Importing tickets... ({$imported['tickets']} so far)", $imported, $errors);
+                    }
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Tickets migration failed: ' . $e->getMessage()];
             }
 
             try {
-                $whmcsPosts = $remotePdo->query("SELECT * FROM {$prefix}tblticketposts")->fetchAll();
-                foreach ($whmcsPosts as $row) {
-                    $whmcsTicketId = (int) ($row['ticketid'] ?? 0);
+                // Same reasoning as tblaccounts above — a support history's
+                // reply table only grows, so this streams rather than
+                // fetchAll()-ing the whole thing into memory up front.
+                $postsStmt = $remotePdo->query("SELECT * FROM {$prefix}tblticketreplies");
+                $postCount = 0;
+                while (($row = $postsStmt->fetch()) !== false) {
+                    // WHMCS ticket replies link to their ticket via `tid`.
+                    $whmcsTicketId = (int) ($row['tid'] ?? 0);
                     if (!isset($ticketMap[$whmcsTicketId])) {
                         continue;
                     }
@@ -740,15 +1180,21 @@ final class WhmcsImportService
                             $row['date'] ?? $nowStr,
                         ]
                     );
+
+                    $postCount++;
+                    if ($postCount % 100 === 0) {
+                        $this->updateProgress('running', 95, "Importing ticket replies... ({$postCount} so far)", $imported, $errors);
+                    }
                 }
             } catch (\Throwable $e) {
                 $errors[] = ['row' => 0, 'reason' => 'Ticket replies migration failed: ' . $e->getMessage()];
             }
 
-            // 13. Promotions/coupon codes — table/column names (tblpromotions:
-            // id/code/type/value/maxuses/uses/startdate/expirydate/status) are
-            // the best-documented real WHMCS shape available, same caveat as
-            // the configurable-options and tickets steps above. Matched by
+            $this->updateProgress('running', 98, 'Importing promotions and coupons...', $imported, $errors);
+            // 13. Promotions/coupon codes — confirmed against a real WHMCS
+            // schema: tblpromotions has code/type/value/maxuses/uses/
+            // startdate/expirationdate (there is NO status column — a promo
+            // is simply active until its expirationdate passes). Matched by
             // code (upsert), so re-running the migration doesn't duplicate.
             try {
                 $whmcsPromotions = $remotePdo->query("SELECT * FROM {$prefix}tblpromotions")->fetchAll();
@@ -761,8 +1207,10 @@ final class WhmcsImportService
                     $whmcsType = strtolower(trim((string) ($row['type'] ?? '')));
                     $type = str_contains($whmcsType, 'fixed') ? 'fixed' : 'percentage';
 
-                    $whmcsStatus = strtolower(trim((string) ($row['status'] ?? '')));
-                    $status = in_array($whmcsStatus, ['disabled', 'inactive', 'expired'], true) ? 'inactive' : 'active';
+                    // WHMCS has no promo status column — derive it: expired
+                    // (expirationdate in the past) => inactive, else active.
+                    $expiresAt = ($row['expirationdate'] ?? null) ?: null;
+                    $status = ($expiresAt !== null && $expiresAt < substr($nowStr, 0, 10)) ? 'inactive' : 'active';
 
                     $maxUses = isset($row['maxuses']) && (int) $row['maxuses'] > 0 ? (int) $row['maxuses'] : null;
                     $usesCount = (int) ($row['uses'] ?? 0);
@@ -772,12 +1220,12 @@ final class WhmcsImportService
                     if ($existing !== null) {
                         $this->db->update(
                             'UPDATE promotions SET type = ?, value = ?, max_redemptions = ?, redemption_count = ?, starts_at = ?, expires_at = ?, status = ?, updated_at = ? WHERE id = ?',
-                            [$type, (float) ($row['value'] ?? 0), $maxUses, $usesCount, $row['startdate'] ?: null, $row['expirydate'] ?: null, $status, $nowStr, $existing['id']]
+                            [$type, (float) ($row['value'] ?? 0), $maxUses, $usesCount, ($row['startdate'] ?? null) ?: null, $expiresAt, $status, $nowStr, $existing['id']]
                         );
                     } else {
                         $this->db->insert(
                             'INSERT INTO promotions (code, type, value, max_redemptions, redemption_count, min_order_amount, starts_at, expires_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                            [$code, $type, (float) ($row['value'] ?? 0), $maxUses, $usesCount, 0.00, $row['startdate'] ?: null, $row['expirydate'] ?: null, $status, $nowStr, $nowStr]
+                            [$code, $type, (float) ($row['value'] ?? 0), $maxUses, $usesCount, 0.00, ($row['startdate'] ?? null) ?: null, $expiresAt, $status, $nowStr, $nowStr]
                         );
                     }
 
@@ -787,6 +1235,99 @@ final class WhmcsImportService
                 $errors[] = ['row' => 0, 'reason' => 'Promotions migration failed: ' . $e->getMessage()];
             }
 
+            $this->updateProgress('running', 99, 'Importing domain TLD pricing...', $imported, $errors);
+            // 14. Domain TLD pricing — same "best-documented shape, no live
+            // reference install to confirm against" caveat as the
+            // configurable-options/tickets/promotions steps above. WHMCS
+            // keeps per-TLD pricing in tbldomainpricing (extension + which
+            // registrar module auto-registers it) with the actual prices in
+            // the shared tblpricing table (type IN domainregister/
+            // domaintransfer/domainrenew, relid = tbldomainpricing.id, one
+            // row per currency, price in msetupfee). This app's
+            // domain_pricing table has no currency dimension, so the row
+            // matching WHMCS's default currency is used (falling back to
+            // whichever currency row exists first); it also has one flat
+            // price per type rather than WHMCS's 1-10 year term tiers, so
+            // only the 1-year fee is imported. Upserts by TLD via
+            // DomainPricingRepository::save(), so re-running is safe.
+            try {
+                $whmcsTlds = $remotePdo->query("SELECT * FROM {$prefix}tbldomainpricing")->fetchAll();
+                foreach ($whmcsTlds as $row) {
+                    $extension = trim((string) ($row['extension'] ?? ''));
+                    if ($extension === '') {
+                        continue;
+                    }
+
+                    $relid = (int) $row['id'];
+                    $prices = [];
+
+                    foreach (['domainregister' => 'register_price', 'domaintransfer' => 'transfer_price', 'domainrenew' => 'renew_price'] as $whmcsType => $localField) {
+                        $priceRows = $pricingByTld[$whmcsType][$relid] ?? [];
+
+                        $priceRow = null;
+                        foreach ($priceRows as $r) {
+                            if ($whmcsDefaultCurrencyId !== null && (int) ($r['currency'] ?? 0) === $whmcsDefaultCurrencyId) {
+                                $priceRow = $r;
+                                break;
+                            }
+                        }
+                        $priceRow ??= ($priceRows[0] ?? null);
+
+                        $prices[$localField] = $priceRow !== null ? (float) ($priceRow['msetupfee'] ?? 0) : 0.0;
+                    }
+
+                    $registrarSlug = $this->resolveRegistrarSlug(trim((string) ($row['autoreg'] ?? '')));
+
+                    if ($registrarSlug === null) {
+                        $registrarSlug = 'local';
+                        $errors[] = [
+                            'row' => 0,
+                            'reason' => ".{$extension}: WHMCS registrar module \"" . trim((string) ($row['autoreg'] ?? '')) . "\" has no matching registrar here — assigned to \"local\", review and reassign in Domain Pricing.",
+                        ];
+                    }
+
+                    $this->domainPricing->save([
+                        'tld' => $extension,
+                        'registrar_slug' => $registrarSlug,
+                        'register_price' => $prices['register_price'],
+                        'transfer_price' => $prices['transfer_price'],
+                        'renew_price' => $prices['renew_price'],
+                    ]);
+
+                    $imported['domain_pricing']++;
+                }
+            } catch (\Throwable $e) {
+                $errors[] = ['row' => 0, 'reason' => 'Domain TLD pricing migration failed: ' . $e->getMessage()];
+            }
+
+            $this->updateProgress('running', 99, 'Importing default nameservers...', $imported, $errors);
+            // 15. Default nameservers — WHMCS General Settings > Domains
+            // tab stores these as individual rows in the general
+            // tblconfiguration key/value table, setting names
+            // 'DomainNS1'..'DomainNS5'. Best-documented shape available,
+            // same caveat as the other steps that assume undocumented
+            // internal table layouts.
+            try {
+                $nsStmt = $remotePdo->prepare("SELECT value FROM {$prefix}tblconfiguration WHERE setting = ?");
+                $nameservers = [];
+
+                for ($i = 1; $i <= 5; $i++) {
+                    $nsStmt->execute(["DomainNS{$i}"]);
+                    $row = $nsStmt->fetch();
+                    $value = $row !== false ? trim((string) ($row['value'] ?? '')) : '';
+
+                    if ($value !== '') {
+                        $nameservers[] = $value;
+                    }
+                }
+
+                if ($nameservers !== []) {
+                    $this->domainSettings->setDefaultNameservers($nameservers);
+                }
+            } catch (\Throwable $e) {
+                // No tblconfiguration table, or this WHMCS install has no default nameservers set — not fatal, admin can set them manually.
+            }
+
             return [
                 'success' => count($errors) === 0,
                 'message' => count($errors) === 0 ? 'WHMCS database imported successfully!' : 'Completed with some errors.',
@@ -794,5 +1335,43 @@ final class WhmcsImportService
                 'errors' => $errors,
             ];
         });
+
+            $success = count($result['errors']) === 0;
+            $this->updateProgress($success ? 'completed' : 'failed', 100, $success ? 'Migration completed successfully!' : 'Completed with some errors.', $result['imported'], $result['errors']);
+            return $result;
+        } catch (\Throwable $e) {
+            $this->updateProgress('failed', 100, 'Migration failed: ' . $e->getMessage(), $imported, [['row' => 0, 'reason' => 'Migration failed: ' . $e->getMessage()]]);
+            return [
+                'success' => false,
+                'message' => 'Migration failed: ' . $e->getMessage(),
+                'imported' => $imported,
+                'errors' => [['row' => 0, 'reason' => $e->getMessage()]],
+            ];
+        }
+    }
+
+    /**
+     * Matches a WHMCS registrar module directory name (tbldomainpricing.autoreg,
+     * e.g. "enom", "resellerclub") against this app's registered registrars
+     * by slug or display name. Returns null (rather than guessing) when
+     * nothing matches — WHMCS's module names don't correspond 1:1 with the
+     * registrars this app ships (local/upperlink/connectreseller), so an
+     * unmatched TLD needs a human to pick the right one.
+     */
+    private function resolveRegistrarSlug(string $whmcsAutoreg): ?string
+    {
+        if ($whmcsAutoreg === '') {
+            return null;
+        }
+
+        $normalized = strtolower($whmcsAutoreg);
+
+        foreach ($this->registrars->all() as $registrar) {
+            if (strtolower((string) $registrar['slug']) === $normalized || strtolower((string) $registrar['name']) === $normalized) {
+                return (string) $registrar['slug'];
+            }
+        }
+
+        return null;
     }
 }

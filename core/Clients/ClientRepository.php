@@ -39,7 +39,9 @@ final class ClientRepository
 
         $data = $this->db->select(
             <<<SQL
-            SELECT c.*, g.name AS group_name
+            SELECT c.*, g.name AS group_name,
+                (SELECT COUNT(*) FROM services s WHERE s.client_id = c.id) AS services_total,
+                (SELECT COUNT(*) FROM services s WHERE s.client_id = c.id AND s.status = 'active') AS services_active
             FROM clients c
             LEFT JOIN client_groups g ON g.id = c.client_group_id
             {$where}
@@ -70,14 +72,14 @@ final class ClientRepository
         return (int) ($row['c'] ?? 0);
     }
 
-    /** @return array<string, mixed>|null */
     public function find(int $id): ?array
     {
         return $this->db->selectOne(
             <<<'SQL'
-            SELECT c.*, g.name AS group_name
+            SELECT c.*, g.name AS group_name, cu.symbol AS currency_symbol, cu.code AS currency_code
             FROM clients c
             LEFT JOIN client_groups g ON g.id = c.client_group_id
+            LEFT JOIN currencies cu ON cu.id = c.currency_id
             WHERE c.id = ?
             SQL,
             [$id]
@@ -134,15 +136,19 @@ final class ClientRepository
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
+        $defaultCurrency = $this->db->selectOne("SELECT id FROM currencies WHERE is_default = 1 LIMIT 1");
+        $defaultCurrencyId = $defaultCurrency !== null ? (int) $defaultCurrency['id'] : null;
+
         return (int) $this->db->insert(
             <<<'SQL'
-            INSERT INTO clients (client_group_id, email, password_hash, first_name, last_name, company_name, address1, address2, city, state, postcode, country, vat_number, phone, status, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clients (client_group_id, email, password_hash, security_pin_hash, first_name, last_name, company_name, address1, address2, city, state, postcode, country, vat_number, phone, currency_id, status, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             SQL,
             [
                 $fields['client_group_id'] ?? null,
                 $fields['email'],
                 password_hash($fields['password'] ?? bin2hex(random_bytes(8)), PASSWORD_ARGON2ID),
+                isset($fields['security_pin']) && $fields['security_pin'] !== '' ? password_hash($fields['security_pin'], PASSWORD_ARGON2ID) : null,
                 $fields['first_name'],
                 $fields['last_name'],
                 $fields['company_name'] ?? null,
@@ -154,6 +160,7 @@ final class ClientRepository
                 $fields['country'] ?? null,
                 $fields['vat_number'] ?? null,
                 $fields['phone'] ?? null,
+                $fields['currency_id'] ?? $defaultCurrencyId,
                 $fields['status'] ?? 'active',
                 $fields['notes'] ?? null,
                 $now,
@@ -213,8 +220,10 @@ final class ClientRepository
                 [$factor, $factor, $factor, $currencyId, $factor, $id]
             );
 
+            // transactions has no client_id column of its own — it's
+            // scoped to a client only via the invoice it paid.
             $this->db->update(
-                'UPDATE transactions SET amount = amount * ? WHERE client_id = ?',
+                'UPDATE transactions SET amount = amount * ? WHERE invoice_id IN (SELECT id FROM invoices WHERE client_id = ?)',
                 [$factor, $id]
             );
 
@@ -371,6 +380,14 @@ final class ClientRepository
         $this->db->update(
             'UPDATE clients SET password_hash = ?, updated_at = ? WHERE id = ?',
             [password_hash($plainPassword, PASSWORD_ARGON2ID), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    public function updateSecurityPin(int $id, string $plainPin): void
+    {
+        $this->db->update(
+            'UPDATE clients SET security_pin_hash = ?, updated_at = ? WHERE id = ?',
+            [password_hash($plainPin, PASSWORD_ARGON2ID), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
 

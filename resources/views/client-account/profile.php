@@ -42,22 +42,22 @@
             <input class="cv-input" name="company_name" value="<?= e((string) ($client['company_name'] ?? '')) ?>">
         </div>
         <div class="cv-field">
-            <label class="cv-label">Address</label>
-            <input class="cv-input" name="address1" value="<?= e((string) ($client['address1'] ?? '')) ?>" style="margin-bottom:var(--cv-space-2);">
-            <input class="cv-input" name="address2" value="<?= e((string) ($client['address2'] ?? '')) ?>">
+            <label class="cv-label">Address <span style="color:var(--cv-color-danger, #ef4444);">*</span></label>
+            <input class="cv-input" name="address1" value="<?= e((string) ($client['address1'] ?? '')) ?>" required style="margin-bottom:var(--cv-space-2);">
+            <input class="cv-input" name="address2" value="<?= e((string) ($client['address2'] ?? '')) ?>" placeholder="Address Line 2 (optional)">
         </div>
         <div style="display:flex;gap:var(--cv-space-3);">
             <div class="cv-field" style="flex:1;">
-                <label class="cv-label">City</label>
-                <input class="cv-input" name="city" value="<?= e((string) ($client['city'] ?? '')) ?>">
+                <label class="cv-label">City <span style="color:var(--cv-color-danger, #ef4444);">*</span></label>
+                <input class="cv-input" name="city" value="<?= e((string) ($client['city'] ?? '')) ?>" required>
             </div>
             <div class="cv-field" style="flex:1;">
                 <label class="cv-label">State / Province</label>
                 <input class="cv-input" name="state" value="<?= e((string) ($client['state'] ?? '')) ?>">
             </div>
             <div class="cv-field" style="flex:1;">
-                <label class="cv-label">Postcode</label>
-                <input class="cv-input" name="postcode" value="<?= e((string) ($client['postcode'] ?? '')) ?>">
+                <label class="cv-label">Postcode <span style="color:var(--cv-color-danger, #ef4444);">*</span></label>
+                <input class="cv-input" name="postcode" value="<?= e((string) ($client['postcode'] ?? '')) ?>" required>
             </div>
         </div>
         <div style="display:flex;gap:var(--cv-space-3);">
@@ -66,8 +66,8 @@
                 <input class="cv-input" name="country" value="<?= e((string) ($client['country'] ?? '')) ?>">
             </div>
             <div class="cv-field" style="flex:1;">
-                <label class="cv-label">Phone</label>
-                <input class="cv-input" name="phone" value="<?= e((string) ($client['phone'] ?? '')) ?>">
+                <label class="cv-label">Phone <span style="color:var(--cv-color-danger, #ef4444);">*</span></label>
+                <input class="cv-input" name="phone" value="<?= e((string) ($client['phone'] ?? '')) ?>" required>
             </div>
         </div>
         <div class="cv-field">
@@ -104,5 +104,20 @@
             <input class="cv-input" type="password" name="new_password" required minlength="8">
         </div>
         <button class="cv-btn" type="submit">Change Password</button>
+    </form>
+</div>
+
+<div class="cv-card" style="max-width:40rem;margin:var(--cv-space-4) auto;">
+    <h2 class="cv-card__title" style="font-size:var(--cv-text-md);">Change Security PIN</h2>
+    <form method="post" action="/client/account/security-pin"><?= csrf_field() ?>
+        <div class="cv-field">
+            <label class="cv-label">Current Password <span style="color:var(--cv-text-secondary);">(for verification)</span></label>
+            <input class="cv-input" type="password" name="current_password" required>
+        </div>
+        <div class="cv-field">
+            <label class="cv-label">New Security PIN (4+ chars)</label>
+            <input class="cv-input" type="password" name="new_security_pin" required minlength="4">
+        </div>
+        <button class="cv-btn" type="submit">Change Security PIN</button>
     </form>
 </div>

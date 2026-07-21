@@ -208,7 +208,14 @@ final class ProvisioningService
             return [null, [], "Unknown provisioning module \"{$server['module_slug']}\"."];
         }
 
-        return [$module, ['username' => $service['username'], 'server' => $server], null];
+        return [$module, [
+            'username' => $service['username'],
+            'server' => $server,
+            'domain' => $service['domain'] ?? null,
+            'hostname' => $service['hostname'] ?? null,
+            'password' => $service['password'] ?? null,
+            'product_name' => $service['product_name'] ?? '',
+        ], null];
     }
 
     private function resolveModule(string $slug): ?ProvisioningModule

@@ -19,6 +19,7 @@ use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
+use CodeVault\Billing\CurrencyService;
 use Throwable;
 
 final class ClientController
@@ -39,7 +40,8 @@ final class ClientController
         private readonly ClientCreditRepository $credit,
         private readonly CreditService $creditService,
         private readonly VatLookupService $vatLookup,
-        private readonly \CodeVault\Session\SessionManager $session
+        private readonly \CodeVault\Session\SessionManager $session,
+        private readonly CurrencyService $currencyService
     ) {
     }
 
@@ -156,6 +158,7 @@ final class ClientController
 
         return $this->render('clients.show', [
             'client' => $client,
+            'currency' => $this->currencyService->resolveForClient($client),
             'tab' => in_array($tab, ['summary', 'profile', 'contacts', 'billing', 'log'], true) ? $tab : 'summary',
             'contacts' => $this->contacts->forClient((int) $client['id']),
             'activity' => $this->activity->forSubject('client', (int) $client['id']),

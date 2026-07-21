@@ -51,6 +51,21 @@ final class ServerController
         return Response::redirect('/admin/servers');
     }
 
+    public function updateGroup(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $name = trim((string) $request->input('name', ''));
+
+        if ($name !== '') {
+            $this->groups->update((int) $params['id'], $name);
+        }
+
+        return Response::redirect('/admin/servers');
+    }
+
     public function destroyGroup(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {
@@ -149,6 +164,39 @@ final class ServerController
         $this->servers->delete((int) $params['id']);
 
         return Response::redirect('/admin/servers');
+    }
+
+    public function testConnection(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $server = $this->servers->find((int) $params['id']);
+
+        if ($server === null) {
+            return Response::json(['success' => false, 'message' => 'Server not found.'], 404);
+        }
+
+        $module = $this->modules->get(ProvisioningModule::class, (string) $server['module_slug']);
+
+        if ($module === null) {
+            return Response::json([
+                'success' => false,
+                'message' => "No provisioning module registered for [{$server['module_slug']}].",
+            ]);
+        }
+
+        try {
+            $result = $module->testConnection(['server' => $server]);
+        } catch (\Throwable $e) {
+            return Response::json(['success' => false, 'message' => 'Connection test failed: ' . $e->getMessage()]);
+        }
+
+        return Response::json([
+            'success' => (bool) ($result['success'] ?? false),
+            'message' => (string) ($result['message'] ?? ($result['success'] ?? false ? 'Connected.' : 'Connection failed.')),
+        ]);
     }
 
     /** @return array<string, mixed> */

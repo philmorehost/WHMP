@@ -27,7 +27,7 @@ $badgeClass = static fn (string $status): string => match ($status) {
                 <td><a href="/admin/quotes/<?= (int) $quote['id'] ?>">Q-<?= (int) $quote['id'] ?></a></td>
                 <td><?= e($quote['first_name'] . ' ' . $quote['last_name']) ?> (<?= e($quote['client_email']) ?>)</td>
                 <td><?= e($quote['subject']) ?></td>
-                <td>$<?= number_format((float) $quote['total'], 2) ?></td>
+                <td><?= e($quote['currency_symbol'] ?? '$') ?><?= number_format((float) $quote['total'], 2) ?></td>
                 <td><span class="cv-badge <?= $badgeClass((string) $quote['status']) ?>"><?= e(ucfirst((string) $quote['status'])) ?></span></td>
                 <td><?= $quote['valid_until'] !== null ? e((string) $quote['valid_until']) : '&mdash;' ?></td>
                 <td><a class="cv-btn cv-btn--secondary" href="/admin/quotes/<?= (int) $quote['id'] ?>">View</a></td>

@@ -25,7 +25,7 @@
             <tr>
                 <td><a href="/admin/orders/<?= (int) $order['id'] ?>">ORD-<?= (int) $order['id'] ?></a></td>
                 <td><?= e($order['first_name'] . ' ' . $order['last_name']) ?> (<?= e($order['client_email']) ?>)</td>
-                <td>$<?= number_format((float) $order['total'], 2) ?></td>
+                <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $order['total'], 2) ?></td>
                 <td>
                     <?php if ($order['status'] === 'active'): ?>
                         <span class="cv-badge cv-badge--success">Active</span>
@@ -37,7 +37,12 @@
                         <span class="cv-badge cv-badge--danger">Pending</span>
                     <?php endif; ?>
                 </td>
-                <td><a class="cv-btn cv-btn--secondary" href="/admin/orders/<?= (int) $order['id'] ?>">View</a></td>
+                <td style="display:flex;gap:var(--cv-space-2);">
+                    <a class="cv-btn cv-btn--secondary" href="/admin/orders/<?= (int) $order['id'] ?>">View</a>
+                    <form method="post" action="/admin/orders/<?= (int) $order['id'] ?>/delete" data-confirm="Delete order ORD-<?= (int) $order['id'] ?>? This cannot be undone."><?= csrf_field() ?>
+                        <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
+                    </form>
+                </td>
             </tr>
         <?php endforeach; ?>
         <?php if ($orders === []): ?>

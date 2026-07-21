@@ -42,6 +42,14 @@ final class DepartmentRepository
         );
     }
 
+    public function update(int $id, string $name, ?string $email): void
+    {
+        $this->db->update(
+            'UPDATE departments SET name = ?, email = ?, updated_at = ? WHERE id = ?',
+            [$name, $email, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM departments WHERE id = ?', [$id]);

@@ -6,6 +6,7 @@
 /** @var array<int, array<string, mixed>> $admins */
 /** @var string|null $aiSuggestion */
 /** @var string|null $aiError */
+/** @var array<int, array<int, array<string, mixed>>> $attachments grouped by reply_id (0 = opening message) */
 $id = (int) $ticket['id'];
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
@@ -65,7 +66,10 @@ $id = (int) $ticket['id'];
 </div>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <?php foreach ($replies as $reply): ?>
+    <?php foreach ($replies as $i => $reply):
+        $replyAttachments = $attachments[(int) $reply['id']] ?? [];
+        if ($i === 0) { $replyAttachments = array_merge($attachments[0] ?? [], $replyAttachments); }
+    ?>
         <div style="border-bottom:1px solid var(--cv-border);padding:var(--cv-space-3) 0;<?= $reply['is_private'] ? 'background:var(--cv-surface-warning, #fff8e1);' : '' ?>">
             <p>
                 <strong><?= e($reply['author_name']) ?></strong>
@@ -73,7 +77,8 @@ $id = (int) $ticket['id'];
                 <?php if ($reply['is_private']): ?><span class="cv-badge cv-badge--danger">Private Note</span><?php endif; ?>
                 <span style="color:var(--cv-text-secondary);"> &middot; <?= e($reply['created_at']) ?></span>
             </p>
-            <p style="white-space:pre-wrap;"><?= e($reply['message']) ?></p>
+            <p style="white-space:pre-wrap;word-break:break-word;"><?= e($reply['message']) ?></p>
+            <?= $view->partial('partials.ticket-attachments', ['items' => $replyAttachments, 'baseUrl' => "/admin/tickets/{$id}/attachments"]) ?>
         </div>
     <?php endforeach; ?>
 </div>
@@ -90,7 +95,7 @@ $id = (int) $ticket['id'];
             <label class="cv-label">Suggested Reply</label>
             <textarea class="cv-input" id="cv-ai-suggestion" rows="6" readonly><?= e($aiSuggestion) ?></textarea>
         </div>
-        <button class="cv-btn cv-btn--secondary" type="button" id="cv-ai-use-suggestion">Insert into Reply</button>
+        <button class="cv-btn cv-btn--secondary" type="button" data-copy-value-from="cv-ai-suggestion" data-copy-value-to="cv-reply-message">Insert into Reply</button>
     <?php endif; ?>
 </div>
 
@@ -99,7 +104,7 @@ $id = (int) $ticket['id'];
     <?php if ($cannedReplies !== []): ?>
         <div class="cv-field">
             <label class="cv-label">Insert Canned Reply</label>
-            <select class="cv-input" id="cv-canned-reply-select">
+            <select class="cv-input" data-insert-value-into="cv-reply-message">
                 <option value="">-- Select --</option>
                 <?php foreach ($cannedReplies as $canned): ?>
                     <option value="<?= e($canned['body']) ?>"><?= e($canned['title']) ?></option>
@@ -107,9 +112,13 @@ $id = (int) $ticket['id'];
             </select>
         </div>
     <?php endif; ?>
-    <form method="post" action="/admin/tickets/<?= $id ?>/reply"><?= csrf_field() ?>
+    <form method="post" action="/admin/tickets/<?= $id ?>/reply" enctype="multipart/form-data"><?= csrf_field() ?>
         <div class="cv-field">
-            <textarea class="cv-input" name="message" id="cv-reply-message" rows="6" required></textarea>
+            <textarea class="cv-input" name="message" id="cv-reply-message" rows="6" placeholder="Type your reply… emojis and all characters welcome ✨"></textarea>
+        </div>
+        <div class="cv-field">
+            <label class="cv-label">Attachments <span style="color:var(--cv-text-secondary);font-weight:400;">(images &amp; documents, up to 10 MB each)</span></label>
+            <input class="cv-input" type="file" name="attachments[]" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.odt,.zip">
         </div>
         <label style="display:flex;align-items:center;gap:var(--cv-space-1);margin-bottom:var(--cv-space-2);">
             <input type="checkbox" name="is_private" value="1"> Private note (not visible to client)
@@ -118,20 +127,6 @@ $id = (int) $ticket['id'];
     </form>
 </div>
 
-<?php if ($aiSuggestion !== null): ?>
-<script>
-document.getElementById('cv-ai-use-suggestion').addEventListener('click', function () {
-    document.getElementById('cv-reply-message').value = document.getElementById('cv-ai-suggestion').value;
-});
-</script>
-<?php endif; ?>
-
-<?php if ($cannedReplies !== []): ?>
-<script>
-document.getElementById('cv-canned-reply-select').addEventListener('change', function () {
-    if (this.value) {
-        document.getElementById('cv-reply-message').value = this.value;
-    }
-});
-</script>
-<?php endif; ?>
+<?php /* The "Insert into Reply" button and the canned-reply <select> are
+       wired via delegated listeners in app.js (data-copy-value-from /
+       data-insert-value-into) — inline <script> here is blocked by the CSP. */ ?>

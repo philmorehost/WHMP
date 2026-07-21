@@ -28,7 +28,7 @@ final class Cart
     }
 
     /** @param array<int, int> $selectedOptions option_group_id => configurable_option_id */
-    public function add(int $productId, string $billingCycle, array $selectedOptions = [], int $quantity = 1): void
+    public function add(int $productId, string $billingCycle, array $selectedOptions = [], int $quantity = 1, ?array $domainOptions = null, ?array $serverOptions = null, ?array $customFields = null): void
     {
         $items = $this->items();
         $items[] = [
@@ -36,6 +36,9 @@ final class Cart
             'billing_cycle' => $billingCycle,
             'quantity' => max(1, $quantity),
             'options' => $selectedOptions,
+            'domain_options' => $domainOptions,
+            'server_options' => $serverOptions,
+            'custom_fields' => $customFields,
         ];
 
         $this->session->set(self::SESSION_KEY, $items);

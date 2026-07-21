@@ -17,7 +17,8 @@ final class DeepSeekProvider implements AiProvider
         private readonly HttpClient $http,
         private readonly string $apiKey,
         private readonly string $model = 'deepseek-chat',
-        private readonly string $baseUrl = 'https://api.deepseek.com'
+        private readonly string $baseUrl = 'https://api.deepseek.com',
+        private readonly ?AiUsageRepository $usage = null
     ) {
     }
 
@@ -42,6 +43,7 @@ final class DeepSeekProvider implements AiProvider
         ], (string) $payload);
 
         if ($response['status'] !== 200) {
+            $this->meter([], false);
             return ['success' => false, 'text' => null, 'error' => "DeepSeek API returned HTTP {$response['status']}."];
         }
 
@@ -49,9 +51,28 @@ final class DeepSeekProvider implements AiProvider
         $text = is_array($decoded) ? ($decoded['choices'][0]['message']['content'] ?? null) : null;
 
         if (!is_string($text) || trim($text) === '') {
+            $this->meter(is_array($decoded) ? ($decoded['usage'] ?? []) : [], false);
             return ['success' => false, 'text' => null, 'error' => 'DeepSeek API returned an empty response.'];
         }
 
+        $this->meter($decoded['usage'] ?? [], true);
+
         return ['success' => true, 'text' => trim($text), 'error' => null];
+    }
+
+    /** @param array<string, mixed> $usage the provider's `usage` token block, if any */
+    private function meter(array $usage, bool $success): void
+    {
+        if ($this->usage === null) {
+            return;
+        }
+
+        $this->usage->record(
+            'general',
+            'deepseek',
+            (int) ($usage['prompt_tokens'] ?? 0),
+            (int) ($usage['completion_tokens'] ?? 0),
+            $success
+        );
     }
 }

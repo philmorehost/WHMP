@@ -2,7 +2,10 @@
 /** @var array<string, mixed> $service */
 /** @var array<string, mixed>|null $usage */
 /** @var string|null $error */
+/** @var bool $cpanelToolsAvailable */
+/** @var array<string, mixed> $currency */
 $id = (int) $service['id'];
+$cpanelToolsAvailable ??= false;
 ?>
 <div class="cv-card" style="max-width:32rem;margin:0 auto;">
     <h1 class="cv-card__title"><?= e($service['product_name']) ?></h1>
@@ -21,7 +24,10 @@ $id = (int) $service['id'];
             <span class="cv-badge cv-badge--neutral"><?= e($service['status']) ?></span>
         <?php endif; ?>
     </p>
-    <p><strong>Billing Cycle:</strong> <?= e($service['billing_cycle']) ?> &middot; <strong>Amount:</strong> $<?= number_format((float) $service['amount'], 2) ?></p>
+    <p><strong>Billing Cycle:</strong> <?= e($service['billing_cycle']) ?> &middot; <strong>Amount:</strong> <?= e($currency['symbol']) ?><?= number_format((float) $service['amount'] * (float) $currency['exchange_rate'], 2) ?></p>
+    <?php if (!empty($service['domain']) || !empty($service['hostname'])): ?>
+        <p><strong>Domain/Hostname:</strong> <?= e($service['domain'] ?: $service['hostname']) ?></p>
+    <?php endif; ?>
     <p><strong>Next Due:</strong> <?= e($service['next_due_date']) ?></p>
 
     <?php if ($usage !== null && ($usage['success'] ?? false)): ?>
@@ -37,6 +43,9 @@ $id = (int) $service['id'];
             <form method="post" action="/client/services/<?= $id ?>/sso"><?= csrf_field() ?>
                 <button class="cv-btn" type="submit">Log In to Control Panel</button>
             </form>
+            <?php if ($cpanelToolsAvailable): ?>
+                <a class="cv-btn cv-btn--secondary" href="/client/services/<?= $id ?>/cpanel-tools">cPanel Tools</a>
+            <?php endif; ?>
         <?php endif; ?>
         <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true)): ?>
             <form method="post" action="/client/services/<?= $id ?>/cancel" data-confirm="Request cancellation of this service?"><?= csrf_field() ?>

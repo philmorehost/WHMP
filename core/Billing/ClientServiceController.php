@@ -6,6 +6,7 @@ namespace CodeVault\Billing;
 
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\View;
@@ -22,7 +23,9 @@ final class ClientServiceController
         private readonly ClientAuthGuard $guard,
         private readonly View $view,
         private readonly ServiceRepository $services,
-        private readonly ProvisioningService $provisioning
+        private readonly ProvisioningService $provisioning,
+        private readonly ServerRepository $servers,
+        private readonly CurrencyService $currency
     ) {
     }
 
@@ -58,6 +61,8 @@ final class ClientServiceController
         return $this->page('billing.client-service-show', [
             'service' => $service,
             'usage' => $usage,
+            'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
+            'currency' => $this->currency->resolveForClient($client),
         ]);
     }
 
@@ -82,6 +87,7 @@ final class ClientServiceController
                 'service' => $service,
                 'usage' => null,
                 'error' => $result['message'],
+                'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
             ]);
         }
 
@@ -103,6 +109,18 @@ final class ClientServiceController
         }
 
         return Response::redirect('/client/services');
+    }
+
+    /** @param array<string, mixed> $service */
+    private function isOnCpanelServer(array $service): bool
+    {
+        if ($service['server_id'] === null) {
+            return false;
+        }
+
+        $server = $this->servers->find((int) $service['server_id']);
+
+        return $server !== null && (string) ($server['module_slug'] ?? '') === 'cpanel';
     }
 
     private function page(string $template, array $data): Response

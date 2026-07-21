@@ -18,7 +18,7 @@
                 <td><?= e($affiliate['first_name'] . ' ' . $affiliate['last_name']) ?> (<?= e($affiliate['email']) ?>)</td>
                 <td><code><?= e($affiliate['code']) ?></code></td>
                 <td><?= number_format((float) $affiliate['commission_rate'], 2) ?>%</td>
-                <td>$<?= number_format((float) $affiliate['pending_balance'], 2) ?></td>
+                <td><?= e($affiliate['currency_symbol'] ?? '$') ?><?= number_format((float) $affiliate['pending_balance'], 2) ?></td>
                 <td>
                     <?php if ($affiliate['status'] === 'active'): ?>
                         <span class="cv-badge cv-badge--success">Active</span>

@@ -6,7 +6,7 @@
 /** @var string $submitLabel */
 $formId = 'server-form-' . ($server['id'] ?? 'new');
 ?>
-<form id="<?= e($formId) ?>" method="post" action="<?= e($action) ?>" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--cv-space-3);max-width:40rem;"><?= csrf_field() ?>
+<form id="<?= e($formId) ?>" method="post" action="<?= e($action) ?>" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:var(--cv-space-3);max-width:40rem;"><?= csrf_field() ?>
     <div class="cv-field">
         <label class="cv-label">Name</label>
         <input class="cv-input" name="name" value="<?= e((string) ($server['name'] ?? '')) ?>" required>
@@ -48,5 +48,5 @@ $formId = 'server-form-' . ($server['id'] ?? 'new');
         <label class="cv-label" style="font-weight:normal;"><input type="checkbox" name="use_ssl" value="1" <?= ($server === null || $server['use_ssl']) ? 'checked' : '' ?>> Use SSL</label>
         <label class="cv-label" style="font-weight:normal;"><input type="checkbox" name="active" value="1" <?= ($server === null || $server['active']) ? 'checked' : '' ?>> Active</label>
     </div>
-    <button class="cv-btn" type="submit" style="grid-column:span 2;"><?= e($submitLabel) ?></button>
+    <button class="cv-btn" type="submit" style="grid-column: 1 / -1;"><?= e($submitLabel) ?></button>
 </form>

@@ -17,7 +17,16 @@ final class AffiliateRepository
     /** @return array<string, mixed>|null */
     public function find(int $id): ?array
     {
-        return $this->db->selectOne('SELECT * FROM affiliates WHERE id = ?', [$id]);
+        return $this->db->selectOne(
+            <<<'SQL'
+            SELECT a.*, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            FROM affiliates a
+            JOIN clients c ON c.id = a.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            WHERE a.id = ?
+            SQL,
+            [$id]
+        );
     }
 
     /** @return array<string, mixed>|null */
@@ -37,9 +46,10 @@ final class AffiliateRepository
     {
         return $this->db->select(
             <<<'SQL'
-            SELECT a.*, c.first_name, c.last_name, c.email
+            SELECT a.*, c.first_name, c.last_name, c.email, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM affiliates a
             JOIN clients c ON c.id = a.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             ORDER BY a.id DESC
             SQL
         );

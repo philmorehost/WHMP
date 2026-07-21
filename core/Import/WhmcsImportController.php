@@ -35,7 +35,20 @@ final class WhmcsImportController
 
     public function run(Request $request): Response
     {
+        $isAjax = $request->header('X-Requested-With') === 'XMLHttpRequest' || $request->input('ajax') === '1';
+
+        // For an AJAX submit, an expired session/insufficient permission
+        // must come back as JSON — otherwise the browser receives a 302
+        // redirect to /login (or a 403 HTML page) that the migrator's
+        // fetch() can't parse, and the real cause ("you're logged out")
+        // gets buried under a generic "lost connection" message.
         if ($denied = $this->requirePermission()) {
+            if ($isAjax) {
+                return Response::json([
+                    'success' => false,
+                    'message' => 'Your admin session has expired or you lack permission to run imports. Log back in, reload the migrator page, and try again.',
+                ], 403);
+            }
             return $denied;
         }
 
@@ -45,8 +58,16 @@ final class WhmcsImportController
         $username = trim((string) $request->input('username', ''));
         $password = (string) $request->input('password', '');
         $prefix = trim((string) $request->input('prefix', ''));
+        $overwrite = $request->input('overwrite') === '1';
+        // Per-attempt identifier the frontend generates and echoes back so
+        // it can distinguish this run's progress from a previous run's
+        // leftover result in the persisted progress file.
+        $runId = trim((string) $request->input('run_id', ''));
 
         if ($database === '' || $username === '') {
+            if ($isAjax) {
+                return Response::json(['success' => false, 'message' => 'Database name and username are required fields.']);
+            }
             return $this->render('import.whmcs', [
                 'result' => null,
                 'error' => 'Database name and username are required fields.',
@@ -54,41 +75,84 @@ final class WhmcsImportController
             ]);
         }
 
-        $result = $this->importer->import([
-            'host' => $host,
-            'port' => $port,
-            'database' => $database,
-            'username' => $username,
-            'password' => $password,
-            'prefix' => $prefix,
-        ]);
+        session_write_close(); // Release session lock so progress AJAX requests can run concurrently
 
-        if (!$result['success']) {
+        try {
+            $result = $this->importer->import([
+                'host' => $host,
+                'port' => $port,
+                'database' => $database,
+                'username' => $username,
+                'password' => $password,
+                'prefix' => $prefix,
+                'run_id' => $runId,
+            ], $overwrite);
+
+            // Re-start session if needed, but since we are redirecting/responding we can just log the run
+            $adminId = (int) $this->guard->currentAdmin()['id'];
+            $totalImported = array_sum($result['imported']);
+
+            $this->runs->create(
+                $adminId,
+                'whmcs',
+                "Database: {$database}",
+                $totalImported,
+                $totalImported,
+                0,
+                $result['errors']
+            );
+
+            if ($isAjax) {
+                return Response::json($result);
+            }
+
+            return $this->render('import.whmcs', [
+                'result' => $result,
+                'error' => null,
+                'runs' => $this->runs->recentByType('whmcs'),
+            ]);
+        } catch (\Throwable $e) {
+            $logFile = dirname(__DIR__, 2) . '/storage/migration_error.log';
+            $errorMsg = $e->getMessage() . "\n" . $e->getTraceAsString();
+            file_put_contents($logFile, $errorMsg);
+
+            $errorResult = [
+                'success' => false,
+                'message' => 'Migration failed with fatal error: ' . $e->getMessage(),
+                'imported' => [
+                    'clients' => 0, 'servers' => 0, 'products' => 0, 'services' => 0,
+                    'domains' => 0, 'invoices' => 0, 'transactions' => 0, 'currencies' => 0,
+                    'tax_rules' => 0, 'contacts' => 0, 'configurable_options' => 0,
+                    'departments' => 0, 'tickets' => 0, 'promotions' => 0, 'domain_pricing' => 0
+                ],
+                'errors' => [['row' => 0, 'reason' => $e->getMessage()]],
+            ];
+
+            if ($isAjax) {
+                return Response::json($errorResult);
+            }
+
             return $this->render('import.whmcs', [
                 'result' => null,
-                'error' => $result['message'],
+                'error' => 'Migration failed with fatal error: ' . $e->getMessage(),
                 'runs' => $this->runs->recentByType('whmcs'),
             ]);
         }
+    }
 
-        $adminId = (int) $this->guard->currentAdmin()['id'];
-        $totalImported = array_sum($result['imported']);
+    public function progress(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
 
-        $this->runs->create(
-            $adminId,
-            'whmcs',
-            "Database: {$database}",
-            $totalImported,
-            $totalImported,
-            0,
-            $result['errors']
-        );
+        $file = dirname(__DIR__, 2) . '/storage/migration_progress.json';
+        $data = [];
+        if (file_exists($file)) {
+            $data = json_decode((string) file_get_contents($file), true) ?: [];
+        }
 
-        return $this->render('import.whmcs', [
-            'result' => $result,
-            'error' => null,
-            'runs' => $this->runs->recentByType('whmcs'),
-        ]);
+        return Response::json($data);
     }
 
     private function requirePermission(): ?Response

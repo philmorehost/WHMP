@@ -22,16 +22,19 @@
         <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Fraud score: <?= number_format((float) $order['fraud_score'], 0) ?>/100 (below hold threshold)</p>
     <?php endif; ?>
 
-    <?php if ($order['status'] === 'pending' || $order['status'] === 'fraud'): ?>
-        <div style="display:flex;gap:var(--cv-space-2);margin-top:var(--cv-space-3);">
+    <div style="display:flex;gap:var(--cv-space-2);margin-top:var(--cv-space-3);">
+        <?php if ($order['status'] === 'pending' || $order['status'] === 'fraud'): ?>
             <form method="post" action="/admin/orders/<?= (int) $order['id'] ?>/accept"><?= csrf_field() ?>
                 <button class="cv-btn" type="submit">Accept</button>
             </form>
             <form method="post" action="/admin/orders/<?= (int) $order['id'] ?>/cancel"><?= csrf_field() ?>
                 <button class="cv-btn cv-btn--danger" type="submit">Cancel</button>
             </form>
-        </div>
-    <?php endif; ?>
+        <?php endif; ?>
+        <form method="post" action="/admin/orders/<?= (int) $order['id'] ?>/delete" data-confirm="Delete order ORD-<?= (int) $order['id'] ?>? This cannot be undone."><?= csrf_field() ?>
+            <button class="cv-btn cv-btn--danger" type="submit">Delete Order</button>
+        </form>
+    </div>
 </div>
 
 <div class="cv-card">

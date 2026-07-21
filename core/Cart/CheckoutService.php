@@ -13,6 +13,7 @@ use CodeVault\Catalog\BillingCycle;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database;
+use CodeVault\Domains\DomainSettings;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 use DateTimeImmutable;
@@ -37,7 +38,8 @@ final class CheckoutService
         private readonly CurrencySelection $currencySelection,
         private readonly PromotionRepository $promotions,
         private readonly Database $db,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly DomainSettings $domainSettings
     ) {
     }
 
@@ -73,12 +75,85 @@ final class CheckoutService
 
         [$orderId, $invoiceId, $serviceIds] = $result;
 
+        // Auto-provision products and domains configured with autosetup === 'order'
+        $hasPendingApproval = false;
+        $container = \CodeVault\Support\App::container();
+        $provisioning = $container->make(\CodeVault\Provisioning\ProvisioningService::class);
+        $domainService = $container->make(\CodeVault\Domains\DomainService::class);
+
+        foreach ($serviceIds as $sId) {
+            $s = $this->services->find($sId);
+            if ($s === null || $s['status'] !== 'pending') {
+                continue;
+            }
+
+            $prod = $this->products->find((int) $s['product_id']);
+            $autosetup = $prod['autosetup'] ?? 'payment';
+
+            if ($autosetup === 'order') {
+                $provisioning->provision((int) $s['id']);
+            } elseif (in_array($autosetup, ['on_accept', 'off'], true)) {
+                $hasPendingApproval = true;
+            }
+        }
+
+        $domainRepo = $container->make(\CodeVault\Domains\DomainRepository::class);
+        $domainPricingRepo = $container->make(\CodeVault\Domains\DomainPricingRepository::class);
+        foreach ($domainRepo->forOrder($orderId) as $d) {
+            if ($d['status'] !== 'pending') {
+                continue;
+            }
+
+            $tldPricing = $domainPricingRepo->findByTld((string) $d['tld']);
+            // Default to 'payment' if not set
+            $autosetup = $tldPricing['autosetup_registration'] ?? 'payment';
+
+            if ($autosetup === 'order') {
+                $domainService->register((int) $d['id']);
+            } elseif (in_array($autosetup, ['on_accept', 'off'], true)) {
+                $hasPendingApproval = true;
+            }
+        }
+
+        if ($hasPendingApproval) {
+            $this->notifyAdminsOfPendingApproval($orderId, $client, $priced['total']);
+        }
+
         $this->hooks->fire(HookPoints::ORDER_PLACED, ['orderId' => $orderId, 'clientId' => $clientId]);
         $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'clientId' => $clientId]);
 
         $this->cart->clear();
 
         return ['success' => true, 'orderId' => $orderId, 'invoiceId' => $invoiceId, 'serviceIds' => $serviceIds];
+    }
+
+    private function notifyAdminsOfPendingApproval(int $orderId, ?array $client, float $orderTotal): void
+    {
+        try {
+            $container = \CodeVault\Support\App::container();
+            /** @var \CodeVault\Mail\EmailDispatcher $dispatcher */
+            $dispatcher = $container->make(\CodeVault\Mail\EmailDispatcher::class);
+            /** @var \CodeVault\Auth\AdminRepository $adminRepo */
+            $adminRepo = $container->make(\CodeVault\Auth\AdminRepository::class);
+
+            $clientName = $client ? trim(($client['first_name'] ?? '') . ' ' . ($client['last_name'] ?? '')) : 'Client';
+            $clientEmail = $client['email'] ?? '';
+
+            $admins = $adminRepo->all();
+            foreach ($admins as $admin) {
+                if (!empty($admin['email'])) {
+                    $dispatcher->sendTemplate('admin_pending_order_approval', (string) $admin['email'], [
+                        'order_id' => (string) $orderId,
+                        'client_name' => $clientName,
+                        'client_email' => $clientEmail,
+                        'order_total' => number_format($orderTotal, 2),
+                        'company_name' => 'CodeVault',
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Ignore email errors to not block checkout
+        }
     }
 
     /**
@@ -91,21 +166,98 @@ final class CheckoutService
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
-        $invoiceTotal = $priced['total'] + $tax['amount'];
-        // Defensive fallbacks: a hand-built $priced fixture (e.g. in tests
-        // exercising this method directly) may predate these keys.
+        
         $discount = (float) ($priced['discount'] ?? 0.0);
         $promoCode = $priced['promoCode'] ?? null;
         $promotionId = $priced['promotionId'] ?? null;
+
+        $domainTotalAdditions = 0.0;
+        $domainInvoiceItems = [];
+        $orderLinesWithDomains = [];
+
+        // Pre-parse domains to calculate total addition
+        foreach ($priced['lines'] as $lineIndex => $line) {
+            $domainName = null;
+            $domainOptions = $line['domain_options'] ?? null;
+            if ($domainOptions !== null && !empty($domainOptions['name'])) {
+                $domainName = $domainOptions['name'];
+                
+                if (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
+                    $parts = explode('.', $domainName);
+                    $tld = '.' . end($parts);
+                    
+                    $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
+                    $price = 0.00;
+                    if ($priceRow !== null) {
+                        $price = $domainOptions['option'] === 'register' ? (float) $priceRow['register_price'] : (float) $priceRow['transfer_price'];
+                    }
+                    
+                    $domainTotalAdditions += $price;
+                    $domainInvoiceItems[] = [
+                        'description' => "Domain " . ($domainOptions['option'] === 'register' ? 'Registration' : 'Transfer') . ": {$domainName} (1 Year)",
+                        'amount' => $price
+                    ];
+                }
+            }
+            $orderLinesWithDomains[$lineIndex] = $domainName;
+        }
+
+        $invoiceTotal = $priced['total'] + $tax['amount'] + $domainTotalAdditions;
 
         $orderId = (int) $this->db->insert(
             'INSERT INTO orders (client_id, status, total, discount_amount, promotion_code, currency_id, currency_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [$clientId, 'pending', $invoiceTotal, $discount, $promoCode, $currencyLock['currency_id'], $currencyLock['currency_rate'], $now, $now]
         );
 
+        // Insert domains into DB now that we have orderId
+        foreach ($priced['lines'] as $lineIndex => $line) {
+            $domainName = $orderLinesWithDomains[$lineIndex];
+            $domainOptions = $line['domain_options'] ?? null;
+            if ($domainOptions !== null && !empty($domainOptions['name']) && in_array($domainOptions['option'], ['register', 'transfer'], true)) {
+                $parts = explode('.', $domainOptions['name']);
+                $tld = '.' . end($parts);
+                
+                $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
+                $price = 0.00;
+                if ($priceRow !== null) {
+                    $price = $domainOptions['option'] === 'register' ? (float) $priceRow['register_price'] : (float) $priceRow['transfer_price'];
+                }
+                
+                $chosenNameservers = array_values(array_filter([
+                    $domainOptions['ns1'] ?? '',
+                    $domainOptions['ns2'] ?? '',
+                    $domainOptions['ns3'] ?? '',
+                    $domainOptions['ns4'] ?? '',
+                    $domainOptions['ns5'] ?? '',
+                    $domainOptions['ns6'] ?? '',
+                ], static fn ($ns) => trim((string) $ns) !== ''));
+
+                $nameservers = json_encode($chosenNameservers !== [] ? $chosenNameservers : $this->domainSettings->defaultNameservers());
+
+                $this->db->insert(
+                    'INSERT INTO domains (client_id, order_id, domain_name, tld, registrar_slug, status, amount, nameservers, auto_renew, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [
+                        $clientId,
+                        $orderId,
+                        $domainOptions['name'],
+                        $tld,
+                        'local',
+                        'pending',
+                        $price,
+                        $nameservers,
+                        1,
+                        $now,
+                        $now
+                    ]
+                );
+            }
+        }
+
         $serviceIds = [];
 
-        foreach ($priced['lines'] as $line) {
+        foreach ($priced['lines'] as $lineIndex => $line) {
+            $domainName = $orderLinesWithDomains[$lineIndex];
+            
             $this->db->insert(
                 'INSERT INTO order_items (order_id, product_id, product_name, billing_cycle, quantity, unit_price, setup_fee, configurable_options, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
@@ -121,13 +273,6 @@ final class CheckoutService
                 ]
             );
 
-            // The pre-transaction 'in_stock' check above reads stock at
-            // pricing time — under concurrent checkouts for the last unit,
-            // both requests can pass that check before either decrements.
-            // This atomic UPDATE (product's decrementStock()) is the real
-            // check: it only affects a row when stock_quantity is finite
-            // AND still > 0, so a lost race returns false here and we
-            // abort the whole order rather than silently overselling.
             $product = $this->products->find((int) $line['product_id']);
             $hasLimitedStock = $product !== null && $product['stock_quantity'] !== null;
             $decremented = $this->products->decrementStock($line['product_id']);
@@ -138,23 +283,37 @@ final class CheckoutService
 
             if ($line['billing_cycle'] !== BillingCycle::ONE_TIME) {
                 $recurringAmount = ($line['unit_price'] + $line['options_total']) * $line['quantity'];
+                $hostname = $line['server_options']['hostname'] ?? null;
+                $password = $line['server_options']['root_password'] ?? null;
 
-                $serviceIds[] = $this->services->create([
+                $serviceId = $this->services->create([
                     'client_id' => $clientId,
                     'order_id' => $orderId,
                     'product_id' => $line['product_id'],
                     'product_name' => $line['product_name'],
                     'billing_cycle' => $line['billing_cycle'],
                     'amount' => $recurringAmount,
+                    'domain' => $domainName,
+                    'hostname' => $hostname,
+                    'password' => $password,
                     'status' => 'pending',
                     'next_due_date' => ServiceRepository::nextCycleDate($today, $line['billing_cycle']),
                 ]);
+                $serviceIds[] = $serviceId;
+
+                $customFields = $line['custom_fields'] ?? [];
+                foreach ($customFields as $fieldId => $val) {
+                    $this->db->insert(
+                        'INSERT INTO service_custom_field_values (service_id, custom_field_id, value) VALUES (?, ?, ?)',
+                        [$serviceId, (int) $fieldId, $val]
+                    );
+                }
             }
         }
 
         $invoiceId = (int) $this->db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, promotion_code, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$clientId, $orderId, 'unpaid', $priced['total'], $tax['amount'], $discount, $promoCode, $invoiceTotal, $currencyLock['currency_id'], $currencyLock['currency_rate'], $today, $now, $now]
+            [$clientId, $orderId, 'unpaid', $priced['total'] + $domainTotalAdditions, $tax['amount'], $discount, $promoCode, $invoiceTotal, $currencyLock['currency_id'], $currencyLock['currency_rate'], $today, $now, $now]
         );
 
         foreach ($priced['lines'] as $line) {
@@ -162,6 +321,14 @@ final class CheckoutService
             $this->db->insert(
                 'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
                 [$invoiceId, $description, $line['line_total']]
+            );
+        }
+
+        // Insert domain invoice items
+        foreach ($domainInvoiceItems as $div) {
+            $this->db->insert(
+                'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+                [$invoiceId, $div['description'], $div['amount']]
             );
         }
 

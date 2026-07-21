@@ -67,7 +67,9 @@ final class PaymentCallbackControllerTest extends DatabaseTestCase
             $this->transactions,
             $payments,
             $modules,
-            $config
+            $config,
+            $this->db,
+            new \CodeVault\Billing\PaymentMethodRepository($this->db)
         );
 
         $this->clientId = $clients->create([

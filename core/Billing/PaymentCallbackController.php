@@ -30,7 +30,8 @@ final class PaymentCallbackController
         private readonly PaymentService $payments,
         private readonly ModuleManager $modules,
         private readonly Config $config,
-        private readonly Database $db
+        private readonly Database $db,
+        private readonly PaymentMethodRepository $paymentMethods
     ) {
     }
 
@@ -113,8 +114,10 @@ final class PaymentCallbackController
 
         // Paystack returns ?reference=...; Flutterwave returns
         // ?transaction_id=...&tx_ref=... (its own numeric id is what
-        // verify takes, not the tx_ref we generated).
-        $reference = (string) ($request->query('reference') ?? $request->query('transaction_id') ?? '');
+        // verify takes, not the tx_ref we generated); PayPal returns
+        // ?token=...&PayerID=... where token is the PayPal order id
+        // (see PaypalGateway::capture()'s transactionId).
+        $reference = (string) ($request->query('reference') ?? $request->query('transaction_id') ?? $request->query('token') ?? '');
 
         if ($reference === '') {
             return Response::redirect('/client/invoices');
@@ -148,7 +151,7 @@ final class PaymentCallbackController
 
         $config = $this->configFor($slug);
 
-        if (!$this->verifiesSignature($slug, $request, $config)) {
+        if (!$this->verifiesSignature($slug, $request, $config, $module)) {
             return Response::html('invalid signature', 401);
         }
 
@@ -196,6 +199,33 @@ final class PaymentCallbackController
         }
 
         $this->payments->recordPayment($invoiceId, $slug, $verification['amount'], $verification['reference']);
+        $this->capturePaymentMethod($slug, $verification);
+    }
+
+    /**
+     * If the gateway handed back a reusable card authorization on a
+     * successful charge, save it as the client's payment method so future
+     * invoices can be auto-charged without another redirect. Best-effort:
+     * anything missing (no authorization, no client id) just means no method
+     * is saved — never blocks recording the payment itself.
+     *
+     * @param array<string, mixed> $verification
+     */
+    private function capturePaymentMethod(string $slug, array $verification): void
+    {
+        $authorization = $verification['authorization'] ?? null;
+        $clientId = (int) ($verification['metadata']['client_id'] ?? 0);
+
+        if (!is_array($authorization) || ($authorization['token'] ?? '') === '' || $clientId <= 0) {
+            return;
+        }
+
+        $this->paymentMethods->store($clientId, $slug, (string) $authorization['token'], [
+            'brand' => $authorization['brand'] ?? null,
+            'last4' => $authorization['last4'] ?? null,
+            'exp_month' => $authorization['exp_month'] ?? null,
+            'exp_year' => $authorization['exp_year'] ?? null,
+        ]);
     }
 
     /** @return array<string, mixed> */
@@ -207,8 +237,17 @@ final class PaymentCallbackController
     }
 
     /** @param array<string, mixed> $config */
-    private function verifiesSignature(string $slug, Request $request, array $config): bool
+    private function verifiesSignature(string $slug, Request $request, array $config, GatewayModule $module): bool
     {
+        // PayPal has no local shared-secret HMAC to check — verifying it
+        // needs a live API call (PaypalGateway::verifySignature(), an
+        // instance method since it needs $this->http + an OAuth token),
+        // so it's handled by instanceof rather than the static-method
+        // match every other gateway here uses.
+        if ($module instanceof PaypalGateway) {
+            return $module->verifySignature($request->rawBody(), $request->headers(), $config);
+        }
+
         return match ($slug) {
             'paystack' => PaystackGateway::verifySignature(
                 $request->rawBody(),

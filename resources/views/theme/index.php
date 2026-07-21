@@ -34,6 +34,13 @@
             <label class="cv-label">Primary Color</label>
             <input class="cv-input" type="color" name="primary_color" value="<?= e($theme['primaryColor']) ?>" style="width:5rem;height:2.5rem;padding:0;">
         </div>
+        <div class="cv-field">
+            <label class="cv-label">Terms of Service URL (optional)</label>
+            <input class="cv-input" type="url" name="terms_url" value="<?= e((string) ($theme['termsUrl'] ?? '')) ?>" placeholder="https://yourdomain.com/terms">
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-1);">
+                Full URL of your Terms of Service page (usually on your primary website). Every &ldquo;Terms of Service&rdquo; link in the store and client area points here.
+            </p>
+        </div>
         <button class="cv-btn" type="submit">Save Theme</button>
     </form>
     <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-3);">

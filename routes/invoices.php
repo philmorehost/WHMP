@@ -22,3 +22,4 @@ $router->get('/admin/invoices/{id}', [AdminInvoiceController::class, 'show']);
 $router->get('/admin/invoices/{id}/pdf', [AdminInvoiceController::class, 'downloadPdf']);
 $router->post('/admin/invoices/{id}/mark-paid', [AdminInvoiceController::class, 'markPaid']);
 $router->post('/admin/invoices/{id}/cancel', [AdminInvoiceController::class, 'cancel']);
+$router->post('/admin/invoices/{id}/refund', [AdminInvoiceController::class, 'refund']);

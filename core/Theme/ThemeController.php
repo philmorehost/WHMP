@@ -37,12 +37,17 @@ final class ThemeController
         $brandName = trim((string) $request->input('brand_name', ''));
         $logoUrl = trim((string) $request->input('logo_url', ''));
         $primaryColor = trim((string) $request->input('primary_color', ''));
+        $termsUrl = trim((string) $request->input('terms_url', ''));
 
         if (!$this->theme->isValidHex($primaryColor)) {
             return $this->render(['theme' => $this->theme->get(), 'error' => 'Primary color must be a hex code like #2f6fed.', 'saved' => false]);
         }
 
-        $this->theme->save($brandName, $logoUrl !== '' ? $logoUrl : null, $primaryColor);
+        if ($termsUrl !== '' && !filter_var($termsUrl, FILTER_VALIDATE_URL)) {
+            return $this->render(['theme' => $this->theme->get(), 'error' => 'Terms of Service URL must be a full URL like https://yourdomain.com/terms.', 'saved' => false]);
+        }
+
+        $this->theme->save($brandName, $logoUrl !== '' ? $logoUrl : null, $primaryColor, $termsUrl !== '' ? $termsUrl : null);
 
         return $this->render(['theme' => $this->theme->get(), 'error' => null, 'saved' => true]);
     }

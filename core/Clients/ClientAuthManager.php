@@ -17,7 +17,8 @@ final class ClientAuthManager
 {
     public function __construct(
         private readonly ClientRepository $clients,
-        private readonly BruteGuard $bruteGuard
+        private readonly BruteGuard $bruteGuard,
+        private readonly \CodeVault\Settings\SettingsRepository $settings
     ) {
     }
 
@@ -30,7 +31,7 @@ final class ClientAuthManager
      *
      * @return array{success: bool, client?: array<string, mixed>, error?: string}
      */
-    public function register(string $email, string $password, string $firstName, string $lastName, string $ip, string $country = '', string $vatNumber = ''): array
+    public function register(string $email, string $password, string $firstName, string $lastName, string $ip, string $country = '', string $vatNumber = '', string $phone = '', string $address1 = '', string $city = '', string $postcode = '', string $securityPin = ''): array
     {
         if ($this->clients->findByEmail($email) !== null) {
             return ['success' => false, 'error' => 'An account with that email already exists.'];
@@ -47,6 +48,11 @@ final class ClientAuthManager
             'last_name' => $lastName,
             'country' => $country !== '' ? $country : null,
             'vat_number' => $vatNumber !== '' ? $vatNumber : null,
+            'phone' => $phone !== '' ? $phone : null,
+            'address1' => $address1 !== '' ? $address1 : null,
+            'city' => $city !== '' ? $city : null,
+            'postcode' => $postcode !== '' ? $postcode : null,
+            'security_pin' => $securityPin,
         ]);
 
         $client = $this->clients->find($id);
@@ -77,10 +83,32 @@ final class ClientAuthManager
 
         $this->bruteGuard->recordSuccessfulAttempt($ip, $email);
 
-        if ((int) $client['two_factor_enabled'] === 1) {
+        $is2faGloballyEnabled = $this->settings->get('security.2fa_enabled', '1') === '1';
+
+        if ($is2faGloballyEnabled && (int) $client['two_factor_enabled'] === 1) {
             return ClientAuthResult::needsTwoFactor($client);
         }
 
         return ClientAuthResult::success($client);
+    }
+
+    /**
+     * Verifies a client's security PIN for BruteGuard recovery.
+     * If valid, clears the IP block.
+     */
+    public function verifySecurityPin(string $email, string $pin, string $ip): bool
+    {
+        $client = $this->clients->findByEmail($email);
+        
+        if ($client === null || empty($client['security_pin_hash'])) {
+            return false;
+        }
+
+        if (password_verify($pin, $client['security_pin_hash'])) {
+            $this->bruteGuard->clearIpBlock($ip);
+            return true;
+        }
+
+        return false;
     }
 }

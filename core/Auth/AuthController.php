@@ -71,8 +71,8 @@ final class AuthController
         }
 
         $message = match ($result->status) {
-            'locked' => 'This account is temporarily locked due to repeated failed attempts.',
-            'blocked' => 'Access denied.',
+            'locked' => 'This account is temporarily locked due to repeated failed attempts. <a href="/login/recover-pin" style="color:var(--cv-color-brand-500);text-decoration:underline;">Recover with Security PIN</a>',
+            'blocked' => 'Access denied. <a href="/login/recover-pin" style="color:var(--cv-color-brand-500);text-decoration:underline;">Recover with Security PIN</a>',
             default => 'Invalid username or password.',
         };
 
@@ -138,6 +138,37 @@ final class AuthController
         $this->guard->logout();
 
         return Response::redirect('/login');
+    }
+
+    public function recoverPinForm(Request $request): Response
+    {
+        if ($this->guard->check()) {
+            return Response::redirect('/admin');
+        }
+
+        return $this->page('auth.recover-pin', ['error' => null, 'success' => false]);
+    }
+
+    public function recoverPin(Request $request): Response
+    {
+        if ($this->guard->check()) {
+            return Response::redirect('/admin');
+        }
+
+        $username = trim((string) $request->input('username', ''));
+        $pin = trim((string) $request->input('security_pin', ''));
+
+        if ($username === '' || $pin === '') {
+            return $this->page('auth.recover-pin', ['error' => 'Username and Security PIN are required.', 'success' => false]);
+        }
+
+        $isValid = $this->auth->verifySecurityPin($username, $pin, $request->ip());
+
+        if (!$isValid) {
+            return $this->page('auth.recover-pin', ['error' => 'Invalid username or Security PIN.', 'success' => false], 403);
+        }
+
+        return $this->page('auth.recover-pin', ['error' => null, 'success' => true]);
     }
 
     public function forgotPasswordForm(Request $request): Response

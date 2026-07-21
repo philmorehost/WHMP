@@ -90,4 +90,30 @@ $router->get('/deals', function (Request $request, array $params, Container $con
     ]));
 });
 
+// Terms of Service link target. The actual page lives on the company's
+// primary website; an admin sets its URL under Configuration → Theme. If
+// unset, we show a short notice rather than a broken 404 (which is what
+// prompted this route — the store/footer link to /terms).
+$router->get('/terms', function (Request $request, array $params, Container $container): Response {
+    /** @var CodeVault\Theme\ThemeSettings $theme */
+    $theme = $container->make(CodeVault\Theme\ThemeSettings::class);
+    $termsUrl = $theme->termsUrl();
+
+    if ($termsUrl !== null) {
+        return Response::redirect($termsUrl);
+    }
+
+    /** @var View $view */
+    $view = $container->make(View::class);
+    $content = '<div class="cv-card" style="max-width:40rem;margin:2rem auto;text-align:center;">'
+        . '<h1 class="cv-card__title">Terms of Service</h1>'
+        . '<p style="color:var(--cv-text-secondary);">Our Terms of Service haven\'t been published here yet. Please contact us if you need a copy.</p>'
+        . '<p><a class="cv-btn cv-btn--secondary" href="/">Back to home</a></p></div>';
+
+    return Response::html($view->render('layouts.client', [
+        'title' => 'Terms of Service',
+        'content' => $content,
+    ]));
+});
+
 $router->get('/admin', [AdminDashboardController::class, 'index']);

@@ -75,7 +75,7 @@
                         <h4 style="margin: 0; font-family: 'Hanken Grotesk', sans-serif; font-size: var(--cv-text-sm); font-weight: 700; color: var(--cv-text-primary); min-height: 2.5rem; display: flex; align-items: center; justify-content: center;">
                             <?= e($prod['name']) ?>
                         </h4>
-                        <p style="font-size: var(--cv-text-xs); color: var(--cv-text-secondary); height: 3.5rem; overflow: hidden; margin: var(--cv-space-2) 0;">
+                        <p style="font-size: var(--cv-text-xs); color: var(--cv-text-secondary); height: 3.5rem; overflow: hidden; margin: var(--cv-space-2) 0; white-space: pre-wrap;">
                             <?= e($prod['description'] ?: 'High performance license key with instant auto-provisioning.') ?>
                         </p>
                         <div style="font-size: var(--cv-text-xs); color: var(--cv-text-secondary); margin-top: var(--cv-space-2);">Starting at</div>

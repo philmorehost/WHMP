@@ -34,10 +34,11 @@ final class AffiliatePayoutRequestRepository
 
         return $this->db->select(
             <<<SQL
-            SELECT p.*, a.code, c.first_name, c.last_name, c.email
+            SELECT p.*, a.code, c.first_name, c.last_name, c.email, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM affiliate_payout_requests p
             JOIN affiliates a ON a.id = p.affiliate_id
             JOIN clients c ON c.id = a.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
             ORDER BY p.id DESC
             SQL,

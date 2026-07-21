@@ -19,7 +19,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
     </div>
 
     <table class="cv-table">
-        <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Group</th><th>Status</th></tr></thead>
+        <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Group</th><th>Status</th><th>Active Services</th><th>Date Created</th></tr></thead>
         <tbody>
         <?php foreach ($results['data'] as $client): ?>
             <tr>
@@ -36,10 +36,12 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                         <span class="cv-badge cv-badge--neutral">Inactive</span>
                     <?php endif; ?>
                 </td>
+                <td><?= (int) $client['services_active'] ?>(<?= (int) $client['services_total'] ?>)</td>
+                <td><?= e((string) $client['created_at']) ?></td>
             </tr>
         <?php endforeach; ?>
         <?php if ($results['data'] === []): ?>
-            <tr><td colspan="5" style="color:var(--cv-text-secondary);">No clients found.</td></tr>
+            <tr><td colspan="7" style="color:var(--cv-text-secondary);">No clients found.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

@@ -24,3 +24,22 @@ if (!function_exists('csrf_field')) {
         return '<input type="hidden" name="_token" value="' . e(csrf_token()) . '">';
     }
 }
+
+if (!function_exists('asset')) {
+    /**
+     * Builds a URL for a file under public/, appending the file's
+     * modification time as a ?v= cache-buster. Static assets are served
+     * with far-future cache headers by most hosts/CDNs (LiteSpeed, cPanel,
+     * Cloudflare), so without this a redeployed app.js/CSS can keep being
+     * served stale for a long time even after a hard refresh — the version
+     * changes whenever the file does, forcing a fresh fetch.
+     */
+    function asset(string $path): string
+    {
+        $path = '/' . ltrim($path, '/');
+        $file = dirname(__DIR__) . '/public' . $path;
+        $version = is_file($file) ? (string) @filemtime($file) : '';
+
+        return $path . ($version !== '' ? '?v=' . $version : '');
+    }
+}

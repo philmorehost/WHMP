@@ -35,6 +35,9 @@ $groups = [
         '/admin/services' => 'Services',
         '/admin/import/services' => 'Import Services',
         '/admin/servers' => 'Servers',
+        '/admin/products' => 'Products',
+        '/admin/products/groups' => 'Product Groups',
+        '/admin/configurable-options' => 'Configurable Options',
     ]],
     'Domains' => ['icon' => 'globe', 'links' => [
         '/admin/domains' => 'Domains',
@@ -75,6 +78,8 @@ $groups = [
         '/admin/languages' => 'Languages',
         '/admin/notification-endpoints' => 'Notifications',
         '/admin/theme' => 'Theme',
+        '/admin/ai' => 'AI Copilot',
+        '/admin/cron' => 'Cron & Automation',
         '/admin/backups' => 'Backups',
         '/admin/addons' => 'Addons',
         '/admin/widgets' => 'Widgets',
@@ -111,8 +116,8 @@ $groupHasActive = static function (array $links) use ($currentPath): bool {
         <img src="<?= e($theme['logoUrl']) ?>" alt="<?= e($theme['brandName']) ?>" style="height:1.5rem;">
     <?php else: ?>
         <div style="width:1.75rem;height:1.75rem;border-radius:var(--cv-radius-sm);background:var(--cv-gradient-accent);flex-shrink:0;"></div>
+        <span style="font-weight:800;font-size:var(--cv-text-lg);letter-spacing:-0.01em;"><?= e($theme['brandName']) ?></span>
     <?php endif; ?>
-    <span style="font-weight:800;font-size:var(--cv-text-lg);letter-spacing:-0.01em;"><?= e($theme['brandName']) ?></span>
 </div>
 <nav class="cv-sidenav">
     <?php foreach ($groups as $groupLabel => $group): ?>

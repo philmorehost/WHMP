@@ -43,6 +43,11 @@ $action = $isEdit ? "/admin/staff/{$admin['id']}" : '/admin/staff';
             <label class="cv-label">Password <?= $isEdit ? '(leave blank to keep current)' : '' ?></label>
             <input class="cv-input" type="password" name="password" <?= $isEdit ? '' : 'required' ?>>
         </div>
+        <div class="cv-field">
+            <label class="cv-label">Security PIN <?= $isEdit ? '(leave blank to keep current)' : '(4+ chars)' ?></label>
+            <input class="cv-input" type="password" name="security_pin" <?= $isEdit ? '' : 'required' ?> minlength="4">
+            <div style="font-size:12px;color:var(--cv-text-secondary);margin-top:4px;">Used by this admin to recover their account if blocked.</div>
+        </div>
         <button class="cv-btn" type="submit"><?= $isEdit ? 'Save Changes' : 'Create Staff Account' ?></button>
     </form>
 </div>

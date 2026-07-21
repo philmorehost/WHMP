@@ -15,6 +15,7 @@ use CodeVault\Billing\FlutterwaveGateway;
 use CodeVault\Billing\ManualGateway;
 use CodeVault\Billing\PaystackGateway;
 use CodeVault\Billing\PayhubGateway;
+use CodeVault\Billing\PaypalGateway;
 use CodeVault\Billing\PlisioGateway;
 use CodeVault\Billing\OrderRepository;
 use CodeVault\Billing\PaymentGatewayRepository;
@@ -88,11 +89,14 @@ use CodeVault\Provisioning\NocixDedicatedServerModule;
 use CodeVault\Provisioning\LocalProvisioningModule;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Domains\ConnectResellerRegistrarModule;
+use CodeVault\Domains\NamecheapRegistrarModule;
+use CodeVault\Domains\ResellerClubRegistrarModule;
 use CodeVault\Domains\DomainRenewalBillingJob;
 use CodeVault\Domains\DomainRenewalBillingService;
 use CodeVault\Domains\DomainRepository;
 use CodeVault\Domains\DomainPricingRepository;
 use CodeVault\Domains\DomainService;
+use CodeVault\Domains\DomainSettings;
 use CodeVault\Domains\DomainSyncJob;
 use CodeVault\Domains\LocalRegistrarModule;
 use CodeVault\Domains\RegistrarRepository;
@@ -335,6 +339,7 @@ class Kernel
                 $c->make(BruteGuard::class),
                 $c->make(AccountLockRepository::class),
                 $c->make(HookDispatcher::class),
+                $c->make(SettingsRepository::class)
             );
         });
 
@@ -359,7 +364,7 @@ class Kernel
         });
 
         $this->container->singleton(ClientAuthManager::class, function (Container $c) {
-            return new ClientAuthManager($c->make(ClientRepository::class), $c->make(BruteGuard::class));
+            return new ClientAuthManager($c->make(ClientRepository::class), $c->make(BruteGuard::class), $c->make(SettingsRepository::class));
         });
 
         $this->container->singleton(CustomFieldRepository::class, function (Container $c) {
@@ -456,6 +461,7 @@ class Kernel
                 $c->make(PromotionRepository::class),
                 $c->make(Database::class),
                 $c->make(HookDispatcher::class),
+                $c->make(DomainSettings::class),
             );
         });
 
@@ -489,6 +495,7 @@ class Kernel
                 $c->make(ClientRepository::class),
                 $c->make(EmailDispatcher::class),
                 $c->make(HookDispatcher::class),
+                $c->make(CurrencyService::class),
             );
         });
 
@@ -562,6 +569,14 @@ class Kernel
             return new ConnectResellerRegistrarModule($c->make(HttpClient::class));
         });
 
+        $this->container->singleton(ResellerClubRegistrarModule::class, function (Container $c) {
+            return new ResellerClubRegistrarModule($c->make(HttpClient::class));
+        });
+
+        $this->container->singleton(NamecheapRegistrarModule::class, function (Container $c) {
+            return new NamecheapRegistrarModule($c->make(HttpClient::class));
+        });
+
         $this->container->singleton(PaystackGateway::class, function (Container $c) {
             return new PaystackGateway($c->make(HttpClient::class));
         });
@@ -578,6 +593,10 @@ class Kernel
             return new PlisioGateway($c->make(HttpClient::class));
         });
 
+        $this->container->singleton(PaypalGateway::class, function (Container $c) {
+            return new PaypalGateway($c->make(HttpClient::class));
+        });
+
         $this->container->singleton(ModuleManager::class, function (Container $c) {
             $manager = new ModuleManager($c->make(HookDispatcher::class));
             $manager->register(GatewayModule::class, 'manual', $c->make(ManualGateway::class));
@@ -585,6 +604,7 @@ class Kernel
             $manager->register(GatewayModule::class, 'flutterwave', $c->make(FlutterwaveGateway::class));
             $manager->register(GatewayModule::class, 'payhub', $c->make(PayhubGateway::class));
             $manager->register(GatewayModule::class, 'plisio', $c->make(PlisioGateway::class));
+            $manager->register(GatewayModule::class, 'paypal', $c->make(PaypalGateway::class));
             $manager->register(ProvisioningModule::class, 'local', $c->make(LocalProvisioningModule::class));
             $manager->register(ProvisioningModule::class, 'cpanel', $c->make(CpanelProvisioningModule::class));
             $manager->register(ProvisioningModule::class, 'cyberpanel', $c->make(CyberPanelProvisioningModule::class));
@@ -593,6 +613,8 @@ class Kernel
             $manager->register(RegistrarModule::class, 'local', $c->make(LocalRegistrarModule::class));
             $manager->register(RegistrarModule::class, 'upperlink', $c->make(UpperlinkRegistrarModule::class));
             $manager->register(RegistrarModule::class, 'connectreseller', $c->make(ConnectResellerRegistrarModule::class));
+            $manager->register(RegistrarModule::class, 'resellerclub', $c->make(ResellerClubRegistrarModule::class));
+            $manager->register(RegistrarModule::class, 'namecheap', $c->make(NamecheapRegistrarModule::class));
             $manager->register(FraudModule::class, 'rules', $c->make(RuleBasedFraudModule::class));
             $manager->register(FraudModule::class, 'deepseek', $c->make(DeepSeekFraudTriageModule::class));
             $manager->register(AddonModule::class, 'system-diagnostics', $c->make(SystemDiagnosticsAddon::class));
@@ -705,7 +727,13 @@ class Kernel
         });
 
         $this->container->singleton(WhmcsImportService::class, function (Container $c) {
-            return new WhmcsImportService($c->make(Database::class));
+            return new WhmcsImportService(
+                $c->make(Database::class),
+                $c->make(DomainPricingRepository::class),
+                $c->make(RegistrarRepository::class),
+                $c->make(ProductPricingRepository::class),
+                $c->make(DomainSettings::class)
+            );
         });
 
         $this->container->singleton(DomainService::class, function (Container $c) {
@@ -919,13 +947,18 @@ class Kernel
         });
 
         $this->container->singleton(AiProvider::class, function (Container $c) {
-            /** @var Config $config */
-            $config = $c->make(Config::class);
+            /** @var \CodeVault\Ai\AiSettings $ai */
+            $ai = $c->make(\CodeVault\Ai\AiSettings::class);
 
+            // Key/model come from the admin-managed AI settings (which fall
+            // back to DEEPSEEK_API_KEY in .env); every call is metered into
+            // ai_usage_log for the AI dashboard.
             return new DeepSeekProvider(
                 $c->make(HttpClient::class),
-                (string) $config->env('DEEPSEEK_API_KEY', ''),
-                (string) $config->env('DEEPSEEK_MODEL', 'deepseek-chat'),
+                $ai->apiKey(),
+                $ai->model(),
+                'https://api.deepseek.com',
+                $c->make(\CodeVault\Ai\AiUsageRepository::class),
             );
         });
 
@@ -1006,6 +1039,74 @@ class Kernel
                 "Invoice INV-{$invoiceId} paid — \${$invoice['total']}",
                 ['invoiceId' => $invoiceId, 'total' => $invoice['total']]
             );
+
+            // Auto-provision services and domains associated with paid order if autosetup === 'payment'
+            if (!empty($invoice['order_id'])) {
+                $orderId = (int) $invoice['order_id'];
+                $serviceRepo = $this->container->make(\CodeVault\Billing\ServiceRepository::class);
+                $productRepo = $this->container->make(\CodeVault\Catalog\ProductRepository::class);
+                $provisioning = $this->container->make(\CodeVault\Provisioning\ProvisioningService::class);
+                $domainRepo = $this->container->make(\CodeVault\Domains\DomainRepository::class);
+                $domainPricingRepo = $this->container->make(\CodeVault\Domains\DomainPricingRepository::class);
+                $domainService = $this->container->make(\CodeVault\Domains\DomainService::class);
+
+                $hasPendingApproval = false;
+
+                foreach ($serviceRepo->forOrder($orderId) as $service) {
+                    if ($service['status'] !== 'pending') {
+                        continue;
+                    }
+
+                    $product = $productRepo->find((int) $service['product_id']);
+                    $autosetup = $product['autosetup'] ?? 'payment';
+
+                    if ($autosetup === 'payment') {
+                        $provisioning->provision((int) $service['id']);
+                    } elseif (in_array($autosetup, ['on_accept', 'off'], true)) {
+                        $hasPendingApproval = true;
+                    }
+                }
+
+                foreach ($domainRepo->forOrder($orderId) as $domain) {
+                    if ($domain['status'] !== 'pending') {
+                        continue;
+                    }
+
+                    $tldPricing = $domainPricingRepo->findByTld((string) $domain['tld']);
+                    $autosetup = $tldPricing['autosetup_registration'] ?? 'payment';
+
+                    if ($autosetup === 'payment') {
+                        $domainService->register((int) $domain['id']);
+                    } elseif (in_array($autosetup, ['on_accept', 'off'], true)) {
+                        $hasPendingApproval = true;
+                    }
+                }
+
+                if ($hasPendingApproval) {
+                    try {
+                        $client = $this->container->make(\CodeVault\Clients\ClientRepository::class)->find((int) $invoice['client_id']);
+                        $adminRepo = $this->container->make(\CodeVault\Auth\AdminRepository::class);
+                        $dispatcher = $this->container->make(\CodeVault\Mail\EmailDispatcher::class);
+
+                        $clientName = $client ? trim(($client['first_name'] ?? '') . ' ' . ($client['last_name'] ?? '')) : 'Client';
+                        $clientEmail = $client['email'] ?? '';
+
+                        foreach ($adminRepo->all() as $admin) {
+                            if (!empty($admin['email'])) {
+                                $dispatcher->sendTemplate('admin_pending_order_approval', (string) $admin['email'], [
+                                    'order_id' => (string) $orderId,
+                                    'client_name' => $clientName,
+                                    'client_email' => $clientEmail,
+                                    'order_total' => number_format((float) $invoice['total'], 2),
+                                    'company_name' => 'CodeVault',
+                                ]);
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        // Ignore email errors
+                    }
+                }
+            }
         });
 
         $hooks->register(HookPoints::TICKET_OPEN, function (array $payload) {
@@ -1073,10 +1174,10 @@ class Kernel
             }
             try {
                 $this->container->make(Migrator::class)->run();
+                $this->container->make(AddonModuleService::class)->bootActiveAddons();
             } catch (\Throwable $e) {
                 // Prevent database failures from crashing the system during early bootstrap
             }
-            $this->container->make(AddonModuleService::class)->bootActiveAddons();
         }
 
         /** @var SessionManager $session */
@@ -1088,6 +1189,48 @@ class Kernel
             $csrf = $this->container->make(CsrfToken::class);
 
             if (!$csrf->verify($request->input('_token'))) {
+                // An AJAX caller (fetch/XHR) can't do anything useful with
+                // a 403 HTML body — it tries to JSON.parse it and reports a
+                // generic failure. Hand those callers a JSON error with an
+                // actionable message (the token goes stale when a session
+                // rolls over, which is common on long-lived admin pages
+                // like the WHMCS migrator) so the real cause is visible.
+                $isAjax = $request->header('X-Requested-With') === 'XMLHttpRequest' || $request->input('ajax') === '1';
+
+                if ($isAjax) {
+                    // Pinpoint WHY the check failed so we stop guessing. The
+                    // three booleans distinguish the real root causes:
+                    //  - cookie_received false  => the browser never stored/
+                    //    sent a session cookie (Secure flag over plain HTTP,
+                    //    headers-already-sent, blocked cookie) — a fresh
+                    //    token can never survive, which is why reloading
+                    //    doesn't help.
+                    //  - cookie_received true but session_has_token false =>
+                    //    the cookie round-trips but the session STORE isn't
+                    //    persisting data (broken Redis, unwritable save path).
+                    //  - both true but submitted differs => a genuine stale/
+                    //    mismatched token (the benign "reload fixes it" case).
+                    $submitted = $request->input('_token');
+                    $debug = [
+                        'submitted_token_present' => is_string($submitted) && $submitted !== '',
+                        'session_has_token' => $session->has('_csrf_token'),
+                        'cookie_received' => isset($_COOKIE[session_name()]),
+                        'session_id_present' => session_id() !== '',
+                        'session_save_handler' => (string) ini_get('session.save_handler'),
+                    ];
+
+                    return SecurityHeaders::apply(Response::json([
+                        'success' => false,
+                        'message' => 'Security token expired or invalid — reload this page to get a fresh token, then submit again. (Nothing was changed.)',
+                        // Retained for troubleshooting: distinguishes a lost
+                        // session cookie (cookie_received=false) from a
+                        // non-persisting session store (session_has_token=
+                        // false) from a form that simply didn't submit the
+                        // token (submitted_token_present=false).
+                        'debug' => $debug,
+                    ], 403));
+                }
+
                 return SecurityHeaders::apply(Response::html('403 Forbidden — invalid or missing CSRF token', 403));
             }
         }

@@ -43,6 +43,48 @@
                 </div>
                 <button class="cv-btn" type="submit">Save</button>
             </form>
+        <?php elseif ($registrar['slug'] === 'resellerclub'): ?>
+            <form method="post" action="/admin/registrars/resellerclub/config" style="margin-top:var(--cv-space-3);display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Reseller ID (auth-userid)</label>
+                    <input class="cv-input" name="reseller_id" value="<?= e((string) ($config['reseller_id'] ?? '')) ?>">
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">API Key</label>
+                    <input class="cv-input" type="password" name="api_key" value="<?= e((string) ($config['api_key'] ?? '')) ?>">
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Default Customer ID</label>
+                    <input class="cv-input" name="customer_id" value="<?= e((string) ($config['customer_id'] ?? '')) ?>">
+                </div>
+                <button class="cv-btn" type="submit">Save</button>
+            </form>
+        <?php elseif ($registrar['slug'] === 'namecheap'): ?>
+            <form method="post" action="/admin/registrars/namecheap/config" style="margin-top:var(--cv-space-3);display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">API User</label>
+                    <input class="cv-input" name="api_user" value="<?= e((string) ($config['api_user'] ?? '')) ?>">
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">API Key</label>
+                    <input class="cv-input" type="password" name="api_key" value="<?= e((string) ($config['api_key'] ?? '')) ?>">
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Username</label>
+                    <input class="cv-input" name="username" value="<?= e((string) ($config['username'] ?? '')) ?>">
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Whitelisted Client IP</label>
+                    <input class="cv-input" name="client_ip" value="<?= e((string) ($config['client_ip'] ?? '')) ?>" placeholder="Set in Namecheap's API settings">
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                        <input type="checkbox" name="sandbox" value="1" <?= !empty($config['sandbox']) ? 'checked' : '' ?>>
+                        Sandbox
+                    </label>
+                </div>
+                <button class="cv-btn" type="submit">Save</button>
+            </form>
         <?php endif; ?>
     </div>
 <?php endforeach; ?>

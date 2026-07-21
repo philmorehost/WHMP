@@ -45,6 +45,21 @@ final class ConfigurableOptionController
         return Response::redirect('/admin/configurable-options');
     }
 
+    public function updateGroup(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $name = trim((string) $request->input('name', ''));
+
+        if ($name !== '') {
+            $this->groups->update((int) $params['id'], $name);
+        }
+
+        return Response::redirect('/admin/configurable-options');
+    }
+
     public function destroyGroup(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {
@@ -115,6 +130,48 @@ final class ConfigurableOptionController
         $this->options->delete((int) $params['optionId']);
 
         return Response::redirect("/admin/configurable-options/{$params['id']}");
+    }
+
+    public function updateOption(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $groupId = (int) $params['id'];
+        $optionId = (int) $params['optionId'];
+        $name = trim((string) $request->input('name', ''));
+
+        if ($name !== '') {
+            $container = \CodeVault\Support\App::container();
+            $db = $container->make(\CodeVault\Database::class);
+            $db->update("UPDATE configurable_options SET name = ? WHERE id = ?", [$name, $optionId]);
+
+            $prices = (array) $request->input('price', []);
+            foreach (BillingCycle::keys() as $cycle) {
+                if (isset($prices[$cycle])) {
+                    $this->pricing->setPricing($optionId, $cycle, (float) $prices[$cycle]);
+                }
+            }
+        }
+
+        return Response::redirect("/admin/configurable-options/{$groupId}");
+    }
+
+    public function bulkDeleteOptions(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $groupId = (int) $params['id'];
+        $optionIds = array_map('intval', (array) $request->input('selected_options', []));
+
+        foreach ($optionIds as $optionId) {
+            $this->options->delete($optionId);
+        }
+
+        return Response::redirect("/admin/configurable-options/{$groupId}");
     }
 
     private function requirePermission(): ?Response

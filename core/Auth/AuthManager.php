@@ -19,7 +19,8 @@ final class AuthManager
         private readonly AdminRepository $admins,
         private readonly BruteGuard $bruteGuard,
         private readonly AccountLockRepository $accountLocks,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly \CodeVault\Settings\SettingsRepository $settings
     ) {
     }
 
@@ -53,7 +54,9 @@ final class AuthManager
 
         $this->bruteGuard->recordSuccessfulAttempt($ip, $username);
 
-        if ((int) $admin['two_factor_enabled'] === 1) {
+        $is2faGloballyEnabled = $this->settings->get('security.2fa_enabled', '1') === '1';
+
+        if ($is2faGloballyEnabled && (int) $admin['two_factor_enabled'] === 1) {
             // Deliberately no ADMIN_LOGIN hook fire here — the password
             // alone isn't a completed login when 2FA is enabled; that
             // fires from the 2FA-verification step instead, once the
@@ -64,5 +67,26 @@ final class AuthManager
         $this->hooks->fire(HookPoints::ADMIN_LOGIN, ['adminId' => $admin['id'], 'username' => $username, 'ip' => $ip]);
 
         return AuthResult::success($admin);
+    }
+
+    /**
+     * Verifies an admin's security PIN for BruteGuard recovery.
+     * If valid, clears the IP block and account lock.
+     */
+    public function verifySecurityPin(string $username, string $pin, string $ip): bool
+    {
+        $admin = $this->admins->findByUsername($username);
+        
+        if ($admin === null || empty($admin['security_pin_hash'])) {
+            return false;
+        }
+
+        if (password_verify($pin, $admin['security_pin_hash'])) {
+            $this->bruteGuard->clearIpBlock($ip);
+            $this->accountLocks->unlock((int) $admin['id']);
+            return true;
+        }
+
+        return false;
     }
 }

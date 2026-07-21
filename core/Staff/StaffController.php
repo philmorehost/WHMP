@@ -54,6 +54,7 @@ final class StaffController
         $email = trim((string) $request->input('email', ''));
         $displayName = trim((string) $request->input('display_name', ''));
         $password = (string) $request->input('password', '');
+        $securityPin = (string) $request->input('security_pin', '');
         $roleId = $request->input('role_id') !== null && $request->input('role_id') !== ''
             ? (int) $request->input('role_id')
             : null;
@@ -67,6 +68,9 @@ final class StaffController
         }
 
         $id = $this->admins->create($username, $email, $password, $displayName, $roleId);
+        if ($securityPin !== '') {
+            $this->admins->updateSecurityPin($id, $securityPin);
+        }
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'staff.created', 'admin', $id, "Created staff account {$username}", $request->ip());
 
         return Response::redirect('/admin/staff');
@@ -100,11 +104,15 @@ final class StaffController
             ? (int) $request->input('role_id')
             : null;
         $password = (string) $request->input('password', '');
+        $securityPin = (string) $request->input('security_pin', '');
 
         $this->admins->updateProfile($id, $email, $displayName, $roleId);
 
         if ($password !== '') {
             $this->admins->updatePassword($id, $password);
+        }
+        if ($securityPin !== '') {
+            $this->admins->updateSecurityPin($id, $securityPin);
         }
 
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'staff.updated', 'admin', $id, "Updated staff account #{$id}", $request->ip());

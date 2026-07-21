@@ -33,7 +33,7 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
 <div class="cv-card" style="max-width:32rem;margin:var(--cv-space-4) auto 0;">
     <h2 class="cv-card__title">Nameservers</h2>
     <form method="post" action="/client/domains/<?= $id ?>/nameservers"><?= csrf_field() ?>
-        <?php for ($i = 1; $i <= 5; $i++): ?>
+        <?php for ($i = 1; $i <= 6; $i++): ?>
             <div class="cv-field">
                 <label class="cv-label">NS<?= $i ?></label>
                 <input class="cv-input" name="ns<?= $i ?>" value="<?= e((string) ($ns[$i - 1] ?? '')) ?>">

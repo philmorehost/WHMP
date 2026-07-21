@@ -49,6 +49,22 @@ final class DepartmentController
         return Response::redirect('/admin/departments');
     }
 
+    public function update(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $name = trim((string) $request->input('name', ''));
+        $email = trim((string) $request->input('email', '')) ?: null;
+
+        if ($name !== '') {
+            $this->departments->update((int) $params['id'], $name, $email);
+        }
+
+        return Response::redirect('/admin/departments');
+    }
+
     public function destroy(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {

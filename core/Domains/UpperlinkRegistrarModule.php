@@ -184,17 +184,129 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function checkAvailability(array $params): array
     {
+        $domain = $params['domain'];
+        $parts = explode('.', $domain, 2);
+        $sld = $parts[0] ?? $domain;
+        $tld = isset($parts[1]) ? '.' . $parts[1] : '';
+
         $response = $this->post($params['registrar'], '/domains/lookup', [
-            'searchTerm' => $params['domain'],
+            'searchTerm' => $domain,
+            'sld' => $sld,
+            'tld' => $tld,
+            'domain' => $domain,
         ]);
 
         $decoded = $this->decode($response);
 
+        // Parse Upperlink response variations (available, is_available, status == 'available')
+        $data = $decoded['data'];
+        $isAvailable = false;
+
+        if (isset($data['available'])) {
+            $isAvailable = (bool) $data['available'];
+        } elseif (isset($data['is_available'])) {
+            $isAvailable = (bool) $data['is_available'];
+        } elseif (isset($data['status'])) {
+            $isAvailable = strtolower((string) $data['status']) === 'available';
+        } elseif (isset($decoded['available'])) {
+            $isAvailable = (bool) $decoded['available'];
+        } elseif (isset($decoded['status']) && strtolower((string) $decoded['status']) === 'available') {
+            $isAvailable = true;
+        }
+
+        // Socket WHOIS check fallback if registrar API lookup fails or returns unexpected format
+        if (!$decoded['success'] && function_exists('fsockopen')) {
+            $whoisCheck = $this->socketWhoisCheck($domain);
+            if ($whoisCheck !== null) {
+                return $whoisCheck;
+            }
+        }
+
         return [
             'success' => $decoded['success'],
-            'available' => (bool) ($decoded['data']['available'] ?? false),
-            'expiryDate' => $decoded['data']['expiryDate'] ?? null,
-            'status' => $decoded['data']['status'] ?? ($decoded['success'] ? 'checked' : 'error'),
+            'available' => $isAvailable,
+            'expiryDate' => $data['expiryDate'] ?? ($decoded['expiryDate'] ?? null),
+            'status' => $decoded['message'] !== '' ? $decoded['message'] : ($decoded['success'] ? 'checked' : 'error'),
+        ];
+    }
+
+    private function socketWhoisCheck(string $domain): ?array
+    {
+        $domainLower = strtolower($domain);
+
+        // Check if domain is a .ng extension (.ng, .com.ng, .org.ng, .net.ng, .gov.ng, .edu.ng, .name.ng, .mobi.ng, .sch.ng, .i.ng)
+        if (preg_match('/\.ng$/i', $domainLower)) {
+            $url = 'https://whois.nic.net.ng/domain/' . urlencode($domainLower);
+            $response = $this->http->request('GET', $url, []);
+            
+            // WHMCS dist.whois.json rule for .ng: HTTP 404 or "404" in body means available
+            $isAvailable = $response['status'] === 404 || str_contains($response['body'], '404') || str_contains(strtolower($response['body']), 'not found');
+            
+            return [
+                'success' => true,
+                'available' => $isAvailable,
+                'expiryDate' => null,
+                'status' => $isAvailable ? 'Available' : 'Registered',
+            ];
+        }
+
+        $parts = explode('.', $domainLower);
+        $tld = '.' . end($parts);
+
+        $whoisServers = [
+            '.com' => 'whois.verisign-grs.com',
+            '.net' => 'whois.verisign-grs.com',
+            '.org' => 'whois.pir.org',
+            '.info' => 'whois.afilias.net',
+            '.biz' => 'whois.biz',
+            '.co' => 'whois.nic.co',
+            '.io' => 'whois.nic.io',
+            '.me' => 'whois.nic.me',
+            '.us' => 'whois.nic.us',
+            '.uk' => 'whois.nic.uk',
+            '.co.uk' => 'whois.nic.uk',
+        ];
+
+        $server = $whoisServers[$tld] ?? null;
+        if ($server === null) {
+            return null;
+        }
+
+        $fp = @fsockopen($server, 43, $errno, $errstr, 5);
+        if (!$fp) {
+            return null;
+        }
+
+        fputs($fp, $domain . "\r\n");
+        $out = '';
+        while (!feof($fp)) {
+            $out .= fgets($fp, 128);
+        }
+        fclose($fp);
+
+        $outLower = strtolower($out);
+        $notFoundStrings = [
+            'no match',
+            'not found',
+            'no entries found',
+            'domain not found',
+            'no data found',
+            'nothing found',
+        ];
+
+        $available = false;
+        foreach ($notFoundStrings as $pattern) {
+            if (str_contains($outLower, $pattern)) {
+                $available = true;
+                break;
+            }
+        }
+
+        return [
+            'success' => true,
+            'available' => $available,
+            'expiryDate' => null,
+            'status' => $available ? 'Available' : 'Registered',
         ];
     }
 

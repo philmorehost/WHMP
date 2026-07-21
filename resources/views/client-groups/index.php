@@ -32,12 +32,12 @@
         </tbody>
     </table>
 
-    <form method="post" action="/admin/client-groups" style="margin-top:var(--cv-space-4);display:flex;gap:var(--cv-space-2);align-items:end;"><?= csrf_field() ?>
-        <div class="cv-field" style="margin-bottom:0;">
+    <form method="post" action="/admin/client-groups" style="margin-top:var(--cv-space-4);display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
+        <div class="cv-field" style="margin-bottom:0;flex:1;min-width:200px;">
             <label class="cv-label">Name</label>
             <input class="cv-input" name="name" required>
         </div>
-        <div class="cv-field" style="margin-bottom:0;">
+        <div class="cv-field" style="margin-bottom:0;flex:1;min-width:200px;">
             <label class="cv-label">Discount %</label>
             <input class="cv-input" type="number" step="0.01" name="discount_percent" value="0">
         </div>

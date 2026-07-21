@@ -44,7 +44,7 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <?php foreach ($jsonLd as $schema): ?>
         <script type="application/ld+json"><?= json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
     <?php endforeach; ?>
-    <script src="/assets/js/app.js" defer></script>
+    <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
 <body data-skin="client">
 <?php if (!empty($_SESSION['original_admin_id'])): ?>

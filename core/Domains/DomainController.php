@@ -23,7 +23,8 @@ final class DomainController
         private readonly RegistrarRepository $registrars,
         private readonly DomainService $domainService,
         private readonly ActivityLogger $activity,
-        private readonly DomainPricingRepository $domainPricing
+        private readonly DomainPricingRepository $domainPricing,
+        private readonly DomainSettings $domainSettings
     ) {
     }
 
@@ -38,7 +39,21 @@ final class DomainController
         return $this->render('domains.index', [
             'domains' => $this->domains->all($status !== '' ? $status : null),
             'statusFilter' => $status,
+            'statusCounts' => $this->domains->countByStatus(),
+            'registrarCounts' => $this->domains->countActiveByRegistrar(),
+            'defaultNameservers' => $this->domainSettings->defaultNameservers(),
         ]);
+    }
+
+    public function updateDefaultNameservers(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $this->domainSettings->setDefaultNameservers((array) $request->input('ns', []));
+
+        return Response::redirect('/admin/domains');
     }
 
     public function createForm(Request $request): Response
@@ -178,6 +193,7 @@ final class DomainController
             trim((string) $request->input('ns3', '')),
             trim((string) $request->input('ns4', '')),
             trim((string) $request->input('ns5', '')),
+            trim((string) $request->input('ns6', '')),
         ]));
 
         return $this->action($request, $params, fn (int $id) => $this->domainService->saveNameservers($id, $ns), 'domain.nameservers_saved');

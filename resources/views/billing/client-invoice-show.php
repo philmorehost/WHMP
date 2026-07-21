@@ -65,7 +65,7 @@ $paymentStatus ??= null;
                     <p style="color:var(--cv-text-secondary);white-space:pre-line;"><?= e($config['bank_details'] ?? 'Contact us for bank transfer details, then we will confirm your payment.') ?></p>
                     <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Once we receive your transfer, an admin will mark this invoice as paid.</p>
                 </div>
-            <?php elseif (in_array($gateway['slug'], ['paystack', 'flutterwave', 'payhub', 'plisio'], true)): ?>
+            <?php elseif (in_array($gateway['slug'], ['paystack', 'flutterwave', 'payhub', 'plisio', 'paypal'], true)): ?>
                 <div class="cv-card">
                     <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>"><?= csrf_field() ?>
                         <button class="cv-btn" type="submit">Pay with <?= e($gateway['name']) ?></button>

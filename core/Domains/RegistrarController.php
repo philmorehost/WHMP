@@ -63,6 +63,18 @@ final class RegistrarController
             'connectreseller' => [
                 'api_key' => trim((string) $request->input('api_key', '')),
             ],
+            'resellerclub' => [
+                'reseller_id' => trim((string) $request->input('reseller_id', '')),
+                'api_key' => trim((string) $request->input('api_key', '')),
+                'customer_id' => trim((string) $request->input('customer_id', '')),
+            ],
+            'namecheap' => [
+                'api_user' => trim((string) $request->input('api_user', '')),
+                'api_key' => trim((string) $request->input('api_key', '')),
+                'username' => trim((string) $request->input('username', '')),
+                'client_ip' => trim((string) $request->input('client_ip', '')),
+                'sandbox' => $request->input('sandbox') ? '1' : '',
+            ],
             default => [],
         };
 

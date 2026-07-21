@@ -122,6 +122,32 @@ final class PaystackGateway implements GatewayModule
             'reference' => (string) ($data['reference'] ?? $reference),
             'amount' => ((float) ($data['amount'] ?? 0)) / 100,
             'metadata' => (array) ($data['metadata'] ?? []),
+            // Paystack returns a reusable card authorization on every
+            // successful charge — this is what powers recurring auto-charge
+            // (charge_authorization) without another redirect. Only surfaced
+            // when the card is flagged reusable.
+            'authorization' => $this->extractAuthorization($data),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data verify response data block
+     * @return array{token: string, brand: ?string, last4: ?string, exp_month: ?string, exp_year: ?string}|null
+     */
+    private function extractAuthorization(array $data): ?array
+    {
+        $auth = $data['authorization'] ?? null;
+
+        if (!is_array($auth) || ($auth['reusable'] ?? false) !== true || ($auth['authorization_code'] ?? '') === '') {
+            return null;
+        }
+
+        return [
+            'token' => (string) $auth['authorization_code'],
+            'brand' => isset($auth['card_type']) ? (string) $auth['card_type'] : null,
+            'last4' => isset($auth['last4']) ? (string) $auth['last4'] : null,
+            'exp_month' => isset($auth['exp_month']) ? (string) $auth['exp_month'] : null,
+            'exp_year' => isset($auth['exp_year']) ? (string) $auth['exp_year'] : null,
         ];
     }
 
@@ -144,14 +170,60 @@ final class PaystackGateway implements GatewayModule
         return ['success' => false, 'message' => 'Paystack does not support voiding — issue a refund instead.'];
     }
 
+    /**
+     * Paystack doesn't mint tokens on demand — a reusable authorization is
+     * returned by verifyTransaction() after the client's first real
+     * checkout, and captured there. Nothing to do here.
+     */
     public function tokenize(array $params): array
     {
-        return ['success' => false, 'message' => 'Recurring card tokenization is not yet implemented for Paystack.'];
+        return ['success' => false, 'message' => 'Paystack payment methods are saved automatically after a successful checkout.'];
     }
 
+    /**
+     * Charges a previously-saved reusable authorization (recurring auto-
+     * charge) via Paystack's charge_authorization endpoint — no redirect.
+     *
+     * @param array{config: array<string, mixed>, token: string, email: string, amount: float, reference: string, metadata?: array<string, mixed>} $params
+     * @return array{success: bool, transactionId?: string, status: string, message: string}
+     */
     public function chargeToken(array $params): array
     {
-        return ['success' => false, 'message' => 'Recurring card tokenization is not yet implemented for Paystack.'];
+        $secretKey = (string) ($params['config']['secret_key'] ?? '');
+        $token = (string) ($params['token'] ?? '');
+
+        if ($secretKey === '') {
+            return ['success' => false, 'status' => 'error', 'message' => 'Paystack is not configured — missing secret key.'];
+        }
+
+        if ($token === '') {
+            return ['success' => false, 'status' => 'error', 'message' => 'No saved payment authorization to charge.'];
+        }
+
+        $body = json_encode([
+            'authorization_code' => $token,
+            'email' => (string) ($params['email'] ?? ''),
+            'amount' => (int) round(((float) ($params['amount'] ?? 0)) * 100),
+            'reference' => (string) ($params['reference'] ?? ''),
+            'metadata' => $params['metadata'] ?? [],
+        ]);
+
+        $response = $this->http->request('POST', self::BASE_URL . '/transaction/charge_authorization', $this->headers($secretKey), $body);
+        $decoded = json_decode($response['body'], true);
+
+        if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? false) !== true) {
+            return ['success' => false, 'status' => 'failed', 'message' => $decoded['message'] ?? 'Paystack authorization charge failed.'];
+        }
+
+        $data = $decoded['data'] ?? [];
+        $chargeStatus = (string) ($data['status'] ?? 'failed');
+
+        return [
+            'success' => $chargeStatus === 'success',
+            'transactionId' => (string) ($data['reference'] ?? ($params['reference'] ?? '')),
+            'status' => $chargeStatus,
+            'message' => $chargeStatus === 'success' ? 'Charge successful.' : ('Charge ' . $chargeStatus . '.'),
+        ];
     }
 
     /**

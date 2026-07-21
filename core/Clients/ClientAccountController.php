@@ -76,10 +76,10 @@ final class ClientAccountController
             'phone' => trim((string) $request->input('phone', '')) ?: null,
         ];
 
-        if ($fields['email'] === '' || $fields['first_name'] === '' || $fields['last_name'] === '') {
+        if ($fields['email'] === '' || $fields['first_name'] === '' || $fields['last_name'] === '' || $fields['address1'] === null || $fields['city'] === null || $fields['postcode'] === null || $fields['phone'] === null) {
             return $this->page('client-account.profile', [
                 'client' => $client,
-                'error' => 'Email, first name, and last name are required.',
+                'error' => 'Email, first name, last name, street address, city, postcode, and phone are required.',
                 'success' => null,
             ]);
         }
@@ -196,6 +196,42 @@ final class ClientAccountController
             'client' => $this->clients->find((int) $client['id']),
             'error' => null,
             'success' => 'Your password has been changed.',
+        ]);
+    }
+
+    public function updateSecurityPin(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $currentPassword = (string) $request->input('current_password', '');
+        $newPin = (string) $request->input('new_security_pin', '');
+
+        if (!password_verify($currentPassword, (string) $client['password_hash'])) {
+            return $this->page('client-account.profile', [
+                'client' => $client,
+                'error' => 'Current password is incorrect — your Security PIN was not changed.',
+                'success' => null,
+            ]);
+        }
+
+        if (strlen($newPin) < 4) {
+            return $this->page('client-account.profile', [
+                'client' => $client,
+                'error' => 'Security PIN must be at least 4 characters.',
+                'success' => null,
+            ]);
+        }
+
+        $this->clients->updateSecurityPin((int) $client['id'], $newPin);
+
+        return $this->page('client-account.profile', [
+            'client' => $this->clients->find((int) $client['id']),
+            'error' => null,
+            'success' => 'Your Security PIN has been updated.',
         ]);
     }
 

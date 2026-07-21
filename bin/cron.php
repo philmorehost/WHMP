@@ -11,6 +11,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use CodeVault\Backup\BackupCronJob;
+use CodeVault\Billing\AutoChargeJob;
 use CodeVault\Billing\BillableItemInvoicingJob;
 use CodeVault\Billing\DunningJob;
 use CodeVault\Billing\QuoteExpiryJob;
@@ -42,6 +43,9 @@ $hooks = $kernel->container->make(HookDispatcher::class);
 if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register(new IntegrityCheckJob($kernel->container->make(IntegrityManager::class)));
     $scheduler->register(new RecurringBillingJob($kernel->container->make(RecurringBillingService::class)));
+    // Auto-charge runs before dunning so successfully-charged invoices are
+    // already paid and never trigger an overdue notice.
+    $scheduler->register($kernel->container->make(AutoChargeJob::class));
     $scheduler->register($kernel->container->make(DunningJob::class));
     $scheduler->register($kernel->container->make(DomainRenewalBillingJob::class));
     $scheduler->register($kernel->container->make(DomainSyncJob::class));

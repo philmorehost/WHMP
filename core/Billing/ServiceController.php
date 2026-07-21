@@ -36,9 +36,10 @@ final class ServiceController
         }
 
         $status = (string) $request->query('status', '');
+        $page = (int) $request->query('page', 1);
 
         return $this->render('billing.services-index', [
-            'services' => $this->services->all($status !== '' ? $status : null),
+            'results' => $this->services->paginate($status !== '' ? $status : null, $page),
             'statusFilter' => $status,
         ]);
     }

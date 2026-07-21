@@ -22,13 +22,33 @@ class RedisSessionHandler implements SessionHandlerInterface
     public function __construct(string $host, int $port, string $password, int $database, int $ttlSeconds = 7200)
     {
         $this->redis = new Redis();
-        $this->redis->connect($host, $port, 2.5);
+
+        // connect() returns false (rather than throwing) on some failures;
+        // treat that as unusable so SessionManager falls back to file
+        // sessions instead of proceeding with a dead handler.
+        if (!$this->redis->connect($host, $port, 2.5)) {
+            throw new RedisException("Redis connect to {$host}:{$port} failed");
+        }
 
         if ($password !== '') {
             $this->redis->auth($password);
         }
 
         $this->redis->select($database);
+
+        // Verify the connection is actually usable with a real round-trip.
+        // Without this, a Redis that accepts the TCP connection but rejects
+        // commands (auth required but none/empty configured, wrong DB,
+        // memory-full noeviction, a non-Redis service on the port) would
+        // pass construction, then silently fail every read()/write() — and
+        // because those swallow RedisException, sessions would vanish on
+        // every request with no fallback: CSRF tokens and logins would
+        // never persist. Failing here instead lets SessionManager catch it
+        // and use rock-solid native file sessions.
+        if ($this->redis->ping() === false) {
+            throw new RedisException('Redis ping failed — connection not usable');
+        }
+
         $this->ttl = $ttlSeconds;
     }
 

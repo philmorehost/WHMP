@@ -16,6 +16,7 @@ use CodeVault\Support\TicketController;
 
 $router->get('/admin/tickets', [TicketController::class, 'index']);
 $router->get('/admin/tickets/{id}', [TicketController::class, 'show']);
+$router->get('/admin/tickets/{id}/attachments/{attId}', [TicketController::class, 'attachment']);
 $router->post('/admin/tickets/{id}/reply', [TicketController::class, 'reply']);
 $router->post('/admin/tickets/{id}/close', [TicketController::class, 'close']);
 $router->post('/admin/tickets/{id}/reopen', [TicketController::class, 'reopen']);
@@ -27,6 +28,7 @@ $router->post('/admin/tickets/{id}/ai-suggest', [TicketController::class, 'aiSug
 
 $router->get('/admin/departments', [DepartmentController::class, 'index']);
 $router->post('/admin/departments', [DepartmentController::class, 'store']);
+$router->post('/admin/departments/{id}', [DepartmentController::class, 'update']);
 $router->post('/admin/departments/{id}/delete', [DepartmentController::class, 'destroy']);
 
 $router->get('/admin/billable-items', [BillableItemController::class, 'index']);
@@ -54,5 +56,6 @@ $router->get('/client/tickets', [ClientTicketController::class, 'index']);
 $router->get('/client/tickets/create', [ClientTicketController::class, 'create']);
 $router->post('/client/tickets', [ClientTicketController::class, 'store']);
 $router->get('/client/tickets/{id}', [ClientTicketController::class, 'show']);
+$router->get('/client/tickets/{id}/attachments/{attId}', [ClientTicketController::class, 'attachment']);
 $router->post('/client/tickets/{id}/reply', [ClientTicketController::class, 'reply']);
 $router->post('/client/tickets/{id}/rate', [ClientTicketController::class, 'rate']);

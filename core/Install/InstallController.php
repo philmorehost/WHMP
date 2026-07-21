@@ -77,12 +77,12 @@ final class InstallController
             return $this->page('install.database', ['errors' => [], 'old' => []], 'Database Setup');
         }
 
-        $host = (string) $request->input('db_host', '127.0.0.1');
-        $port = (string) $request->input('db_port', '3306');
-        $name = (string) $request->input('db_database', 'codevault');
-        $user = (string) $request->input('db_username', 'root');
+        $host = trim((string) $request->input('db_host', '127.0.0.1'));
+        $port = trim((string) $request->input('db_port', '3306'));
+        $name = trim((string) $request->input('db_database', 'codevault'));
+        $user = trim((string) $request->input('db_username', 'root'));
         $pass = (string) $request->input('db_password', '');
-        $appUrl = (string) $request->input('app_url', 'http://localhost');
+        $appUrl = trim((string) $request->input('app_url', 'http://localhost'));
 
         $errors = [];
 

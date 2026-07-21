@@ -15,6 +15,8 @@ use CodeVault\Catalog\ProductGroupRepository;
 use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Domains\DomainPricingRepository;
+use CodeVault\Domains\DomainSettings;
 use CodeVault\Localization\LanguageRepository;
 use CodeVault\Localization\LanguageSelection;
 use CodeVault\Localization\LocalizationService;
@@ -43,7 +45,9 @@ final class CheckoutController
         private readonly CurrencySelection $currencySelection,
         private readonly LanguageRepository $languages,
         private readonly LocalizationService $localization,
-        private readonly LanguageSelection $languageSelection
+        private readonly LanguageSelection $languageSelection,
+        private readonly DomainSettings $domainSettings,
+        private readonly DomainPricingRepository $domainPricing
     ) {
     }
 
@@ -63,6 +67,11 @@ final class CheckoutController
 
         $client = $this->guard->currentClient();
         $currency = $this->currency->resolveEffective($client, $this->currencySelection->get());
+
+        $selectedGroupId = $request->query('group_id') !== null ? (int) $request->query('group_id') : null;
+        if ($selectedGroupId !== null) {
+            $groups = array_filter($groups, static fn ($g) => (int) $g['id'] === $selectedGroupId);
+        }
 
         return $this->page('cart.store', ['groups' => $groups, 'currency' => $currency], [
             'canonicalUrl' => $this->seo->canonicalUrl('/store'),
@@ -93,12 +102,18 @@ final class CheckoutController
         $client = $this->guard->currentClient();
         $currency = $this->currency->resolveEffective($client, $this->currencySelection->get());
 
+        $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
+        $customFields = $db->select("SELECT * FROM custom_fields WHERE field_for = 'product' AND (product_id IS NULL OR product_id = ?) ORDER BY sort_order ASC", [$product['id']]);
+
         return $this->page('cart.product', [
             'product' => $product,
             'pricing' => $pricing,
             'cycles' => BillingCycle::labels(),
             'optionGroups' => $productOptionGroups,
             'currency' => $currency,
+            'customFields' => $customFields,
+            'defaultNameservers' => $this->domainSettings->defaultNameservers(),
+            'domainTlds' => array_column($this->domainPricing->all(), 'tld'),
         ], [
             'title' => "{$product['name']} — CodeVault Store",
             'canonicalUrl' => $url,
@@ -131,8 +146,41 @@ final class CheckoutController
             }
         }
 
+        $domainOptions = null;
+        $domainOption = (string) $request->input('domain_option');
+        if ($domainOption !== '') {
+            $domainName = trim((string) $request->input('domain_name', ''));
+            $domainTld = trim((string) $request->input('domain_tld', ''));
+            
+            $fullDomain = $domainName;
+            if ($domainOption !== 'existing' && $domainTld !== '' && !str_ends_with(strtolower($domainName), strtolower($domainTld))) {
+                $fullDomain .= $domainTld;
+            }
+            
+            $domainOptions = [
+                'option' => $domainOption,
+                'name' => $fullDomain,
+                'ns1' => trim((string) $request->input('ns1', '')),
+                'ns2' => trim((string) $request->input('ns2', '')),
+                'ns3' => trim((string) $request->input('ns3', '')),
+                'ns4' => trim((string) $request->input('ns4', '')),
+                'ns5' => trim((string) $request->input('ns5', '')),
+                'ns6' => trim((string) $request->input('ns6', '')),
+            ];
+        }
+
+        $serverOptions = null;
+        if ((string) $request->input('hostname') !== '') {
+            $serverOptions = [
+                'hostname' => trim((string) $request->input('hostname')),
+                'root_password' => trim((string) $request->input('root_password')),
+            ];
+        }
+
+        $customFieldsInput = (array) $request->input('custom_field', []);
+
         if ($productId > 0 && $cycle !== '') {
-            $this->cart->add($productId, $cycle, $selectedOptions, $quantity);
+            $this->cart->add($productId, $cycle, $selectedOptions, $quantity, $domainOptions, $serverOptions, $customFieldsInput);
         }
 
         return Response::redirect('/cart');
@@ -186,6 +234,23 @@ final class CheckoutController
 
         if ($client === null) {
             return Response::redirect('/client/login');
+        }
+
+        // Require client contact details (street address, city, postcode, phone) for order completion
+        if (empty($client['address1']) || empty($client['city']) || empty($client['postcode']) || empty($client['phone'])) {
+            $inCart = array_map(static fn (array $item) => $item['product_id'], $this->cart->items());
+            $currency = $this->currency->resolveEffective($client, $this->currencySelection->get());
+
+            return $this->page('cart.cart', [
+                'priced' => $this->cartService->priced(),
+                'loggedIn' => true,
+                'upsells' => $this->products->upsellProducts($inCart),
+                'error' => 'Please complete your street address, city, postcode, and phone number in your account profile before completing your order. <a href="/client/account" style="text-decoration:underline;">Update Profile</a>',
+                'currency' => $currency,
+            ], [
+                'currencies' => $this->currencies->all(),
+                'selectedCurrency' => $currency,
+            ], $client);
         }
 
         $result = $this->checkout->placeOrder((int) $client['id']);

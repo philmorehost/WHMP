@@ -25,7 +25,8 @@ final class DunningJob implements CronJob
         private readonly InvoiceRepository $invoices,
         private readonly ClientRepository $clients,
         private readonly EmailDispatcher $mail,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly CurrencyService $currency
     ) {
     }
 
@@ -46,10 +47,13 @@ final class DunningJob implements CronJob
 
             if ($client !== null) {
                 try {
+                    $currencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
+                    $formattedTotal = $this->currency->formatLocked((float) $invoice['total'], $currencyId, (float) $invoice['currency_rate']);
+
                     $this->mail->sendTemplate('invoice_overdue', $client['email'], [
                         'first_name' => $client['first_name'],
                         'invoice_id' => (string) $invoice['id'],
-                        'total' => number_format((float) $invoice['total'], 2),
+                        'total' => $formattedTotal,
                         'due_date' => $invoice['due_date'],
                         'company_name' => 'CodeVault',
                     ], (int) $client['id']);

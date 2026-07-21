@@ -48,7 +48,7 @@ $kernel->loadRoutes(
     'client-domains.php', 'support.php', 'knowledgebase.php', 'downloads.php', 'affiliates.php', 'reports.php', 'seo.php', 'ai.php', 'api.php',
     'currencies.php', 'localization.php', 'notifications.php', 'theme.php', 'backup.php', 'marketing.php',
     'account-security.php', 'client-account.php', 'gdpr.php', 'import.php', 'credit-notes.php', 'addons.php', 'widgets.php', 'quotes.php',
-    'security-questions.php'
+    'security-questions.php', 'cpanel-tools.php', 'system.php'
 );
 
 $response = $kernel->handle(Request::capture());

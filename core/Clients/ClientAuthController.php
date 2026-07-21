@@ -36,7 +36,8 @@ final class ClientAuthController
         private readonly PasswordResetToken $resetToken,
         private readonly EmailDispatcher $mail,
         private readonly Config $config,
-        private readonly SecurityQuestionModuleService $securityQuestions
+        private readonly SecurityQuestionModuleService $securityQuestions,
+        private readonly \CodeVault\Settings\SettingsRepository $settings
     ) {
     }
 
@@ -49,6 +50,7 @@ final class ClientAuthController
         return $this->page('client-auth.login', [
             'error' => null,
             'resetSuccess' => $request->query('reset') === 'success',
+            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
         ]);
     }
 
@@ -68,10 +70,15 @@ final class ClientAuthController
         if ($result->isSuccess()) {
             $this->guard->login($result->client);
 
+            // If client was placing an order, resume checkout by redirecting to /cart
+            if (!empty($this->session->get('cart_items', []))) {
+                return Response::redirect('/cart');
+            }
+
             return Response::redirect('/client/dashboard');
         }
 
-        $message = $result->status === 'blocked' ? 'Access denied.' : 'Invalid email or password.';
+        $message = $result->status === 'blocked' ? 'Access denied. <a href="/client/recover-pin" style="color:var(--cv-color-brand-500);text-decoration:underline;">Recover with Security PIN</a>' : 'Invalid email or password.';
         $status = $result->status === 'blocked' ? 403 : 200;
 
         return $this->page('client-auth.login', ['error' => $message], $status);
@@ -117,6 +124,10 @@ final class ClientAuthController
         $this->session->remove(self::PENDING_2FA_SESSION_KEY);
         $this->guard->login($client);
 
+        if (!empty($this->session->get('cart_items', []))) {
+            return Response::redirect('/cart');
+        }
+
         return Response::redirect('/client/dashboard');
     }
 
@@ -134,31 +145,63 @@ final class ClientAuthController
             return Response::redirect('/client/dashboard');
         }
 
-        return $this->page('client-auth.register', ['error' => null, 'refCode' => (string) $request->query('ref', '')]);
+        $googleUser = $this->session->get('google_user');
+
+        return $this->page('client-auth.register', [
+            'error' => null,
+            'refCode' => (string) $request->query('ref', ''),
+            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+            'googleUser' => $googleUser,
+        ]);
     }
 
     public function register(Request $request): Response
     {
+        $googleUser = $this->session->get('google_user');
+
         $email = trim((string) $request->input('email', ''));
+        if ($googleUser && !empty($googleUser['email'])) {
+            $email = $googleUser['email'];
+        }
+
         $password = (string) $request->input('password', '');
+        if ($googleUser && $password === '') {
+            $password = bin2hex(random_bytes(16));
+        }
+
         $firstName = trim((string) $request->input('first_name', ''));
         $lastName = trim((string) $request->input('last_name', ''));
         $refCode = trim((string) $request->input('ref', ''));
         $country = strtoupper(trim((string) $request->input('country', '')));
         $vatNumber = trim((string) $request->input('vat_number', ''));
+        $phone = trim((string) $request->input('phone', ''));
+        $address1 = trim((string) $request->input('address1', ''));
+        $city = trim((string) $request->input('city', ''));
+        $postcode = trim((string) $request->input('postcode', ''));
+
+        $securityPin = trim((string) $request->input('security_pin', ''));
 
         if ($email === '' || $firstName === '' || $lastName === '') {
-            return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode]);
+            return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
 
-        $result = $this->auth->register($email, $password, $firstName, $lastName, $request->ip(), $country, $vatNumber);
+        if (strlen($securityPin) < 4) {
+            return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+        }
+
+        $result = $this->auth->register($email, $password, $firstName, $lastName, $request->ip(), $country, $vatNumber, $phone, $address1, $city, $postcode, $securityPin);
 
         if (!$result['success']) {
-            return $this->page('client-auth.register', ['error' => $result['error'], 'refCode' => $refCode]);
+            return $this->page('client-auth.register', ['error' => $result['error'], 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
 
+        $this->session->remove('google_user');
         $this->affiliateService->registerReferral($refCode, (int) $result['client']['id']);
         $this->guard->login($result['client']);
+
+        if (!empty($this->session->get('cart_items', []))) {
+            return Response::redirect('/cart');
+        }
 
         return Response::redirect('/client/dashboard');
     }
@@ -168,6 +211,37 @@ final class ClientAuthController
         $this->guard->logout();
 
         return Response::redirect('/client/login');
+    }
+
+    public function recoverPinForm(Request $request): Response
+    {
+        if ($this->guard->check()) {
+            return Response::redirect('/client/dashboard');
+        }
+
+        return $this->page('client-auth.recover-pin', ['error' => null, 'success' => false]);
+    }
+
+    public function recoverPin(Request $request): Response
+    {
+        if ($this->guard->check()) {
+            return Response::redirect('/client/dashboard');
+        }
+
+        $email = trim((string) $request->input('email', ''));
+        $pin = trim((string) $request->input('security_pin', ''));
+
+        if ($email === '' || $pin === '') {
+            return $this->page('client-auth.recover-pin', ['error' => 'Email and Security PIN are required.', 'success' => false]);
+        }
+
+        $isValid = $this->auth->verifySecurityPin($email, $pin, $request->ip());
+
+        if (!$isValid) {
+            return $this->page('client-auth.recover-pin', ['error' => 'Invalid email or Security PIN.', 'success' => false], 403);
+        }
+
+        return $this->page('client-auth.recover-pin', ['error' => null, 'success' => true]);
     }
 
     public function forgotPasswordForm(Request $request): Response
@@ -282,6 +356,94 @@ final class ClientAuthController
         }
 
         return Response::redirect('/client/dashboard');
+    }
+
+    public function googleRedirect(Request $request): Response
+    {
+        $clientId = $this->settings->get('auth.google_client_id', '');
+        if (empty($clientId)) {
+            return Response::redirect('/client/login');
+        }
+
+        $appUrl = $this->config->get('app.url', 'http://localhost');
+        $redirectUri = rtrim($appUrl, '/') . '/client/auth/google/callback';
+
+        $url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
+            'client_id' => $clientId,
+            'redirect_uri' => $redirectUri,
+            'response_type' => 'code',
+            'scope' => 'email profile',
+            'access_type' => 'online',
+            'state' => csrf_token(),
+        ]);
+
+        return Response::redirect($url);
+    }
+
+    public function googleCallback(Request $request): Response
+    {
+        $clientId = $this->settings->get('auth.google_client_id', '');
+        $clientSecret = $this->settings->get('auth.google_client_secret', '');
+
+        if (empty($clientId) || empty($clientSecret)) {
+            return Response::redirect('/client/login');
+        }
+
+        $code = $request->query('code');
+        if (!$code) {
+            return Response::redirect('/client/login');
+        }
+
+        $appUrl = $this->config->get('app.url', 'http://localhost');
+        $redirectUri = rtrim($appUrl, '/') . '/client/auth/google/callback';
+
+        $ch = curl_init('https://oauth2.googleapis.com/token');
+        if ($ch !== false) {
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'code' => $code,
+                'grant_type' => 'authorization_code',
+                'redirect_uri' => $redirectUri,
+            ]));
+            
+            $response = curl_exec($ch);
+            curl_close($ch);
+            
+            $data = json_decode((string) $response, true);
+            if (!empty($data['access_token'])) {
+                $ch2 = curl_init('https://www.googleapis.com/oauth2/v2/userinfo');
+                if ($ch2 !== false) {
+                    curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch2, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $data['access_token']]);
+                    
+                    $userResponse = curl_exec($ch2);
+                    curl_close($ch2);
+
+                    $googleUser = json_decode((string) $userResponse, true);
+                    if (!empty($googleUser['email'])) {
+                        $email = $googleUser['email'];
+                        $existing = $this->clients->findByEmail($email);
+                        
+                        if ($existing) {
+                            return $this->completeTwoFactorLogin($existing);
+                        }
+
+                        // Register new user
+                        $this->session->set('google_user', [
+                            'email' => $email,
+                            'first_name' => $googleUser['given_name'] ?? '',
+                            'last_name' => $googleUser['family_name'] ?? '',
+                            'google_id' => $googleUser['id'] ?? '',
+                        ]);
+                        return Response::redirect('/client/register');
+                    }
+                }
+            }
+        }
+
+        return Response::redirect('/client/login?error=google_failed');
     }
 
     private function page(string $template, array $data, int $status = 200): Response

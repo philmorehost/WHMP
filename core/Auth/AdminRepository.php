@@ -71,6 +71,14 @@ final class AdminRepository
         );
     }
 
+    public function updateSecurityPin(int $id, string $plainPin): void
+    {
+        $this->db->update(
+            'UPDATE admins SET security_pin_hash = ?, updated_at = ? WHERE id = ?',
+            [password_hash($plainPin, PASSWORD_ARGON2ID), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM admins WHERE id = ?', [$id]);

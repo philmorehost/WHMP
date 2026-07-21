@@ -28,7 +28,10 @@ final class TicketController
         private readonly TicketService $ticketService,
         private readonly ActivityLogger $activity,
         private readonly BillableItemRepository $billableItems,
-        private readonly AiProvider $aiProvider
+        private readonly AiProvider $aiProvider,
+        private readonly \CodeVault\Ai\AiSettings $aiSettings,
+        private readonly TicketAttachmentRepository $attachments,
+        private readonly TicketAttachmentService $attachmentService
     ) {
     }
 
@@ -75,6 +78,7 @@ final class TicketController
             'departments' => $this->departments->all(),
             'cannedReplies' => $this->cannedReplies->all(),
             'admins' => $this->admins->all(),
+            'attachments' => $this->attachments->forTicketGroupedByReply((int) $ticket['id']),
             'aiSuggestion' => null,
             'aiError' => null,
         ]);
@@ -93,6 +97,19 @@ final class TicketController
             return Response::html('404 Not Found', 404);
         }
 
+        if (!$this->aiSettings->isFeatureEnabled('ticket_replies')) {
+            return $this->render('support.ticket-show', [
+                'ticket' => $ticket,
+                'replies' => $this->replies->forTicket($id, includePrivate: true),
+                'departments' => $this->departments->all(),
+                'cannedReplies' => $this->cannedReplies->all(),
+                'admins' => $this->admins->all(),
+            'attachments' => $this->attachments->forTicketGroupedByReply((int) $ticket['id']),
+                'aiSuggestion' => null,
+                'aiError' => 'AI ticket-reply drafting is turned off. An admin can enable it under Configuration → AI Copilot.',
+            ]);
+        }
+
         $conversation = array_map(
             static fn (array $reply) => ['author' => $reply['author_type'], 'message' => $reply['message']],
             $this->replies->forTicket($id, includePrivate: false)
@@ -106,6 +123,7 @@ final class TicketController
             'departments' => $this->departments->all(),
             'cannedReplies' => $this->cannedReplies->all(),
             'admins' => $this->admins->all(),
+            'attachments' => $this->attachments->forTicketGroupedByReply((int) $ticket['id']),
             'aiSuggestion' => $result['success'] ? $result['text'] : null,
             'aiError' => $result['success'] ? null : $result['error'],
         ]);
@@ -142,12 +160,58 @@ final class TicketController
         $isPrivate = (bool) $request->input('is_private', false);
         $admin = $this->guard->currentAdmin();
 
-        if ($message !== '') {
-            $this->ticketService->reply($id, 'admin', (int) $admin['id'], $admin['display_name'], $message, $isPrivate);
+        $filesEntry = $request->file('attachments');
+        $hasFiles = $this->attachmentService->hasRealUpload($filesEntry);
+
+        if ($message !== '' || $hasFiles) {
+            $replyId = $this->ticketService->reply($id, 'admin', (int) $admin['id'], $admin['display_name'], $message, $isPrivate);
+
+            if ($hasFiles) {
+                $this->attachmentService->storeFromFilesEntry($filesEntry, $id, $replyId, 'admin');
+            }
+
             $this->activity->log('admin', (int) $admin['id'], 'ticket.replied', 'ticket', $id, $isPrivate ? "Added a private note to ticket #{$id}" : "Replied to ticket #{$id}", $request->ip());
         }
 
         return Response::redirect("/admin/tickets/{$id}");
+    }
+
+    public function attachment(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $attachment = $this->attachments->find((int) $params['attId']);
+
+        if ($attachment === null || (int) $attachment['ticket_id'] !== (int) $params['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        return $this->serveAttachment($attachment);
+    }
+
+    /** @param array<string, mixed> $attachment */
+    private function serveAttachment(array $attachment): Response
+    {
+        $file = $this->attachmentService->fileFor($attachment);
+
+        if ($file === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        // Inline for raster images + PDF so the browser previews them.
+        // SVG is deliberately excluded (it can carry scripts) and served as a
+        // download; nosniff stops any file being reinterpreted as HTML/JS.
+        $previewable = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'application/pdf'];
+        $disposition = in_array($file['mime'], $previewable, true) ? 'inline' : 'attachment';
+        $bytes = (string) file_get_contents($file['path']);
+
+        return (new Response($bytes, 200))
+            ->withHeader('Content-Type', $file['mime'])
+            ->withHeader('X-Content-Type-Options', 'nosniff')
+            ->withHeader('Content-Disposition', $disposition . '; filename="' . str_replace('"', '', $file['name']) . '"')
+            ->withHeader('Content-Length', (string) strlen($bytes));
     }
 
     public function close(Request $request, array $params): Response

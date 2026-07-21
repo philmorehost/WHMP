@@ -27,7 +27,7 @@ final class ThemeSettingsTest extends DatabaseTestCase
 
         $this->assertSame('CodeVault', $theme['brandName']);
         $this->assertNull($theme['logoUrl']);
-        $this->assertSame('#2f6fed', $theme['primaryColor']);
+        $this->assertSame('#ff8f28', $theme['primaryColor']);
     }
 
     public function test_save_and_get_round_trips(): void
@@ -51,7 +51,7 @@ final class ThemeSettingsTest extends DatabaseTestCase
     {
         $this->theme->save('Acme', null, 'not-a-color');
 
-        $this->assertSame('#2f6fed', $this->theme->get()['primaryColor']);
+        $this->assertSame('#ff8f28', $this->theme->get()['primaryColor']);
     }
 
     public function test_is_valid_hex(): void

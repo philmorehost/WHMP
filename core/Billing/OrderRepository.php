@@ -22,9 +22,10 @@ final class OrderRepository
 
         return $this->db->select(
             <<<SQL
-            SELECT o.*, c.email AS client_email, c.first_name, c.last_name
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM orders o
             JOIN clients c ON c.id = o.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
             ORDER BY o.id DESC
             SQL,
@@ -37,9 +38,10 @@ final class OrderRepository
     {
         return $this->db->selectOne(
             <<<'SQL'
-            SELECT o.*, c.email AS client_email, c.first_name, c.last_name
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM orders o
             JOIN clients c ON c.id = o.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             WHERE o.id = ?
             SQL,
             [$id]
@@ -95,6 +97,17 @@ final class OrderRepository
             'UPDATE orders SET fraud_reviewed_by = ?, fraud_reviewed_at = ? WHERE id = ?',
             [$adminId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
+    }
+
+    /**
+     * order_items cascade-deletes with the order; services/invoices that
+     * originated from this order keep existing independently (their
+     * order_id FK is ON DELETE SET NULL) — deleting the order record
+     * itself never deletes a client's service or invoice.
+     */
+    public function delete(int $id): void
+    {
+        $this->db->delete('DELETE FROM orders WHERE id = ?', [$id]);
     }
 
     /** Dashboard tile — a bare COUNT, not all()'s full joined row set (R17). */

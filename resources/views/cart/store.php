@@ -12,13 +12,13 @@
         <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
             <h2 class="cv-card__title"><?= e($group['name']) ?></h2>
             <?php if (!empty($group['description'])): ?>
-                <p style="color:var(--cv-text-secondary);"><?= e($group['description']) ?></p>
+                <p style="color:var(--cv-text-secondary);white-space:pre-wrap;"><?= e($group['description']) ?></p>
             <?php endif; ?>
             <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:var(--cv-space-3);">
                 <?php foreach ($group['products'] as $product): ?>
                     <div class="cv-card">
                         <strong><?= e($product['name']) ?></strong>
-                        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e((string) ($product['description'] ?? '')) ?></p>
+                        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);white-space:pre-wrap;"><?= e((string) ($product['description'] ?? '')) ?></p>
                         <a class="cv-btn" href="/store/<?= (int) $product['id'] ?>"><?= e($t->get('store.view')) ?></a>
                     </div>
                 <?php endforeach; ?>

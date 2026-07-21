@@ -72,14 +72,17 @@ final class ProductRepository
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
-            'INSERT INTO products (product_group_id, server_group_id, name, description, status, is_upsell, upsell_pitch, stock_quantity, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO products (product_group_id, server_group_id, autosetup, name, description, status, type, is_upsell, require_domain, upsell_pitch, stock_quantity, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $fields['product_group_id'],
                 $fields['server_group_id'] ?? null,
+                $fields['autosetup'] ?? 'payment',
                 $fields['name'],
                 $fields['description'] ?? null,
                 $fields['status'] ?? 'active',
+                $fields['type'] ?? 'other',
                 !empty($fields['is_upsell']) ? 1 : 0,
+                !empty($fields['require_domain']) ? 1 : 0,
                 $fields['upsell_pitch'] ?? null,
                 $fields['stock_quantity'] ?? null,
                 $fields['sort_order'] ?? 0,
@@ -93,14 +96,17 @@ final class ProductRepository
     public function update(int $id, array $fields): void
     {
         $this->db->update(
-            'UPDATE products SET product_group_id = ?, server_group_id = ?, name = ?, description = ?, status = ?, is_upsell = ?, upsell_pitch = ?, stock_quantity = ?, updated_at = ? WHERE id = ?',
+            'UPDATE products SET product_group_id = ?, server_group_id = ?, autosetup = ?, name = ?, description = ?, status = ?, type = ?, is_upsell = ?, require_domain = ?, upsell_pitch = ?, stock_quantity = ?, updated_at = ? WHERE id = ?',
             [
                 $fields['product_group_id'],
                 $fields['server_group_id'] ?? null,
+                $fields['autosetup'] ?? 'payment',
                 $fields['name'],
                 $fields['description'] ?? null,
                 $fields['status'] ?? 'active',
+                $fields['type'] ?? 'other',
                 !empty($fields['is_upsell']) ? 1 : 0,
+                !empty($fields['require_domain']) ? 1 : 0,
                 $fields['upsell_pitch'] ?? null,
                 $fields['stock_quantity'] ?? null,
                 (new DateTimeImmutable())->format('Y-m-d H:i:s'),

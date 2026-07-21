@@ -7,14 +7,37 @@
 </div>
 
 <div class="cv-card">
+    <h3 id="option-group-form-title" style="margin-top:0;">Add Group</h3>
+    <form id="option-group-form" method="post" action="/admin/configurable-options" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;margin-bottom:var(--cv-space-4);"><?= csrf_field() ?>
+        <div class="cv-field" style="margin-bottom:0;flex:1;min-width:200px;">
+            <label class="cv-label">Name</label>
+            <input class="cv-input" name="name" id="option-group-name" required>
+        </div>
+        <button class="cv-btn" type="submit" data-edit-submit>Add Group</button>
+        <button class="cv-btn cv-btn--secondary" type="button" style="display:none;"
+            data-edit-cancel
+            data-edit-reset-action="/admin/configurable-options"
+            data-edit-reset-label="Add Group"
+            data-edit-reset-title="Add Group"
+            data-edit-title-target="#option-group-form-title">Cancel</button>
+    </form>
+
     <table class="cv-table">
         <thead><tr><th>Name</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($groups as $group): ?>
             <tr>
                 <td><a href="/admin/configurable-options/<?= (int) $group['id'] ?>"><?= e($group['name']) ?></a></td>
-                <td>
-                    <form method="post" action="/admin/configurable-options/<?= (int) $group['id'] ?>/delete"><?= csrf_field() ?>
+                <td style="display:flex;gap:var(--cv-space-2);">
+                    <button type="button" class="cv-btn cv-btn--secondary"
+                        data-edit-trigger
+                        data-edit-form="#option-group-form"
+                        data-edit-fields="<?= e(json_encode(['name' => $group['name']])) ?>"
+                        data-edit-action="/admin/configurable-options/<?= (int) $group['id'] ?>/edit"
+                        data-edit-submit-label="Update Group"
+                        data-edit-title="Edit Group"
+                        data-edit-title-target="#option-group-form-title">Edit</button>
+                    <form method="post" action="/admin/configurable-options/<?= (int) $group['id'] ?>/delete" data-confirm="Delete this option group and all of its options?"><?= csrf_field() ?>
                         <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                     </form>
                 </td>
@@ -25,12 +48,4 @@
         <?php endif; ?>
         </tbody>
     </table>
-
-    <form method="post" action="/admin/configurable-options" style="margin-top:var(--cv-space-4);display:flex;gap:var(--cv-space-2);align-items:end;"><?= csrf_field() ?>
-        <div class="cv-field" style="margin-bottom:0;">
-            <label class="cv-label">Name</label>
-            <input class="cv-input" name="name" required>
-        </div>
-        <button class="cv-btn" type="submit">Add Group</button>
-    </form>
 </div>

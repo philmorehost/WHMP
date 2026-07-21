@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace CodeVault\Tests\Unit;
 
+use CodeVault\Billing\CurrencyRepository;
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Billing\RenewalReminderJob;
 use CodeVault\Billing\ServiceRepository;
 use CodeVault\Catalog\ProductGroupRepository;
@@ -40,7 +42,7 @@ final class RenewalReminderJobTest extends DatabaseTestCase
         $this->emailLog = new EmailLogRepository($this->db);
 
         $dispatcher = new EmailDispatcher(new EmailTemplateRepository($this->db), $this->emailLog, new SyncQueue());
-        $this->job = new RenewalReminderJob($this->services, $this->clients, $dispatcher);
+        $this->job = new RenewalReminderJob($this->services, $this->clients, $dispatcher, new CurrencyService(new CurrencyRepository($this->db)));
 
         $mailLogPath = sys_get_temp_dir() . '/codevault-renewal-test-' . uniqid() . '.log';
         $container = new Container();

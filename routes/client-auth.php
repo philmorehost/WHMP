@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Clients\ClientAuthController;
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Container;
@@ -11,11 +12,22 @@ use CodeVault\View;
 
 /** @var CodeVault\Router $router */
 
+$router->get('/client', function (Request $request, array $params, Container $container): Response {
+    /** @var ClientAuthGuard $guard */
+    $guard = $container->make(ClientAuthGuard::class);
+    if ($guard->check()) {
+        return Response::redirect('/client/dashboard');
+    }
+    return Response::redirect('/client/login');
+});
+
 $router->get('/client/login', [ClientAuthController::class, 'loginForm']);
 $router->post('/client/login', [ClientAuthController::class, 'login']);
 $router->get('/client/return-to-admin', [ClientAuthController::class, 'returnToAdmin']);
 $router->get('/client/login/2fa', [ClientAuthController::class, 'twoFactorForm']);
 $router->post('/client/login/2fa', [ClientAuthController::class, 'verifyTwoFactor']);
+$router->get('/client/recover-pin', [ClientAuthController::class, 'recoverPinForm']);
+$router->post('/client/recover-pin', [ClientAuthController::class, 'recoverPin']);
 $router->get('/client/register', [ClientAuthController::class, 'registerForm']);
 $router->post('/client/register', [ClientAuthController::class, 'register']);
 $router->post('/client/logout', [ClientAuthController::class, 'logout']);
@@ -24,6 +36,9 @@ $router->get('/client/forgot-password', [ClientAuthController::class, 'forgotPas
 $router->post('/client/forgot-password', [ClientAuthController::class, 'sendResetLink']);
 $router->get('/client/password/reset/{token}', [ClientAuthController::class, 'resetPasswordForm']);
 $router->post('/client/password/reset/{token}', [ClientAuthController::class, 'resetPassword']);
+
+$router->get('/client/auth/google', [ClientAuthController::class, 'googleRedirect']);
+$router->get('/client/auth/google/callback', [ClientAuthController::class, 'googleCallback']);
 
 $router->get('/client/dashboard', function (Request $request, array $params, Container $container): Response {
     /** @var ClientAuthGuard $guard */
@@ -48,8 +63,15 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
     // Fetch active services
     $activeServices = $db->select("SELECT * FROM services WHERE client_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5", [$clientId]);
 
+    /** @var CurrencyService $currencyService */
+    $currencyService = $container->make(CurrencyService::class);
+    $currency = $currencyService->resolveForClient($client);
+
     /** @var View $view */
     $view = $container->make(View::class);
+
+    /** @var CodeVault\Ai\AiSettings $aiSettings */
+    $aiSettings = $container->make(CodeVault\Ai\AiSettings::class);
 
     $content = $view->render('client-auth.dashboard', [
         'client' => $client,
@@ -59,6 +81,8 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
         'ticketsCount' => $ticketsCount,
         'unpaidInvoices' => $unpaidInvoices,
         'activeServices' => $activeServices,
+        'currency' => $currency,
+        'aiCopilotEnabled' => $aiSettings->isFeatureEnabled('onboarding') && $aiSettings->hasKey(),
     ]);
 
     return Response::html($view->render('layouts.client', [

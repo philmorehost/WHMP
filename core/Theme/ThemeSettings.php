@@ -17,6 +17,7 @@ final class ThemeSettings
     private const BRAND_NAME_KEY = 'theme.brand_name';
     private const LOGO_URL_KEY = 'theme.logo_url';
     private const PRIMARY_COLOR_KEY = 'theme.primary_color';
+    private const TERMS_URL_KEY = 'theme.terms_url';
 
     private const DEFAULT_BRAND_NAME = 'CodeVault';
     private const DEFAULT_PRIMARY_COLOR = '#ff8f28';
@@ -39,14 +40,25 @@ final class ThemeSettings
             'logoUrl' => $this->settings->get(self::LOGO_URL_KEY) ?: null,
             'primaryColor' => $primaryColor,
             'primaryColorDark' => $this->darken($primaryColor, 0.82),
+            // Full URL of the Terms of Service page (typically hosted on the
+            // company's primary marketing domain). Empty until an admin sets
+            // it; the /terms route redirects here when present.
+            'termsUrl' => $this->settings->get(self::TERMS_URL_KEY) ?: null,
         ];
     }
 
-    public function save(string $brandName, ?string $logoUrl, string $primaryColor): void
+    public function save(string $brandName, ?string $logoUrl, string $primaryColor, ?string $termsUrl = null): void
     {
         $this->settings->set(self::BRAND_NAME_KEY, $brandName !== '' ? $brandName : self::DEFAULT_BRAND_NAME);
         $this->settings->set(self::LOGO_URL_KEY, $logoUrl ?? '');
         $this->settings->set(self::PRIMARY_COLOR_KEY, $this->isValidHex($primaryColor) ? $primaryColor : self::DEFAULT_PRIMARY_COLOR);
+        $this->settings->set(self::TERMS_URL_KEY, $termsUrl ?? '');
+    }
+
+    /** The configured Terms of Service URL, or null if the admin hasn't set one. */
+    public function termsUrl(): ?string
+    {
+        return $this->settings->get(self::TERMS_URL_KEY) ?: null;
     }
 
     public function isValidHex(string $color): bool

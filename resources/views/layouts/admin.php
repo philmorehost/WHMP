@@ -18,7 +18,7 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <link rel="stylesheet" href="/assets/css/tokens.css">
     <link rel="stylesheet" href="/assets/css/components.css">
     <style>:root { --cv-color-brand-500: <?= e($theme['primaryColor']) ?>; --cv-color-brand-600: <?= e($theme['primaryColorDark']) ?>; }</style>
-    <script src="/assets/js/app.js" defer></script>
+    <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
 <body data-skin="admin">
 <div class="cv-sidebar-backdrop" data-sidebar-close></div>

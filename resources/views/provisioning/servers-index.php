@@ -17,7 +17,13 @@
         <?php foreach ($groups as $group): ?>
             <tr>
                 <td><?= e($group['name']) ?></td>
-                <td>
+                <td style="display:flex;gap:var(--cv-space-2);">
+                    <button type="button" class="cv-btn cv-btn--secondary"
+                        data-edit-trigger
+                        data-edit-form="#server-group-form"
+                        data-edit-fields="<?= e(json_encode(['name' => $group['name']])) ?>"
+                        data-edit-action="/admin/server-groups/<?= (int) $group['id'] ?>"
+                        data-edit-submit-label="Update Group">Edit</button>
                     <form method="post" action="/admin/server-groups/<?= (int) $group['id'] ?>/delete"><?= csrf_field() ?>
                         <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                     </form>
@@ -29,12 +35,17 @@
         <?php endif; ?>
         </tbody>
     </table>
-    <form method="post" action="/admin/server-groups" style="margin-top:var(--cv-space-4);display:flex;gap:var(--cv-space-2);align-items:end;"><?= csrf_field() ?>
+    <form id="server-group-form" method="post" action="/admin/server-groups" style="margin-top:var(--cv-space-4);display:flex;gap:var(--cv-space-2);align-items:end;"><?= csrf_field() ?>
         <div class="cv-field" style="margin-bottom:0;">
             <label class="cv-label">Name</label>
-            <input class="cv-input" name="name" required>
+            <input class="cv-input" name="name" id="server-group-name" required>
         </div>
-        <button class="cv-btn" type="submit">Add Group</button>
+        <button class="cv-btn" type="submit" data-edit-submit>Add Group</button>
+        <button class="cv-btn cv-btn--secondary" type="button" style="display:none;"
+            data-edit-cancel
+            data-edit-form="#server-group-form"
+            data-edit-reset-action="/admin/server-groups"
+            data-edit-reset-label="Add Group">Cancel</button>
     </form>
 </div>
 
@@ -59,14 +70,16 @@
                         <span class="cv-badge cv-badge--neutral">Disabled</span>
                     <?php endif; ?>
                 </td>
-                <td style="display:flex;gap:var(--cv-space-2);">
+                <td style="display:flex;gap:var(--cv-space-2);align-items:center;">
                     <a class="cv-btn cv-btn--secondary" href="/admin/servers/<?= (int) $server['id'] ?>/edit">Edit</a>
+                    <button type="button" class="cv-btn cv-btn--secondary" data-test-server="<?= (int) $server['id'] ?>" data-token="<?= e(csrf_token()) ?>">Test Connection</button>
                     <form method="post" action="/admin/servers/<?= (int) $server['id'] ?>/toggle"><?= csrf_field() ?>
                         <button class="cv-btn cv-btn--secondary" type="submit"><?= $server['active'] ? 'Disable' : 'Enable' ?></button>
                     </form>
                     <form method="post" action="/admin/servers/<?= (int) $server['id'] ?>/delete"><?= csrf_field() ?>
                         <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                     </form>
+                    <span class="server-test-result" style="font-size:var(--cv-text-xs);"></span>
                 </td>
             </tr>
         <?php endforeach; ?>

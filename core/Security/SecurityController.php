@@ -22,7 +22,8 @@ final class SecurityController
         private readonly LoginAttemptRepository $attempts,
         private readonly IpRuleRepository $ipRules,
         private readonly CountryRuleRepository $countryRules,
-        private readonly AccountLockRepository $accountLocks
+        private readonly AccountLockRepository $accountLocks,
+        private readonly \CodeVault\Settings\SettingsRepository $settings
     ) {
     }
 
@@ -37,12 +38,28 @@ final class SecurityController
             'ipRules' => $this->ipRules->all(),
             'countryRules' => $this->countryRules->all(),
             'accountLocks' => $this->accountLocks->activeLocks(),
+            'twoFactorEnabled' => $this->settings->get('security.2fa_enabled', '1') === '1',
+            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+            'googleClientSecret' => $this->settings->get('auth.google_client_secret', ''),
         ]);
 
         return Response::html($this->view->render('layouts.admin', [
-            'title' => 'CodeVault Admin — BruteGuard',
+            'title' => 'CodeVault Admin — Security Settings',
             'content' => $content,
         ]));
+    }
+
+    public function updateAuthSettings(Request $request): Response
+    {
+        if (!$this->guard->check()) {
+            return Response::redirect('/login');
+        }
+
+        $this->settings->set('security.2fa_enabled', (string) $request->input('two_factor_enabled', '') === '1' ? '1' : '0');
+        $this->settings->set('auth.google_client_id', trim((string) $request->input('google_client_id', '')));
+        $this->settings->set('auth.google_client_secret', trim((string) $request->input('google_client_secret', '')));
+
+        return Response::redirect('/admin/security');
     }
 
     public function addIpRule(Request $request): Response

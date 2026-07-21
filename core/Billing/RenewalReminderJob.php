@@ -23,7 +23,8 @@ final class RenewalReminderJob implements CronJob
     public function __construct(
         private readonly ServiceRepository $services,
         private readonly ClientRepository $clients,
-        private readonly EmailDispatcher $mail
+        private readonly EmailDispatcher $mail,
+        private readonly CurrencyService $currency
     ) {
     }
 
@@ -46,11 +47,15 @@ final class RenewalReminderJob implements CronJob
                 continue;
             }
 
+            $clientCurrency = $this->currency->resolveForClient($client);
+            $symbol = (string) $clientCurrency['symbol'];
+            $rate = (float) ($clientCurrency['exchange_rate'] ?? 1.0000);
+
             $this->mail->sendTemplate('service_renewal_reminder', $client['email'], [
                 'first_name' => $client['first_name'],
                 'product_name' => $service['product_name'],
                 'due_date' => $service['next_due_date'],
-                'amount' => number_format((float) $service['amount'], 2),
+                'amount' => $symbol . number_format((float) $service['amount'] * $rate, 2),
                 'company_name' => 'CodeVault',
             ], (int) $client['id']);
 

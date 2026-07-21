@@ -11,3 +11,10 @@
 !/storage/system/.gitkeep
 !/storage/backups/.gitkeep
 /.installed.lock
+
+# Database dumps — may contain real customer PII, never commit
+*.sql
+*.sql.gz
+*.zip
+/storage/ticket_attachments/*
+!/storage/ticket_attachments/.gitkeep
