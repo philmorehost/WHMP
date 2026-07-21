@@ -163,8 +163,17 @@ final class CpanelProvisioningModule implements ProvisioningModule
 
         $url = "{$scheme}://{$server['hostname']}:{$port}/json-api/{$function}?" . http_build_query($query);
 
+        $token = $server['api_token'] ?? '';
+        $username = $server['api_username'] ?? '';
+        // WHM API tokens are alphanumeric and typically 32 chars. 
+        // If it contains special characters or is short, assume it's a password.
+        $isToken = preg_match('/^[a-zA-Z0-9]{30,64}$/', $token);
+        $authHeader = $isToken 
+            ? "whm {$username}:{$token}" 
+            : "Basic " . base64_encode("{$username}:{$token}");
+
         return $this->http->request('GET', $url, [
-            'Authorization' => "whm {$server['api_username']}:{$server['api_token']}",
+            'Authorization' => $authHeader,
         ]);
     }
 
