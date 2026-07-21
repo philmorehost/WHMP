@@ -37,12 +37,14 @@ final class CurlHttpClient implements HttpClient
 
         $raw = curl_exec($ch);
         $errored = $raw === false || curl_errno($ch) !== 0;
+        $errorMsg = $errored ? curl_error($ch) : '';
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         return [
             'status' => $errored ? 0 : $status,
             'body' => $errored ? '' : (string) $raw,
+            'error' => $errorMsg,
         ];
     }
 }

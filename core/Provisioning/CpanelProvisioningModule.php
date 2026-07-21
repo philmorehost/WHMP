@@ -194,7 +194,11 @@ final class CpanelProvisioningModule implements ProvisioningModule
     private function decode(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'reason' => 'Could not reach the WHM server.', 'data' => []];
+            $msg = 'Could not reach the WHM server.';
+            if (!empty($response['error'])) {
+                $msg .= ' (' . $response['error'] . ')';
+            }
+            return ['success' => false, 'reason' => $msg, 'data' => []];
         }
 
         $decoded = json_decode($response['body'], true);

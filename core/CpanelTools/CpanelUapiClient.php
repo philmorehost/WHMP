@@ -87,7 +87,11 @@ final class CpanelUapiClient
     private function decodeUapi(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the WHM server.', 'data' => []];
+            $msg = 'Could not reach the WHM server.';
+            if (!empty($response['error'])) {
+                $msg .= ' (' . $response['error'] . ')';
+            }
+            return ['success' => false, 'message' => $msg, 'data' => []];
         }
 
         $decoded = json_decode($response['body'], true);
@@ -136,7 +140,11 @@ final class CpanelUapiClient
     private function decodeWhm(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the WHM server.', 'data' => []];
+            $msg = 'Could not reach the WHM server.';
+            if (!empty($response['error'])) {
+                $msg .= ' (' . $response['error'] . ')';
+            }
+            return ['success' => false, 'message' => $msg, 'data' => []];
         }
 
         $decoded = json_decode($response['body'], true);

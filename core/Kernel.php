@@ -542,7 +542,11 @@ class Kernel
         $this->container->singleton(HttpClient::class, fn () => new CurlHttpClient(timeoutSeconds: 120));
 
         $this->container->singleton(CpanelProvisioningModule::class, function (Container $c) {
-            return new CpanelProvisioningModule($c->make(HttpClient::class));
+            return new CpanelProvisioningModule(new CurlHttpClient(timeoutSeconds: 120, verifySsl: false));
+        });
+
+        $this->container->singleton(\CodeVault\CpanelTools\CpanelUapiClient::class, function (Container $c) {
+            return new \CodeVault\CpanelTools\CpanelUapiClient(new CurlHttpClient(timeoutSeconds: 120, verifySsl: false));
         });
 
         $this->container->singleton(CyberPanelProvisioningModule::class, function (Container $c) {
