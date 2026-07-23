@@ -365,7 +365,8 @@ final class ClientAuthController
             return Response::redirect('/client/login');
         }
 
-        $appUrl = $this->config->get('app.url', 'http://localhost');
+        $configuredUrl = (string) ($this->config->get('app.url') ?: $this->config->env('APP_URL', ''));
+        $appUrl = ($configuredUrl !== '' && !str_contains($configuredUrl, 'localhost')) ? $configuredUrl : $request->baseUrl();
         $redirectUri = rtrim($appUrl, '/') . '/client/auth/google/callback';
 
         $url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
@@ -394,7 +395,8 @@ final class ClientAuthController
             return Response::redirect('/client/login');
         }
 
-        $appUrl = $this->config->get('app.url', 'http://localhost');
+        $configuredUrl = (string) ($this->config->get('app.url') ?: $this->config->env('APP_URL', ''));
+        $appUrl = ($configuredUrl !== '' && !str_contains($configuredUrl, 'localhost')) ? $configuredUrl : $request->baseUrl();
         $redirectUri = rtrim($appUrl, '/') . '/client/auth/google/callback';
 
         $ch = curl_init('https://oauth2.googleapis.com/token');

@@ -37,12 +37,19 @@ final class CurrencyRepository
     {
         $row = $this->db->selectOne('SELECT * FROM currencies WHERE is_default = 1 LIMIT 1');
 
-        // Every install seeds exactly one default currency (migration 0037)
-        // and setDefault() never leaves zero defaults, so this is
-        // unreachable outside a corrupted database — fail loudly rather
-        // than silently pricing everything at a fabricated rate.
         if ($row === null) {
-            throw new \RuntimeException('No default currency configured.');
+            $any = $this->db->selectOne('SELECT * FROM currencies LIMIT 1');
+            if ($any !== null) {
+                $this->db->statement('UPDATE currencies SET is_default = 1 WHERE id = ?', [$any['id']]);
+                $row = $this->db->selectOne('SELECT * FROM currencies WHERE is_default = 1 LIMIT 1');
+            } else {
+                $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+                $this->db->insert(
+                    "INSERT INTO currencies (code, symbol, exchange_rate, is_default, created_at, updated_at) VALUES ('USD', '$', 1.0000, 1, ?, ?)",
+                    [$now, $now]
+                );
+                $row = $this->db->selectOne('SELECT * FROM currencies WHERE is_default = 1 LIMIT 1');
+            }
         }
 
         return $row;

@@ -155,4 +155,18 @@ final class CurrencyServiceTest extends DatabaseTestCase
         $this->assertTrue($deleted);
         $this->assertNull($this->currencies->find($eurId));
     }
+
+    public function test_default_currency_heals_when_empty(): void
+    {
+        // Truncate currencies table
+        $this->db->statement('SET FOREIGN_KEY_CHECKS = 0');
+        $this->db->statement('TRUNCATE TABLE currencies');
+        $this->db->statement('SET FOREIGN_KEY_CHECKS = 1');
+
+        // Fetch default currency, which should heal and re-seed USD
+        $default = $this->currencies->default();
+
+        $this->assertSame('USD', $default['code']);
+        $this->assertSame(1, (int) $default['is_default']);
+    }
 }

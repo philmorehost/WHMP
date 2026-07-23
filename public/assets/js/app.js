@@ -563,6 +563,9 @@
         resultEl.textContent = 'Checking availability...';
         resultEl.style.color = 'var(--cv-text-secondary)';
 
+        var optionEl = document.querySelector('[data-domain-option-toggle]:checked');
+        var option = optionEl ? optionEl.value : 'register';
+
         fetch('/domains/availability?domain=' + encodeURIComponent(domain), {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
         })
@@ -572,7 +575,8 @@
                 resultEl.textContent = data.message || 'Could not check availability.';
                 resultEl.style.color = 'var(--cv-text-secondary)';
             } else if (data.available) {
-                resultEl.textContent = domain + ' is available.';
+                var priceStr = option === 'transfer' ? data.formatted_transfer_price : data.formatted_price;
+                resultEl.textContent = domain + ' is available! Price: ' + priceStr + ' / Year';
                 resultEl.style.color = '#22c55e';
             } else {
                 resultEl.textContent = domain + ' is already taken.';
@@ -916,8 +920,8 @@
 
             resultsEl.innerHTML = suggestions.map(function (s) {
                 return '<div class="cv-card" style="margin-bottom:var(--cv-space-3);display:flex;justify-content:space-between;align-items:center;">'
-                    + '<div><strong>' + s.domain + '</strong>'
-                    + '<div style="font-size:var(--cv-text-xs);color:#22c55e;font-weight:600;">Available &mdash; $' + Number(s.price).toFixed(2) + '/yr</div></div>'
+                    + '<div><strong style="font-size:1.1rem;color:var(--cv-text-primary);">' + s.domain + '</strong>'
+                    + '<div style="font-size:var(--cv-text-sm);color:#10b981;font-weight:700;margin-top:0.3rem;display:flex;align-items:center;gap:0.5rem;"><span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#10b981;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(16,185,129,0.3);">✔ AVAILABLE</span> <span style="font-size:1rem;color:var(--cv-text-primary);">$' + Number(s.price).toFixed(2) + '/yr</span></div></div>'
                     + '<button type="button" class="cv-btn" data-domain-register-trigger="' + s.domain + '">Register</button>'
                     + '</div>';
             }).join('');
@@ -985,4 +989,73 @@
             });
         }, 250);
     });
+
+    // Select-all checkbox delegation (CSP compliant)
+    document.addEventListener('change', function (event) {
+        var target = event.target;
+        if (target.matches('[data-select-all-trigger]')) {
+            var selector = target.getAttribute('data-select-all-trigger');
+            var checkboxes = document.querySelectorAll(selector);
+            for (var i = 0; i < checkboxes.length; i++) {
+                checkboxes[i].checked = target.checked;
+            }
+            updateBulkDeleteButtonVisibility(selector);
+        }
+        if (target.matches('[data-select-all-item]')) {
+            var group = target.getAttribute('data-select-all-item');
+            var selectAll = document.querySelector('[data-select-all-trigger="' + group + '"]');
+            var checkboxes = document.querySelectorAll(group);
+            if (selectAll) {
+                var allChecked = true;
+                for (var j = 0; j < checkboxes.length; j++) {
+                    if (!checkboxes[j].checked) {
+                        allChecked = false;
+                        break;
+                    }
+                }
+                selectAll.checked = allChecked;
+            }
+            updateBulkDeleteButtonVisibility(group);
+        }
+    });
+
+    function updateBulkDeleteButtonVisibility(selector) {
+        var checkboxes = document.querySelectorAll(selector);
+        var anyChecked = false;
+        for (var i = 0; i < checkboxes.length; i++) {
+            if (checkboxes[i].checked) {
+                anyChecked = true;
+                break;
+            }
+        }
+        var deleteBtns = document.querySelectorAll('[data-bulk-delete-for="' + selector + '"]');
+        for (var j = 0; j < deleteBtns.length; j++) {
+            deleteBtns[j].style.display = anyChecked ? 'inline-block' : 'none';
+        }
+    }
+
+    // Admin: Show hostname hint for specific server modules
+    document.addEventListener('change', function(event) {
+        if (!event.target.matches('[data-server-module-select]')) return;
+        
+        var module = event.target.value;
+        var hintEl = event.target.closest('form').querySelector('#hostname-hint');
+        if (!hintEl) return;
+        
+        if (module === 'interserver-vps' || module === 'interserver-dedicated' || module === 'interserver_vps' || module === 'interserver_dedicated') {
+            hintEl.innerHTML = 'Hint: Use <strong>https://my.interserver.net/</strong>';
+            hintEl.style.display = 'block';
+        } else if (module === 'nocix-dedicated' || module === 'nocix_dedicated' || module === 'nocix') {
+            hintEl.innerHTML = 'Hint: Use <strong>https://manage.nocix.net/</strong>';
+            hintEl.style.display = 'block';
+        } else {
+            hintEl.style.display = 'none';
+        }
+    });
+
+    // Trigger module select logic once on load if present
+    var serverModuleSelect = document.querySelector('[data-server-module-select]');
+    if (serverModuleSelect) {
+        serverModuleSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 })();

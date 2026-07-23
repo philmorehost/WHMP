@@ -362,6 +362,201 @@ h1, h2, h3, h4, h5, h6 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+        inset: 0 auto 0 0;
+        z-index: 100;
+        transform: translateX(-100%);
+        transition: transform var(--cv-transition-base);
+        box-shadow: var(--cv-shadow-lg);
+    }
+    body[data-sidebar-open='true'] .cv-shell__sidebar { transform: translateX(0); }
+    body[data-sidebar-open='true'] .cv-sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(20, 23, 28, 0.4);
+        z-index: 99;
+    }
+    .cv-sidebar-toggle { display: inline-flex; }
+    .cv-shell__topbar { justify-content: space-between; }
+
+    /* Standard no-wrapper responsive-table technique: the table itself
+       becomes the scroll container (its rows/cells keep their default
+       table-row/table-cell display, so column layout is unaffected). */
+    .cv-table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; width: 100%; }
+
+    .cv-dashboard-grid--2-3, .cv-dashboard-grid--2-1 { grid-template-columns: 1fr !important; gap: var(--cv-space-4); }
+
+    /* Client-area top bar (partials/header.php): brand + language/currency
+       selects + theme toggle wrap onto their own row instead of overflowing
+       the viewport width. */
+    .cv-topbar { flex-wrap: wrap; row-gap: var(--cv-space-2); padding: var(--cv-space-3) var(--cv-space-4); }
+    .cv-topbar__actions { flex-wrap: wrap; row-gap: var(--cv-space-2); width: 100%; justify-content: space-between; }
+
+    /* Standard layout containers and shell */
+    .cv-card {
+        padding: var(--cv-space-4);
+    }
+    
+    .cv-shell__main {
+        padding: var(--cv-space-4);
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    /* Wrap standard data table toolbars */
+    .cv-datatable__toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .cv-datatable__toolbar form {
+        width: 100%;
+    }
+    .cv-datatable__toolbar .cv-input {
+        width: 100%;
+    }
+
+    /* Wrap pagination */
+    .cv-datatable__pagination {
+        flex-wrap: wrap;
+        justify-content: space-between;
+    }
+
+    /* Wrap input grids */
+    [style*="grid-template-columns:1fr 1fr"],
+    [style*="grid-template-columns: 1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Prevent text/summary amounts and tables from pushing screen sizes horizontally */
+    .cv-stat-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Ensure the main container and html/body don't allow horizontal page scroll */
+    html, body {
+        overflow-x: hidden;
+    }
+
+    .cv-hide-mobile {
+        display: none !important;
+    }
+}
+
+/* --- Dashboard grids ---------------------------------------------------
+   Named after their desktop column ratio; collapse to one column below the
+   tablet breakpoint (see the @media block above). Replaces two previously
+   inline `style="display:grid;grid-template-columns:..."` blocks so the
+   media query has a class to target. */
+.cv-dashboard-grid--2-3 { display: grid; grid-template-columns: 3fr 2fr; gap: var(--cv-space-6); }
+.cv-dashboard-grid--2-3 > * { min-width: 0; }
+.cv-dashboard-grid--2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: var(--cv-space-5); align-items: start; }
+.cv-dashboard-grid--2-1 > * { min-width: 0; }
+
+/* --- Stat tiles (dashboard) ------------------------------------------- */
+.cv-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--cv-space-4); }
+.cv-stat-grid > * { min-width: 0; }
+.cv-stat-tile { 
+    display: flex; 
+    flex-direction: column; 
+    gap: var(--cv-space-2); 
+    border: 1px solid var(--cv-border-default);
+    transition: transform var(--cv-transition-base), box-shadow var(--cv-transition-base), border-color var(--cv-transition-base);
+    min-width: 0;
+}
+.cv-stat-tile:hover {
+    transform: translateY(-4px);
+    border-color: var(--cv-color-brand-400);
+    box-shadow: var(--cv-shadow-md);
+}
+.cv-stat-tile__icon {
+    width: 3rem;
+    height: 3rem;
+    border-radius: var(--cv-radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: var(--cv-text-xl);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.cv-stat-tile__label { 
+    color: var(--cv-text-secondary); 
+    font-size: var(--cv-text-xs); 
+    font-weight: 700; 
+    text-transform: uppercase; 
+    letter-spacing: 0.05em; 
+}
+.cv-stat-tile__value { 
+    font-family: var(--cv-font-heading); 
+    font-size: var(--cv-text-2xl); 
+    font-weight: 800; 
+    color: var(--cv-text-primary); 
+    letter-spacing: -0.02em; 
+    line-height: 1.1; 
+}
+.cv-stat-tile__meta { 
+    font-size: var(--cv-text-xs); 
+    color: var(--cv-text-tertiary); 
+    border-top: 1px solid var(--cv-border-subtle); 
+    padding-top: var(--cv-space-2); 
+    margin-top: var(--cv-space-2); 
+}
+.cv-stat-tile__meta a { 
+    color: var(--cv-color-brand-500); 
+    text-decoration: none; 
+    font-weight: 600; 
+}
+.cv-stat-tile__meta a:hover { 
+    text-decoration: underline; 
+}
+
+/* --- Chart (server-rendered inline SVG — no client-side chart library) */
+.cv-chart { width: 100%; height: auto; overflow: visible; }
+.cv-chart__bar { fill: var(--cv-color-accent); transition: opacity var(--cv-transition-fast); }
+.cv-chart__bar:hover { opacity: 0.75; }
+.cv-chart__line { fill: none; stroke: var(--cv-color-accent); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.cv-chart__area { fill: url(#cv-chart-area-fill); opacity: 0.5; }
+.cv-chart__dot { fill: var(--cv-bg-surface); stroke: var(--cv-color-accent); stroke-width: 2.5; }
+.cv-chart__axis-label { fill: var(--cv-text-tertiary); font-size: 11px; font-family: var(--cv-font-sans); }
+.cv-chart__gridline { stroke: var(--cv-border-subtle); stroke-width: 1; }
+
+/* --- Sidebar nav (grouped, icon-based) --------------------------------- */
+.cv-sidenav { padding: var(--cv-space-2); overflow-y: auto; flex: 1; }
+.cv-sidenav-group { margin-bottom: var(--cv-space-2); }
+.cv-sidenav-group__label {
+    padding: var(--cv-space-2) var(--cv-space-3) var(--cv-space-1);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--cv-text-tertiary);
+}
+.cv-sidenav-link {
+    display: flex;
+    align-items: center;
+    gap: var(--cv-space-3);
+    padding: 0.5rem var(--cv-space-3);
+    border-radius: var(--cv-radius-sm);
+    color: var(--cv-text-secondary);
+    text-decoration: none;
+    font-size: var(--cv-text-sm);
+    font-weight: 500;
+    transition: background-color var(--cv-transition-fast), color var(--cv-transition-fast);
+}
+.cv-sidenav-link:hover { background: var(--cv-bg-surface-sunken); color: var(--cv-text-primary); }
+.cv-sidenav-link__icon { width: 1.125rem; height: 1.125rem; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; opacity: 0.75; }
+.cv-sidenav-link[data-active='true'] {
+    background: var(--cv-sidenav-active-bg);
+    color: var(--cv-color-accent);
+    font-weight: 700;
+}
+.cv-sidenav-link[data-active='true'] .cv-sidenav-link__icon { opacity: 1; }
+
+/* --- Theme toggle -------------------------------------------------------- */
+.cv-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 2rem;
     height: 2rem;
     border-radius: var(--cv-radius-full);
@@ -376,3 +571,42 @@ h1, h2, h3, h4, h5, h6 {
 .cv-theme-toggle .cv-icon-sun { display: none; }
 :root[data-theme='dark'] .cv-theme-toggle .cv-icon-moon { display: none; }
 :root[data-theme='dark'] .cv-theme-toggle .cv-icon-sun { display: block; }
+
+/* --- Responsive Sidebar Layout ------------------------------------------- */
+.home-layout-wrapper {
+    display: flex;
+    gap: var(--cv-space-6);
+    align-items: flex-start;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding-top: var(--cv-space-4);
+    flex-direction: row;
+    padding-left: 0;
+    padding-right: 0;
+}
+.home-sidebar {
+    width: 260px;
+    padding: var(--cv-space-3) 0;
+    flex-shrink: 0;
+    border: 1px solid var(--cv-border-default);
+    background: var(--cv-bg-surface);
+    position: sticky;
+    top: var(--cv-space-4);
+    border-radius: var(--cv-radius-md);
+}
+.home-main-content {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+}
+@media (max-width: 992px) {
+    .home-layout-wrapper {
+        flex-direction: column;
+        padding-left: var(--cv-space-4);
+        padding-right: var(--cv-space-4);
+    }
+    .home-sidebar {
+        width: 100%;
+        position: static;
+    }
+}

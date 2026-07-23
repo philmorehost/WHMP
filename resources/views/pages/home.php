@@ -2,9 +2,10 @@
 /** @var CodeVault\View $view */
 /** @var array<int, array{group: array<string, mixed>, products: array<int, array<string, mixed>>}> $productGroups */
 ?>
-<div style="display: flex; gap: var(--cv-space-6); align-items: flex-start; max-width: 1400px; margin: 0 auto; padding-top: var(--cv-space-4);">
+
+<div class="home-layout-wrapper">
     <!-- Left Sidebar (Lagom2 style) -->
-    <div class="cv-card" style="width: 260px; padding: var(--cv-space-3) 0; flex-shrink: 0; border: 1px solid var(--cv-border-default); background: var(--cv-bg-surface); position: sticky; top: var(--cv-space-4);">
+    <div class="cv-card home-sidebar">
         <ul style="list-style: none; padding: 0; margin: 0;">
             <li style="margin-bottom: var(--cv-space-1);">
                 <a href="/store" style="display: flex; align-items: center; justify-content: space-between; padding: var(--cv-space-3) var(--cv-space-4); color: var(--cv-text-primary); text-decoration: none; font-weight: 600; font-size: var(--cv-text-sm); transition: background var(--cv-transition-fast);" onmouseover="this.style.background='var(--cv-bg-surface-sunken)'" onmouseout="this.style.background='transparent'">
@@ -52,15 +53,7 @@
     </div>
 
     <!-- Main Content Area -->
-    <div style="flex: 1; min-width: 0;">
-        <!-- Terms Warning Banner -->
-        <div style="background: rgba(255, 143, 40, 0.08); border: 1px solid var(--cv-color-brand-500); padding: var(--cv-space-4); border-radius: var(--cv-radius-md); display: flex; gap: var(--cv-space-3); margin-bottom: var(--cv-space-6); font-size: var(--cv-text-sm); color: var(--cv-text-primary); align-items: flex-start;">
-            <span style="font-size: 1.25rem; line-height: 1;">⚠️</span>
-            <div>
-                <strong style="display: block; margin-bottom: var(--cv-space-1); font-family: 'Hanken Grotesk', sans-serif;">Read Our Terms of Service Before Purchase Licenses</strong>
-                <span style="color: var(--cv-text-secondary); font-size: var(--cv-text-xs);">Please ensure you read <a href="/terms" style="color: var(--cv-color-brand-500); font-weight: 700; text-decoration: none;">terms of services</a> before ordering any license.</span>
-            </div>
-        </div>
+    <div class="home-main-content">
 
         <?php foreach ($productGroups as $groupData): ?>
             <h2 style="font-family: 'Hanken Grotesk', sans-serif; font-size: var(--cv-text-xl); font-weight: 800; margin-top: var(--cv-space-6); margin-bottom: var(--cv-space-4); color: var(--cv-text-primary); border-bottom: 2px solid var(--cv-border-default); padding-bottom: var(--cv-space-2);">

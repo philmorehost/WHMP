@@ -10,6 +10,7 @@ use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\View;
+use CodeVault\Activity\ActivityLogger;
 
 /**
  * My Services (blueprint §4.1): status, usage, SSO-to-panel, cancel.
@@ -25,7 +26,10 @@ final class ClientServiceController
         private readonly ServiceRepository $services,
         private readonly ProvisioningService $provisioning,
         private readonly ServerRepository $servers,
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly CancellationRequestRepository $cancellations,
+        private readonly InvoiceRepository $invoices,
+        private readonly ActivityLogger $activity
     ) {
     }
 
@@ -57,12 +61,23 @@ final class ClientServiceController
         }
 
         $usage = $service['status'] === 'active' ? $this->provisioning->usage((int) $service['id']) : null;
+        $pendingCancellation = $this->cancellations->findPendingForService((int) $service['id']);
+
+        $serverModule = null;
+        if ($service['server_id'] !== null) {
+            $server = $this->servers->find((int) $service['server_id']);
+            $serverModule = $server ? $server['module_slug'] : null;
+        }
 
         return $this->page('billing.client-service-show', [
             'service' => $service,
             'usage' => $usage,
             'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
             'currency' => $this->currency->resolveForClient($client),
+            'pendingCancellation' => $pendingCancellation,
+            'serverModule' => $serverModule,
+            'message' => $params['message'] ?? null,
+            'error' => $params['error'] ?? null,
         ]);
     }
 
@@ -83,15 +98,42 @@ final class ClientServiceController
         $result = $this->provisioning->singleSignOn((int) $service['id']);
 
         if (!$result['success']) {
+            $pendingCancellation = $this->cancellations->findPendingForService((int) $service['id']);
             return $this->page('billing.client-service-show', [
                 'service' => $service,
                 'usage' => null,
                 'error' => $result['message'],
                 'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
+                'pendingCancellation' => $pendingCancellation,
             ]);
         }
 
         return Response::redirect($result['url']);
+    }
+
+    public function cancelForm(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $service = $this->services->find((int) $params['id']);
+
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $pendingCancellation = $this->cancellations->findPendingForService((int) $service['id']);
+        if ($pendingCancellation !== null) {
+            return Response::redirect("/client/services/{$service['id']}");
+        }
+
+        return $this->page('billing.client-service-cancel', [
+            'service' => $service,
+            'currency' => $this->currency->resolveForClient($client),
+        ]);
     }
 
     public function cancel(Request $request, array $params): Response
@@ -104,11 +146,115 @@ final class ClientServiceController
 
         $service = $this->services->find((int) $params['id']);
 
-        if ($service !== null && (int) $service['client_id'] === (int) $client['id']) {
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $pendingCancellation = $this->cancellations->findPendingForService((int) $service['id']);
+        if ($pendingCancellation !== null) {
+            return Response::redirect('/client/services');
+        }
+
+        $type = (string) $request->input('type', 'end_of_period');
+        $reason = trim((string) $request->input('reason', ''));
+
+        if ($type === 'immediate') {
+            // Call module terminate
+            $this->provisioning->terminate((int) $service['id']);
+            // Locally cancel service
             $this->services->cancel((int) $service['id']);
+            // Cancel unpaid invoices
+            $this->invoices->cancelUnpaidForService((int) $service['id']);
+
+            $this->activity->log(
+                'client',
+                (int) $client['id'],
+                'service.cancelled_immediate',
+                'service',
+                (int) $service['id'],
+                "Client cancelled service #{$service['id']} immediately. Reason: {$reason}",
+                $request->ip()
+            );
+        } else {
+            // End of period request
+            $this->cancellations->createRequest((int) $service['id'], 'end_of_period', $reason);
+            // Cancel unpaid invoices
+            $this->invoices->cancelUnpaidForService((int) $service['id']);
+
+            $this->activity->log(
+                'client',
+                (int) $client['id'],
+                'service.cancellation_requested',
+                'service',
+                (int) $service['id'],
+                "Client requested end of period cancellation for service #{$service['id']}. Reason: {$reason}",
+                $request->ip()
+            );
         }
 
         return Response::redirect('/client/services');
+    }
+
+    public function reinstall(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $service = $this->services->find((int) $params['id']);
+
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $osVersion = trim((string) $request->input('os_version', 'ubuntu24'));
+        $result = $this->provisioning->reinstall((int) $service['id'], $osVersion);
+
+        $pendingCancellation = $this->cancellations->findPendingForService((int) $service['id']);
+        $usage = $service['status'] === 'active' ? $this->provisioning->usage((int) $service['id']) : null;
+
+        return $this->page('billing.client-service-show', [
+            'service' => $service,
+            'usage' => $usage,
+            'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
+            'currency' => $this->currency->resolveForClient($client),
+            'pendingCancellation' => $pendingCancellation,
+            'message' => $result['success'] ? $result['message'] : null,
+            'error' => !$result['success'] ? $result['message'] : null,
+        ]);
+    }
+
+    public function rdns(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $service = $this->services->find((int) $params['id']);
+
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $rdns = trim((string) $request->input('rdns', ''));
+        $result = $this->provisioning->setReverseDns((int) $service['id'], $rdns);
+
+        $pendingCancellation = $this->cancellations->findPendingForService((int) $service['id']);
+        $usage = $service['status'] === 'active' ? $this->provisioning->usage((int) $service['id']) : null;
+
+        return $this->page('billing.client-service-show', [
+            'service' => $service,
+            'usage' => $usage,
+            'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
+            'currency' => $this->currency->resolveForClient($client),
+            'pendingCancellation' => $pendingCancellation,
+            'message' => $result['success'] ? $result['message'] : null,
+            'error' => !$result['success'] ? $result['message'] : null,
+        ]);
     }
 
     /** @param array<string, mixed> $service */

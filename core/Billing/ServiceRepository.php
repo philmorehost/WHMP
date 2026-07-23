@@ -17,7 +17,16 @@ final class ServiceRepository
     /** @return array<string, mixed>|null */
     public function find(int $id): ?array
     {
-        return $this->db->selectOne('SELECT * FROM services WHERE id = ?', [$id]);
+        return $this->db->selectOne(
+            <<<SQL
+            SELECT s.*, c.email AS client_email, c.first_name, c.last_name, c.company_name, c.currency_id AS client_currency_id, cu.code AS currency_code, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            FROM services s
+            JOIN clients c ON c.id = s.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            WHERE s.id = ?
+            SQL,
+            [$id]
+        );
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -276,6 +285,24 @@ final class ServiceRepository
                 $fields['product_name'],
                 $fields['billing_cycle'],
                 $fields['amount'],
+                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                $id,
+            ]
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $fields
+     */
+    public function updateDetails(int $id, array $fields): void
+    {
+        $this->db->update(
+            'UPDATE services SET username = ?, domain = ?, hostname = ?, server_id = ?, updated_at = ? WHERE id = ?',
+            [
+                $fields['username'],
+                $fields['domain'],
+                $fields['hostname'],
+                $fields['server_id'],
                 (new DateTimeImmutable())->format('Y-m-d H:i:s'),
                 $id,
             ]

@@ -9,3 +9,4 @@ use CodeVault\Billing\PromotionController;
 $router->get('/admin/promotions', [PromotionController::class, 'index']);
 $router->post('/admin/promotions', [PromotionController::class, 'store']);
 $router->post('/admin/promotions/{id}/delete', [PromotionController::class, 'destroy']);
+$router->post('/admin/promotions/delete-multiple', [PromotionController::class, 'destroyMultiple']);

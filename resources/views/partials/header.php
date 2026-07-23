@@ -21,13 +21,13 @@ try {
 } catch (\Throwable $e) {}
 ?>
 <header class="cv-topbar" style="position:relative;display:flex;align-items:center;justify-content:space-between;padding:var(--cv-space-4) var(--cv-space-6);border-bottom:1px solid var(--cv-border-default);">
-    <strong style="display:flex;align-items:center;gap:var(--cv-space-2);flex-shrink:0;">
+    <a href="/client/dashboard" style="text-decoration:none; color:inherit; display:flex;align-items:center;gap:var(--cv-space-2);flex-shrink:0;font-weight:bold;">
         <?php if (!empty($theme['logoUrl'])): ?>
             <img src="<?= e($theme['logoUrl']) ?>" alt="<?= e($theme['brandName']) ?>" style="height:1.75rem;">
         <?php else: ?>
             <?= e($title ?? $theme['brandName']) ?>
         <?php endif; ?>
-    </strong>
+    </a>
 
     <nav style="display:flex; gap:var(--cv-space-4); margin-left:var(--cv-space-6); font-size:var(--cv-text-sm); font-weight:600; align-items:center; flex:1;" class="cv-nav-links">
         <a href="/client/dashboard" style="color:var(--cv-text-primary); text-decoration:none;">Dashboard</a>

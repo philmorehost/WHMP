@@ -36,6 +36,15 @@ final class CreditService
         $this->credit->add($clientId, $amount, $reason, null, $adminId);
     }
 
+    public function debit(int $clientId, float $amount, string $reason, ?int $adminId = null): void
+    {
+        if ($amount <= 0) {
+            throw new RuntimeException('Credit debits must be a positive amount.');
+        }
+
+        $this->credit->add($clientId, -$amount, $reason, null, $adminId);
+    }
+
     /**
      * @return array{success: bool, applied?: float, error?: string}
      */

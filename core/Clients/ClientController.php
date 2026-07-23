@@ -155,6 +155,8 @@ final class ClientController
         }
 
         $tab = (string) $request->query('tab', 'summary');
+        $billingPage = max(1, (int) $request->query('billing_page', 1));
+        $billingPagination = $this->invoices->paginateForClient((int) $client['id'], $billingPage, 10);
 
         return $this->render('clients.show', [
             'client' => $client,
@@ -163,7 +165,8 @@ final class ClientController
             'contacts' => $this->contacts->forClient((int) $client['id']),
             'activity' => $this->activity->forSubject('client', (int) $client['id']),
             'services' => $this->services->forClient((int) $client['id']),
-            'invoices' => $this->invoices->forClient((int) $client['id']),
+            'invoices' => $billingPagination['data'],
+            'billingPagination' => $billingPagination,
             'creditBalance' => $this->credit->balance((int) $client['id']),
             'creditLedger' => $this->credit->forClient((int) $client['id']),
         ]);
@@ -176,12 +179,28 @@ final class ClientController
         }
 
         $clientId = (int) $params['id'];
+        $client = $this->clients->find($clientId);
+        if ($client === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
         $amount = (float) $request->input('amount', 0);
-        $reason = trim((string) $request->input('reason', '')) ?: 'Manual credit grant';
+        $action = $request->input('action', 'credit');
+        $reason = trim((string) $request->input('reason', ''));
 
         if ($amount > 0) {
-            $this->creditService->grant($clientId, $amount, $reason, (int) $this->guard->currentAdmin()['id']);
-            $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'client.credit_granted', 'client', $clientId, "Granted \${$amount} credit: {$reason}", $request->ip());
+            $currency = $this->currencyService->resolveForClient($client);
+            $currencySymbol = $currency['symbol'] ?? '$';
+            $adminId = (int) $this->guard->currentAdmin()['id'];
+            if ($action === 'debit') {
+                $reason = $reason ?: 'Manual credit debit';
+                $this->creditService->debit($clientId, $amount, $reason, $adminId);
+                $this->activity->log('admin', $adminId, 'client.credit_debited', 'client', $clientId, "Debited {$currencySymbol}" . number_format($amount, 2) . " credit: {$reason}", $request->ip());
+            } else {
+                $reason = $reason ?: 'Manual credit grant';
+                $this->creditService->grant($clientId, $amount, $reason, $adminId);
+                $this->activity->log('admin', $adminId, 'client.credit_granted', 'client', $clientId, "Granted {$currencySymbol}" . number_format($amount, 2) . " credit: {$reason}", $request->ip());
+            }
         }
 
         return Response::redirect("/admin/clients/{$clientId}?tab=billing");
@@ -222,6 +241,9 @@ final class ClientController
         }
 
         $this->clients->update($id, $fields);
+        if (isset($fields['password']) && $fields['password'] !== '') {
+            $this->clients->updatePassword($id, $fields['password']);
+        }
         $this->customFieldValues->saveForClient($id, $this->extractCustomFieldValues($request));
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'client.updated', 'client', $id, "Updated client #{$id}", $request->ip());
 

@@ -77,19 +77,23 @@ final class DomainPricingRepository
             $autosetupTransfer = 'payment';
         }
 
+        $gracePeriodDays = (int) ($fields['grace_period_days'] ?? 30);
+        $redemptionPeriodDays = (int) ($fields['redemption_period_days'] ?? 30);
+        $redemptionFee = (float) ($fields['redemption_fee'] ?? 0.0);
+
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         $existing = $this->findByTld($tld);
 
         if ($existing !== null) {
             $this->db->update(
-                'UPDATE domain_pricing SET registrar_slug = ?, register_price = ?, transfer_price = ?, renew_price = ?, spinner_enabled = ?, category = ?, autosetup_registration = ?, autosetup_transfer = ?, updated_at = ? WHERE tld = ?',
-                [$registrarSlug, $registerPrice, $transferPrice, $renewPrice, $spinnerEnabled, $category, $autosetupRegistration, $autosetupTransfer, $now, $tld]
+                'UPDATE domain_pricing SET registrar_slug = ?, register_price = ?, transfer_price = ?, renew_price = ?, grace_period_days = ?, redemption_period_days = ?, redemption_fee = ?, spinner_enabled = ?, category = ?, autosetup_registration = ?, autosetup_transfer = ?, updated_at = ? WHERE tld = ?',
+                [$registrarSlug, $registerPrice, $transferPrice, $renewPrice, $gracePeriodDays, $redemptionPeriodDays, $redemptionFee, $spinnerEnabled, $category, $autosetupRegistration, $autosetupTransfer, $now, $tld]
             );
         } else {
             $this->db->insert(
-                'INSERT INTO domain_pricing (tld, category, registrar_slug, register_price, transfer_price, renew_price, spinner_enabled, autosetup_registration, autosetup_transfer, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [$tld, $category, $registrarSlug, $registerPrice, $transferPrice, $renewPrice, $spinnerEnabled, $autosetupRegistration, $autosetupTransfer, $now, $now]
+                'INSERT INTO domain_pricing (tld, category, registrar_slug, register_price, transfer_price, renew_price, grace_period_days, redemption_period_days, redemption_fee, spinner_enabled, autosetup_registration, autosetup_transfer, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$tld, $category, $registrarSlug, $registerPrice, $transferPrice, $renewPrice, $gracePeriodDays, $redemptionPeriodDays, $redemptionFee, $spinnerEnabled, $autosetupRegistration, $autosetupTransfer, $now, $now]
             );
         }
     }

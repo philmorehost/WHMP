@@ -35,6 +35,25 @@ final class InvoiceRepository
     /**
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
+    public function paginateForClient(int $clientId, int $page = 1, int $perPage = 10): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM invoices WHERE client_id = ?", [$clientId])['c'] ?? 0);
+
+        $data = $this->db->select(
+            "SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC LIMIT {$perPage} OFFSET {$offset}",
+            [$clientId]
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
+    /**
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
     public function paginate(?string $status = null, int $page = 1, int $perPage = 20): array
     {
         $page = max(1, $page);
@@ -91,10 +110,10 @@ final class InvoiceRepository
         );
     }
 
-    public function markPaid(int $id): void
+    public function markPaid(int $id): int
     {
-        $this->db->update(
-            'UPDATE invoices SET status = ?, paid_at = ?, updated_at = ? WHERE id = ?',
+        return $this->db->update(
+            "UPDATE invoices SET status = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'unpaid'",
             ['paid', (new DateTimeImmutable())->format('Y-m-d H:i:s'), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
@@ -104,6 +123,14 @@ final class InvoiceRepository
         $this->db->update(
             'UPDATE invoices SET status = ?, updated_at = ? WHERE id = ?',
             ['cancelled', (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    public function cancelUnpaidForService(int $serviceId): void
+    {
+        $this->db->update(
+            "UPDATE invoices SET status = 'cancelled', updated_at = ? WHERE service_id = ? AND status = 'unpaid'",
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $serviceId]
         );
     }
 

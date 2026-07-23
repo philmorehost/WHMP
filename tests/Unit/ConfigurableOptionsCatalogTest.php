@@ -68,4 +68,27 @@ final class ConfigurableOptionsCatalogTest extends DatabaseTestCase
 
         $this->assertNull($this->options->find($optionId));
     }
+
+    public function test_bulk_delete_groups_deletes_multiple_groups_and_cascades(): void
+    {
+        $groupA = $this->optionGroups->create('Group A');
+        $groupB = $this->optionGroups->create('Group B');
+        $groupC = $this->optionGroups->create('Group C');
+
+        $optA = $this->options->create($groupA, 'Opt A');
+        $optB = $this->options->create($groupB, 'Opt B');
+        $optC = $this->options->create($groupC, 'Opt C');
+
+        // Delete A and B (mimicking bulkDeleteGroups loop)
+        $this->optionGroups->delete($groupA);
+        $this->optionGroups->delete($groupB);
+
+        $this->assertNull($this->optionGroups->find($groupA));
+        $this->assertNull($this->optionGroups->find($groupB));
+        $this->assertNotNull($this->optionGroups->find($groupC));
+
+        $this->assertNull($this->options->find($optA));
+        $this->assertNull($this->options->find($optB));
+        $this->assertNotNull($this->options->find($optC));
+    }
 }

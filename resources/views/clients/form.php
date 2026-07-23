@@ -33,7 +33,12 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
             <label class="cv-label">Email</label>
             <input class="cv-input" type="email" name="email" value="<?= $val('email') ?>" required>
         </div>
-        <?php if (!$isEdit): ?>
+        <?php if ($isEdit): ?>
+        <div class="cv-field">
+            <label class="cv-label">Change Password (leave blank to keep current)</label>
+            <input class="cv-input" type="password" name="password" placeholder="Enter new password">
+        </div>
+        <?php else: ?>
         <div class="cv-field">
             <label class="cv-label">Password (leave blank to auto-generate)</label>
             <input class="cv-input" type="password" name="password">

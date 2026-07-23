@@ -26,6 +26,12 @@ final class ServerGroupRepository
         return $this->db->selectOne('SELECT * FROM server_groups WHERE id = ?', [$id]);
     }
 
+    /** @return array<string, mixed>|null */
+    public function findByName(string $name): ?array
+    {
+        return $this->db->selectOne('SELECT * FROM server_groups WHERE LOWER(name) = LOWER(?)', [$name]);
+    }
+
     public function create(string $name): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');

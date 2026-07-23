@@ -76,10 +76,75 @@ final class TicketRepository
             JOIN departments d ON d.id = t.department_id
             LEFT JOIN admins a ON a.id = t.assigned_admin_id
             {$whereSql}
-            ORDER BY t.priority = 'high' DESC, t.updated_at DESC
+            ORDER BY 
+              CASE t.status
+                WHEN 'open' THEN 1
+                WHEN 'customer-reply' THEN 2
+                WHEN 'answered' THEN 3
+                ELSE 4
+              END ASC, 
+              t.priority = 'high' DESC, 
+              t.updated_at DESC
             SQL,
             $bindings
         );
+    }
+
+    /**
+     * @param array{status?: string, departmentId?: int, assignedAdminId?: int} $filters
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(array $filters = [], int $page = 1, int $perPage = 20): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        $where = [];
+        $bindings = [];
+
+        if (isset($filters['status'])) {
+            $where[] = 't.status = ?';
+            $bindings[] = $filters['status'];
+        }
+
+        if (isset($filters['departmentId'])) {
+            $where[] = 't.department_id = ?';
+            $bindings[] = $filters['departmentId'];
+        }
+
+        if (isset($filters['assignedAdminId'])) {
+            $where[] = 't.assigned_admin_id = ?';
+            $bindings[] = $filters['assignedAdminId'];
+        }
+
+        $whereSql = $where !== [] ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $totalRow = $this->db->selectOne("SELECT COUNT(*) AS c FROM tickets t {$whereSql}", $bindings);
+        $total = (int) ($totalRow['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT t.*, d.name AS department_name, a.display_name AS assigned_admin_name
+            FROM tickets t
+            JOIN departments d ON d.id = t.department_id
+            LEFT JOIN admins a ON a.id = t.assigned_admin_id
+            {$whereSql}
+            ORDER BY 
+              CASE t.status
+                WHEN 'open' THEN 1
+                WHEN 'customer-reply' THEN 2
+                WHEN 'answered' THEN 3
+                ELSE 4
+              END ASC, 
+              t.priority = 'high' DESC, 
+              t.updated_at DESC
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
     }
 
     /** Dashboard tile (R17) — everything not closed, not the full joined row set. */

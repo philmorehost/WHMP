@@ -152,10 +152,26 @@ final class DomainRegistrationController
 
         $check = $this->domainService->checkAvailability($domain, (string) $pricingRow['registrar_slug']);
 
+        $client = $this->guard->currentClient();
+        $container = \CodeVault\Support\App::container();
+        $currencySelection = $container->make(\CodeVault\Billing\CurrencySelection::class);
+        $currencyService = $container->make(\CodeVault\Billing\CurrencyService::class);
+        $currency = $currencyService->resolveEffective($client, $currencySelection->get());
+
+        $price = (float) $pricingRow['register_price'];
+        $transferPrice = (float) $pricingRow['transfer_price'];
+
+        $formattedPrice = $currency['symbol'] . number_format($price * (float) $currency['exchange_rate'], 2);
+        $formattedTransferPrice = $currency['symbol'] . number_format($transferPrice * (float) $currency['exchange_rate'], 2);
+
         return Response::json([
             'checked' => $check['success'],
             'available' => $check['available'],
             'message' => $check['message'],
+            'price' => $price,
+            'transfer_price' => $transferPrice,
+            'formatted_price' => $formattedPrice,
+            'formatted_transfer_price' => $formattedTransferPrice,
         ]);
     }
 

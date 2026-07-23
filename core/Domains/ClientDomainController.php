@@ -47,7 +47,15 @@ final class ClientDomainController
             return $this->deniedOrNotFound();
         }
 
-        return $this->page('domains.client-show', ['domain' => $domain, 'eppCode' => null]);
+        $id = (int) $domain['id'];
+        return $this->page('domains.client-show', [
+            'domain' => $domain,
+            'eppCode' => null,
+            'childNameservers' => $this->domainService->getChildNameservers($id),
+            'dnsRecords' => $this->domainService->getDnsRecords($id),
+            'msg' => $request->query('msg'),
+            'error' => $request->query('error'),
+        ]);
     }
 
     public function toggleLock(Request $request, array $params): Response
@@ -58,9 +66,13 @@ final class ClientDomainController
             return $this->deniedOrNotFound();
         }
 
-        $this->domainService->setLock((int) $domain['id'], !$domain['registrar_lock_enabled']);
+        $result = $this->domainService->setLock((int) $domain['id'], !$domain['registrar_lock_enabled']);
 
-        return Response::redirect("/client/domains/{$domain['id']}");
+        if (!$result['success']) {
+            return Response::redirect("/client/domains/{$domain['id']}?error=" . urlencode($result['message']));
+        }
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
     }
 
     public function toggleIdProtection(Request $request, array $params): Response
@@ -71,9 +83,13 @@ final class ClientDomainController
             return $this->deniedOrNotFound();
         }
 
-        $this->domainService->setIdProtection((int) $domain['id'], !$domain['id_protection_enabled']);
+        $result = $this->domainService->setIdProtection((int) $domain['id'], !$domain['id_protection_enabled']);
 
-        return Response::redirect("/client/domains/{$domain['id']}");
+        if (!$result['success']) {
+            return Response::redirect("/client/domains/{$domain['id']}?error=" . urlencode($result['message']));
+        }
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
     }
 
     public function saveNameservers(Request $request, array $params): Response
@@ -93,9 +109,84 @@ final class ClientDomainController
             trim((string) $request->input('ns6', '')),
         ]));
 
-        $this->domainService->saveNameservers((int) $domain['id'], $ns);
+        $result = $this->domainService->saveNameservers((int) $domain['id'], $ns);
 
-        return Response::redirect("/client/domains/{$domain['id']}");
+        if (!$result['success']) {
+            return Response::redirect("/client/domains/{$domain['id']}?error=" . urlencode($result['message']));
+        }
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
+    }
+
+    public function addChildNameserver(Request $request, array $params): Response
+    {
+        $domain = $this->ownedDomain($params);
+
+        if ($domain === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $hostname = trim((string) $request->input('hostname', ''));
+        $ip = trim((string) $request->input('ip_address', ''));
+
+        $result = $this->domainService->addChildNameserver((int) $domain['id'], $hostname, $ip);
+
+        if (!$result['success']) {
+            return Response::redirect("/client/domains/{$domain['id']}?error=" . urlencode($result['message']));
+        }
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
+    }
+
+    public function deleteChildNameserver(Request $request, array $params): Response
+    {
+        $domain = $this->ownedDomain($params);
+
+        if ($domain === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $childNsId = (int) $params['child_id'];
+        $result = $this->domainService->deleteChildNameserver((int) $domain['id'], $childNsId);
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
+    }
+
+    public function addDnsRecord(Request $request, array $params): Response
+    {
+        $domain = $this->ownedDomain($params);
+
+        if ($domain === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $type = (string) $request->input('type', 'A');
+        $name = (string) $request->input('name', '@');
+        $content = (string) $request->input('content', '');
+        $priority = (int) $request->input('priority', 10);
+        $ttl = (int) $request->input('ttl', 3600);
+
+        $result = $this->domainService->addDnsRecord((int) $domain['id'], $type, $name, $content, $priority, $ttl);
+
+        if (!$result['success']) {
+            return Response::redirect("/client/domains/{$domain['id']}?error=" . urlencode($result['message']));
+        }
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
+    }
+
+    public function deleteDnsRecord(Request $request, array $params): Response
+    {
+        $domain = $this->ownedDomain($params);
+
+        if ($domain === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $recordId = (int) $params['record_id'];
+        $result = $this->domainService->deleteDnsRecord((int) $domain['id'], $recordId);
+
+        return Response::redirect("/client/domains/{$domain['id']}?msg=" . urlencode($result['message']));
     }
 
     public function eppCode(Request $request, array $params): Response
@@ -106,12 +197,16 @@ final class ClientDomainController
             return $this->deniedOrNotFound();
         }
 
-        $result = $this->domainService->getEppCode((int) $domain['id']);
+        $id = (int) $domain['id'];
+        $result = $this->domainService->getEppCode($id);
 
         return $this->page('domains.client-show', [
-            'domain' => $domain,
+            'domain' => $this->domains->find($id) ?: $domain,
             'eppCode' => $result['success'] ? $result['eppCode'] : null,
             'eppError' => $result['success'] ? null : $result['message'],
+            'childNameservers' => $this->domainService->getChildNameservers($id),
+            'dnsRecords' => $this->domainService->getDnsRecords($id),
+            'msg' => $result['success'] ? $result['message'] : null,
         ]);
     }
 

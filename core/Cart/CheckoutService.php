@@ -202,7 +202,7 @@ final class CheckoutService
             $orderLinesWithDomains[$lineIndex] = $domainName;
         }
 
-        $invoiceTotal = $priced['total'] + $tax['amount'] + $domainTotalAdditions;
+        $invoiceTotal = $priced['total'] + $tax['amount'];
 
         $orderId = (int) $this->db->insert(
             'INSERT INTO orders (client_id, status, total, discount_amount, promotion_code, currency_id, currency_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -311,9 +311,13 @@ final class CheckoutService
             }
         }
 
+        $settingsRepo = \CodeVault\Support\App::container()->make(\CodeVault\Settings\SettingsRepository::class);
+        $dueDays = max(0, (int) $settingsRepo->get('billing.new_order_due_days', '7'));
+        $dueDate = (new DateTimeImmutable())->modify("+{$dueDays} days")->format('Y-m-d');
+
         $invoiceId = (int) $this->db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, promotion_code, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$clientId, $orderId, 'unpaid', $priced['total'] + $domainTotalAdditions, $tax['amount'], $discount, $promoCode, $invoiceTotal, $currencyLock['currency_id'], $currencyLock['currency_rate'], $today, $now, $now]
+            [$clientId, $orderId, 'unpaid', $priced['total'], $tax['amount'], $discount, $promoCode, $invoiceTotal, $currencyLock['currency_id'], $currencyLock['currency_rate'], $dueDate, $now, $now]
         );
 
         foreach ($priced['lines'] as $line) {

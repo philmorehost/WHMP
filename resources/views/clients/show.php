@@ -31,6 +31,37 @@ $id = (int) $client['id'];
     <p><a href="/admin/clients">&larr; Back to clients</a></p>
 </div>
 
+<div class="cv-card" style="margin-bottom:var(--cv-space-4); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:var(--cv-space-4);">
+    <div>
+        <span style="font-size:var(--cv-text-xs); color:var(--cv-text-secondary); display:block; text-transform:uppercase; font-weight:600;">Account Credit Balance</span>
+        <span style="font-size:1.5rem; font-weight:800; color:#10b981;"><?= e($client['currency_symbol'] ?? '$') ?><?= number_format($creditBalance, 2) ?></span>
+    </div>
+    <form method="post" action="/admin/clients/<?= $id ?>/credit" style="display:flex; gap:var(--cv-space-2); align-items:flex-end; flex-wrap:wrap; margin:0; flex:1; max-width:600px; width:100%;">
+        <?= csrf_field() ?>
+        <div style="flex:1; min-width:80px;">
+            <label class="cv-label" style="font-size:var(--cv-text-2xs); margin-bottom:4px; display:block;">Action</label>
+            <select class="cv-input" name="action" style="width:100%; padding:6px 8px; font-size:var(--cv-text-sm); height:34px; box-sizing:border-box;">
+                <option value="credit">Credit</option>
+                <option value="debit">Debit</option>
+            </select>
+        </div>
+        <div style="flex:1.5; min-width:110px;">
+            <label class="cv-label" style="font-size:var(--cv-text-2xs); margin-bottom:4px; display:block;">Amount</label>
+            <div style="position:relative; width:100%;">
+                <span style="position:absolute; left:0.75rem; top:50%; transform:translateY(-50%); color:var(--cv-text-secondary); font-size:var(--cv-text-sm);"><?= e($client['currency_symbol'] ?? '$') ?></span>
+                <input class="cv-input" type="number" step="0.01" name="amount" style="width:100%; padding-left:1.75rem; padding-top:6px; padding-bottom:6px; font-size:var(--cv-text-sm); height:34px; box-sizing:border-box;" required>
+            </div>
+        </div>
+        <div style="flex:2.5; min-width:160px;">
+            <label class="cv-label" style="font-size:var(--cv-text-2xs); margin-bottom:4px; display:block;">Reason</label>
+            <input class="cv-input" name="reason" style="width:100%; padding:6px 8px; font-size:var(--cv-text-sm); height:34px; box-sizing:border-box;" required>
+        </div>
+        <div>
+            <button class="cv-btn" type="submit" style="padding:8px 16px; font-size:var(--cv-text-xs); height:34px; box-sizing:border-box;">Submit</button>
+        </div>
+    </form>
+</div>
+
 <div class="cv-tabs" style="margin-bottom:var(--cv-space-4);" role="tablist">
     <?php foreach ($tabs as $key => $label): ?>
         <a class="cv-tab" href="/admin/clients/<?= $id ?>?tab=<?= $key ?>" aria-selected="<?= $tab === $key ? 'true' : 'false' ?>"><?= e($label) ?></a>
@@ -144,33 +175,33 @@ $id = (int) $client['id'];
             <?php endif; ?>
             </tbody>
         </table>
+
+        <?php if (isset($billingPagination) && $billingPagination['total'] > 10): ?>
+            <?php
+            $totalPages = (int) ceil($billingPagination['total'] / 10);
+            $currentPage = $billingPagination['page'];
+            ?>
+            <div style="display:flex; justify-content:center; gap:var(--cv-space-2); margin-top:var(--cv-space-4);">
+                <?php if ($currentPage > 1): ?>
+                    <a class="cv-btn cv-btn--secondary" href="/admin/clients/<?= $id ?>?tab=billing&billing_page=<?= $currentPage - 1 ?>" style="padding:4px 8px; font-size:var(--cv-text-xs); text-decoration:none;">&laquo; Prev</a>
+                <?php endif; ?>
+                <span style="font-size:var(--cv-text-xs); align-self:center; color:var(--cv-text-secondary);">Page <?= $currentPage ?> of <?= $totalPages ?></span>
+                <?php if ($currentPage < $totalPages): ?>
+                    <a class="cv-btn cv-btn--secondary" href="/admin/clients/<?= $id ?>?tab=billing&billing_page=<?= $currentPage + 1 ?>" style="padding:4px 8px; font-size:var(--cv-text-xs); text-decoration:none;">Next &raquo;</a>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     </div>
 
     <div class="cv-card">
-        <h2 class="cv-card__title">Account Credit — Balance: <?= e($currency['symbol'] ?? '$') ?><?= number_format($creditBalance, 2) ?></h2>
-        
-        <form method="post" action="/admin/clients/<?= $id ?>/credit" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;margin-bottom:var(--cv-space-4);"><?= csrf_field() ?>
-            <div class="cv-field" style="margin-bottom:0;flex:1;min-width:150px;">
-                <label class="cv-label">Grant Amount</label>
-                <div style="position:relative;">
-                    <span style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:var(--cv-text-secondary);"><?= e($currency['symbol'] ?? '$') ?></span>
-                    <input class="cv-input" type="number" step="0.01" name="amount" style="padding-left:2rem;" required>
-                </div>
-            </div>
-            <div class="cv-field" style="margin-bottom:0;flex:2;min-width:200px;">
-                <label class="cv-label">Reason</label>
-                <input class="cv-input" name="reason" required>
-            </div>
-            <button class="cv-btn" type="submit">Grant Credit</button>
-        </form>
-
+        <h2 class="cv-card__title">Credit History / Ledger</h2>
         <table class="cv-table">
             <thead><tr><th>Date</th><th>Amount</th><th>Reason</th></tr></thead>
             <tbody>
             <?php foreach ($creditLedger as $entry): ?>
                 <tr>
                     <td><?= e($entry['created_at']) ?></td>
-                    <td><?= (float) $entry['amount'] >= 0 ? '+' : '' ?><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $entry['amount'], 2) ?></td>
+                    <td><?= (float) $entry['amount'] >= 0 ? '+' : '' ?><?= e($client['currency_symbol'] ?? '$') ?><?= number_format((float) $entry['amount'], 2) ?></td>
                     <td><?= e($entry['reason']) ?></td>
                 </tr>
             <?php endforeach; ?>

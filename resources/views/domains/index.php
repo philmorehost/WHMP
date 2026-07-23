@@ -35,6 +35,59 @@
     <?php endif; ?>
 </div>
 
+<?php if (!empty($bulkMsg)): ?>
+    <div class="cv-card" style="background:rgba(16,185,129,0.1);border-color:#10b981;color:#10b981;margin-bottom:var(--cv-space-4);">
+        ✔ <?= e($bulkMsg) ?>
+    </div>
+<?php endif; ?>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Bulk Registrar Tools</h2>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Execute automated Sync or Nameserver Refresh across all domains, or filter by a specific registrar module (ConnectReseller, Upperlink, ResellerClub, Namecheap).</p>
+    <div style="display:flex;gap:var(--cv-space-4);flex-wrap:wrap;align-items:end;">
+        <form method="post" action="/admin/domains/bulk-refresh-ns" style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;"><?= csrf_field() ?>
+            <select class="cv-select" name="registrar_slug" style="width:auto;min-width:160px;">
+                <option value="">All Registrars</option>
+                <option value="connectreseller">ConnectReseller</option>
+                <option value="upperlink">Upperlink</option>
+                <option value="resellerclub">ResellerClub</option>
+                <option value="namecheap">Namecheap</option>
+            </select>
+            <button class="cv-btn" type="submit">Refresh All Nameservers from Registrar</button>
+        </form>
+
+        <form method="post" action="/admin/domains/bulk-sync" style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;"><?= csrf_field() ?>
+            <select class="cv-select" name="registrar_slug" style="width:auto;min-width:160px;">
+                <option value="">All Registrars</option>
+                <option value="connectreseller">ConnectReseller</option>
+                <option value="upperlink">Upperlink</option>
+                <option value="resellerclub">ResellerClub</option>
+                <option value="namecheap">Namecheap</option>
+            </select>
+            <button class="cv-btn cv-btn--secondary" type="submit">Sync All Status &amp; Dates with Registrar</button>
+        </form>
+    </div>
+</div>
+
+<div class="cv-card" id="whois-lookup-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">WHOIS Lookup</h2>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Lookup live WHOIS records for any domain name directly from official registry WHOIS servers (same as WHMCS Admin WHOIS tool).</p>
+    <form method="get" action="/admin/domains/whois-search#whois-lookup-card" style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;max-width:32rem;">
+        <input class="cv-input" name="domain" placeholder="example.com or domain.com.ng" required value="<?= e($whoisDomain ?? '') ?>" style="flex:1;min-width:200px;">
+        <button class="cv-btn" type="submit">Lookup WHOIS</button>
+    </form>
+
+    <?php if (isset($whoisSearchResult)): ?>
+        <div style="margin-top:var(--cv-space-4);">
+            <h3 style="font-size:var(--cv-text-sm, 14px);color:var(--cv-text-primary);margin-bottom:var(--cv-space-2);">WHOIS Output for <strong><?= e($whoisDomain ?? '') ?></strong> (Server: <?= e($whoisSearchResult['server'] ?? 'whois.iana.org') ?>)</h3>
+            <?php if (!empty($whoisSearchResult['error'])): ?>
+                <div class="cv-field-error" style="margin-bottom:var(--cv-space-2);"><?= e($whoisSearchResult['error']) ?></div>
+            <?php endif; ?>
+            <pre style="background:var(--cv-bg-dark, #0d1117);color:var(--cv-text-light, #c9d1d9);padding:1rem;border-radius:6px;font-family:Consolas, Monaco, monospace;font-size:0.85rem;line-height:1.4;max-height:350px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;user-select:all;border:1px solid var(--cv-border-color, #30363d);"><?= e($whoisSearchResult['whois'] ?? '') ?></pre>
+        </div>
+    <?php endif; ?>
+</div>
+
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Default Nameservers</h2>
     <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Used to pre-fill new domain registrations when a client doesn't specify their own — same role as WHMCS's General Settings &rsaquo; Domains &rsaquo; Default Nameservers.</p>
@@ -49,34 +102,100 @@
     </form>
 </div>
 
-<div class="cv-card">
-    <div class="cv-datatable__toolbar">
-        <?= $view->partial('partials.table-search', ['target' => '#domains-table', 'placeholder' => 'Search domains...']) ?>
+<form method="post" action="/admin/domains/bulk-status" id="bulkSelectedDomainsForm">
+    <?= csrf_field() ?>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);background:var(--cv-bg-surface);border:1px solid var(--cv-border-color);">
+        <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-2);">Bulk Operations for Selected Domains</h2>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-bottom:var(--cv-space-3);">Select multiple domain names using the table checkboxes below to update their status (e.g. set Pending to Active) or permanently delete expired domains in bulk.</p>
+        <div style="display:flex;gap:var(--cv-space-3);align-items:center;flex-wrap:wrap;justify-content:space-between;">
+            <div style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
+                <select class="cv-select" name="status" id="bulkStatusSelect" style="width:auto;min-width:160px;">
+                    <option value="">-- Change Status --</option>
+                    <option value="active">Set Active</option>
+                    <option value="pending">Set Pending</option>
+                    <option value="expired">Set Expired</option>
+                    <option value="cancelled">Set Cancelled</option>
+                    <option value="transferred">Set Transferred</option>
+                    <option value="fraud">Set Fraud</option>
+                </select>
+                <button type="submit" formaction="/admin/domains/bulk-status" class="cv-btn" onclick="return validateBulkStatus()">Update Selected Status</button>
+            </div>
+            <div>
+                <button type="submit" formaction="/admin/domains/bulk-delete" class="cv-btn cv-btn--danger" style="background:#ef4444;color:#fff;border:none;" onclick="return validateBulkDelete()">Delete Selected Domains</button>
+            </div>
+        </div>
     </div>
-    <table class="cv-table" id="domains-table">
-        <thead><tr><th>Domain</th><th>Client</th><th>Registrar</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-        <?php foreach ($domains as $domain): ?>
-            <tr>
-                <td><?= e($domain['domain_name']) ?></td>
-                <td><?= e($domain['first_name'] . ' ' . $domain['last_name']) ?> (<?= e($domain['client_email']) ?>)</td>
-                <td><?= e($domain['registrar_slug']) ?></td>
-                <td><?= e((string) ($domain['expiry_date'] ?? '-')) ?></td>
-                <td>
-                    <?php if ($domain['status'] === 'active'): ?>
-                        <span class="cv-badge cv-badge--success">Active</span>
-                    <?php elseif ($domain['status'] === 'expired'): ?>
-                        <span class="cv-badge cv-badge--danger">Expired</span>
-                    <?php else: ?>
-                        <span class="cv-badge cv-badge--neutral"><?= e($domain['status']) ?></span>
-                    <?php endif; ?>
-                </td>
-                <td><a class="cv-btn cv-btn--secondary" href="/admin/domains/<?= (int) $domain['id'] ?>">Manage</a></td>
-            </tr>
-        <?php endforeach; ?>
-        <?php if ($domains === []): ?>
-            <tr><td colspan="6" style="color:var(--cv-text-secondary);">No domains yet.</td></tr>
-        <?php endif; ?>
-        </tbody>
-    </table>
-</div>
+
+    <div class="cv-card">
+        <div class="cv-datatable__toolbar">
+            <?= $view->partial('partials.table-search', ['target' => '#domains-table', 'placeholder' => 'Search domains...']) ?>
+        </div>
+        <table class="cv-table" id="domains-table">
+            <thead>
+                <tr>
+                    <th style="width:38px;text-align:center;"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAllDomains(this)"></th>
+                    <th>Domain</th>
+                    <th>Client</th>
+                    <th>Registrar</th>
+                    <th>Expiry</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($domains as $domain): ?>
+                <tr>
+                    <td style="text-align:center;"><input type="checkbox" name="domain_ids[]" value="<?= (int) $domain['id'] ?>" class="domain-select-checkbox"></td>
+                    <td><strong><?= e($domain['domain_name']) ?></strong></td>
+                    <td><?= e($domain['first_name'] . ' ' . $domain['last_name']) ?> (<?= e($domain['client_email']) ?>)</td>
+                    <td><?= e($domain['registrar_slug']) ?></td>
+                    <td><?= e((string) ($domain['expiry_date'] ?? '-')) ?></td>
+                    <td>
+                        <?php if ($domain['status'] === 'active'): ?>
+                            <span class="cv-badge cv-badge--success">Active</span>
+                        <?php elseif ($domain['status'] === 'expired'): ?>
+                            <span class="cv-badge cv-badge--danger">Expired</span>
+                        <?php else: ?>
+                            <span class="cv-badge cv-badge--neutral"><?= e($domain['status']) ?></span>
+                        <?php endif; ?>
+                    </td>
+                    <td><a class="cv-btn cv-btn--secondary" href="/admin/domains/<?= (int) $domain['id'] ?>">Manage</a></td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if ($domains === []): ?>
+                <tr><td colspan="7" style="color:var(--cv-text-secondary);">No domains yet.</td></tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</form>
+
+<script>
+function toggleSelectAllDomains(master) {
+    const checkboxes = document.querySelectorAll('.domain-select-checkbox');
+    checkboxes.forEach(cb => cb.checked = master.checked);
+}
+
+function validateBulkStatus() {
+    const checked = document.querySelectorAll('.domain-select-checkbox:checked');
+    if (checked.length === 0) {
+        alert('Please select at least one domain using the checkboxes.');
+        return false;
+    }
+    const statusSelect = document.getElementById('bulkStatusSelect');
+    if (!statusSelect.value) {
+        alert('Please select a status from the dropdown to apply to the selected domains.');
+        return false;
+    }
+    return true;
+}
+
+function validateBulkDelete() {
+    const checked = document.querySelectorAll('.domain-select-checkbox:checked');
+    if (checked.length === 0) {
+        alert('Please select at least one domain using the checkboxes.');
+        return false;
+    }
+    return confirm(`Are you sure you want to permanently delete ${checked.length} selected domain(s)? This action cannot be undone.`);
+}
+</script>

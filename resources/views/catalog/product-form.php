@@ -89,6 +89,12 @@ $action = $isEdit ? "/admin/products/{$product['id']}" : '/admin/products';
             </select>
         </div>
 
+        <div class="cv-field">
+            <label class="cv-label">WHM / cPanel Package Name</label>
+            <input class="cv-input" name="whm_package_name" value="<?= e((string) ($product['whm_package_name'] ?? '')) ?>" placeholder="e.g. cpanel_gold or username_packagename">
+            <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Exact WHM Package name as created in cPanel/WHM. If left blank, WHM default package will be used.</span>
+        </div>
+
         <div style="margin-bottom:var(--cv-space-4);background:var(--cv-bg-surface, rgba(255,255,255,0.03));padding:var(--cv-space-3);border:1px solid var(--cv-border-color, rgba(255,255,255,0.1));border-radius:6px;color:var(--cv-text-primary, inherit);">
             <div style="display:flex;flex-direction:column;gap:var(--cv-space-2);">
                 <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
@@ -110,21 +116,64 @@ $action = $isEdit ? "/admin/products/{$product['id']}" : '/admin/products';
             </div>
         </div>
 
-        <h3>Pricing</h3>
-        <table class="cv-table">
-            <thead><tr><th>Enabled</th><th>Cycle</th><th>Setup Fee</th><th>Price</th></tr></thead>
-            <tbody>
-            <?php foreach ($cycles as $cycleKey => $label): ?>
-                <?php $row = $pricing[$cycleKey] ?? null; ?>
-                <tr>
-                    <td><input type="checkbox" name="cycle_enabled[<?= $cycleKey ?>]" value="1" <?= $row !== null ? 'checked' : '' ?>></td>
-                    <td><?= e($label) ?></td>
-                    <td><input class="cv-input" type="number" step="0.01" name="setup_fee[<?= $cycleKey ?>]" value="<?= e((string) ($row['setup_fee'] ?? '0.00')) ?>" style="width:8rem;"></td>
-                    <td><input class="cv-input" type="number" step="0.01" name="price[<?= $cycleKey ?>]" value="<?= e((string) ($row['price'] ?? '0.00')) ?>" style="width:8rem;"></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
+        <div class="cv-field">
+            <label class="cv-label">Payment Type</label>
+            <select class="cv-select" name="pay_type" id="pay_type_select" onchange="togglePayTypeOptions()">
+                <option value="paid" <?= ($product['pay_type'] ?? 'paid') === 'paid' ? 'selected' : '' ?>>Paid (Recurring / One-Time Pricing)</option>
+                <option value="free" <?= ($product['pay_type'] ?? '') === 'free' ? 'selected' : '' ?>>Free Package</option>
+            </select>
+        </div>
+
+        <div id="free_hosting_options_container" style="display:<?= ($product['pay_type'] ?? 'paid') === 'free' ? 'block' : 'none' ?>;margin-bottom:var(--cv-space-4);background:rgba(245,158,11,0.08);padding:var(--cv-space-3);border:1px solid rgba(245,158,11,0.3);border-radius:6px;color:var(--cv-text-primary, inherit);">
+            <label class="cv-label" style="font-weight:700;margin-bottom:var(--cv-space-2);display:block;color:#f59e0b;">🎁 Free Package / Product Duration Options</label>
+            <div style="display:flex;flex-direction:column;gap:var(--cv-space-2);">
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
+                    <input type="radio" name="free_duration_type" value="lifetime" <?= ($product['free_duration_type'] ?? 'lifetime') === 'lifetime' ? 'checked' : '' ?>>
+                    Free for Life (Unlimited / Lifetime access)
+                </label>
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;color:inherit;">
+                    <input type="radio" name="free_duration_type" value="days" <?= ($product['free_duration_type'] ?? '') === 'days' ? 'checked' : '' ?>>
+                    Fixed Duration (Free for specified number of days)
+                </label>
+                <div style="margin-left:1.75rem;margin-top:var(--cv-space-1);">
+                    <label class="cv-label" style="font-size:0.85rem;">Number of Free Days (e.g. 30, 90, 365):</label>
+                    <input class="cv-input" type="number" name="free_duration_days" value="<?= e((string) ($product['free_duration_days'] ?? '30')) ?>" min="1" style="max-width:150px;">
+                </div>
+            </div>
+        </div>
+
+        <div id="pricing_table_container" style="display:<?= ($product['pay_type'] ?? 'paid') === 'paid' ? 'block' : 'none' ?>;">
+            <h3>Pricing</h3>
+            <table class="cv-table">
+                <thead><tr><th>Enabled</th><th>Cycle</th><th>Setup Fee</th><th>Price</th></tr></thead>
+                <tbody>
+                <?php foreach ($cycles as $cycleKey => $label): ?>
+                    <?php $row = $pricing[$cycleKey] ?? null; ?>
+                    <tr>
+                        <td><input type="checkbox" name="cycle_enabled[<?= $cycleKey ?>]" value="1" <?= $row !== null ? 'checked' : '' ?>></td>
+                        <td><?= e($label) ?></td>
+                        <td><input class="cv-input" type="number" step="0.01" name="setup_fee[<?= $cycleKey ?>]" value="<?= e((string) ($row['setup_fee'] ?? '0.00')) ?>" style="width:8rem;"></td>
+                        <td><input class="cv-input" type="number" step="0.01" name="price[<?= $cycleKey ?>]" value="<?= e((string) ($row['price'] ?? '0.00')) ?>" style="width:8rem;"></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+        function togglePayTypeOptions() {
+            var val = document.getElementById('pay_type_select').value;
+            var freeContainer = document.getElementById('free_hosting_options_container');
+            var pricingContainer = document.getElementById('pricing_table_container');
+            if (val === 'free') {
+                freeContainer.style.display = 'block';
+                pricingContainer.style.display = 'none';
+            } else {
+                freeContainer.style.display = 'none';
+                pricingContainer.style.display = 'block';
+            }
+        }
+        </script>
 
         <?php if ($optionGroups !== []): ?>
             <h3>Configurable Option Groups</h3>

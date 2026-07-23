@@ -68,7 +68,7 @@
                 </div>
                 <div class="cv-field">
                     <label class="cv-label">Table Prefix (optional)</label>
-                    <input class="cv-input" name="prefix" placeholder="tbl" value="tbl">
+                    <input class="cv-input" name="prefix" placeholder="e.g. whmcs_" value="">
                 </div>
                 
                 <div class="cv-field" style="grid-column: 1 / -1; margin-bottom: var(--cv-space-1);">

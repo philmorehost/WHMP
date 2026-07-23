@@ -6,197 +6,679 @@
 /** @var int $ticketsCount */
 /** @var array<int, array<string, mixed>> $unpaidInvoices */
 /** @var array<int, array<string, mixed>> $activeServices */
+/** @var array<int, array<string, mixed>> $recentTickets */
 /** @var array<string, mixed> $currency */
+/** @var \CodeVault\Billing\CurrencyService $currencyService */
+/** @var float $creditBalance */
 /** @var bool $aiCopilotEnabled */
+$sym = e($currency['symbol'] ?? 'N');
+$recentTickets = $recentTickets ?? [];
+$clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
 ?>
-<div class="cv-hero" style="background:var(--cv-bg-surface);padding:var(--cv-space-6);border-radius:var(--cv-radius-md);margin-bottom:var(--cv-space-4);border:1px solid var(--cv-border-default);">
-    <h1 style="font-size:var(--cv-text-2xl);font-family:'Hanken Grotesk', sans-serif;margin:0;color:var(--cv-text-primary);">Hello, <?= e($client['first_name']) ?>!</h1>
-    <p style="color:var(--cv-text-secondary);margin:var(--cv-space-1) 0 0 0;font-size:var(--cv-text-sm);">Welcome back to your client area dashboard. From here you can manage your hosting packages, domains, invoices, and support requests.</p>
-</div>
+<style>
+/* ====== Dashboard Layout Reset ====== */
+.cv-shell__main { padding: 0 !important; }
 
-<?php if (!empty($aiCopilotEnabled)): ?>
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);border-left:4px solid var(--cv-color-brand-500);" data-copilot data-copilot-token="<?= e(csrf_token()) ?>">
-    <h2 class="cv-card__title" style="display:flex;align-items:center;gap:.5rem;">✨ Getting Started Assistant</h2>
-    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:0;">New here? Ask anything — how to order hosting, what happens after payment, how to point your domain, or how to log into cPanel.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:var(--cv-space-3);">
-        <button type="button" class="cv-btn cv-btn--secondary" data-copilot-suggest="How do I get my website online after paying?">How do I get online after paying?</button>
-        <button type="button" class="cv-btn cv-btn--secondary" data-copilot-suggest="How do I log into cPanel?">How do I log into cPanel?</button>
-        <button type="button" class="cv-btn cv-btn--secondary" data-copilot-suggest="How do I point my domain to my hosting?">Point my domain</button>
+/* ====== Hero Banner ====== */
+.dbd-hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 45%, #0f3460 100%);
+    padding: 36px 40px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 0;
+}
+.dbd-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 80% 50%, rgba(245,158,11,.15) 0%, transparent 65%);
+    pointer-events: none;
+}
+.dbd-hero__icon {
+    width: 84px;
+    height: 84px;
+    background: linear-gradient(135deg, rgba(245,158,11,.25), rgba(249,115,22,.2));
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.6rem;
+    flex-shrink: 0;
+    border: 2px solid rgba(245,158,11,.35);
+    position: relative;
+    z-index: 1;
+}
+.dbd-hero__body {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    z-index: 1;
+}
+.dbd-hero__label {
+    color: rgba(255,255,255,.6);
+    font-size: .8rem;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.dbd-hero__title {
+    color: #fff;
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: 1.75rem;
+    font-weight: 800;
+    margin: 0 0 18px 0;
+    line-height: 1.15;
+}
+.dbd-hero__search-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.dbd-hero__search-row input {
+    flex: 1;
+    background: rgba(255,255,255,.92);
+    border: none;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: .9rem;
+    color: #111;
+    outline: none;
+    min-width: 0;
+}
+.dbd-hero__search-row input:focus { box-shadow: 0 0 0 3px rgba(245,158,11,.5); }
+.dbd-hero__search-row button {
+    background: #f59e0b;
+    color: #1a1a2e;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 22px;
+    font-weight: 700;
+    font-size: .9rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .2s;
+}
+.dbd-hero__search-row button:hover { background: #d97706; }
+.dbd-hero__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dbd-hero__chip {
+    background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.2);
+    color: rgba(255,255,255,.85);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: .8rem;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    font-family: inherit;
+    transition: background .2s;
+}
+.dbd-hero__chip:hover { background: rgba(245,158,11,.3); color: #fff; }
+.dbd-answer { display:none; background:rgba(255,255,255,.08); color:#fff; border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:14px 16px; margin-top:14px; font-size:.875rem; white-space:pre-wrap; }
+
+/* Chat history inside hero */
+.dbd-chat {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 14px;
+    max-height: 280px;
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.2) transparent;
+}
+.dbd-chat::-webkit-scrollbar { width: 4px; }
+.dbd-chat::-webkit-scrollbar-track { background: transparent; }
+.dbd-chat::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 4px; }
+.dbd-chat.has-messages { display: flex; }
+.dbd-msg {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: .875rem;
+    line-height: 1.55;
+    max-width: 90%;
+    white-space: pre-wrap;
+    word-break: break-word;
+    animation: dbdFadeIn .25s ease;
+}
+.dbd-msg--user {
+    background: rgba(245,158,11,.25);
+    color: #fff;
+    align-self: flex-end;
+    border-bottom-right-radius: 3px;
+    font-weight: 600;
+}
+.dbd-msg--ai {
+    background: rgba(255,255,255,.1);
+    color: rgba(255,255,255,.92);
+    align-self: flex-start;
+    border-bottom-left-radius: 3px;
+    border: 1px solid rgba(255,255,255,.12);
+}
+.dbd-msg--thinking {
+    color: rgba(255,255,255,.5);
+    font-style: italic;
+    background: transparent;
+    border: none;
+    padding: 4px 0;
+}
+@keyframes dbdFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ====== Page Body ====== */
+.dbd-body { padding: 24px 24px 40px; max-width: 1280px; margin: 0 auto; }
+
+/* ====== Stats Row ====== */
+.dbd-stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+}
+.dbd-stat {
+    background: var(--cv-bg-surface);
+    border: 1px solid var(--cv-border-default);
+    border-radius: 12px;
+    padding: 16px 18px;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+.dbd-stat:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.1); border-color: var(--cv-color-brand-500); }
+.dbd-stat__label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cv-text-secondary); }
+.dbd-stat__value { font-family: 'Hanken Grotesk', sans-serif; font-size: 2.25rem; font-weight: 800; line-height: 1; color: var(--cv-color-brand-500); }
+.dbd-stat__value--red   { color: #ef4444; }
+.dbd-stat__value--green { color: #10b981; font-size: 1.6rem; }
+.dbd-stat__sub { font-size: .75rem; color: var(--cv-text-secondary); }
+.dbd-stat__sub a { color: var(--cv-color-brand-500); font-weight: 600; text-decoration: none; }
+.dbd-btn-addfunds {
+    display: inline-block;
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981 !important;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-size: .75rem;
+    font-weight: 700 !important;
+    text-decoration: none !important;
+    transition: all .15s ease;
+    margin-top: 2px;
+}
+.dbd-btn-addfunds:hover {
+    background: #10b981 !important;
+    color: #ffffff !important;
+    border-color: #10b981 !important;
+    transform: translateY(-1px);
+}
+
+/* ====== Domain Search Banner ====== */
+.dbd-domain {
+    background: linear-gradient(135deg, #1e3a5f 0%, #2d1b69 100%);
+    border-radius: 14px;
+    padding: 32px 40px;
+    margin-bottom: 24px;
+}
+.dbd-domain h2 { color: #fff; font-family: 'Hanken Grotesk', sans-serif; font-size: 1.5rem; font-weight: 800; margin: 0 0 20px 0; text-align: center; }
+.dbd-domain form { display: flex; gap: 10px; max-width: 680px; margin: 0 auto; }
+.dbd-domain input { flex: 1; background: rgba(255,255,255,.95); border: none; border-radius: 8px; padding: 14px 18px; font-size: .95rem; color: #111; outline: none; min-width: 0; }
+.dbd-domain button { background: #f59e0b; color: #1a1a2e; border: none; border-radius: 8px; padding: 14px 28px; font-weight: 700; font-size: .95rem; cursor: pointer; white-space: nowrap; transition: background .2s; }
+.dbd-domain button:hover { background: #d97706; }
+
+/* ====== 2-Column Main Grid ====== */
+.dbd-grid {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 20px;
+    align-items: start;
+}
+
+/* ====== Cards ====== */
+.dbd-card {
+    background: var(--cv-bg-surface);
+    border: 1px solid var(--cv-border-default);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+}
+.dbd-card:last-child { margin-bottom: 0; }
+.dbd-card__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 8px;
+}
+.dbd-card__title { font-family: 'Hanken Grotesk', sans-serif; font-size: 1rem; font-weight: 700; color: var(--cv-text-primary); margin: 0; }
+.dbd-card__viewall { font-size: .8rem; font-weight: 700; color: var(--cv-color-brand-500); text-decoration: none; white-space: nowrap; }
+.dbd-card__viewall:hover { text-decoration: underline; }
+
+/* ====== Tables ====== */
+.dbd-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.dbd-table thead th { text-align: left; padding: 8px 10px; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cv-text-secondary); border-bottom: 2px solid var(--cv-border-default); white-space: nowrap; }
+.dbd-table tbody tr { border-bottom: 1px solid var(--cv-border-default); transition: background .15s; }
+.dbd-table tbody tr:last-child { border-bottom: none; }
+.dbd-table tbody tr:hover { background: var(--cv-bg-surface-sunken, rgba(0,0,0,.03)); }
+.dbd-table tbody td { padding: 12px 10px; color: var(--cv-text-primary); vertical-align: middle; }
+.dbd-table .t-sub { font-size: .75rem; color: var(--cv-text-secondary); margin-top: 2px; }
+.dbd-table .t-amt { font-weight: 700; font-size: .95rem; }
+
+/* Pay button */
+.dbd-pay {
+    display: inline-block;
+    background: var(--cv-color-brand-500);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background .18s, transform .15s;
+    white-space: nowrap;
+}
+.dbd-pay:hover { background: #d97706; transform: scale(1.04); }
+
+/* Badges */
+.dbd-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.dbd-badge--open    { background: rgba(16,185,129,.12); color: #059669; border: 1px solid rgba(16,185,129,.3); }
+.dbd-badge--pending { background: rgba(245,158,11,.12); color: #d97706; border: 1px solid rgba(245,158,11,.3); }
+.dbd-badge--closed  { background: rgba(107,114,128,.12); color: #6b7280; border: 1px solid rgba(107,114,128,.3); }
+.dbd-badge--cycle   { background: var(--cv-bg-surface-sunken, rgba(0,0,0,.05)); color: var(--cv-text-secondary); border: 1px solid var(--cv-border-default); font-size: .72rem; }
+
+.dbd-empty { text-align: center; padding: 28px; color: var(--cv-text-secondary); font-size: .875rem; }
+.dbd-empty a { color: var(--cv-color-brand-500); font-weight: 700; text-decoration: none; }
+
+/* ====== Quick Actions ====== */
+.dbd-actions { display: flex; flex-direction: column; gap: 6px; }
+.dbd-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--cv-border-default);
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    font-size: .9rem;
+    font-weight: 500;
+    font-family: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    transition: background .15s, border-color .15s, transform .15s;
+}
+.dbd-action:hover { background: var(--cv-bg-surface-sunken, rgba(0,0,0,.04)); border-color: var(--cv-color-brand-500); transform: translateX(3px); }
+.dbd-action--danger { color: #ef4444; }
+.dbd-action--danger:hover { background: rgba(239,68,68,.06); border-color: rgba(239,68,68,.4); transform: translateX(3px); }
+.dbd-action__icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
+
+/* Support Options */
+.dbd-support { display: flex; gap: 10px; }
+.dbd-support-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--cv-border-default);
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    text-decoration: none;
+    font-size: .825rem;
+    font-weight: 600;
+    transition: background .15s, border-color .15s;
+}
+.dbd-support-btn:hover { background: var(--cv-bg-surface-sunken, rgba(0,0,0,.04)); border-color: var(--cv-color-brand-500); }
+
+/* ====== Responsive ====== */
+@media (max-width: 1024px) {
+    .dbd-grid { grid-template-columns: 1fr; }
+    .dbd-stats { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 640px) {
+    .dbd-hero { flex-direction: column; align-items: flex-start; padding: 24px 20px; gap: 18px; }
+    .dbd-hero__icon { width: 64px; height: 64px; font-size: 2rem; }
+    .dbd-hero__title { font-size: 1.3rem; }
+    .dbd-hero__search-row { flex-direction: column; }
+    .dbd-hero__search-row button { width: 100%; }
+    .dbd-body { padding: 16px 16px 32px; }
+    .dbd-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .dbd-stat__value { font-size: 1.75rem; }
+    .dbd-domain { padding: 24px 20px; }
+    .dbd-domain h2 { font-size: 1.15rem; }
+    .dbd-domain form { flex-direction: column; }
+    .dbd-domain button { width: 100%; }
+    .dbd-card { padding: 16px; }
+    .dbd-support { flex-direction: column; }
+}
+@media (max-width: 400px) {
+    .dbd-stats { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+<!-- HERO -->
+<div class="dbd-hero">
+    <div class="dbd-hero__icon">🚀</div>
+    <div class="dbd-hero__body">
+        <div class="dbd-hero__label">Getting Started</div>
+        <h1 class="dbd-hero__title">How can we help you today?</h1>
+        <div id="dbd-copilot" data-token="<?= e(csrf_token()) ?>" data-enabled="<?= !empty($aiCopilotEnabled) ? '1' : '0' ?>">
+            <div class="dbd-hero__chips">
+                <button type="button" class="dbd-hero__chip" data-q="How do I get online after paying?">How do I get online after paying?</button>
+                <button type="button" class="dbd-hero__chip" data-q="How do I log into cPanel?">How do I log into cPanel?</button>
+                <button type="button" class="dbd-hero__chip" data-q="How do I point my domain?">Point my domain</button>
+            </div>
+            <div class="dbd-hero__search-row" style="margin-top:12px;">
+                <input type="text" id="dbd-q" placeholder="Ask a question…" maxlength="1000">
+                <button type="button" id="dbd-ask">Ask</button>
+            </div>
+            <div class="dbd-chat" id="dbd-chat"></div>
+        </div>
     </div>
-    <div data-copilot-answer style="display:none;white-space:pre-wrap;background:var(--cv-bg-body,#0b1220);border:1px solid var(--cv-border-default);border-radius:var(--cv-radius-md);padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);font-size:var(--cv-text-sm);"></div>
-    <form data-copilot-form style="display:flex;gap:.5rem;">
-        <input class="cv-input" data-copilot-input placeholder="Ask a question…" style="flex:1;" maxlength="1000">
-        <button class="cv-btn" type="submit" data-copilot-submit>Ask</button>
-    </form>
 </div>
-<?php endif; ?>
 
-<!-- Lagom2 Summary Stats Cards Grid -->
-<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:var(--cv-space-4);margin-bottom:var(--cv-space-6);width:100%;box-sizing:border-box;">
-    <a href="/client/services" style="text-decoration:none;color:inherit;width:100%;">
-        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Services</div>
-            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:var(--cv-color-brand-500);margin:var(--cv-space-2) 0;"><?= $servicesCount ?></div>
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Active Services</div>
-        </div>
+<!-- BODY WRAPPER -->
+<div class="dbd-body">
+
+<!-- STATS -->
+<div class="dbd-stats">
+    <a href="/client/services" class="dbd-stat">
+        <div class="dbd-stat__label">SERVICES</div>
+        <div class="dbd-stat__value"><?= (int)$servicesCount ?></div>
+        <div class="dbd-stat__sub">Active Services</div>
     </a>
-    <a href="/client/domains" style="text-decoration:none;color:inherit;width:100%;">
-        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Domains</div>
-            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:var(--cv-color-brand-500);margin:var(--cv-space-2) 0;"><?= $domainsCount ?></div>
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Active Domains</div>
-        </div>
+    <a href="/client/domains" class="dbd-stat">
+        <div class="dbd-stat__label">DOMAINS</div>
+        <div class="dbd-stat__value"><?= (int)$domainsCount ?></div>
+        <div class="dbd-stat__sub">Active Domains</div>
     </a>
-    <a href="/client/invoices" style="text-decoration:none;color:inherit;width:100%;">
-        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Invoices</div>
-            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:<?= $invoicesCount > 0 ? 'var(--cv-color-danger, #ef4444)' : 'var(--cv-text-primary)' ?>;margin:var(--cv-space-2) 0;"><?= $invoicesCount ?></div>
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"><?= $invoicesCount > 0 ? 'Unpaid Invoices' : 'All Invoices Paid' ?></div>
-        </div>
+    <a href="/client/invoices" class="dbd-stat">
+        <div class="dbd-stat__label">INVOICES</div>
+        <div class="dbd-stat__value <?= $invoicesCount > 0 ? 'dbd-stat__value--red' : '' ?>"><?= (int)$invoicesCount ?></div>
+        <div class="dbd-stat__sub"><?= $invoicesCount > 0 ? 'Unpaid Invoices' : 'All Invoices Paid' ?></div>
     </a>
-    <a href="/client/tickets" style="text-decoration:none;color:inherit;width:100%;">
-        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Tickets</div>
-            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:var(--cv-color-brand-500);margin:var(--cv-space-2) 0;"><?= $ticketsCount ?></div>
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Open Tickets</div>
-        </div>
+    <a href="/client/tickets" class="dbd-stat">
+        <div class="dbd-stat__label">TICKETS</div>
+        <div class="dbd-stat__value <?= $ticketsCount > 0 ? 'dbd-stat__value--red' : '' ?>"><?= (int)$ticketsCount ?></div>
+        <div class="dbd-stat__sub">Open Tickets</div>
+    </a>
+    <a href="/client/wallet/add-funds" class="dbd-stat">
+        <div class="dbd-stat__label">WALLET</div>
+        <div class="dbd-stat__value dbd-stat__value--green"><?= $sym ?><?= number_format((float)$creditBalance, 2) ?></div>
+        <div class="dbd-stat__sub"><span class="dbd-btn-addfunds">Add Funds →</span></div>
     </a>
 </div>
 
-<!-- Domain Registration Search Bar -->
-<div class="cv-card" style="margin-bottom:var(--cv-space-6);border:1px solid var(--cv-border-default);background:var(--cv-bg-surface-sunken);width:100%;box-sizing:border-box;">
-    <h3 style="margin:0 0 var(--cv-space-2) 0;font-size:var(--cv-text-md);font-family:'Hanken Grotesk', sans-serif;color:var(--cv-text-primary);">Find Your New Domain Name</h3>
-    <form method="get" action="/domains/register" style="display:flex;gap:var(--cv-space-2);width:100%;box-sizing:border-box;">
-        <input class="cv-input" name="domain" placeholder="Enter the domain you want to register (e.g. mywebsite.com)" style="flex:1;min-width:0;">
-        <button class="cv-btn" type="submit">Search</button>
+<!-- DOMAIN SEARCH -->
+<div class="dbd-domain">
+    <h2>Find Your New Domain Name</h2>
+    <form method="get" action="/domains/register">
+        <input type="text" name="domain" placeholder="Enter the domain you want to register (e.g. mywebsite.com)">
+        <button type="submit">Search</button>
     </form>
 </div>
 
-<div class="cv-dashboard-grid--2-3" style="width:100%;box-sizing:border-box;">
-    <!-- Left Column: Unpaid Invoices & Active Services -->
-    <div style="display:flex;flex-direction:column;gap:var(--cv-space-6);width:100%;box-sizing:border-box;">
+<!-- MAIN 2-COL GRID -->
+<div class="dbd-grid">
+
+    <!-- LEFT COLUMN -->
+    <div>
+
         <!-- Unpaid Invoices -->
-        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--cv-space-3);flex-wrap:wrap;gap:var(--cv-space-2);">
-                <h3 style="margin:0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Unpaid Invoices</h3>
-                <a href="/client/invoices" style="font-size:var(--cv-text-xs);color:var(--cv-color-brand-500);font-weight:600;text-decoration:none;">View All Invoices &rarr;</a>
+        <div class="dbd-card">
+            <div class="dbd-card__head">
+                <h2 class="dbd-card__title">Unpaid Invoices</h2>
+                <a href="/client/invoices" class="dbd-card__viewall">View All Invoices →</a>
             </div>
-            
-            <?php if ($unpaidInvoices !== []): ?>
-                <div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">
-                    <table class="cv-table" style="width:100%;">
-                        <thead>
-                            <tr>
-                                <th>Invoice #</th>
-                                <th>Due Date</th>
-                                <th>Total</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($unpaidInvoices as $invoice): ?>
-                                <tr>
-                                    <td><strong>INV-<?= (int) $invoice['id'] ?></strong></td>
-                                    <td><?= e($invoice['due_date']) ?></td>
-                                    <td><?= e($currency['symbol']) ?><?= number_format((float) $invoice['total'] * (float) ($invoice['currency_rate'] ?? 1.00), 2) ?></td>
-                                    <td>
-                                        <a class="cv-btn cv-btn--secondary" href="/client/invoices/<?= (int) $invoice['id'] ?>" style="padding:var(--cv-space-1) var(--cv-space-2);font-size:var(--cv-text-xs);background:var(--cv-color-brand-500);color:#ffffff;border:none;">Pay Now</a>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
+            <?php if (!empty($unpaidInvoices)): ?>
+            <div style="overflow-x:auto;">
+                <table class="dbd-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Due Date</th>
+                            <th>Total</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($unpaidInvoices as $inv): ?>
+                        <tr>
+                            <td><strong>INV-<?= (int)$inv['id'] ?></strong></td>
+                            <td><?= e((string)($inv['due_date'] ?? '')) ?></td>
+                            <td class="t-amt"><?= e($currencyService->formatLocked((float)$inv['total'], $inv['currency_id'] !== null ? (int)$inv['currency_id'] : null, (float)($inv['currency_rate'] ?? 1.0))) ?></td>
+                            <td><a class="dbd-pay" href="/client/invoices/<?= (int)$inv['id'] ?>">Pay Now</a></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
             <?php else: ?>
-                <div style="text-align:center;padding:var(--cv-space-6);color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
-                    You do not have any unpaid invoices. Thank you!
-                </div>
+            <div class="dbd-empty">You do not have any unpaid invoices. Thank you!</div>
             <?php endif; ?>
         </div>
 
-        <!-- Active Services -->
-        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--cv-space-3);flex-wrap:wrap;gap:var(--cv-space-2);">
-                <h3 style="margin:0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Your Active Products & Services</h3>
-                <a href="/client/services" style="font-size:var(--cv-text-xs);color:var(--cv-color-brand-500);font-weight:600;text-decoration:none;">View All Services &rarr;</a>
+        <!-- Active Products & Services -->
+        <div class="dbd-card">
+            <div class="dbd-card__head">
+                <h2 class="dbd-card__title">Your Active Products &amp; Services</h2>
+                <a href="/client/services" class="dbd-card__viewall">View All Services →</a>
             </div>
-
-            <?php if ($activeServices !== []): ?>
-                <div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">
-                    <table class="cv-table" style="width:100%;">
-                        <thead>
-                            <tr>
-                                <th>Product/Domain</th>
-                                <th>Billing Cycle</th>
-                                <th>Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($activeServices as $service): ?>
-                                <tr class="cv-clickable-row" style="cursor:pointer;" data-row-link="/client/services/<?= (int) $service['id'] ?>">
-                                    <td>
-                                        <a href="/client/services/<?= (int) $service['id'] ?>" style="text-decoration:none;color:inherit;">
-                                            <strong><?= e($service['product_name']) ?></strong><br>
-                                            <span style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"><?= e((string) ($service['domain'] ?: ($service['hostname'] ?: '-'))) ?></span>
-                                        </a>
-                                    </td>
-                                    <td><span class="cv-badge cv-badge--neutral"><?= e($service['billing_cycle']) ?></span></td>
-                                    <td><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $service['amount'] * (float) ($currency['exchange_rate'] ?? 1.00), 2) ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
+            <?php if (!empty($activeServices)): ?>
+            <div style="overflow-x:auto;">
+                <table class="dbd-table">
+                    <thead>
+                        <tr>
+                            <th>Product/Domain</th>
+                            <th>Billing Cycle</th>
+                            <th>Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($activeServices as $svc): ?>
+                        <tr style="cursor:pointer;" onclick="location.href='/client/services/<?= (int)$svc['id'] ?>'">
+                            <td>
+                                <strong><?= e((string)$svc['product_name']) ?></strong>
+                                <?php $dom = $svc['domain'] ?? $svc['hostname'] ?? ''; if ($dom !== ''): ?>
+                                <div class="t-sub"><?= e((string)$dom) ?></div>
+                                <?php endif; ?>
+                            </td>
+                            <td><span class="dbd-badge dbd-badge--cycle"><?= e((string)$svc['billing_cycle']) ?></span></td>
+                            <td class="t-amt"><?= e($currencyService->format((float)$svc['amount'], $currency)) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
             <?php else: ?>
-                <div style="text-align:center;padding:var(--cv-space-6);color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
-                    You do not have any active products or services. <a href="/store" style="color:var(--cv-color-brand-500);text-decoration:none;font-weight:600;">Browse Store &rarr;</a>
-                </div>
+            <div class="dbd-empty">No active services yet. <a href="/store">Browse Store →</a></div>
             <?php endif; ?>
         </div>
-        <style>
-        .cv-clickable-row:hover {
-            background-color: var(--cv-bg-surface-sunken) !important;
-        }
-        </style>
-    </div>
 
-    <!-- Right Column: Quick Links / Actions -->
-    <div style="display:flex;flex-direction:column;gap:var(--cv-space-6);width:100%;box-sizing:border-box;">
-        <!-- Quick Actions Card -->
-        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
-            <h3 style="margin:0 0 var(--cv-space-3) 0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Quick Actions</h3>
-            <div style="display:flex;flex-direction:column;gap:var(--cv-space-2);width:100%;box-sizing:border-box;">
-                <a href="/store" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">🛍️ Order New Services</a>
-                <a href="/store" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">🌐 Register New Domains</a>
-                <a href="/client/tickets" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">✉️ Submit Support Ticket</a>
-                <a href="/client/account" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">👤 Edit Profile Details</a>
-                <a href="/client/affiliate" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">🤝 Affiliate Program</a>
-                <form method="post" action="/client/logout" style="width:100%;margin:0;box-sizing:border-box;"><?= csrf_field() ?>
-                    <button class="cv-btn cv-btn--secondary" type="submit" style="text-align:left;width:100%;background:rgba(239, 68, 68, 0.1);color:#ef4444;border-color:rgba(239, 68, 68, 0.2);box-sizing:border-box;">🚪 Log Out</button>
+        <!-- Recent Support Tickets -->
+        <div class="dbd-card" style="margin-bottom:0;">
+            <div class="dbd-card__head">
+                <h2 class="dbd-card__title">Recent Support Tickets</h2>
+                <a href="/client/tickets" class="dbd-card__viewall">View All →</a>
+            </div>
+            <?php if (!empty($recentTickets)): ?>
+            <div style="overflow-x:auto;">
+                <table class="dbd-table">
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th>Status</th>
+                            <th>Last Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($recentTickets as $t):
+                            $st = strtolower((string)($t['status'] ?? 'open'));
+                            $bc = ($st === 'open' || $st === 'customer-reply') ? 'dbd-badge--open'
+                                : (($st === 'pending' || $st === 'on-hold') ? 'dbd-badge--pending' : 'dbd-badge--closed');
+                            $bl = match($st) {
+                                'open' => 'Open', 'customer-reply' => 'Replied',
+                                'pending' => 'Pending', 'on-hold' => 'On Hold',
+                                'closed' => 'Closed', default => ucfirst($st),
+                            };
+                            $ua = $t['updated_at'] ?? $t['created_at'] ?? '';
+                            $ul = '';
+                            if ($ua) {
+                                $ts2 = strtotime((string)$ua);
+                                if ($ts2 >= strtotime('today'))          $ul = 'Today, ' . date('g:i A', $ts2);
+                                elseif ($ts2 >= strtotime('yesterday'))  $ul = 'Yesterday, ' . date('g:i A', $ts2);
+                                else                                     $ul = date('M j, Y', $ts2);
+                            }
+                        ?>
+                        <tr style="cursor:pointer;" onclick="location.href='/client/tickets/<?= (int)$t['id'] ?>'">
+                            <td><a href="/client/tickets/<?= (int)$t['id'] ?>" style="color:inherit;text-decoration:none;"><?= e((string)($t['subject'] ?? 'Ticket')) ?></a></td>
+                            <td><span class="dbd-badge <?= $bc ?>"><?= $bl ?></span></td>
+                            <td style="color:var(--cv-text-secondary);font-size:.825rem;white-space:nowrap;"><?= $ul ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php else: ?>
+            <div class="dbd-empty">No tickets yet. <a href="/client/tickets/new">Open a Ticket →</a></div>
+            <?php endif; ?>
+        </div>
+
+    </div><!-- /left -->
+
+    <!-- RIGHT COLUMN -->
+    <div>
+
+        <!-- Quick Actions -->
+        <div class="dbd-card">
+            <h2 class="dbd-card__title" style="margin-bottom:14px;">Quick Actions</h2>
+            <div class="dbd-actions">
+                <a href="/store" class="dbd-action">
+                    <div class="dbd-action__icon" style="background:rgba(249,115,22,.12);">🛍️</div>Order New Services
+                </a>
+                <a href="/domains/register" class="dbd-action">
+                    <div class="dbd-action__icon" style="background:rgba(59,130,246,.12);">🌐</div>Register New Domains
+                </a>
+                <a href="/client/tickets/new" class="dbd-action">
+                    <div class="dbd-action__icon" style="background:rgba(107,114,128,.12);">✉️</div>Submit Support Ticket
+                </a>
+                <a href="/client/account" class="dbd-action">
+                    <div class="dbd-action__icon" style="background:rgba(59,130,246,.12);">👤</div>Edit Profile Details
+                </a>
+                <a href="/client/affiliate" class="dbd-action">
+                    <div class="dbd-action__icon" style="background:rgba(245,158,11,.12);">🤝</div>Affiliate Program
+                </a>
+                <form method="post" action="/client/logout" style="margin:0;"><?= csrf_field() ?>
+                    <button type="submit" class="dbd-action dbd-action--danger">
+                        <div class="dbd-action__icon" style="background:rgba(239,68,68,.1);">🚪</div>Log Out
+                    </button>
                 </form>
             </div>
         </div>
 
-        <!-- System Information Card -->
-        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
-            <h3 style="margin:0 0 var(--cv-space-2) 0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Support Options</h3>
-            <p style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin:0 0 var(--cv-space-3) 0;">Find answers instantly in our knowledgebase or download tools and resources.</p>
-            <div style="display:flex;gap:var(--cv-space-2);width:100%;box-sizing:border-box;flex-wrap:wrap;">
-                <a href="/kb" class="cv-btn cv-btn--secondary" style="flex:1;text-align:center;text-decoration:none;font-size:var(--cv-text-xs);box-sizing:border-box;min-width:120px;">📚 KB articles</a>
-                <a href="/downloads" class="cv-btn cv-btn--secondary" style="flex:1;text-align:center;text-decoration:none;font-size:var(--cv-text-xs);box-sizing:border-box;min-width:120px;">💾 Downloads</a>
+        <!-- Support Options -->
+        <div class="dbd-card" style="margin-bottom:0;">
+            <h2 class="dbd-card__title" style="margin-bottom:6px;">Support Options</h2>
+            <p style="color:var(--cv-text-secondary);font-size:.85rem;margin:0 0 14px 0;">Find answers instantly in our knowledgebase or download tools and resources.</p>
+            <div class="dbd-support">
+                <a href="/kb" class="dbd-support-btn">📚 KB articles</a>
+                <a href="/downloads" class="dbd-support-btn">💾 Downloads</a>
             </div>
         </div>
-    </div>
-</div>
+
+    </div><!-- /right -->
+
+</div><!-- /grid -->
+</div><!-- /body -->
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.cv-clickable-row').forEach(function (row) {
-        row.addEventListener('click', function (e) {
-            if (!e.target.closest('a') && row.dataset.rowLink) {
-                window.location = row.dataset.rowLink;
-            }
+(function(){
+    var cp = document.getElementById('dbd-copilot');
+    if (!cp) return;
+
+    var inputEl = document.getElementById('dbd-q');
+    var askBtn  = document.getElementById('dbd-ask');
+    var chat    = document.getElementById('dbd-chat');
+    var tok     = cp.dataset.token  || '';
+    var enabled = cp.dataset.enabled === '1';
+
+    // Append a message bubble to the chat box
+    function bubble(text, type) {
+        chat.classList.add('has-messages');
+        var el = document.createElement('div');
+        el.className = 'dbd-msg dbd-msg--' + type;
+        el.textContent = text;
+        chat.appendChild(el);
+        chat.scrollTop = chat.scrollHeight;
+        return el;
+    }
+
+    function ask(question) {
+        question = question.trim();
+        if (!question) return;
+
+        // Show user bubble
+        bubble(question, 'user');
+        if (inputEl) inputEl.value = '';
+        askBtn.disabled = true;
+
+        // Thinking indicator
+        var thinking = bubble('Thinking…', 'thinking');
+
+        fetch('/client/copilot/ask', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': tok
+            },
+            body: JSON.stringify({ question: question })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            thinking.remove();
+            var text = (d.success && d.answer) ? d.answer : (d.message || 'No response. Please try again.');
+            bubble(text, 'ai');
+        })
+        .catch(function() {
+            thinking.remove();
+            bubble('Something went wrong. Please check your connection and try again.', 'ai');
+        })
+        .finally(function() {
+            askBtn.disabled = false;
+        });
+    }
+
+    // Prompt chips
+    cp.querySelectorAll('[data-q]').forEach(function(chip) {
+        chip.addEventListener('click', function() {
+            ask(chip.dataset.q);
         });
     });
-});
+
+    // Ask button
+    askBtn && askBtn.addEventListener('click', function() {
+        ask(inputEl ? inputEl.value : '');
+    });
+
+    // Enter key in input
+    inputEl && inputEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); ask(inputEl.value); }
+    });
+})();
 </script>

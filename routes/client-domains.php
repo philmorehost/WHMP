@@ -20,4 +20,8 @@ $router->get('/client/domains/{id}', [ClientDomainController::class, 'show']);
 $router->post('/client/domains/{id}/lock', [ClientDomainController::class, 'toggleLock']);
 $router->post('/client/domains/{id}/id-protection', [ClientDomainController::class, 'toggleIdProtection']);
 $router->post('/client/domains/{id}/nameservers', [ClientDomainController::class, 'saveNameservers']);
+$router->post('/client/domains/{id}/child-ns', [ClientDomainController::class, 'addChildNameserver']);
+$router->post('/client/domains/{id}/child-ns/{child_id}/delete', [ClientDomainController::class, 'deleteChildNameserver']);
+$router->post('/client/domains/{id}/dns', [ClientDomainController::class, 'addDnsRecord']);
+$router->post('/client/domains/{id}/dns/{record_id}/delete', [ClientDomainController::class, 'deleteDnsRecord']);
 $router->post('/client/domains/{id}/epp-code', [ClientDomainController::class, 'eppCode']);

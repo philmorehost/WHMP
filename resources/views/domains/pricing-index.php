@@ -14,7 +14,30 @@
     <?php endif; ?>
 
     <h2 class="cv-card__title" id="tld-form-title">Add or Update TLD</h2>
-    <form id="tld-form" method="post" action="/admin/domain-pricing" style="display:grid;grid-template-columns:repeat(6, 1fr);gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
+    <style>
+    #tld-form {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--cv-space-3);
+        align-items: end;
+    }
+    @media (max-width: 1100px) {
+        #tld-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        #tld-form .tld-span3 { grid-column: span 3; }
+        #tld-form .tld-span6 { grid-column: span 3; }
+    }
+    @media (max-width: 700px) {
+        #tld-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        #tld-form .tld-span3,
+        #tld-form .tld-span6 { grid-column: span 2; }
+    }
+    @media (max-width: 420px) {
+        #tld-form { grid-template-columns: 1fr; }
+        #tld-form .tld-span3,
+        #tld-form .tld-span6 { grid-column: span 1; }
+    }
+    </style>
+    <form id="tld-form" method="post" action="/admin/domain-pricing"><?= csrf_field() ?>
         <div class="cv-field" style="margin-bottom:0;">
             <label class="cv-label">TLD (e.g. .com)</label>
             <input class="cv-input" name="tld" id="tld-input" placeholder=".com" required>
@@ -51,7 +74,19 @@
             <label class="cv-label">Renewal Price</label>
             <input class="cv-input" type="number" step="0.01" name="renew_price" id="tld-renew-price" value="0.00" min="0">
         </div>
-        <div class="cv-field" style="margin-bottom:0;grid-column:span 3;">
+        <div class="cv-field" style="margin-bottom:0;">
+            <label class="cv-label">Grace Period (Days)</label>
+            <input class="cv-input" type="number" name="grace_period_days" id="tld-grace-period" value="30" min="0">
+        </div>
+        <div class="cv-field" style="margin-bottom:0;">
+            <label class="cv-label">Redemption Period (Days)</label>
+            <input class="cv-input" type="number" name="redemption_period_days" id="tld-redemption-period" value="30" min="0">
+        </div>
+        <div class="cv-field" style="margin-bottom:0;">
+            <label class="cv-label">Redemption Fee</label>
+            <input class="cv-input" type="number" step="0.01" name="redemption_fee" id="tld-redemption-fee" value="0.00" min="0">
+        </div>
+        <div class="cv-field tld-span3" style="margin-bottom:0;grid-column:span 3;">
             <label class="cv-label">Registration Auto-Setup</label>
             <select class="cv-select" name="autosetup_registration" id="tld-autosetup-registration">
                 <option value="order">Automatically setup as soon as an order is placed</option>
@@ -60,7 +95,7 @@
                 <option value="off">Do not automatically setup</option>
             </select>
         </div>
-        <div class="cv-field" style="margin-bottom:0;grid-column:span 3;">
+        <div class="cv-field tld-span3" style="margin-bottom:0;grid-column:span 3;">
             <label class="cv-label">Transfer Auto-Setup</label>
             <select class="cv-select" name="autosetup_transfer" id="tld-autosetup-transfer">
                 <option value="order">Automatically setup as soon as an order is placed</option>
@@ -69,13 +104,13 @@
                 <option value="off">Do not automatically setup</option>
             </select>
         </div>
-        <div class="cv-field" style="margin-bottom:0;grid-column:span 6;">
+        <div class="cv-field tld-span6" style="margin-bottom:0;grid-column:span 6;">
             <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
                 <input type="checkbox" name="spinner_enabled" id="tld-spinner-enabled">
                 Allow this TLD in the Domain Spinner (client-facing name-suggestion tool)
             </label>
         </div>
-        <div style="grid-column:span 6;margin-top:var(--cv-space-2);display:flex;gap:var(--cv-space-2);">
+        <div class="tld-span6" style="grid-column:span 6;margin-top:var(--cv-space-2);display:flex;gap:var(--cv-space-2);flex-wrap:wrap;">
             <button class="cv-btn" type="submit" data-edit-submit>Save TLD Pricing</button>
             <button class="cv-btn cv-btn--secondary" type="button" style="display:none;"
                 data-edit-cancel
@@ -132,6 +167,9 @@
                                 'register_price' => number_format((float) $price['register_price'], 2, '.', ''),
                                 'transfer_price' => number_format((float) $price['transfer_price'], 2, '.', ''),
                                 'renew_price' => number_format((float) $price['renew_price'], 2, '.', ''),
+                                'grace_period_days' => (int) ($price['grace_period_days'] ?? 30),
+                                'redemption_period_days' => (int) ($price['redemption_period_days'] ?? 30),
+                                'redemption_fee' => number_format((float) ($price['redemption_fee'] ?? 0), 2, '.', ''),
                                 'autosetup_registration' => $price['autosetup_registration'] ?? 'payment',
                                 'autosetup_transfer' => $price['autosetup_transfer'] ?? 'payment',
                                 'spinner_enabled' => !empty($price['spinner_enabled']),

@@ -74,6 +74,23 @@ final class PromotionController
         return Response::redirect('/admin/promotions');
     }
 
+    public function destroyMultiple(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = $request->input('ids');
+
+        if (is_array($ids)) {
+            foreach ($ids as $id) {
+                $this->promotions->delete((int) $id);
+            }
+        }
+
+        return Response::redirect('/admin/promotions');
+    }
+
     private function requirePermission(): ?Response
     {
         if (!$this->guard->check()) {

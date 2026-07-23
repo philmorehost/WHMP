@@ -11,6 +11,7 @@ use CodeVault\Catalog\ProductGroupController;
 $router->get('/admin/products/groups', [ProductGroupController::class, 'index']);
 $router->post('/admin/products/groups', [ProductGroupController::class, 'store']);
 $router->post('/admin/products/groups/{id}', [ProductGroupController::class, 'update']);
+$router->post('/admin/products/groups/{id}/edit', [ProductGroupController::class, 'update']);
 $router->post('/admin/products/groups/{id}/delete', [ProductGroupController::class, 'destroy']);
 
 $router->get('/admin/products', [ProductController::class, 'index']);
@@ -24,6 +25,7 @@ $router->get('/admin/configurable-options', [ConfigurableOptionController::class
 $router->post('/admin/configurable-options', [ConfigurableOptionController::class, 'storeGroup']);
 $router->post('/admin/configurable-options/{id}/edit', [ConfigurableOptionController::class, 'updateGroup']);
 $router->post('/admin/configurable-options/{id}/delete', [ConfigurableOptionController::class, 'destroyGroup']);
+$router->post('/admin/configurable-options/bulk-delete', [ConfigurableOptionController::class, 'bulkDeleteGroups']);
 $router->get('/admin/configurable-options/{id}', [ConfigurableOptionController::class, 'show']);
 $router->post('/admin/configurable-options/{id}/options', [ConfigurableOptionController::class, 'storeOption']);
 $router->post('/admin/configurable-options/{id}/options/{optionId}/delete', [ConfigurableOptionController::class, 'destroyOption']);

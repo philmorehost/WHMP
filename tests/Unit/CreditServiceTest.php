@@ -139,4 +139,45 @@ final class CreditServiceTest extends DatabaseTestCase
 
         $this->assertFalse($result['success']);
     }
+
+    public function test_apply_custom_amount_to_invoice(): void
+    {
+        $this->creditService->grant($this->clientId, 50.00, 'Grant');
+        $invoiceId = $this->createInvoice(30.00);
+
+        // Apply a custom amount of $15.00
+        $result = $this->creditService->applyToInvoice($this->clientId, $invoiceId, 15.00);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(15.00, $result['applied']);
+        $this->assertSame('unpaid', $this->invoices->find($invoiceId)['status']);
+        $this->assertSame(35.00, $this->credit->balance($this->clientId));
+    }
+
+    public function test_auto_credits_wallet_on_deposit_invoice_payment(): void
+    {
+        $invoiceId = $this->createInvoice(100.00);
+        $this->db->insert(
+            'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+            [$invoiceId, "Deposit / Add Funds to Wallet", 100.00]
+        );
+
+        $hooks = new HookDispatcher();
+        $transactions = new TransactionRepository($this->db);
+        $payments = new PaymentService($this->invoices, $transactions, $hooks);
+
+        // Pay the deposit invoice
+        $payments->recordPayment($invoiceId, 'paypal', 100.00);
+
+        $this->assertSame('paid', $this->invoices->find($invoiceId)['status']);
+        $this->assertSame(100.00, $this->credit->balance($this->clientId));
+    }
+
+    public function test_debit_decreases_balance(): void
+    {
+        $this->creditService->grant($this->clientId, 50.00, 'Initial Grant');
+        $this->creditService->debit($this->clientId, 20.00, 'Manual Reversal');
+
+        $this->assertSame(30.00, $this->credit->balance($this->clientId));
+    }
 }

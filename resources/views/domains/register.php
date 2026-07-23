@@ -15,8 +15,13 @@ $categoryNames = array_keys($categories);
     padding: clamp(1.5rem, 5vw, 3rem);
     position: relative; overflow: hidden; margin-bottom: var(--cv-space-4);
 }
-.dr-hero__search { display: flex; gap: .5rem; max-width: 34rem; }
-.dr-hero__search input { flex: 1; border: none; border-radius: 8px; padding: .85rem 1rem; font-size: 1rem; }
+.dr-hero__search { display: flex; gap: .5rem; max-width: 34rem; flex-wrap: wrap; }
+.dr-hero__search input { flex: 1; min-width: 150px; border: none; border-radius: 8px; padding: .85rem 1rem; font-size: 1rem; }
+@media (max-width: 480px) {
+    .dr-hero__search { flex-direction: column; width: 100%; }
+    .dr-hero__search input { width: 100%; box-sizing: border-box; }
+    .dr-hero__search button { width: 100%; }
+}
 .dr-featured { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--cv-space-3); margin-bottom: var(--cv-space-4); }
 .dr-featured__card { background: var(--cv-bg-surface); border: 1px solid var(--cv-border-default); border-radius: var(--cv-radius-md, 10px); overflow: hidden; text-align: center; }
 .dr-featured__tld { font-size: clamp(1.8rem, 6vw, 2.6rem); font-weight: 800; padding: 1.25rem; letter-spacing: -.02em; }
@@ -72,15 +77,20 @@ $categoryNames = array_keys($categories);
                 <p style="color:var(--cv-text-secondary);">No TLDs are configured to search against yet.</p>
             <?php endif; ?>
             <?php foreach ($results as $result): ?>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--cv-border-default);">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:.85rem 0;border-bottom:1px solid var(--cv-border-default);">
                     <div>
-                        <strong><?= e($result['domain']) ?></strong>
+                        <strong style="font-size:1.15rem;color:var(--cv-text-primary);"><?= e($result['domain']) ?></strong>
                         <?php if (!$result['checked']): ?>
-                            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"><?= e($result['message'] !== '' ? $result['message'] : 'Could not check availability.') ?></div>
+                            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:0.25rem;"><?= e($result['message'] !== '' ? $result['message'] : 'Could not check availability.') ?></div>
                         <?php elseif ($result['available']): ?>
-                            <div style="font-size:var(--cv-text-xs);color:#22c55e;font-weight:600;">Available &mdash; $<?= number_format((float) $result['price'], 2) ?>/yr</div>
+                            <div style="font-size:var(--cv-text-sm);color:#10b981;font-weight:700;margin-top:0.3rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                                <span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#10b981;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(16,185,129,0.3);">✔ AVAILABLE</span>
+                                <span style="font-size:1rem;color:var(--cv-text-primary);">$<?= number_format((float) $result['price'], 2) ?>/yr</span>
+                            </div>
                         <?php else: ?>
-                            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Already taken</div>
+                            <div style="font-size:var(--cv-text-sm);color:#ef4444;font-weight:700;margin-top:0.3rem;">
+                                <span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#ef4444;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(239,68,68,0.3);display:inline-block;">✖ ALREADY TAKEN</span>
+                            </div>
                         <?php endif; ?>
                     </div>
                     <?php if ($result['checked'] && $result['available']): ?>

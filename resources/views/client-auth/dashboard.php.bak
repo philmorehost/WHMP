@@ -1,0 +1,209 @@
+<?php
+/** @var array<string, mixed> $client */
+/** @var int $servicesCount */
+/** @var int $domainsCount */
+/** @var int $invoicesCount */
+/** @var int $ticketsCount */
+/** @var array<int, array<string, mixed>> $unpaidInvoices */
+/** @var array<int, array<string, mixed>> $activeServices */
+/** @var array<string, mixed> $currency */
+/** @var bool $aiCopilotEnabled */
+?>
+<div class="cv-hero" style="background:var(--cv-bg-surface);padding:var(--cv-space-6);border-radius:var(--cv-radius-md);margin-bottom:var(--cv-space-4);border:1px solid var(--cv-border-default);">
+    <h1 style="font-size:var(--cv-text-2xl);font-family:'Hanken Grotesk', sans-serif;margin:0;color:var(--cv-text-primary);">Hello, <?= e($client['first_name']) ?>!</h1>
+    <p style="color:var(--cv-text-secondary);margin:var(--cv-space-1) 0 0 0;font-size:var(--cv-text-sm);">Welcome back to your client area dashboard. From here you can manage your hosting packages, domains, invoices, and support requests.</p>
+</div>
+
+<?php if (!empty($aiCopilotEnabled)): ?>
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);border-left:4px solid var(--cv-color-brand-500);" data-copilot data-copilot-token="<?= e(csrf_token()) ?>">
+    <h2 class="cv-card__title" style="display:flex;align-items:center;gap:.5rem;">✨ Getting Started Assistant</h2>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:0;">New here? Ask anything — how to order hosting, what happens after payment, how to point your domain, or how to log into cPanel.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:var(--cv-space-3);">
+        <button type="button" class="cv-btn cv-btn--secondary" data-copilot-suggest="How do I get my website online after paying?">How do I get online after paying?</button>
+        <button type="button" class="cv-btn cv-btn--secondary" data-copilot-suggest="How do I log into cPanel?">How do I log into cPanel?</button>
+        <button type="button" class="cv-btn cv-btn--secondary" data-copilot-suggest="How do I point my domain to my hosting?">Point my domain</button>
+    </div>
+    <div data-copilot-answer style="display:none;white-space:pre-wrap;background:var(--cv-bg-surface-sunken, #f8fafc);color:var(--cv-text-primary, inherit);border:1px solid var(--cv-border-default);border-radius:var(--cv-radius-md);padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);font-size:var(--cv-text-sm);"></div>
+    <form data-copilot-form style="display:flex;gap:.5rem;">
+        <input class="cv-input" data-copilot-input placeholder="Ask a question…" style="flex:1;" maxlength="1000">
+        <button class="cv-btn" type="submit" data-copilot-submit>Ask</button>
+    </form>
+</div>
+<?php endif; ?>
+
+<!-- Lagom2 Summary Stats Cards Grid -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:var(--cv-space-4);margin-bottom:var(--cv-space-6);width:100%;box-sizing:border-box;">
+    <a href="/client/services" style="text-decoration:none;color:inherit;width:100%;">
+        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Services</div>
+            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:var(--cv-color-brand-500);margin:var(--cv-space-2) 0;"><?= $servicesCount ?></div>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Active Services</div>
+        </div>
+    </a>
+    <a href="/client/domains" style="text-decoration:none;color:inherit;width:100%;">
+        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Domains</div>
+            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:var(--cv-color-brand-500);margin:var(--cv-space-2) 0;"><?= $domainsCount ?></div>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Active Domains</div>
+        </div>
+    </a>
+    <a href="/client/invoices" style="text-decoration:none;color:inherit;width:100%;">
+        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Invoices</div>
+            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:<?= $invoicesCount > 0 ? 'var(--cv-color-danger, #ef4444)' : 'var(--cv-text-primary)' ?>;margin:var(--cv-space-2) 0;"><?= $invoicesCount ?></div>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"><?= $invoicesCount > 0 ? 'Unpaid Invoices' : 'All Invoices Paid' ?></div>
+        </div>
+    </a>
+    <a href="/client/tickets" style="text-decoration:none;color:inherit;width:100%;">
+        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Tickets</div>
+            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:var(--cv-color-brand-500);margin:var(--cv-space-2) 0;"><?= $ticketsCount ?></div>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Open Tickets</div>
+        </div>
+    </a>
+    <a href="/client/wallet/add-funds" style="text-decoration:none;color:inherit;width:100%;">
+        <div class="cv-card" style="padding:var(--cv-space-4);text-align:center;transition:transform var(--cv-transition-fast), border-color var(--cv-transition-fast);cursor:pointer;border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;" onmouseover="this.style.transform='translateY(-3px)';this.style.borderColor='var(--cv-color-brand-500)';" onmouseout="this.style.transform='none';this.style.borderColor='var(--cv-border-default)';">
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;">Wallet</div>
+            <div style="font-size:var(--cv-text-3xl);font-family:'Hanken Grotesk', sans-serif;font-weight:800;color:#10b981;margin:var(--cv-space-2) 0;"><?= e($currency['symbol'] ?? '$') ?><?= number_format($creditBalance, 2) ?></div>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Add Funds &rarr;</div>
+        </div>
+    </a>
+</div>
+
+<!-- Domain Registration Search Bar -->
+<div class="cv-card" style="margin-bottom:var(--cv-space-6);border:1px solid var(--cv-border-default);background:var(--cv-bg-surface-sunken);width:100%;box-sizing:border-box;">
+    <h3 style="margin:0 0 var(--cv-space-2) 0;font-size:var(--cv-text-md);font-family:'Hanken Grotesk', sans-serif;color:var(--cv-text-primary);">Find Your New Domain Name</h3>
+    <form method="get" action="/domains/register" style="display:flex;gap:var(--cv-space-2);width:100%;box-sizing:border-box;flex-wrap:wrap;">
+        <input class="cv-input" name="domain" placeholder="Enter the domain you want to register (e.g. mywebsite.com)" style="flex:1;min-width:220px;">
+        <button class="cv-btn" type="submit" style="background:var(--cv-color-brand-500);color:#ffffff;border:none;font-weight:600;">Search</button>
+    </form>
+</div>
+
+<div class="cv-dashboard-grid--2-3" style="width:100%;box-sizing:border-box;">
+    <!-- Left Column: Unpaid Invoices & Active Services -->
+    <div style="display:flex;flex-direction:column;gap:var(--cv-space-6);width:100%;box-sizing:border-box;">
+        <!-- Unpaid Invoices -->
+        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--cv-space-3);flex-wrap:wrap;gap:var(--cv-space-2);">
+                <h3 style="margin:0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Unpaid Invoices</h3>
+                <a href="/client/invoices" style="font-size:var(--cv-text-xs);color:var(--cv-color-brand-500);font-weight:600;text-decoration:none;">View All Invoices &rarr;</a>
+            </div>
+            
+            <?php if ($unpaidInvoices !== []): ?>
+                <div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+                    <table class="cv-table" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Invoice #</th>
+                                <th>Due Date</th>
+                                <th>Total</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($unpaidInvoices as $invoice): ?>
+                                <tr>
+                                    <td><strong>INV-<?= (int) $invoice['id'] ?></strong></td>
+                                    <td><?= e($invoice['due_date']) ?></td>
+                                    <td><?= e($currencyService->formatLocked((float) $invoice['total'], $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null, (float) ($invoice['currency_rate'] ?? 1.0000))) ?></td>
+                                    <td>
+                                        <a class="cv-btn cv-btn--secondary" href="/client/invoices/<?= (int) $invoice['id'] ?>" style="padding:var(--cv-space-1) var(--cv-space-2);font-size:var(--cv-text-xs);background:var(--cv-color-brand-500);color:#ffffff;border:none;">Pay Now</a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php else: ?>
+                <div style="text-align:center;padding:var(--cv-space-6);color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                    You do not have any unpaid invoices. Thank you!
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- Active Services -->
+        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--cv-space-3);flex-wrap:wrap;gap:var(--cv-space-2);">
+                <h3 style="margin:0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Your Active Products & Services</h3>
+                <a href="/client/services" style="font-size:var(--cv-text-xs);color:var(--cv-color-brand-500);font-weight:600;text-decoration:none;">View All Services &rarr;</a>
+            </div>
+
+            <?php if ($activeServices !== []): ?>
+                <div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+                    <table class="cv-table" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Product/Domain</th>
+                                <th>Billing Cycle</th>
+                                <th>Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($activeServices as $service): ?>
+                                <tr class="cv-clickable-row" style="cursor:pointer;" data-row-link="/client/services/<?= (int) $service['id'] ?>">
+                                    <td>
+                                        <a href="/client/services/<?= (int) $service['id'] ?>" style="text-decoration:none;color:inherit;">
+                                            <strong><?= e($service['product_name']) ?></strong><br>
+                                            <span style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"><?= e((string) ($service['domain'] ?: ($service['hostname'] ?: '-'))) ?></span>
+                                        </a>
+                                    </td>
+                                    <td><span class="cv-badge cv-badge--neutral"><?= e($service['billing_cycle']) ?></span></td>
+                                    <td><?= e($currencyService->format((float) $service['amount'], $currency)) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php else: ?>
+                <div style="text-align:center;padding:var(--cv-space-6);color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                    You do not have any active products or services. <a href="/store" style="color:var(--cv-color-brand-500);text-decoration:none;font-weight:600;">Browse Store &rarr;</a>
+                </div>
+            <?php endif; ?>
+        </div>
+        <style>
+        .cv-clickable-row:hover {
+            background-color: var(--cv-bg-surface-sunken) !important;
+        }
+        </style>
+    </div>
+
+    <!-- Right Column: Quick Links / Actions -->
+    <div style="display:flex;flex-direction:column;gap:var(--cv-space-6);width:100%;box-sizing:border-box;">
+        <!-- Quick Actions Card -->
+        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
+            <h3 style="margin:0 0 var(--cv-space-3) 0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Quick Actions</h3>
+            <div style="display:flex;flex-direction:column;gap:var(--cv-space-2);width:100%;box-sizing:border-box;">
+                <a href="/store" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">🛍️ Order New Services</a>
+                <a href="/domains/register" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">🌐 Register New Domains</a>
+                <a href="/client/tickets" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">✉️ Submit Support Ticket</a>
+                <a href="/client/account" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">👤 Edit Profile Details</a>
+                <a href="/client/affiliate" class="cv-btn cv-btn--secondary" style="text-align:left;display:block;width:100%;text-decoration:none;box-sizing:border-box;">🤝 Affiliate Program</a>
+                <form method="post" action="/client/logout" style="width:100%;margin:0;box-sizing:border-box;"><?= csrf_field() ?>
+                    <button class="cv-btn cv-btn--secondary" type="submit" style="text-align:left;width:100%;background:rgba(239, 68, 68, 0.1);color:#ef4444;border-color:rgba(239, 68, 68, 0.2);box-sizing:border-box;">🚪 Log Out</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- System Information Card -->
+        <div class="cv-card" style="border:1px solid var(--cv-border-default);width:100%;box-sizing:border-box;">
+            <h3 style="margin:0 0 var(--cv-space-2) 0;font-family:'Hanken Grotesk', sans-serif;font-size:var(--cv-text-md);">Support Options</h3>
+            <p style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin:0 0 var(--cv-space-3) 0;">Find answers instantly in our knowledgebase or download tools and resources.</p>
+            <div style="display:flex;gap:var(--cv-space-2);width:100%;box-sizing:border-box;flex-wrap:wrap;">
+                <a href="/kb" class="cv-btn cv-btn--secondary" style="flex:1;text-align:center;text-decoration:none;font-size:var(--cv-text-xs);box-sizing:border-box;min-width:120px;">📚 KB articles</a>
+                <a href="/downloads" class="cv-btn cv-btn--secondary" style="flex:1;text-align:center;text-decoration:none;font-size:var(--cv-text-xs);box-sizing:border-box;min-width:120px;">💾 Downloads</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.cv-clickable-row').forEach(function (row) {
+        row.addEventListener('click', function (e) {
+            if (!e.target.closest('a') && row.dataset.rowLink) {
+                window.location = row.dataset.rowLink;
+            }
+        });
+    });
+});
+</script>

@@ -11,6 +11,25 @@ use CodeVault\View;
 
 /** @var CodeVault\Router $router */
 
+$router->get('/db-debug', function (Request $request, array $params, Container $container): Response {
+    /** @var CodeVault\Database $db */
+    $db = $container->make(CodeVault\Database::class);
+    
+    $currencies = $db->select("SELECT * FROM currencies");
+    $clients = $db->select("SELECT id, currency_id FROM clients LIMIT 5");
+    $invoices = $db->select("SELECT id, subtotal, total, currency_id, currency_rate FROM invoices LIMIT 5");
+    $pricing = $db->select("SELECT * FROM product_pricing LIMIT 5");
+    $services = $db->select("SELECT id, amount, billing_cycle FROM services LIMIT 5");
+
+    return Response::json([
+        'currencies' => $currencies,
+        'clients' => $clients,
+        'invoices' => $invoices,
+        'pricing' => $pricing,
+        'services' => $services,
+    ]);
+});
+
 $router->get('/', function (Request $request, array $params, Container $container): Response {
     /** @var View $view */
     $view = $container->make(View::class);

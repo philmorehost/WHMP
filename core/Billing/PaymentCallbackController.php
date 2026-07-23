@@ -68,21 +68,11 @@ final class PaymentCallbackController
         $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
         $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
 
-        $invoiceCurrId = $invoice['currency_id'];
-        $invoiceCurr = null;
-        if ($invoiceCurrId !== null) {
-            $invoiceCurr = $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrId]);
-        }
-        $invoiceCode = $invoiceCurr !== null ? $invoiceCurr['code'] : 'USD';
-        $invoiceRate = $invoiceCurr !== null ? (float) $invoiceCurr['exchange_rate'] : 1.0000;
-
         $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
         $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
 
-        $captureAmount = $remaining;
-        if ($invoiceCode !== $gatewayCurrency) {
-            $captureAmount = round($remaining * ($gatewayRate / $invoiceRate), 2);
-        }
+        // $remaining is always in base currency. Convert it to the gateway's expected currency.
+        $captureAmount = round($remaining * $gatewayRate, 2);
 
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
 

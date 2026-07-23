@@ -38,6 +38,7 @@ $groups = [
         '/admin/products' => 'Products',
         '/admin/products/groups' => 'Product Groups',
         '/admin/configurable-options' => 'Configurable Options',
+        '/admin/import-resellerclub' => 'ResellerClub Import',
     ]],
     'Domains' => ['icon' => 'globe', 'links' => [
         '/admin/domains' => 'Domains',
@@ -72,6 +73,7 @@ $groups = [
         '/admin/gdpr' => 'GDPR / Privacy',
     ]],
     'Configuration' => ['icon' => 'settings', 'links' => [
+        '/admin/settings/general' => 'General Settings',
         '/admin/staff' => 'Staff',
         '/admin/roles' => 'Roles',
         '/admin/email-templates' => 'Email Templates',

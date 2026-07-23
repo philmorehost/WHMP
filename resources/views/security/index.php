@@ -25,7 +25,7 @@
         <h3 style="margin-top:0;font-size:var(--cv-text-md);">Google OAuth 2.0 Client Setup</h3>
         <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-bottom:var(--cv-space-3);">
             To enable Google Sign-In: Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--cv-color-brand-500);">Google Cloud Console</a> &rsaquo; Create Credentials &rsaquo; OAuth client ID (Web Application).<br>
-            Set Authorized redirect URIs to: <code style="background:var(--cv-bg-surface-sunken);padding:2px 6px;border-radius:4px;"><?= e(rtrim((string) ($config['app']['url'] ?? 'http://localhost'), '/')) ?>/client/auth/google/callback</code>
+            Set Authorized redirect URIs to: <code style="background:var(--cv-bg-surface-sunken);padding:2px 6px;border-radius:4px;"><?= e(rtrim((string) ($appUrl ?? 'http://localhost'), '/')) ?>/client/auth/google/callback</code>
         </p>
 
         <div class="cv-field">

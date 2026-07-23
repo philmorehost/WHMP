@@ -62,6 +62,8 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
     $unpaidInvoices = $db->select("SELECT * FROM invoices WHERE client_id = ? AND status = 'unpaid' ORDER BY created_at DESC LIMIT 5", [$clientId]);
     // Fetch active services
     $activeServices = $db->select("SELECT * FROM services WHERE client_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5", [$clientId]);
+    // Fetch recent tickets
+    $recentTickets = $db->select("SELECT * FROM tickets WHERE client_id = ? ORDER BY updated_at DESC LIMIT 8", [$clientId]);
 
     /** @var CurrencyService $currencyService */
     $currencyService = $container->make(CurrencyService::class);
@@ -73,6 +75,10 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
     /** @var CodeVault\Ai\AiSettings $aiSettings */
     $aiSettings = $container->make(CodeVault\Ai\AiSettings::class);
 
+    /** @var \CodeVault\Billing\ClientCreditRepository $creditRepo */
+    $creditRepo = $container->make(\CodeVault\Billing\ClientCreditRepository::class);
+    $creditBalance = $creditRepo->balance($clientId);
+
     $content = $view->render('client-auth.dashboard', [
         'client' => $client,
         'servicesCount' => $servicesCount,
@@ -81,7 +87,10 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
         'ticketsCount' => $ticketsCount,
         'unpaidInvoices' => $unpaidInvoices,
         'activeServices' => $activeServices,
+        'recentTickets' => $recentTickets,
         'currency' => $currency,
+        'currencyService' => $currencyService,
+        'creditBalance' => $creditBalance,
         'aiCopilotEnabled' => $aiSettings->isFeatureEnabled('onboarding') && $aiSettings->hasKey(),
     ]);
 

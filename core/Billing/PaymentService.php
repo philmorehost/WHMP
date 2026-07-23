@@ -27,16 +27,44 @@ final class PaymentService
      */
     public function recordPayment(int $invoiceId, string $gatewaySlug, float $amount, ?string $gatewayTransactionId = null): array
     {
-        $transactionId = $this->transactions->create($invoiceId, $gatewaySlug, $amount, 'completed', $gatewayTransactionId);
+        try {
+            $transactionId = $this->transactions->create($invoiceId, $gatewaySlug, $amount, 'completed', $gatewayTransactionId);
+        } catch (\PDOException $e) {
+            // If the unique constraint on (gateway_slug, gateway_transaction_id) is violated,
+            // this is a duplicate webhook/callback payload. Silently ignore it to prevent race conditions.
+            if ($e->getCode() === '23000') {
+                return ['transactionId' => 0, 'invoicePaid' => false];
+            }
+            throw $e;
+        }
 
         $invoice = $this->invoices->find($invoiceId);
         $totalPaid = $this->transactions->totalCompletedForInvoice($invoiceId);
         $invoicePaid = false;
 
         if ($invoice !== null && $invoice['status'] === 'unpaid' && $totalPaid >= (float) $invoice['total']) {
-            $this->invoices->markPaid($invoiceId);
-            $this->hooks->fire(HookPoints::INVOICE_PAID, ['invoiceId' => $invoiceId]);
-            $invoicePaid = true;
+            $rowsAffected = $this->invoices->markPaid($invoiceId);
+
+            if ($rowsAffected > 0) {
+                // Check if it is a deposit invoice
+                $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
+                $items = $db->select('SELECT * FROM invoice_items WHERE invoice_id = ?', [$invoiceId]);
+                $isDeposit = false;
+                foreach ($items as $item) {
+                    if (stripos((string) $item['description'], 'Add Funds') !== false || stripos((string) $item['description'], 'Deposit') !== false) {
+                        $isDeposit = true;
+                        break;
+                    }
+                }
+
+                if ($isDeposit) {
+                    $creditRepo = \CodeVault\Support\App::container()->make(\CodeVault\Billing\ClientCreditRepository::class);
+                    $creditRepo->add((int) $invoice['client_id'], (float) $invoice['total'], "Wallet deposit: Invoice #{$invoiceId}", $invoiceId);
+                }
+
+                $this->hooks->fire(HookPoints::INVOICE_PAID, ['invoiceId' => $invoiceId]);
+                $invoicePaid = true;
+            }
         }
 
         $this->hooks->fire(HookPoints::TRANSACTION_ADDED, ['invoiceId' => $invoiceId, 'amount' => $amount, 'gateway' => $gatewaySlug]);

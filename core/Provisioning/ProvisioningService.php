@@ -77,6 +77,9 @@ final class ProvisioningService
         $result = $module->create([
             'username' => $username,
             'product_name' => $service['product_name'],
+            'whm_package_name' => $product['whm_package_name'] ?? null,
+            'domain' => $service['domain'] ?? null,
+            'password' => $service['password'] ?? null,
             'server' => $server,
         ]);
 
@@ -139,6 +142,38 @@ final class ProvisioningService
         }
 
         return $module->singleSignOn($params);
+    }
+
+    public function reinstall(int $serviceId, string $osVersion): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        if (!method_exists($module, 'reinstall')) {
+            return ['success' => false, 'message' => 'OS Reinstallation is not supported by this server module.'];
+        }
+
+        $params['osVersion'] = $osVersion;
+        return $module->reinstall($params);
+    }
+
+    public function setReverseDns(int $serviceId, string $rdns): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        if (!method_exists($module, 'setReverseDns')) {
+            return ['success' => false, 'message' => 'Reverse DNS configuration is not supported by this server module.'];
+        }
+
+        $params['rdns'] = $rdns;
+        return $module->setReverseDns($params);
     }
 
     /** @return array<string, mixed> */
@@ -228,7 +263,29 @@ final class ProvisioningService
 
     private function generateUsername(int $serviceId): string
     {
-        return "cv{$serviceId}";
+        $service = $this->services->find($serviceId);
+        $domain = $service['domain'] ?? $service['hostname'] ?? '';
+
+        $settingsRepo = \CodeVault\Support\App::container()->make(\CodeVault\Settings\SettingsRepository::class);
+        $randomEnabled = $settingsRepo->get('cpanel.random_usernames', '1') === '1';
+
+        if (!$randomEnabled && !empty($domain)) {
+            // Strip TLD / non-alphanumeric chars and get first 6 lowercase letters
+            $clean = strtolower(preg_replace('/[^a-zA-Z]/', '', explode('.', $domain)[0]));
+            if (strlen($clean) >= 3) {
+                return substr($clean, 0, 8);
+            }
+        }
+
+        // WHMCS-style random 8-character alphanumeric username starting with a letter
+        $letters = 'abcdefghijklmnopqrstuvwxyz';
+        $chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        $user = $letters[random_int(0, 25)];
+        for ($i = 0; $i < 7; $i++) {
+            $user .= $chars[random_int(0, 35)];
+        }
+
+        return $user;
     }
 
     private function recordFailure(int $serviceId, string $message): void

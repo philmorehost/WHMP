@@ -9,6 +9,8 @@ use CodeVault\Cron\CronJob;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 use CodeVault\Mail\EmailDispatcher;
+use CodeVault\Database;
+use CodeVault\Settings\SettingsRepository;
 use RuntimeException;
 
 /**
@@ -26,7 +28,9 @@ final class DunningJob implements CronJob
         private readonly ClientRepository $clients,
         private readonly EmailDispatcher $mail,
         private readonly HookDispatcher $hooks,
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly Database $db,
+        private readonly SettingsRepository $settings
     ) {
     }
 
@@ -42,7 +46,42 @@ final class DunningJob implements CronJob
 
     public function handle(): void
     {
+        $lateFeePercent = (float) $this->settings->get('billing.late_fee_percentage', '5.00');
+
         foreach ($this->invoices->overdue() as $invoice) {
+            $invoiceId = (int) $invoice['id'];
+
+            // Check if late fee has already been added
+            if ($lateFeePercent > 0) {
+                $hasLateFee = $this->db->selectOne(
+                    "SELECT id FROM invoice_items WHERE invoice_id = ? AND description LIKE '%Late Fee%'",
+                    [$invoiceId]
+                );
+
+                if ($hasLateFee === null) {
+                    $subtotal = (float) $invoice['subtotal'];
+                    $lateFeeAmount = round($subtotal * ($lateFeePercent / 100), 2);
+
+                    if ($lateFeeAmount > 0) {
+                        $newSubtotal = $subtotal + $lateFeeAmount;
+                        $newTotal = (float) $invoice['total'] + $lateFeeAmount;
+
+                        $this->db->update(
+                            'UPDATE invoices SET subtotal = ?, total = ?, updated_at = NOW() WHERE id = ?',
+                            [$newSubtotal, $newTotal, $invoiceId]
+                        );
+
+                        $this->db->insert(
+                            'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+                            [$invoiceId, "Late Fee ({$lateFeePercent}%)", $lateFeeAmount]
+                        );
+
+                        $invoice['subtotal'] = $newSubtotal;
+                        $invoice['total'] = $newTotal;
+                    }
+                }
+            }
+
             $client = $this->clients->find((int) $invoice['client_id']);
 
             if ($client !== null) {

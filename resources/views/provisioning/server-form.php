@@ -14,12 +14,25 @@ $formId = 'server-form-' . ($server['id'] ?? 'new');
     <div class="cv-field">
         <label class="cv-label">Hostname</label>
         <input class="cv-input" name="hostname" value="<?= e((string) ($server['hostname'] ?? '')) ?>" placeholder="server1.example.com" required>
+        <div id="hostname-hint" style="font-size: var(--cv-text-xs); color: var(--cv-text-secondary); margin-top: var(--cv-space-1); display: none;"></div>
     </div>
     <div class="cv-field">
         <label class="cv-label">Module</label>
         <select class="cv-select" name="module_slug" data-server-module-select>
             <?php foreach ($moduleSlugs as $slug): ?>
-                <option value="<?= e($slug) ?>" <?= ($server['module_slug'] ?? 'local') === $slug ? 'selected' : '' ?>><?= e($slug) ?></option>
+                <?php 
+                    $label = match($slug) {
+                        'cpanel' => 'cPanel / WHM',
+                        'cyberpanel' => 'CyberPanel',
+                        'interserver-vps', 'interserver_vps' => 'InterServer VPS',
+                        'interserver-dedicated', 'interserver_dedicated' => 'InterServer Dedicated',
+                        'nocix-dedicated', 'nocix_dedicated', 'nocix' => 'Nocix Dedicated Server',
+                        'resellerclub-email', 'resellerclub_email' => 'ResellerClub Email',
+                        'local' => 'Local / Custom',
+                        default => ucfirst($slug),
+                    };
+                ?>
+                <option value="<?= e($slug) ?>" <?= ($server['module_slug'] ?? 'cpanel') === $slug ? 'selected' : '' ?>><?= e($label) ?> (<?= e($slug) ?>)</option>
             <?php endforeach; ?>
         </select>
     </div>

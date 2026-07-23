@@ -33,52 +33,97 @@ final class InvoicePdfBuilder
 
         $y = 800.0;
 
-        $pdf->text(50, $y, 'CodeVault', 20, true);
-        $pdf->text(400, $y, 'INVOICE', 20, true);
+        // 1. Logo & Document Title
+        $pdf->text(50, $y, 'CodeVault', 24, true);
+        
+        $statusStr = strtoupper((string) $invoice['status']);
+        $pdf->text(400, $y, $statusStr, 20, true);
         $y -= 30;
 
-        $pdf->text(50, $y, "Invoice #INV-{$invoice['id']}", 12, true);
+        // 2. Metadata Columns
+        $pdf->text(50, $y, "Proforma Invoice #INV-{$invoice['id']}", 12, true);
+        $pdf->text(400, $y, "Due Date: {$invoice['due_date']}", 10, true);
         $y -= 16;
-        $pdf->text(50, $y, 'Status: ' . ucfirst((string) $invoice['status']));
-        $y -= 14;
-        $pdf->text(50, $y, "Due Date: {$invoice['due_date']}");
-        $y -= 14;
-        $pdf->text(50, $y, "Issued: " . substr((string) $invoice['created_at'], 0, 10));
-        $y -= 30;
+        $pdf->text(50, $y, "Issued: " . substr((string) $invoice['created_at'], 0, 10), 10);
+        $y -= 35;
 
-        $pdf->text(50, $y, 'Bill To:', 11, true);
-        $y -= 14;
-        $pdf->text(50, $y, trim("{$client['first_name']} {$client['last_name']}"));
-        $y -= 14;
-        $pdf->text(50, $y, (string) $client['email']);
+        // 3. Billing Addresses
+        $pdf->text(50, $y, 'INVOICED TO', 9, true);
+        $pdf->text(300, $y, 'PAY TO', 9, true);
+        $y -= 16;
 
-        if (!empty($client['company_name'])) {
+        $clientName = trim("{$client['first_name']} {$client['last_name']}");
+        $pdf->text(50, $y, $clientName, 10, true);
+        $pdf->text(300, $y, 'CodeVault Limited', 10, true);
+        $y -= 14;
+
+        $company = !empty($client['company_name']) ? (string) $client['company_name'] : '';
+        $pdf->text(50, $y, $company ?: $client['email'], 10);
+        $pdf->text(300, $y, 'Payments Dept.', 10);
+        $y -= 14;
+
+        if ($company) {
+            $pdf->text(50, $y, $client['email'], 10);
             $y -= 14;
-            $pdf->text(50, $y, (string) $client['company_name']);
         }
+        $y -= 20;
 
-        $y -= 30;
-
-        $pdf->line(50, $y, 545, $y);
-        $y -= 16;
+        // 4. Invoice Items Table Header
+        $pdf->line(50, $y, 545, $y, 1.0);
+        $y -= 15;
         $pdf->text(50, $y, 'Description', 10, true);
-        $pdf->text(480, $y, 'Amount', 10, true);
+        $pdf->text(460, $y, 'Amount', 10, true);
         $y -= 6;
-        $pdf->line(50, $y, 545, $y);
-        $y -= 16;
+        $pdf->line(50, $y, 545, $y, 0.5);
+        $y -= 18;
 
+        // 5. Render Line Items with Word Wrapping
         foreach ($items as $item) {
-            $pdf->text(50, $y, (string) $item['description']);
-            $pdf->text(480, $y, $money((float) $item['amount']));
-            $y -= 16;
+            $description = (string) $item['description'];
+            $lines = explode("\n", wordwrap($description, 65, "\n", true));
+            
+            foreach ($lines as $i => $line) {
+                if ($y < 120) {
+                    break; // simple layout safety
+                }
+                
+                if ($i === 0) {
+                    $pdf->text(50, $y, $line, 9);
+                    $pdf->text(460, $y, $money((float) $item['amount']), 9);
+                } else {
+                    $pdf->text(65, $y, $line, 9); // indent wrapped lines
+                }
+                $y -= 14;
+            }
+            $y -= 4;
         }
 
         $y -= 4;
-        $pdf->line(50, $y, 545, $y);
-        $y -= 18;
+        $pdf->line(50, $y, 545, $y, 0.5);
+        $y -= 16;
 
-        $pdf->text(400, $y, 'Total:', 11, true);
-        $pdf->text(480, $y, $money((float) $invoice['total']), 11, true);
+        // 6. Totals & Summaries
+        $pdf->text(370, $y, 'Sub Total:', 10);
+        $pdf->text(460, $y, $money((float) $invoice['subtotal']), 10);
+        $y -= 14;
+
+        if ((float) $invoice['discount_amount'] > 0) {
+            $pdf->text(370, $y, 'Discount:', 10);
+            $pdf->text(460, $y, '-' . $money((float) $invoice['discount_amount']), 10);
+            $y -= 14;
+        }
+
+        if ((float) $invoice['tax_amount'] > 0) {
+            $pdf->text(370, $y, 'Tax:', 10);
+            $pdf->text(460, $y, $money((float) $invoice['tax_amount']), 10);
+            $y -= 14;
+        }
+
+        $pdf->line(370, $y, 545, $y, 0.5);
+        $y -= 16;
+
+        $pdf->text(370, $y, 'Total Due:', 11, true);
+        $pdf->text(460, $y, $money((float) $invoice['total']), 11, true);
 
         return $pdf->render();
     }

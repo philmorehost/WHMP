@@ -91,10 +91,10 @@ final class AffiliateService
             return ['success' => false, 'error' => 'You already have a payout request pending review.'];
         }
 
-        $pending = $this->commissions->pendingTotal($affiliateId);
+        $minPayout = (float) \CodeVault\Support\App::container()->make(\CodeVault\Settings\SettingsRepository::class)->get('affiliates.min_payout', '50.00');
 
-        if ($pending <= 0) {
-            return ['success' => false, 'error' => 'No pending commission balance to pay out.'];
+        if ($pending < $minPayout) {
+            return ['success' => false, 'error' => "The minimum commission balance required for a payout request is $" . number_format($minPayout, 2) . "."];
         }
 
         $this->commissions->markRequested($affiliateId);

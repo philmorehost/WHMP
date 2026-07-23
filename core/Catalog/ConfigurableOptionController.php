@@ -71,6 +71,21 @@ final class ConfigurableOptionController
         return Response::redirect('/admin/configurable-options');
     }
 
+    public function bulkDeleteGroups(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $groupIds = array_map('intval', (array) $request->input('selected_groups', []));
+
+        foreach ($groupIds as $groupId) {
+            $this->groups->delete($groupId);
+        }
+
+        return Response::redirect('/admin/configurable-options');
+    }
+
     public function show(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {

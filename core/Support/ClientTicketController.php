@@ -168,10 +168,24 @@ final class ClientTicketController
             return $this->deniedOrNotFound();
         }
 
-        $rating = (int) $request->input('rating', 0);
+        $settingsRepo = \CodeVault\Support\App::container()->make(\CodeVault\Settings\SettingsRepository::class);
+        if ($settingsRepo->get('support.ticket_rating_enabled', '1') !== '1') {
+            return Response::redirect("/client/tickets/{$ticket['id']}");
+        }
 
-        if ($ticket['status'] === 'closed' && $ticket['satisfaction_rating'] === null && $rating >= 1 && $rating <= 5) {
-            $this->tickets->setRating((int) $ticket['id'], $rating);
+        $rating = (int) $request->input('rating', 0);
+        $replyId = (int) $request->input('reply_id', 0);
+
+        if ($rating >= 1 && $rating <= 5) {
+            if ($replyId > 0) {
+                // Rate specific staff reply
+                \CodeVault\Support\App::container()->make(\CodeVault\Database::class)->update(
+                    'UPDATE ticket_replies SET rating = ? WHERE id = ? AND ticket_id = ? AND staff_id IS NOT NULL',
+                    [$rating, $replyId, (int) $ticket['id']]
+                );
+            } elseif ($ticket['status'] === 'closed' && $ticket['satisfaction_rating'] === null) {
+                $this->tickets->setRating((int) $ticket['id'], $rating);
+            }
         }
 
         return Response::redirect("/client/tickets/{$ticket['id']}");

@@ -2,9 +2,9 @@
 /** @var CodeVault\View $view */
 /** @var array<int, array<string, mixed>> $promotions */
 ?>
-<div style="display: flex; gap: var(--cv-space-6); align-items: flex-start; max-width: 1400px; margin: 0 auto; padding-top: var(--cv-space-4);">
+<div class="home-layout-wrapper">
     <!-- Left Sidebar (Lagom2 style) -->
-    <div class="cv-card" style="width: 260px; padding: var(--cv-space-3) 0; flex-shrink: 0; border: 1px solid var(--cv-border-default); background: var(--cv-bg-surface); position: sticky; top: var(--cv-space-4);">
+    <div class="cv-card home-sidebar">
         <ul style="list-style: none; padding: 0; margin: 0;">
             <li style="margin-bottom: var(--cv-space-1);">
                 <a href="/store" style="display: flex; align-items: center; justify-content: space-between; padding: var(--cv-space-3) var(--cv-space-4); color: var(--cv-text-primary); text-decoration: none; font-weight: 600; font-size: var(--cv-text-sm); transition: background var(--cv-transition-fast);" onmouseover="this.style.background='var(--cv-bg-surface-sunken)'" onmouseout="this.style.background='transparent'">
@@ -52,7 +52,7 @@
     </div>
 
     <!-- Main Content Area -->
-    <div style="flex: 1; min-width: 0;">
+    <div class="home-main-content">
         <h2 style="font-family: 'Hanken Grotesk', sans-serif; font-size: var(--cv-text-2xl); font-weight: 800; margin-bottom: var(--cv-space-6); color: var(--cv-text-primary);">New Deals & Promotions</h2>
 
         <!-- Promotions Grid -->

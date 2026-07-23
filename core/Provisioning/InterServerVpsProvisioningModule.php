@@ -229,6 +229,40 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         return $this->toResult($response, 'Connected — API key is valid.');
     }
 
+    public function reinstall(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+        }
+
+        $osVersion = (string) ($params['osVersion'] ?? 'ubuntu24');
+
+        $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reinstall", [
+            'osVersion' => $osVersion,
+        ]);
+
+        return $this->toResult($response, 'VPS OS reinstallation has been queued.');
+    }
+
+    public function setReverseDns(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+        }
+
+        $rdns = (string) $params['rdns'];
+
+        $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reverse_dns", [
+            'rdns' => $rdns,
+        ]);
+
+        return $this->toResult($response, 'Reverse DNS updated successfully.');
+    }
+
     /** @param array<string, mixed> $params */
     private function lifecycleAction(array $params, string $method, string $pathTemplate): array
     {

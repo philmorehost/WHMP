@@ -56,11 +56,12 @@ final class CpanelProvisioningModule implements ProvisioningModule
     {
         $server = $params['server'];
         $username = (string) $params['username'];
+        $plan = !empty($params['whm_package_name']) ? (string) $params['whm_package_name'] : ($server['default_package'] ?? 'default');
 
         $response = $this->call($server, 'createacct', [
             'username' => $username,
             'domain' => $params['domain'] ?? "{$username}.example.invalid",
-            'plan' => $server['default_package'] ?? 'default',
+            'plan' => $plan,
             'password' => $params['password'] ?? bin2hex(random_bytes(12)),
         ]);
 

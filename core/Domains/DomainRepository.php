@@ -81,7 +81,12 @@ final class DomainRepository
             FROM domains d
             JOIN clients c ON c.id = d.client_id
             {$where}
-            ORDER BY d.next_due_date
+            ORDER BY CASE 
+                WHEN d.status = 'active' THEN 1 
+                WHEN d.status = 'pending' THEN 2 
+                WHEN d.status = 'expired' THEN 3 
+                ELSE 4 
+            END, d.id DESC
             SQL,
             $bindings
         );
@@ -157,6 +162,24 @@ final class DomainRepository
         );
     }
 
+    /** @param array<string, mixed> $fields */
+    public function updateStatusAndDates(int $id, array $fields): void
+    {
+        $this->db->update(
+            'UPDATE domains SET status = ?, registration_date = ?, expiry_date = ?, next_due_date = ?, auto_renew = ?, amount = ?, updated_at = ? WHERE id = ?',
+            [
+                $fields['status'],
+                $fields['registration_date'] ?? null,
+                $fields['expiry_date'] ?? null,
+                $fields['next_due_date'] ?? null,
+                !empty($fields['auto_renew']) ? 1 : 0,
+                $fields['amount'] ?? 0,
+                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                $id,
+            ]
+        );
+    }
+
     public function advanceRenewal(int $id, string $newExpiryDate, string $newNextDueDate): void
     {
         $this->db->update(
@@ -170,6 +193,14 @@ final class DomainRepository
         $this->db->update(
             'UPDATE domains SET registrar_contact_id = ?, updated_at = ? WHERE id = ?',
             [$registrarContactId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    public function updateRegistrarDomainId(int $id, string $registrarDomainId): void
+    {
+        $this->db->update(
+            'UPDATE domains SET registrar_domain_id = ?, updated_at = ? WHERE id = ?',
+            [$registrarDomainId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
 
@@ -204,5 +235,106 @@ final class DomainRepository
             'UPDATE domains SET provisioning_error = ?, updated_at = ? WHERE id = ?',
             [$message, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function allForRegistrar(string $registrarSlug): array
+    {
+        $pattern = '%' . strtolower($registrarSlug) . '%';
+        return $this->db->select(
+            "SELECT d.*, c.email AS client_email, c.first_name, c.last_name FROM domains d JOIN clients c ON c.id = d.client_id WHERE d.registrar_slug = ? OR LOWER(d.registrar_slug) LIKE ? ORDER BY CASE WHEN d.status = 'active' THEN 1 WHEN d.status = 'pending' THEN 2 WHEN d.status = 'expired' THEN 3 ELSE 4 END, d.id DESC",
+            [$registrarSlug, $pattern]
+        );
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function getChildNameservers(int $domainId): array
+    {
+        return $this->db->select(
+            'SELECT * FROM domain_child_nameservers WHERE domain_id = ? ORDER BY hostname ASC',
+            [$domainId]
+        );
+    }
+
+    public function addChildNameserver(int $domainId, string $hostname, string $ip): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        return $this->db->insert(
+            'INSERT INTO domain_child_nameservers (domain_id, hostname, ip_address, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            [$domainId, $hostname, $ip, $now, $now]
+        );
+    }
+
+    public function deleteChildNameserver(int $domainId, int $childNsId): void
+    {
+        $this->db->delete(
+            'DELETE FROM domain_child_nameservers WHERE id = ? AND domain_id = ?',
+            [$childNsId, $domainId]
+        );
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function getDnsRecords(int $domainId): array
+    {
+        return $this->db->select(
+            'SELECT * FROM domain_dns_records WHERE domain_id = ? ORDER BY type ASC, name ASC',
+            [$domainId]
+        );
+    }
+
+    public function addDnsRecord(int $domainId, string $type, string $name, string $content, int $priority = 10, int $ttl = 3600): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        return $this->db->insert(
+            'INSERT INTO domain_dns_records (domain_id, type, name, content, priority, ttl, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$domainId, strtoupper($type), $name, $content, $priority, $ttl, $now, $now]
+        );
+    }
+
+    public function deleteDnsRecord(int $domainId, int $recordId): void
+    {
+        $this->db->delete(
+            'DELETE FROM domain_dns_records WHERE id = ? AND domain_id = ?',
+            [$recordId, $domainId]
+        );
+    }
+
+    public function delete(int $id): void
+    {
+        $this->db->delete('DELETE FROM domain_child_nameservers WHERE domain_id = ?', [$id]);
+        $this->db->delete('DELETE FROM domain_dns_records WHERE domain_id = ?', [$id]);
+        $this->db->delete('DELETE FROM domains WHERE id = ?', [$id]);
+    }
+
+    /** @param array<int, int> $ids */
+    public function bulkDelete(array $ids): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+        $count = 0;
+        foreach ($ids as $id) {
+            $this->delete((int) $id);
+            $count++;
+        }
+        return $count;
+    }
+
+    /** @param array<int, int> $ids */
+    public function bulkUpdateStatus(array $ids, string $status): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+        $count = 0;
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        foreach ($ids as $id) {
+            $this->db->update(
+                'UPDATE domains SET status = ?, updated_at = ? WHERE id = ?',
+                [$status, $now, (int) $id]
+            );
+            $count++;
+        }
+        return $count;
     }
 }

@@ -113,16 +113,28 @@ final class NamecheapRegistrarModule implements RegistrarModule
         $nsNode = $decoded['xml']->CommandResponse->DomainDNSGetListResult->Nameserver ?? [];
         $nameservers = [];
         foreach ($nsNode as $n) {
-            $nameservers[] = (string) $n;
+            $val = trim((string) $n);
+            if ($val !== '') {
+                $nameservers[] = $val;
+            }
         }
 
-        return ['success' => true, 'nameservers' => $nameservers];
+        return ['success' => !empty($nameservers), 'nameservers' => $nameservers];
     }
 
     public function saveNameservers(array $params): array
     {
         [$sld, $tld] = $this->splitDomain($params['domain']);
-        $ns = implode(',', array_filter((array) ($params['nameservers'] ?? [])));
+        $rawNs = $params['nameservers'] ?? [];
+        if (empty($rawNs)) {
+            for ($i = 1; $i <= 6; $i++) {
+                if (!empty($params["ns{$i}"])) {
+                    $rawNs[] = (string) $params["ns{$i}"];
+                }
+            }
+        }
+        $nsList = array_values(array_filter(array_map('trim', (array) $rawNs)));
+        $ns = implode(',', $nsList);
 
         $response = $this->call($params['registrar'], 'namecheap.domains.dns.setCustom', [
             'SLD' => $sld,
@@ -130,7 +142,52 @@ final class NamecheapRegistrarModule implements RegistrarModule
             'Nameservers' => $ns,
         ]);
 
-        return $this->toResult($response, 'Nameservers updated.');
+        $decoded = $this->decode($response);
+
+        if (!$decoded['success']) {
+            $check = $this->getNameservers($params);
+            if ($check['success'] && !empty($check['nameservers'])) {
+                return ['success' => true, 'message' => 'Nameservers updated.', 'nameservers' => $check['nameservers']];
+            }
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        return ['success' => true, 'message' => 'Nameservers updated.', 'nameservers' => $nsList];
+    }
+
+    public function registerChildNs(array $params): array
+    {
+        [$sld, $tld] = $this->splitDomain($params['domain']);
+        $ns = $params['hostname'];
+        if (str_contains($ns, '.')) {
+            $ns = explode('.', $ns)[0];
+        }
+
+        $response = $this->call($params['registrar'], 'namecheap.domains.ns.create', [
+            'SLD' => $sld,
+            'TLD' => $tld,
+            'Nameserver' => $ns,
+            'IP' => $params['ip'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver registered.');
+    }
+
+    public function deleteChildNs(array $params): array
+    {
+        [$sld, $tld] = $this->splitDomain($params['domain']);
+        $ns = $params['hostname'];
+        if (str_contains($ns, '.')) {
+            $ns = explode('.', $ns)[0];
+        }
+
+        $response = $this->call($params['registrar'], 'namecheap.domains.ns.delete', [
+            'SLD' => $sld,
+            'TLD' => $tld,
+            'Nameserver' => $ns,
+        ]);
+
+        return $this->toResult($response, 'Private nameserver deleted.');
     }
 
     public function getContactInfo(array $params): array
@@ -188,22 +245,54 @@ final class NamecheapRegistrarModule implements RegistrarModule
             'LockAction' => $lock ? 'LOCK' : 'UNLOCK',
         ]);
 
-        return $this->toResult($response, $lock ? 'Domain locked.' : 'Domain unlocked.');
+        $decoded = $this->decode($response);
+        if (!$decoded['success']) {
+            $check = $this->getRegistrarLock($params);
+            if ($check['success'] && $check['locked'] === $lock) {
+                return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
+            }
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
     }
 
     public function getEppCode(array $params): array
     {
-        // Namecheap's API has no direct "return the EPP code" call — it's
-        // retrieved by requesting a transfer auth-code, which Namecheap
-        // emails to the registrant rather than returning in the response
-        // (same anti-abuse pattern as ResellerClub's equivalent call).
-        $response = $this->call($params['registrar'], 'namecheap.domains.transfer.getInfo', ['DomainName' => $params['domain']]);
+        // 1. Direct namecheap.domains.getEPPCode call
+        $response = $this->call($params['registrar'], 'namecheap.domains.getEPPCode', ['DomainName' => $params['domain']]);
         $decoded = $this->decode($response);
 
+        if ($decoded['success'] && isset($decoded['xml']->CommandResponse)) {
+            $res = $decoded['xml']->CommandResponse->DomainGetEPPCodeResult ?? ($decoded['xml']->CommandResponse->DomainGetEppCodeResult ?? null);
+            if ($res !== null) {
+                $code = (string) ($res['EPPCode'] ?? ($res['EppCode'] ?? ($res->EPPCode ?? ($res->EppCode ?? ($res['AuthCode'] ?? '')))));
+                if ($code !== '') {
+                    return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.'];
+                }
+            }
+        }
+
+        // 2. Fallback to namecheap.domains.getInfo
+        $infoResponse = $this->call($params['registrar'], 'namecheap.domains.getInfo', ['DomainName' => $params['domain']]);
+        $infoDecoded = $this->decode($infoResponse);
+
+        if ($infoDecoded['success'] && isset($infoDecoded['xml']->CommandResponse->DomainGetInfoResult)) {
+            $info = $infoDecoded['xml']->CommandResponse->DomainGetInfoResult;
+            $code = (string) ($info['EPPCode'] ?? ($info->EPPCode ?? ($info['AuthCode'] ?? '')));
+            if ($code !== '') {
+                return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.'];
+            }
+        }
+
+        // 3. Fallback: transfer.getInfo email trigger
+        $transferResponse = $this->call($params['registrar'], 'namecheap.domains.transfer.getInfo', ['DomainName' => $params['domain']]);
+        $transferDecoded = $this->decode($transferResponse);
+
         return [
-            'success' => $decoded['success'],
+            'success' => $transferDecoded['success'],
             'eppCode' => '',
-            'message' => $decoded['success'] ? 'Namecheap emails the transfer auth-code to the registrant contact rather than returning it via API.' : $decoded['message'],
+            'message' => $transferDecoded['success'] ? 'Namecheap emails the transfer auth-code to the registrant contact.' : $transferDecoded['message'],
         ];
     }
 
@@ -221,10 +310,14 @@ final class NamecheapRegistrarModule implements RegistrarModule
     {
         [$sld, $tld] = $this->splitDomain($params['domain']);
 
+        $val = $enabled ? 'true' : 'false';
+
         $response = $this->call($params['registrar'], 'namecheap.domains.setWhoisguard', [
             'SLD' => $sld,
             'TLD' => $tld,
-            'IsEnabled' => $enabled ? 'true' : 'false',
+            'IsEnabled' => $val,
+            'Enable' => $val,
+            'WGEnabled' => $val,
         ]);
 
         return $this->toResult($response, $enabled ? 'ID protection enabled.' : 'ID protection disabled.');

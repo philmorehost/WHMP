@@ -176,4 +176,13 @@ final class ClientRepositoryTest extends DatabaseTestCase
         $this->assertSame(0, (int) $client['vat_verified_valid']);
         $this->assertNull($client['vat_verified_name']);
     }
+
+    public function test_update_password_hashes_and_stores_new_password(): void
+    {
+        $id = $this->clients->create($this->sample());
+        $this->clients->updatePassword($id, 'newSecretPassword123');
+        $client = $this->clients->find($id);
+
+        $this->assertTrue(password_verify('newSecretPassword123', $client['password_hash']));
+    }
 }

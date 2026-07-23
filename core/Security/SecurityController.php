@@ -33,6 +33,9 @@ final class SecurityController
             return Response::redirect('/login');
         }
 
+        $configuredUrl = (string) \CodeVault\Support\App::container()->make(\CodeVault\Config::class)->env('APP_URL', '');
+        $appUrl = ($configuredUrl !== '' && !str_contains($configuredUrl, 'localhost')) ? $configuredUrl : $request->baseUrl();
+
         $content = $this->view->render('security.index', [
             'recentAttempts' => $this->attempts->recent(50),
             'ipRules' => $this->ipRules->all(),
@@ -41,6 +44,7 @@ final class SecurityController
             'twoFactorEnabled' => $this->settings->get('security.2fa_enabled', '1') === '1',
             'googleClientId' => $this->settings->get('auth.google_client_id', ''),
             'googleClientSecret' => $this->settings->get('auth.google_client_secret', ''),
+            'appUrl' => $appUrl,
         ]);
 
         return Response::html($this->view->render('layouts.admin', [

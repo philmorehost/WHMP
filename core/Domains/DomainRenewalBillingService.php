@@ -67,21 +67,64 @@ final class DomainRenewalBillingService
      * @param array<string, mixed> $domain
      * @param array{rate: float, name: string, amount: float} $tax
      */
+    /**
+     * @param array<string, mixed> $domain
+     * @param array{rate: float, name: string, amount: float} $tax
+     */
     private function createRenewalInvoice(array $domain, array $tax): int
     {
-        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $now = new DateTimeImmutable();
+        $nowStr = $now->format('Y-m-d H:i:s');
         $subtotal = (float) $domain['amount'];
-        $total = $subtotal + $tax['amount'];
+        $redemptionFee = 0.0;
+
+        // Check if domain exceeds grace period and requires redemption fee
+        $tld = strtolower(trim((string) ($domain['tld'] ?? '')));
+        if ($tld === '') {
+            $parts = explode('.', strtolower(trim((string) $domain['domain_name'])));
+            if (count($parts) > 1) {
+                array_shift($parts);
+                $tld = '.' . implode('.', $parts);
+            }
+        }
+
+        if ($tld !== '') {
+            $tldPricing = $this->db->selectOne('SELECT * FROM domain_pricing WHERE tld = ?', [$tld]);
+            if ($tldPricing !== null && !empty($domain['expiry_date'])) {
+                $expiryDate = new DateTimeImmutable((string) $domain['expiry_date']);
+                $daysExpired = (int) $now->diff($expiryDate)->format('%r%a');
+                // %r%a: negative if $now > $expiryDate
+                if ($daysExpired < 0) {
+                    $daysPastExpiry = abs($daysExpired);
+                    $graceDays = (int) ($tldPricing['grace_period_days'] ?? 30);
+                    $redemptionDays = (int) ($tldPricing['redemption_period_days'] ?? 30);
+
+                    if ($daysPastExpiry > $graceDays && $daysPastExpiry <= ($graceDays + $redemptionDays)) {
+                        $redemptionFee = (float) ($tldPricing['redemption_fee'] ?? 0.0);
+                    }
+                }
+            }
+        }
+
+        $subtotalWithRedemption = $subtotal + $redemptionFee;
+        $total = $subtotalWithRedemption + $tax['amount'];
 
         $invoiceId = (int) $this->db->insert(
             'INSERT INTO invoices (client_id, domain_id, status, subtotal, tax_amount, total, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$domain['client_id'], $domain['id'], 'unpaid', $subtotal, $tax['amount'], $total, $domain['next_due_date'], $now, $now]
+            [$domain['client_id'], $domain['id'], 'unpaid', $subtotalWithRedemption, $tax['amount'], $total, $domain['next_due_date'], $nowStr, $nowStr]
         );
 
         $this->db->insert(
             'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
             [$invoiceId, "{$domain['domain_name']} — Domain Renewal", $subtotal]
         );
+
+        if ($redemptionFee > 0) {
+            $this->db->insert(
+                'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
+                [$invoiceId, "{$domain['domain_name']} — Domain Redemption Fee", $redemptionFee]
+            );
+        }
 
         if ($tax['amount'] > 0) {
             $this->db->insert(

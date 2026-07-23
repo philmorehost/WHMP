@@ -29,6 +29,7 @@ use CodeVault\Integrity\IntegrityManager;
 use CodeVault\Support\MailPipingJob;
 use CodeVault\Support\TicketAutoCloseJob;
 use CodeVault\Support\TicketEscalationJob;
+use CodeVault\Billing\CancellationCronJob;
 
 $kernel = new Kernel(dirname(__DIR__));
 
@@ -54,6 +55,7 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register($kernel->container->make(BillableItemInvoicingJob::class));
     $scheduler->register($kernel->container->make(MailPipingJob::class));
     $scheduler->register($kernel->container->make(BackupCronJob::class));
+    $scheduler->register($kernel->container->make(CancellationCronJob::class));
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));
     $scheduler->register($kernel->container->make(DataPruningJob::class));
     $scheduler->register($kernel->container->make(QuoteExpiryJob::class));
@@ -61,11 +63,13 @@ if (is_file($kernel->basePath('.installed.lock'))) {
 
 $results = $scheduler->run($hooks);
 
+$out = defined('STDOUT') ? STDOUT : fopen('php://output', 'w');
+
 foreach ($results as $job => $result) {
     $status = $result['ran'] ? 'ran' : (isset($result['error']) ? 'failed: ' . $result['error'] : 'skipped (not due)');
-    fwrite(STDOUT, sprintf("[%s] %-30s %s\n", date('Y-m-d H:i:s'), $job, $status));
+    fwrite($out, sprintf("[%s] %-30s %s\n", date('Y-m-d H:i:s'), $job, $status));
 }
 
 if ($results === []) {
-    fwrite(STDOUT, sprintf("[%s] no jobs registered\n", date('Y-m-d H:i:s')));
+    fwrite($out, sprintf("[%s] no jobs registered\n", date('Y-m-d H:i:s')));
 }

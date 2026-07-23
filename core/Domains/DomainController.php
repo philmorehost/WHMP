@@ -24,7 +24,8 @@ final class DomainController
         private readonly DomainService $domainService,
         private readonly ActivityLogger $activity,
         private readonly DomainPricingRepository $domainPricing,
-        private readonly DomainSettings $domainSettings
+        private readonly DomainSettings $domainSettings,
+        private readonly WhoisService $whoisService
     ) {
     }
 
@@ -35,6 +36,11 @@ final class DomainController
         }
 
         $status = (string) $request->query('status', '');
+        $whoisDomain = trim((string) $request->query('domain', ''));
+        $whoisSearchResult = null;
+        if ($whoisDomain !== '') {
+            $whoisSearchResult = $this->whoisService->lookup($whoisDomain);
+        }
 
         return $this->render('domains.index', [
             'domains' => $this->domains->all($status !== '' ? $status : null),
@@ -42,6 +48,8 @@ final class DomainController
             'statusCounts' => $this->domains->countByStatus(),
             'registrarCounts' => $this->domains->countActiveByRegistrar(),
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
+            'whoisDomain' => $whoisDomain,
+            'whoisSearchResult' => $whoisSearchResult,
         ]);
     }
 
@@ -143,7 +151,201 @@ final class DomainController
             return Response::html('404 Not Found', 404);
         }
 
-        return $this->render('domains.show', ['domain' => $domain]);
+        $id = (int) $domain['id'];
+        $whoisResult = null;
+        if ($request->query('whois') === '1') {
+            $whoisResult = $this->whoisService->lookup((string) $domain['domain_name']);
+        }
+
+        return $this->render('domains.show', [
+            'domain' => $domain,
+            'updated' => $request->query('updated') === '1',
+            'childNameservers' => $this->domainService->getChildNameservers($id),
+            'dnsRecords' => $this->domainService->getDnsRecords($id),
+            'bulkMsg' => $request->query('bulk_msg'),
+            'whoisResult' => $whoisResult,
+        ]);
+    }
+
+    public function whois(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        return Response::redirect("/admin/domains/{$id}?whois=1#whois-record");
+    }
+
+    public function bulkSync(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $registrarSlug = trim((string) $request->input('registrar_slug', ''));
+        $result = $this->domainService->bulkSync($registrarSlug !== '' ? $registrarSlug : null);
+
+        $msg = "Bulk Sync completed: {$result['success']} succeeded out of {$result['total']} domains ({$result['failed']} failed).";
+        return Response::redirect('/admin/domains?bulk_msg=' . urlencode($msg));
+    }
+
+    public function bulkRefreshNameservers(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $registrarSlug = trim((string) $request->input('registrar_slug', ''));
+        $result = $this->domainService->bulkRefreshNameservers($registrarSlug !== '' ? $registrarSlug : null);
+
+        $msg = "Bulk Nameserver Refresh completed: {$result['success']} domains updated out of {$result['total']} ({$result['failed']} failed or returned empty).";
+        return Response::redirect('/admin/domains?bulk_msg=' . urlencode($msg));
+    }
+
+    public function bulkDelete(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = array_map('intval', (array) $request->input('domain_ids', []));
+        if (empty($ids)) {
+            return Response::redirect('/admin/domains?bulk_msg=' . urlencode('No domains were selected for deletion.'));
+        }
+
+        $deletedCount = $this->domainService->bulkDelete($ids);
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $this->activity->log('admin', $adminId, 'domains.bulk_delete', 'domain', null, "Bulk deleted {$deletedCount} domains.");
+
+        $msg = "Successfully deleted {$deletedCount} domain(s).";
+        return Response::redirect('/admin/domains?bulk_msg=' . urlencode($msg));
+    }
+
+    public function bulkUpdateStatus(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = array_map('intval', (array) $request->input('domain_ids', []));
+        $status = trim((string) $request->input('status', ''));
+
+        if (empty($ids)) {
+            return Response::redirect('/admin/domains?bulk_msg=' . urlencode('No domains were selected for status update.'));
+        }
+
+        if ($status === '') {
+            return Response::redirect('/admin/domains?bulk_msg=' . urlencode('Please select a valid status to apply.'));
+        }
+
+        $updatedCount = $this->domainService->bulkUpdateStatus($ids, $status);
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $this->activity->log('admin', $adminId, 'domains.bulk_status', 'domain', null, "Bulk updated status to {$status} for {$updatedCount} domains.");
+
+        $msg = "Successfully updated status for {$updatedCount} domain(s) to " . ucfirst($status) . ".";
+        return Response::redirect('/admin/domains?bulk_msg=' . urlencode($msg));
+    }
+
+    public function addChildNameserver(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $hostname = trim((string) $request->input('hostname', ''));
+        $ip = trim((string) $request->input('ip_address', ''));
+
+        $this->domainService->addChildNameserver($id, $hostname, $ip);
+        return Response::redirect("/admin/domains/{$id}?updated=1");
+    }
+
+    public function deleteChildNameserver(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $childNsId = (int) $params['child_id'];
+
+        $this->domainService->deleteChildNameserver($id, $childNsId);
+        return Response::redirect("/admin/domains/{$id}?updated=1");
+    }
+
+    public function addDnsRecord(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $type = (string) $request->input('type', 'A');
+        $name = (string) $request->input('name', '@');
+        $content = (string) $request->input('content', '');
+        $priority = (int) $request->input('priority', 10);
+        $ttl = (int) $request->input('ttl', 3600);
+
+        $this->domainService->addDnsRecord($id, $type, $name, $content, $priority, $ttl);
+        return Response::redirect("/admin/domains/{$id}?updated=1");
+    }
+
+    public function deleteDnsRecord(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $recordId = (int) $params['record_id'];
+
+        $this->domainService->deleteDnsRecord($id, $recordId);
+        return Response::redirect("/admin/domains/{$id}?updated=1");
+    }
+
+    public function updateStatus(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $domain = $this->domains->find($id);
+
+        if ($domain === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $status = (string) $request->input('status', 'active');
+        $registrationDate = trim((string) $request->input('registration_date', ''));
+        $expiryDate = trim((string) $request->input('expiry_date', ''));
+        $nextDueDate = trim((string) $request->input('next_due_date', ''));
+        $autoRenew = $request->input('auto_renew') ? 1 : 0;
+        $amount = (float) $request->input('amount', 0);
+
+        $this->domains->updateStatusAndDates($id, [
+            'status' => $status,
+            'registration_date' => $registrationDate !== '' ? $registrationDate : null,
+            'expiry_date' => $expiryDate !== '' ? $expiryDate : null,
+            'next_due_date' => $nextDueDate !== '' ? $nextDueDate : null,
+            'auto_renew' => $autoRenew,
+            'amount' => $amount,
+        ]);
+
+        $this->activity->log(
+            'admin',
+            (int) $this->guard->currentAdmin()['id'],
+            'domain.status_updated',
+            'domain',
+            $id,
+            "Updated domain status for \"{$domain['domain_name']}\" to {$status}",
+            $request->ip()
+        );
+
+        return Response::redirect("/admin/domains/{$id}?updated=1");
     }
 
     public function renew(Request $request, array $params): Response

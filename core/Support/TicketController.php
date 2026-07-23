@@ -43,6 +43,7 @@ final class TicketController
 
         $status = (string) $request->query('status', '');
         $departmentId = $request->query('department_id');
+        $page = max(1, (int) $request->query('page', 1));
 
         $filters = [];
         if ($status !== '') {
@@ -52,8 +53,11 @@ final class TicketController
             $filters['departmentId'] = (int) $departmentId;
         }
 
+        $pagination = $this->tickets->paginate($filters, $page, 20);
+
         return $this->render('support.tickets-index', [
-            'tickets' => $this->tickets->all($filters),
+            'tickets' => $pagination['data'],
+            'pagination' => $pagination,
             'departments' => $this->departments->all(),
             'statusFilter' => $status,
             'departmentFilter' => $departmentId,

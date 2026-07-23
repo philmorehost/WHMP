@@ -130,7 +130,8 @@ final class AdminInvoiceController
                 $this->payments->recordPayment($id, 'manual', $remaining);
             }
 
-            $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'invoice.paid', 'invoice', $id, "Marked invoice #{$id} as paid (manual, \${$remaining} remaining balance)", $request->ip());
+            $formattedRemaining = $this->currency->formatLocked($remaining, $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null, (float) ($invoice['currency_rate'] ?? 1.0000));
+            $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'invoice.paid', 'invoice', $id, "Marked invoice #{$id} as paid (manual, {$formattedRemaining} remaining balance)", $request->ip());
         }
 
         return Response::redirect("/admin/invoices/{$id}");

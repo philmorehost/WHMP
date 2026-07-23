@@ -10,6 +10,7 @@ use CodeVault\Catalog\ConfigurableOptionPricingRepository;
 use CodeVault\Catalog\ConfigurableOptionRepository;
 use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
+use CodeVault\Database;
 
 /**
  * Resolves cart lines against live product/option pricing and stock —
@@ -23,7 +24,8 @@ final class CartService
         private readonly ProductPricingRepository $pricing,
         private readonly ConfigurableOptionRepository $options,
         private readonly ConfigurableOptionPricingRepository $optionPricing,
-        private readonly PromotionService $promotions
+        private readonly PromotionService $promotions,
+        private readonly Database $db
     ) {
     }
 
@@ -48,9 +50,10 @@ final class CartService
                 continue;
             }
 
+            $isFree = ($product['pay_type'] ?? 'paid') === 'free';
             $priceRow = $this->pricing->find($item['product_id'], $item['billing_cycle']);
-            $unitPrice = $priceRow !== null ? (float) $priceRow['price'] : 0.0;
-            $setupFee = $priceRow !== null ? (float) $priceRow['setup_fee'] : 0.0;
+            $unitPrice = ($isFree || $priceRow === null) ? 0.0 : (float) $priceRow['price'];
+            $setupFee = ($isFree || $priceRow === null) ? 0.0 : (float) $priceRow['setup_fee'];
 
             $selectedOptions = [];
             $optionsTotal = 0.0;
@@ -72,6 +75,19 @@ final class CartService
                 ];
             }
 
+            $domainPrice = 0.00;
+            $domainOptions = $item['domain_options'] ?? null;
+            if ($domainOptions !== null && !empty($domainOptions['name'])) {
+                if (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
+                    $parts = explode('.', $domainOptions['name']);
+                    $tld = '.' . end($parts);
+                    $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
+                    if ($priceRow !== null) {
+                        $domainPrice = $domainOptions['option'] === 'register' ? (float) $priceRow['register_price'] : (float) $priceRow['transfer_price'];
+                    }
+                }
+            }
+
             $quantity = $item['quantity'];
             $lineTotal = ($unitPrice + $optionsTotal) * $quantity;
 
@@ -89,12 +105,18 @@ final class CartService
                 'line_total' => $lineTotal + $setupFee,
                 'in_stock' => $this->products->hasUnlimitedOrAvailableStock((int) $product['id']),
                 'domain_options' => $item['domain_options'] ?? null,
+                'domain_price' => $domainPrice,
                 'server_options' => $item['server_options'] ?? null,
                 'custom_fields' => $item['custom_fields'] ?? null,
             ];
 
             $subtotal += $lineTotal;
             $setupFees += $setupFee;
+        }
+
+        $domainTotal = 0.0;
+        foreach ($lines as $line) {
+            $domainTotal += (float) ($line['domain_price'] ?? 0.0);
         }
 
         $promoCode = $this->cart->promoCode();
@@ -117,11 +139,12 @@ final class CartService
             'lines' => $lines,
             'subtotal' => $subtotal,
             'setupFees' => $setupFees,
+            'domainTotal' => $domainTotal,
             'discount' => $discount,
             'promoCode' => $promoCode,
             'promotionId' => $promotionId,
             'promoError' => $promoError,
-            'total' => max(0.0, $subtotal + $setupFees - $discount),
+            'total' => max(0.0, $subtotal + $setupFees + $domainTotal - $discount),
         ];
     }
 }

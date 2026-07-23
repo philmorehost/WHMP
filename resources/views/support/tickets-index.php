@@ -58,4 +58,27 @@
         <?php endif; ?>
         </tbody>
     </table>
+
+    <?php if (isset($pagination) && $pagination['total'] > 20): ?>
+        <?php
+        $totalPages = (int) ceil($pagination['total'] / 20);
+        $currentPage = $pagination['page'];
+        $queryStr = '';
+        if ($statusFilter !== '') {
+            $queryStr .= '&status=' . urlencode($statusFilter);
+        }
+        if ($departmentFilter !== null && $departmentFilter !== '') {
+            $queryStr .= '&department_id=' . urlencode((string)$departmentFilter);
+        }
+        ?>
+        <div style="display:flex; justify-content:center; gap:var(--cv-space-2); margin-top:var(--cv-space-4); flex-wrap:wrap;">
+            <?php if ($currentPage > 1): ?>
+                <a class="cv-btn cv-btn--secondary" href="/admin/tickets?page=<?= $currentPage - 1 ?><?= $queryStr ?>" style="padding:6px 12px; font-size:var(--cv-text-xs); text-decoration:none;">&laquo; Prev</a>
+            <?php endif; ?>
+            <span style="font-size:var(--cv-text-xs); align-self:center; color:var(--cv-text-secondary);">Page <?= $currentPage ?> of <?= $totalPages ?></span>
+            <?php if ($currentPage < $totalPages): ?>
+                <a class="cv-btn cv-btn--secondary" href="/admin/tickets?page=<?= $currentPage + 1 ?><?= $queryStr ?>" style="padding:6px 12px; font-size:var(--cv-text-xs); text-decoration:none;">Next &raquo;</a>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 </div>

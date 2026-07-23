@@ -11,6 +11,7 @@ use CodeVault\Auth\AuthManager;
 use CodeVault\Billing\ClientCreditRepository;
 use CodeVault\Billing\CreditService;
 use CodeVault\Billing\InvoiceRepository;
+use CodeVault\Billing\CancellationRequestRepository;
 use CodeVault\Billing\FlutterwaveGateway;
 use CodeVault\Billing\ManualGateway;
 use CodeVault\Billing\PaystackGateway;
@@ -68,6 +69,7 @@ use CodeVault\Mail\EmailDispatcher;
 use CodeVault\Mail\EmailLogRepository;
 use CodeVault\Mail\EmailTemplateRepository;
 use CodeVault\Mail\LogMailer;
+use CodeVault\Mail\SmtpMailer;
 use CodeVault\Mail\Mailer;
 use CodeVault\Modules\AddonModule;
 use CodeVault\Modules\AddonModuleRepository;
@@ -85,6 +87,8 @@ use CodeVault\Provisioning\CurlHttpClient;
 use CodeVault\Provisioning\CyberPanelProvisioningModule;
 use CodeVault\Provisioning\HttpClient;
 use CodeVault\Provisioning\InterServerVpsProvisioningModule;
+use CodeVault\Provisioning\InterServerDedicatedProvisioningModule;
+use CodeVault\Provisioning\ResellerClubEmailProvisioningModule;
 use CodeVault\Provisioning\NocixDedicatedServerModule;
 use CodeVault\Provisioning\LocalProvisioningModule;
 use CodeVault\Provisioning\ProvisioningService;
@@ -411,6 +415,7 @@ class Kernel
                 $c->make(ConfigurableOptionRepository::class),
                 $c->make(ConfigurableOptionPricingRepository::class),
                 $c->make(PromotionService::class),
+                $c->make(Database::class)
             );
         });
 
@@ -496,6 +501,8 @@ class Kernel
                 $c->make(EmailDispatcher::class),
                 $c->make(HookDispatcher::class),
                 $c->make(CurrencyService::class),
+                $c->make(Database::class),
+                $c->make(SettingsRepository::class),
             );
         });
 
@@ -503,7 +510,15 @@ class Kernel
         // writes rendered emails to storage/cache/mail.log instead of
         // transmitting them. Swap for a real SMTP-backed Mailer once
         // credentials exist; nothing else in the pipeline changes.
-        $this->container->singleton(Mailer::class, fn () => new LogMailer($basePath . '/storage/cache/mail.log'));
+        $this->container->singleton(Mailer::class, function (Container $c) use ($basePath) {
+            $settings = $c->make(\CodeVault\Settings\SettingsRepository::class);
+            $config = $c->make(\CodeVault\Config::class);
+            $smtpHost = $settings->get('smtp.host') ?: $config->env('SMTP_HOST');
+            if ($smtpHost !== null && $smtpHost !== '') {
+                return new SmtpMailer($settings, $config);
+            }
+            return new LogMailer($basePath . '/storage/cache/mail.log');
+        });
 
         $this->container->singleton(EmailTemplateRepository::class, function (Container $c) {
             return new EmailTemplateRepository($c->make(Database::class));
@@ -518,6 +533,8 @@ class Kernel
                 $c->make(EmailTemplateRepository::class),
                 $c->make(EmailLogRepository::class),
                 $c->make(QueueInterface::class),
+                $c->make(\CodeVault\Settings\SettingsRepository::class),
+                $c->make(\CodeVault\Config::class),
             );
         });
 
@@ -555,6 +572,14 @@ class Kernel
 
         $this->container->singleton(InterServerVpsProvisioningModule::class, function (Container $c) {
             return new InterServerVpsProvisioningModule($c->make(HttpClient::class));
+        });
+
+        $this->container->singleton(InterServerDedicatedProvisioningModule::class, function (Container $c) {
+            return new InterServerDedicatedProvisioningModule($c->make(HttpClient::class));
+        });
+
+        $this->container->singleton(ResellerClubEmailProvisioningModule::class, function (Container $c) {
+            return new ResellerClubEmailProvisioningModule($c->make(HttpClient::class), $c->make(RegistrarRepository::class));
         });
 
         $this->container->singleton(NocixDedicatedServerModule::class, function (Container $c) {
@@ -613,7 +638,14 @@ class Kernel
             $manager->register(ProvisioningModule::class, 'cpanel', $c->make(CpanelProvisioningModule::class));
             $manager->register(ProvisioningModule::class, 'cyberpanel', $c->make(CyberPanelProvisioningModule::class));
             $manager->register(ProvisioningModule::class, 'interserver-vps', $c->make(InterServerVpsProvisioningModule::class));
+            $manager->register(ProvisioningModule::class, 'interserver_vps', $c->make(InterServerVpsProvisioningModule::class));
+            $manager->register(ProvisioningModule::class, 'interserver-dedicated', $c->make(InterServerDedicatedProvisioningModule::class));
+            $manager->register(ProvisioningModule::class, 'interserver_dedicated', $c->make(InterServerDedicatedProvisioningModule::class));
+            $manager->register(ProvisioningModule::class, 'resellerclub-email', $c->make(ResellerClubEmailProvisioningModule::class));
+            $manager->register(ProvisioningModule::class, 'resellerclub_email', $c->make(ResellerClubEmailProvisioningModule::class));
             $manager->register(ProvisioningModule::class, 'nocix-dedicated', $c->make(NocixDedicatedServerModule::class));
+            $manager->register(ProvisioningModule::class, 'nocix_dedicated', $c->make(NocixDedicatedServerModule::class));
+            $manager->register(ProvisioningModule::class, 'nocix', $c->make(NocixDedicatedServerModule::class));
             $manager->register(RegistrarModule::class, 'local', $c->make(LocalRegistrarModule::class));
             $manager->register(RegistrarModule::class, 'upperlink', $c->make(UpperlinkRegistrarModule::class));
             $manager->register(RegistrarModule::class, 'connectreseller', $c->make(ConnectResellerRegistrarModule::class));
@@ -642,6 +674,10 @@ class Kernel
 
         $this->container->singleton(InvoiceRepository::class, function (Container $c) {
             return new InvoiceRepository($c->make(Database::class));
+        });
+
+        $this->container->singleton(CancellationRequestRepository::class, function (Container $c) {
+            return new CancellationRequestRepository($c->make(Database::class));
         });
 
         $this->container->singleton(TransactionRepository::class, function (Container $c) {
@@ -1113,7 +1149,19 @@ class Kernel
             }
         });
 
-        $hooks->register(HookPoints::TICKET_OPEN, function (array $payload) {
+        $ensureTemplate = function(string $key, string $name, string $subject, string $bodyHtml) {
+            $db = $this->container->make(Database::class);
+            $exists = $db->selectOne('SELECT id FROM email_templates WHERE `key` = ?', [$key]);
+            if ($exists === null) {
+                $now = date('Y-m-d H:i:s');
+                $db->insert(
+                    'INSERT INTO email_templates (`key`, name, subject, body_html, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+                    [$key, $name, $subject, $bodyHtml, $now, $now]
+                );
+            }
+        };
+
+        $hooks->register(HookPoints::TICKET_OPEN, function (array $payload) use ($ensureTemplate) {
             $ticketId = $payload['ticketId'] ?? null;
 
             if ($ticketId === null) {
@@ -1131,6 +1179,131 @@ class Kernel
                 "New support ticket #{$ticketId}: {$ticket['subject']}",
                 ['ticketId' => $ticketId]
             );
+
+            // Seed ticket_opened template
+            $ensureTemplate(
+                'ticket_opened',
+                'Ticket Opened Confirmation',
+                '[Ticket #{{ticket_id}}] {{ticket_subject}}',
+                '<p>Dear {{client_name}},</p><p>Thank you for contacting our Support Department. A support ticket has been opened for you.</p><p><strong>Ticket Details:</strong><br>Ticket ID: #{{ticket_id}}<br>Subject: {{ticket_subject}}<br>Department: {{department_name}}</p><p>Our staff will review your request and reply shortly. You can view or update your ticket at any time by logging into the client area.</p><p>Thanks,<br>{{company_name}}</p>'
+            );
+
+            // Seed admin_ticket_opened template
+            $ensureTemplate(
+                'admin_ticket_opened',
+                'Admin Ticket Opened Notification',
+                '[New Ticket #{{ticket_id}}] {{ticket_subject}}',
+                '<p>Hello Admin,</p><p>A new support ticket has been opened by <strong>{{client_name}}</strong> ({{client_email}}).</p><p><strong>Ticket Details:</strong><br>Ticket ID: #{{ticket_id}}<br>Subject: {{ticket_subject}}<br>Department: {{department_name}}</p><p>Please log in to the admin panel to view and reply to the ticket.</p><p>Thanks,<br>{{company_name}} System</p>'
+            );
+
+            $dispatcher = $this->container->make(EmailDispatcher::class);
+            $settings = $this->container->make(SettingsRepository::class);
+            $companyName = $settings->get('theme.brand_name', 'CodeVault') ?: 'CodeVault';
+
+            // Send to client
+            $clientName = $ticket['email'];
+            if (!empty($ticket['client_id'])) {
+                $client = $this->container->make(ClientRepository::class)->find((int) $ticket['client_id']);
+                if ($client) {
+                    $clientName = $client['first_name'] . ' ' . $client['last_name'];
+                }
+            }
+
+            $dispatcher->sendTemplate('ticket_opened', $ticket['email'], [
+                'ticket_id' => (string) $ticketId,
+                'ticket_subject' => $ticket['subject'],
+                'department_name' => $ticket['department_name'],
+                'client_name' => $clientName,
+                'company_name' => $companyName,
+            ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null);
+
+            // Send to all admins
+            $admins = $this->container->make(AdminRepository::class)->all();
+            foreach ($admins as $admin) {
+                if (!empty($admin['email'])) {
+                    $dispatcher->sendTemplate('admin_ticket_opened', $admin['email'], [
+                        'ticket_id' => (string) $ticketId,
+                        'ticket_subject' => $ticket['subject'],
+                        'department_name' => $ticket['department_name'],
+                        'client_name' => $clientName,
+                        'client_email' => $ticket['email'],
+                        'company_name' => $companyName,
+                    ]);
+                }
+            }
+        });
+
+        $hooks->register(HookPoints::TICKET_REPLY, function (array $payload) use ($ensureTemplate) {
+            $ticketId = $payload['ticketId'] ?? null;
+            $authorType = $payload['authorType'] ?? null;
+
+            if ($ticketId === null) {
+                return;
+            }
+
+            $ticket = $this->container->make(TicketRepository::class)->find((int) $ticketId);
+            if ($ticket === null) {
+                return;
+            }
+
+            // Fetch the latest reply
+            $db = $this->container->make(Database::class);
+            $reply = $db->selectOne('SELECT * FROM ticket_replies WHERE ticket_id = ? ORDER BY id DESC LIMIT 1', [$ticketId]);
+            if ($reply === null) {
+                return;
+            }
+
+            // Seed reply templates
+            $ensureTemplate(
+                'ticket_reply',
+                'Ticket Reply Notification',
+                '[Ticket #{{ticket_id}}] Re: {{ticket_subject}}',
+                '<p>Dear {{client_name}},</p><p>A staff member has replied to your support ticket.</p><p><strong>Latest Response:</strong><br>{{reply_message}}</p><p>You can view the full ticket and reply to it by logging into the client area.</p><p>Thanks,<br>{{company_name}}</p>'
+            );
+
+            $ensureTemplate(
+                'admin_ticket_reply',
+                'Admin Ticket Reply Notification',
+                '[Ticket Update #{{ticket_id}}] Client Reply: {{ticket_subject}}',
+                '<p>Hello Admin,</p><p>Client <strong>{{client_name}}</strong> has replied to support ticket #{{ticket_id}}.</p><p><strong>Latest Response:</strong><br>{{reply_message}}</p><p>Please log in to the admin panel to view and reply to the ticket.</p><p>Thanks,<br>{{company_name}} System</p>'
+            );
+
+            $dispatcher = $this->container->make(EmailDispatcher::class);
+            $settings = $this->container->make(SettingsRepository::class);
+            $companyName = $settings->get('theme.brand_name', 'CodeVault') ?: 'CodeVault';
+
+            $clientName = $ticket['email'];
+            if (!empty($ticket['client_id'])) {
+                $client = $this->container->make(ClientRepository::class)->find((int) $ticket['client_id']);
+                if ($client) {
+                    $clientName = $client['first_name'] . ' ' . $client['last_name'];
+                }
+            }
+
+            if ($authorType === 'admin') {
+                // Send reply notification to client
+                $dispatcher->sendTemplate('ticket_reply', $ticket['email'], [
+                    'ticket_id' => (string) $ticketId,
+                    'ticket_subject' => $ticket['subject'],
+                    'client_name' => $clientName,
+                    'reply_message' => nl2br(e($reply['message'])),
+                    'company_name' => $companyName,
+                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null);
+            } elseif ($authorType === 'client') {
+                // Send reply notification to all admins
+                $admins = $this->container->make(AdminRepository::class)->all();
+                foreach ($admins as $admin) {
+                    if (!empty($admin['email'])) {
+                        $dispatcher->sendTemplate('admin_ticket_reply', $admin['email'], [
+                            'ticket_id' => (string) $ticketId,
+                            'ticket_subject' => $ticket['subject'],
+                            'client_name' => $clientName,
+                            'reply_message' => nl2br(e($reply['message'])),
+                            'company_name' => $companyName,
+                        ]);
+                    }
+                }
+            }
         });
 
         $hooks->register(HookPoints::ORDER_FRAUD_FLAGGED, function (array $payload) {
@@ -1176,6 +1349,20 @@ class Kernel
             if ($this->systemSuspended() && $request->path() !== '/install') {
                 return Response::html('503 System Suspended', 503);
             }
+
+            // Check maintenance mode setting (admin routes /admin* and /login bypass maintenance mode)
+            try {
+                $settingsRepo = $this->container->make(\CodeVault\Settings\SettingsRepository::class);
+                if ($settingsRepo->get('system.maintenance_mode', '0') === '1') {
+                    $path = $request->path();
+                    if (!str_starts_with($path, '/admin') && !str_starts_with($path, '/login') && !str_starts_with($path, '/assets')) {
+                        return Response::html('<!DOCTYPE html><html><head><title>Maintenance Mode</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#e2e8f0;}h1{color:#f59e0b;}</style></head><body><h1>🛠️ System Maintenance</h1><p>We are currently performing scheduled maintenance. Please check back shortly.</p></body></html>', 530);
+                    }
+                }
+            } catch (\Throwable) {
+                // Ignore errors during bootstrap
+            }
+
             try {
                 $this->container->make(Migrator::class)->run();
                 $this->container->make(AddonModuleService::class)->bootActiveAddons();

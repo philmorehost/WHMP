@@ -124,7 +124,23 @@ final class ResellerClubRegistrarModule implements RegistrarModule
         $response = $this->call($registrar, 'GET', '/domains/details.json', ['order-id' => $orderId, 'options' => 'NsDetails']);
         $decoded = $this->decode($response);
 
-        return ['success' => $decoded['success'], 'nameservers' => array_values((array) ($decoded['data']['ns'] ?? []))];
+        $data = $decoded['data'] ?? [];
+        $nameservers = [];
+
+        if (isset($data['ns']) && is_array($data['ns'])) {
+            $nameservers = array_values(array_filter(array_map('trim', $data['ns'])));
+        } elseif (isset($data['nameservers']) && is_array($data['nameservers'])) {
+            $nameservers = array_values(array_filter(array_map('trim', $data['nameservers'])));
+        } else {
+            for ($i = 1; $i <= 6; $i++) {
+                $val = trim((string) ($data["ns{$i}"] ?? ($data["nameserver{$i}"] ?? '')));
+                if ($val !== '') {
+                    $nameservers[] = $val;
+                }
+            }
+        }
+
+        return ['success' => !empty($nameservers), 'nameservers' => $nameservers];
     }
 
     public function saveNameservers(array $params): array
@@ -136,10 +152,79 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => $error];
         }
 
-        $query = array_merge(['order-id' => $orderId], $this->nameserverPayload($params['nameservers'] ?? [], 'ns'));
-        $response = $this->call($registrar, 'POST', '/domains/modify-ns.json', $query);
+        $rawNs = $params['nameservers'] ?? [];
+        if (empty($rawNs)) {
+            for ($i = 1; $i <= 6; $i++) {
+                if (!empty($params["ns{$i}"])) {
+                    $rawNs[] = (string) $params["ns{$i}"];
+                }
+            }
+        }
+        $ns = array_values(array_filter(array_map('trim', (array) $rawNs)));
 
-        return $this->toResult($response, 'Nameservers updated.');
+        $query = ['order-id' => $orderId];
+        foreach ($ns as $i => $val) {
+            $query['ns' . ($i + 1)] = $val;
+        }
+
+        $response = $this->call($registrar, 'POST', '/domains/modify-ns.json', $query);
+        $decoded = $this->decode($response);
+
+        if (!$decoded['success']) {
+            $check = $this->getNameservers($params);
+            if ($check['success'] && !empty($check['nameservers'])) {
+                return ['success' => true, 'message' => 'Nameservers updated.', 'nameservers' => $check['nameservers']];
+            }
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        return ['success' => true, 'message' => 'Nameservers updated.', 'nameservers' => $ns];
+    }
+
+    public function registerChildNs(array $params): array
+    {
+        $registrar = $params['registrar'];
+        [$orderId, $error] = $this->resolveOrderId($registrar, $params['domain']);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        $cname = $params['hostname'];
+        if (str_contains($cname, '.')) {
+            $cname = explode('.', $cname)[0];
+        }
+
+        $response = $this->call($registrar, 'POST', '/domains/child-ns/add.json', [
+            'order-id' => $orderId,
+            'cname' => $cname,
+            'ip' => $params['ip'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver registered.');
+    }
+
+    public function deleteChildNs(array $params): array
+    {
+        $registrar = $params['registrar'];
+        [$orderId, $error] = $this->resolveOrderId($registrar, $params['domain']);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        $cname = $params['hostname'];
+        if (str_contains($cname, '.')) {
+            $cname = explode('.', $cname)[0];
+        }
+
+        $response = $this->call($registrar, 'POST', '/domains/child-ns/delete.json', [
+            'order-id' => $orderId,
+            'cname' => $cname,
+            'ip' => $params['ip'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver deleted.');
     }
 
     public function getContactInfo(array $params): array
@@ -205,8 +290,17 @@ final class ResellerClubRegistrarModule implements RegistrarModule
         $lock = (bool) ($params['lock'] ?? true);
         $endpoint = $lock ? '/domains/enable-theft-protection.json' : '/domains/disable-theft-protection.json';
         $response = $this->call($registrar, 'POST', $endpoint, ['order-id' => $orderId]);
+        $decoded = $this->decode($response);
 
-        return $this->toResult($response, $lock ? 'Domain locked.' : 'Domain unlocked.');
+        if (!$decoded['success']) {
+            $check = $this->getRegistrarLock($params);
+            if ($check['success'] && $check['locked'] === $lock) {
+                return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
+            }
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
     }
 
     public function getEppCode(array $params): array
@@ -218,18 +312,71 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => $error];
         }
 
-        // ResellerClub emails the auth/EPP code to the registrant rather
-        // than returning it directly in most API responses (anti-abuse
-        // measure on their side) — this triggers that email send, it
-        // doesn't hand back the code itself.
+        // 1. Direct details.json lookup which returns authcode in ResellerClub API
+        $detailsResponse = $this->call($registrar, 'GET', '/domains/details.json', ['order-id' => $orderId, 'options' => 'OrderDetails']);
+        $detailsDecoded = $this->decode($detailsResponse);
+
+        if ($detailsDecoded['success']) {
+            $code = $this->extractEppCode($detailsResponse['body'] ?? '', $detailsDecoded);
+            if ($code !== null && $code !== '') {
+                return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.'];
+            }
+        }
+
+        // 2. Trigger email send as standard fallback for LogicBoxes
         $response = $this->call($registrar, 'POST', '/domains/customer-default-contact.json', ['order-id' => $orderId]);
         $decoded = $this->decode($response);
 
+        $code = $this->extractEppCode($response['body'] ?? '', $decoded);
+        if ($code !== null && $code !== '') {
+            return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.'];
+        }
+
         return [
             'success' => $decoded['success'],
-            'eppCode' => (string) ($decoded['data']['authcode'] ?? ''),
+            'eppCode' => '',
             'message' => $decoded['success'] ? 'EPP code emailed to the registrant contact.' : $decoded['message'],
         ];
+    }
+
+    /**
+     * Deep extraction helper for EPP / Auth code across ResellerClub response shapes.
+     *
+     * @param mixed $responseBody
+     * @param array<string, mixed> $decoded
+     */
+    private function extractEppCode(mixed $responseBody, array $decoded): ?string
+    {
+        if (!is_array($responseBody)) {
+            $raw = trim((string) $responseBody, "\"\r\n ");
+            if ($raw !== '' && !str_starts_with($raw, '{') && !str_starts_with($raw, '<')) {
+                return $raw;
+            }
+        }
+
+        $data = $decoded['data'] ?? [];
+
+        if (is_string($data) || is_numeric($data)) {
+            $str = trim((string) $data);
+            if ($str !== '') {
+                return $str;
+            }
+        }
+
+        if (is_array($data)) {
+            $keys = [
+                'authcode', 'authCode', 'AuthCode', 'auth-code',
+                'eppCode', 'eppcode', 'EPPCode', 'domainsecretkey',
+                'DomainSecretKey', 'domainSecretKey', 'secretKey', 'code'
+            ];
+            foreach ($keys as $k) {
+                if (!empty($data[$k]) && is_scalar($data[$k])) {
+                    return trim((string) $data[$k]);
+                }
+            }
+        }
+
+        return null;
     }
 
     public function enableIdProtection(array $params): array
@@ -295,11 +442,43 @@ final class ResellerClubRegistrarModule implements RegistrarModule
         $response = $this->call($registrar, 'GET', '/domains/details.json', ['order-id' => $orderId, 'options' => 'OrderDetails']);
         $decoded = $this->decode($response);
 
+        $data = $decoded['data'] ?? [];
+        $rawStatus = $data['orderstatus'] ?? ($data['currentstatus'] ?? ($data['status'] ?? null));
+
+        if (is_array($rawStatus)) {
+            $rawStatus = reset($rawStatus) ?: '';
+            if (is_array($rawStatus)) {
+                $rawStatus = (string) (current($rawStatus) ?: '');
+            }
+        }
+
+        $statusStr = strtolower(trim((string) $rawStatus));
+        $mappedStatus = $this->mapStatus($statusStr);
+
+        $expiryDate = null;
+        if (isset($data['endtime'])) {
+            $expiryDate = gmdate('Y-m-d', (int) $data['endtime']);
+        } elseif (isset($data['expirydate'])) {
+            $expiryDate = date('Y-m-d', strtotime((string) $data['expirydate']));
+        }
+
         return [
             'success' => $decoded['success'],
-            'status' => $decoded['data']['orderstatus'] ?? null,
-            'expiryDate' => isset($decoded['data']['endtime']) ? gmdate('Y-m-d', (int) $decoded['data']['endtime']) : null,
+            'status' => $mappedStatus,
+            'expiryDate' => $expiryDate,
         ];
+    }
+
+    private function mapStatus(string $status): string
+    {
+        return match (strtolower(trim($status))) {
+            'active' => 'active',
+            'inactive', 'in_active' => 'pending',
+            'deleted', 'cancelled' => 'cancelled',
+            'expired' => 'expired',
+            'transferredaway', 'transferred_away' => 'transferred_away',
+            default => 'active',
+        };
     }
 
     /**

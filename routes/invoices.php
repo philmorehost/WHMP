@@ -9,9 +9,13 @@ use CodeVault\Billing\PaymentCallbackController;
 /** @var CodeVault\Router $router */
 
 $router->get('/client/invoices', [ClientInvoiceController::class, 'index']);
+$router->post('/client/invoices/mass-pay', [ClientInvoiceController::class, 'massPay']);
 $router->get('/client/invoices/{id}', [ClientInvoiceController::class, 'show']);
 $router->get('/client/invoices/{id}/pdf', [ClientInvoiceController::class, 'downloadPdf']);
 $router->post('/client/invoices/{id}/apply-credit', [ClientInvoiceController::class, 'applyCredit']);
+
+$router->get('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsForm']);
+$router->post('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsSubmit']);
 
 $router->post('/client/invoices/{id}/pay/{gateway}', [PaymentCallbackController::class, 'initiate']);
 $router->get('/pay/{gateway}/callback', [PaymentCallbackController::class, 'callback']);

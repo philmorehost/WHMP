@@ -260,4 +260,42 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
 
         $this->assertFalse($result['success']);
     }
+
+    public function test_reinstall_queues_reinstallation(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
+            'success' => true,
+            'text' => 'Reinstalling OS'
+        ]));
+
+        $result = $this->module->reinstall([
+            'username' => 'cv900',
+            'server' => $this->server,
+            'osVersion' => 'ubuntu24'
+        ]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/12/reinstall', $this->http->lastRequest()['url']);
+        $this->assertSame('POST', $this->http->lastRequest()['method']);
+    }
+
+    public function test_set_reverse_dns(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
+            'success' => true,
+            'text' => 'rDNS updated'
+        ]));
+
+        $result = $this->module->setReverseDns([
+            'username' => 'cv900',
+            'server' => $this->server,
+            'rdns' => 'ptr.example.com'
+        ]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/12/reverse_dns', $this->http->lastRequest()['url']);
+        $this->assertSame('POST', $this->http->lastRequest()['method']);
+    }
 }

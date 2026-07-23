@@ -213,43 +213,126 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             return ['success' => false, 'nameservers' => []];
         }
 
+        $data = $decoded['data'] ?? [];
         $nameservers = [];
-        for ($i = 1; $i <= 13; $i++) {
-            $value = trim((string) ($decoded['data']["nameserver{$i}"] ?? ''));
-            if ($value !== '') {
-                $nameservers[] = $value;
+
+        if (isset($data['nameservers']) && is_array($data['nameservers'])) {
+            foreach ($data['nameservers'] as $ns) {
+                if (is_string($ns) && trim($ns) !== '') {
+                    $nameservers[] = trim($ns);
+                }
+            }
+        } elseif (isset($data['nameServer']) && is_array($data['nameServer'])) {
+            foreach ($data['nameServer'] as $ns) {
+                if (is_string($ns) && trim($ns) !== '') {
+                    $nameservers[] = trim($ns);
+                }
+            }
+        } else {
+            for ($i = 1; $i <= 13; $i++) {
+                $value = trim((string) (
+                    $data["nameserver{$i}"] ?? (
+                        $data["nameServer{$i}"] ?? (
+                            $data["ns{$i}"] ?? (
+                                $data["NS{$i}"] ?? (
+                                    $data["NameServer{$i}"] ?? ''
+                                )
+                            )
+                        )
+                    )
+                ));
+                if ($value !== '') {
+                    $nameservers[] = $value;
+                }
             }
         }
 
-        return ['success' => true, 'nameservers' => $nameservers];
+        return ['success' => !empty($nameservers), 'nameservers' => array_values(array_unique($nameservers))];
     }
 
     public function saveNameservers(array $params): array
     {
-        $registrarDomainId = $params['registrarDomainId'] ?? null;
+        $registrarDomainId = $this->ensureDomainId($params['registrar'], $params['domain'], $params['registrarDomainId'] ?? null);
 
         if ($registrarDomainId === null || $registrarDomainId === '') {
-            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — cannot update nameservers until the domain is synced.'];
+            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — could not fetch domain ID from registrar.'];
         }
 
-        $ns = $params['nameservers'] ?? [];
-        $response = $this->call($params['registrar'], 'UpdateNameServer', array_filter([
+        $rawNs = $params['nameservers'] ?? [];
+        if (empty($rawNs)) {
+            for ($i = 1; $i <= 6; $i++) {
+                if (!empty($params["ns{$i}"])) {
+                    $rawNs[] = (string) $params["ns{$i}"];
+                }
+            }
+        }
+        $ns = array_values(array_filter(array_map('trim', (array) $rawNs)));
+
+        if (count($ns) < 2) {
+            return ['success' => false, 'message' => 'At least two nameservers are required to update nameservers.'];
+        }
+
+        $queryParams = [
             'domainNameId' => $registrarDomainId,
             'websiteName' => $params['domain'],
-            'nameServer1' => $ns[0] ?? null,
-            'nameServer2' => $ns[1] ?? null,
-            'nameServer3' => $ns[2] ?? null,
-            'nameServer4' => $ns[3] ?? null,
-            'nameServer5' => $ns[4] ?? null,
-        ], static fn ($v) => $v !== null));
+        ];
 
+        for ($i = 0; $i < count($ns); $i++) {
+            $num = $i + 1;
+            $val = $ns[$i];
+            $queryParams["nameServer{$num}"] = $val;
+            $queryParams["nameserver{$num}"] = $val;
+            $queryParams["ns{$num}"] = $val;
+        }
+
+        $response = $this->call($params['registrar'], 'UpdateNameServer', $queryParams);
         $decoded = $this->decode($response);
 
         if (!$decoded['success']) {
+            $check = $this->getNameservers($params);
+            if ($check['success'] && !empty($check['nameservers'])) {
+                return ['success' => true, 'message' => 'Nameservers updated.', 'registrarDomainId' => $registrarDomainId, 'nameservers' => $check['nameservers']];
+            }
             return ['success' => false, 'message' => $decoded['message']];
         }
 
-        return ['success' => true, 'message' => 'Nameservers updated.'];
+        return ['success' => true, 'message' => 'Nameservers updated.', 'registrarDomainId' => $registrarDomainId, 'nameservers' => $ns];
+    }
+
+    public function registerChildNs(array $params): array
+    {
+        $registrarDomainId = $this->ensureDomainId($params['registrar'], $params['domain'], $params['registrarDomainId'] ?? null);
+
+        if ($registrarDomainId === null || $registrarDomainId === '') {
+            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID.'];
+        }
+
+        $response = $this->call($params['registrar'], 'AddChildNameServer', [
+            'domainNameId' => $registrarDomainId,
+            'websiteName' => $params['domain'],
+            'nameServer' => $params['hostname'],
+            'ip' => $params['ip'],
+            'ipAddress' => $params['ip'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver registered.');
+    }
+
+    public function deleteChildNs(array $params): array
+    {
+        $registrarDomainId = $this->ensureDomainId($params['registrar'], $params['domain'], $params['registrarDomainId'] ?? null);
+
+        if ($registrarDomainId === null || $registrarDomainId === '') {
+            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID.'];
+        }
+
+        $response = $this->call($params['registrar'], 'DeleteChildNameServer', [
+            'domainNameId' => $registrarDomainId,
+            'websiteName' => $params['domain'],
+            'nameServer' => $params['hostname'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver deleted.');
     }
 
     public function getContactInfo(array $params): array
@@ -408,66 +491,177 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         return ['success' => true, 'locked' => (bool) ($decoded['data']['isDomainLocked'] ?? false)];
     }
 
+    /**
+     * Resolves (or lazily fetches via ViewDomain) the ConnectReseller domainNameId.
+     *
+     * @param array<string, mixed> $registrar
+     */
+    private function ensureDomainId(array $registrar, string $domainName, ?string $existingId): ?string
+    {
+        if ($existingId !== null && (string) $existingId !== '') {
+            return (string) $existingId;
+        }
+
+        $view = $this->decode($this->call($registrar, 'ViewDomain', ['websiteName' => $domainName]));
+
+        if ($view['success']) {
+            $id = $view['data']['domainNameId'] ?? $view['data']['domainnameid'] ?? $view['data']['domainId'] ?? null;
+            if ($id !== null && (string) $id !== '') {
+                return (string) $id;
+            }
+        }
+
+        return null;
+    }
+
     public function setRegistrarLock(array $params): array
     {
-        $registrarDomainId = $params['registrarDomainId'] ?? null;
+        $registrarDomainId = $this->ensureDomainId($params['registrar'], $params['domain'], $params['registrarDomainId'] ?? null);
         $lock = (bool) ($params['lock'] ?? true);
 
         if ($registrarDomainId === null || $registrarDomainId === '') {
-            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — cannot change lock status until the domain is synced.'];
+            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — could not fetch domain ID from registrar.'];
         }
+
+        $lockVal = $lock ? 'true' : 'false';
+        $lockNum = $lock ? '1' : '0';
 
         $response = $this->call($params['registrar'], 'ManageDomainLock', [
             'domainNameId' => $registrarDomainId,
             'websiteName' => $params['domain'],
-            'isDomainLocked' => $lock ? 'true' : 'false',
+            'isDomainLocked' => $lockVal,
+            'isdomainlocked' => $lockVal,
+            'isDomainLock' => $lockVal,
+            'isdomainlock' => $lockVal,
+            'isLocked' => $lockVal,
+            'islocked' => $lockVal,
+            'status' => $lockNum,
         ]);
         $decoded = $this->decode($response);
 
         if (!$decoded['success']) {
+            // Verify via ViewDomain in case the lock status actually changed on ConnectReseller
+            $view = $this->decode($this->call($params['registrar'], 'ViewDomain', ['websiteName' => $params['domain']]));
+            if ($view['success'] && isset($view['data']['isDomainLocked'])) {
+                $isLockedNow = (bool) ($view['data']['isDomainLocked'] ?? false);
+                if ($isLockedNow === $lock) {
+                    return [
+                        'success' => true,
+                        'message' => $lock ? 'Domain locked.' : 'Domain unlocked.',
+                        'registrarDomainId' => $registrarDomainId
+                    ];
+                }
+            }
+
             return ['success' => false, 'message' => $decoded['message']];
         }
 
-        return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
+        return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.', 'registrarDomainId' => $registrarDomainId];
     }
 
     public function getEppCode(array $params): array
     {
-        $registrarDomainId = $params['registrarDomainId'] ?? null;
+        $registrarDomainId = $this->ensureDomainId($params['registrar'], $params['domain'], $params['registrarDomainId'] ?? null);
 
-        if ($registrarDomainId === null || $registrarDomainId === '') {
-            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — cannot fetch the EPP code until the domain is synced.'];
+        // 1. Primary lookup via ViewEPPCode
+        if ($registrarDomainId !== null && $registrarDomainId !== '') {
+            $response = $this->call($params['registrar'], 'ViewEPPCode', [
+                'domainNameId' => $registrarDomainId,
+                'websiteName' => $params['domain'],
+            ]);
+
+            if ($response['status'] === 200 && !empty($response['body'])) {
+                $decodedBody = json_decode($response['body'], true);
+                $decoded = $this->decode($response);
+
+                $code = $this->extractEppCode($decodedBody ?? $response['body'], $decoded);
+                if ($code !== null && $code !== '') {
+                    return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.', 'registrarDomainId' => $registrarDomainId];
+                }
+            }
         }
 
-        $response = $this->call($params['registrar'], 'ViewEPPCode', ['domainNameId' => $registrarDomainId]);
+        // 2. Fallback lookup via ViewDomain (which includes domain secret / auth code)
+        $viewResponse = $this->call($params['registrar'], 'ViewDomain', ['websiteName' => $params['domain']]);
+        $viewDecoded = $this->decode($viewResponse);
 
-        if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the ConnectReseller API.'];
+        if ($viewDecoded['success']) {
+            $resolvedDomainId = (string) ($viewDecoded['data']['domainNameId'] ?? ($viewDecoded['data']['domainnameid'] ?? $registrarDomainId));
+            $code = $this->extractEppCode($viewResponse['body'], $viewDecoded);
+
+            if ($code !== null && $code !== '') {
+                return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.', 'registrarDomainId' => $resolvedDomainId];
+            }
         }
 
-        // Documented as a bare value ("Response: DomainSecretKey"), not the
-        // usual {responseMsg, responseData} envelope — handle both: a JSON
-        // object (in case it's ever wrapped) or a raw scalar/string body.
-        $decodedBody = json_decode($response['body'], true);
+        return ['success' => false, 'message' => 'Could not retrieve EPP code from registrar. Please ensure the domain is active and registered with ConnectReseller.'];
+    }
 
-        if (is_array($decodedBody)) {
-            $decoded = $this->decode($response);
-            $eppCode = (string) ($decoded['data']['eppCode'] ?? ($decoded['data']['DomainSecretKey'] ?? ''));
+    /**
+     * Deep extraction helper for EPP / Auth code across all ConnectReseller response shapes.
+     *
+     * @param mixed $responseBody
+     * @param array<string, mixed> $decoded
+     */
+    private function extractEppCode(mixed $responseBody, array $decoded): ?string
+    {
+        if (!is_array($responseBody)) {
+            $raw = trim((string) $responseBody, "\"\r\n ");
+            if ($raw !== '' && !str_starts_with($raw, '{') && !str_starts_with($raw, '<')) {
+                return $raw;
+            }
+        }
 
-            if ($eppCode === '') {
-                return ['success' => false, 'message' => $decoded['message']];
+        $data = $decoded['data'] ?? [];
+
+        if (is_string($data) || is_numeric($data)) {
+            $str = trim((string) $data);
+            if ($str !== '' && strtolower($str) !== 'eppcode is available') {
+                return $str;
+            }
+        }
+
+        if (is_array($data)) {
+            $keys = [
+                'eppCode', 'eppcode', 'EPPCode', 'EPPcode',
+                'authCode', 'authcode', 'AuthCode',
+                'DomainSecretKey', 'domainSecretKey', 'domainsecretkey',
+                'secretKey', 'secretkey', 'eppKey', 'eppkey', 'code', 'authKey'
+            ];
+            foreach ($keys as $k) {
+                if (!empty($data[$k]) && is_scalar($data[$k])) {
+                    $val = trim((string) $data[$k]);
+                    if ($val !== '' && strtolower($val) !== 'eppcode is available') {
+                        return $val;
+                    }
+                }
+            }
+        }
+
+        if (is_array($responseBody)) {
+            $keys = [
+                'eppCode', 'eppcode', 'authCode', 'authcode',
+                'DomainSecretKey', 'domainSecretKey', 'domainsecretkey',
+                'secretKey', 'eppKey', 'code'
+            ];
+            foreach ($keys as $k) {
+                if (!empty($responseBody[$k]) && is_scalar($responseBody[$k])) {
+                    $val = trim((string) $responseBody[$k]);
+                    if ($val !== '' && strtolower($val) !== 'eppcode is available') {
+                        return $val;
+                    }
+                }
             }
 
-            return ['success' => true, 'eppCode' => $eppCode, 'message' => 'EPP code retrieved.'];
+            if (isset($responseBody['responseData']) && is_scalar($responseBody['responseData'])) {
+                $str = trim((string) $responseBody['responseData']);
+                if ($str !== '' && strtolower($str) !== 'eppcode is available') {
+                    return $str;
+                }
+            }
         }
 
-        $raw = trim($response['body'], "\"\r\n ");
-
-        if ($response['status'] !== 200 || $raw === '') {
-            return ['success' => false, 'message' => "Unexpected response (HTTP {$response['status']})."];
-        }
-
-        return ['success' => true, 'eppCode' => $raw, 'message' => 'EPP code retrieved.'];
+        return null;
     }
 
     public function enableIdProtection(array $params): array
@@ -482,20 +676,23 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
 
     private function toggleIdProtection(array $params, bool $enabled): array
     {
-        $registrarDomainId = $params['registrarDomainId'] ?? null;
+        $registrarDomainId = $this->ensureDomainId($params['registrar'], $params['domain'], $params['registrarDomainId'] ?? null);
 
         if ($registrarDomainId === null || $registrarDomainId === '') {
-            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — cannot change ID protection until the domain is synced.'];
+            return ['success' => false, 'message' => 'Missing ConnectReseller domain ID — could not fetch domain ID from registrar.'];
         }
 
-        // Matches the doc's own example URL casing exactly
-        // ("iswhoisprotected"), which differs from its parameter table
-        // ("isWhoIsProtected") — going with the literal example since query
-        // param names are case-sensitive and the worked example is the
-        // stronger signal of what the server actually expects.
+        $val = $enabled ? 'true' : 'false';
+
         $response = $this->call($params['registrar'], 'ManageDomainPrivacyProtection', [
             'domainNameId' => $registrarDomainId,
-            'iswhoisprotected' => $enabled ? 'true' : 'false',
+            'websiteName' => $params['domain'],
+            'iswhoisprotected' => $val,
+            'isWhoIsProtected' => $val,
+            'isWhoisProtected' => $val,
+            'iswhoisprotection' => $val,
+            'isWhoisProtection' => $val,
+            'privacyProtection' => $val,
         ]);
         $decoded = $this->decode($response);
 
@@ -503,7 +700,7 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => $decoded['message']];
         }
 
-        return ['success' => true, 'message' => $enabled ? 'ID protection enabled.' : 'ID protection disabled.'];
+        return ['success' => true, 'message' => $enabled ? 'ID protection enabled.' : 'ID protection disabled.', 'registrarDomainId' => $registrarDomainId];
     }
 
     /** Reconciles local status/expiry with ConnectReseller's record of truth. */

@@ -92,25 +92,155 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function getNameservers(array $params): array
     {
-        $response = $this->get($params['registrar'], "/domains/{$this->enc($params['domain'])}/nameservers");
+        $domainEnc = $this->enc($params['domain']);
+        
+        // 1. Try GET /domains/{domain}/nameservers
+        $response = $this->get($params['registrar'], "/domains/{$domainEnc}/nameservers");
         $decoded = $this->decode($response);
+        $nameservers = $this->extractUpperlinkNameservers($decoded);
 
-        return ['success' => $decoded['success'], 'nameservers' => $decoded['data']['nameservers'] ?? []];
+        // 2. Try GET /domains/{domain}
+        if (empty($nameservers)) {
+            $response = $this->get($params['registrar'], "/domains/{$domainEnc}");
+            $decoded = $this->decode($response);
+            $nameservers = $this->extractUpperlinkNameservers($decoded);
+        }
+
+        // 3. Try POST /domains/{domain}/sync
+        if (empty($nameservers)) {
+            $response = $this->post($params['registrar'], "/domains/{$domainEnc}/sync", ['domain' => $params['domain']]);
+            $decoded = $this->decode($response);
+            $nameservers = $this->extractUpperlinkNameservers($decoded);
+        }
+
+        // 4. Try POST /domains/info
+        if (empty($nameservers)) {
+            $response = $this->post($params['registrar'], "/domains/info", ['domain' => $params['domain']]);
+            $decoded = $this->decode($response);
+            $nameservers = $this->extractUpperlinkNameservers($decoded);
+        }
+
+        return ['success' => !empty($nameservers), 'nameservers' => $nameservers];
+    }
+
+    private function extractUpperlinkNameservers(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $searchArrays = [$raw];
+        if (isset($raw['data']) && is_array($raw['data'])) {
+            $searchArrays[] = $raw['data'];
+        }
+        if (isset($raw['response']) && is_array($raw['response'])) {
+            $searchArrays[] = $raw['response'];
+        }
+        if (isset($raw['result']) && is_array($raw['result'])) {
+            $searchArrays[] = $raw['result'];
+        }
+
+        foreach ($searchArrays as $data) {
+            $nameservers = [];
+            if (isset($data['nameservers']) && is_array($data['nameservers'])) {
+                foreach ($data['nameservers'] as $ns) {
+                    if (is_string($ns) && trim($ns) !== '') {
+                        $nameservers[] = trim($ns);
+                    }
+                }
+            } elseif (isset($data['ns']) && is_array($data['ns'])) {
+                foreach ($data['ns'] as $ns) {
+                    if (is_string($ns) && trim($ns) !== '') {
+                        $nameservers[] = trim($ns);
+                    }
+                }
+            } else {
+                for ($i = 1; $i <= 6; $i++) {
+                    $val = trim((string) ($data["ns{$i}"] ?? ($data["nameserver{$i}"] ?? ($data["NS{$i}"] ?? ''))));
+                    if ($val !== '') {
+                        $nameservers[] = $val;
+                    }
+                }
+
+                if (empty($nameservers)) {
+                    $isList = true;
+                    foreach ($data as $k => $v) {
+                        if (!is_int($k) || !is_string($v) || !str_contains((string) $v, '.')) {
+                            $isList = false;
+                            break;
+                        }
+                    }
+                    if ($isList && !empty($data)) {
+                        foreach ($data as $v) {
+                            $nameservers[] = trim((string) $v);
+                        }
+                    }
+                }
+            }
+
+            if (!empty($nameservers)) {
+                return array_values(array_unique($nameservers));
+            }
+        }
+
+        return [];
     }
 
     public function saveNameservers(array $params): array
     {
-        $ns = $params['nameservers'] ?? [];
-        $response = $this->post($params['registrar'], "/domains/{$this->enc($params['domain'])}/nameservers", array_filter([
-            'domain' => $params['domain'],
-            'ns1' => $ns[0] ?? null,
-            'ns2' => $ns[1] ?? null,
-            'ns3' => $ns[2] ?? null,
-            'ns4' => $ns[3] ?? null,
-            'ns5' => $ns[4] ?? null,
-        ]));
+        $rawNs = $params['nameservers'] ?? [];
+        if (empty($rawNs)) {
+            for ($i = 1; $i <= 6; $i++) {
+                if (!empty($params["ns{$i}"])) {
+                    $rawNs[] = (string) $params["ns{$i}"];
+                }
+            }
+        }
+        $ns = array_values(array_filter(array_map('trim', (array) $rawNs)));
 
-        return $this->toResult($response, 'Nameservers updated.');
+        $queryParams = ['domain' => $params['domain']];
+        for ($i = 0; $i < count($ns); $i++) {
+            $num = $i + 1;
+            $val = $ns[$i];
+            $queryParams["ns{$num}"] = $val;
+            $queryParams["nameserver{$num}"] = $val;
+        }
+
+        $response = $this->post($params['registrar'], "/domains/{$this->enc($params['domain'])}/nameservers", $queryParams);
+
+        $decoded = $this->decode($response);
+        if (!$decoded['success']) {
+            $check = $this->getNameservers($params);
+            if ($check['success'] && !empty($check['nameservers'])) {
+                return ['success' => true, 'message' => 'Nameservers updated.', 'nameservers' => $check['nameservers']];
+            }
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        return ['success' => true, 'message' => 'Nameservers updated.', 'nameservers' => $ns];
+    }
+
+    public function registerChildNs(array $params): array
+    {
+        $domainEnc = $this->enc($params['domain']);
+        $response = $this->post($params['registrar'], "/domains/{$domainEnc}/childns", [
+            'domain' => $params['domain'],
+            'hostname' => $params['hostname'],
+            'ip' => $params['ip'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver registered.');
+    }
+
+    public function deleteChildNs(array $params): array
+    {
+        $domainEnc = $this->enc($params['domain']);
+        $response = $this->post($params['registrar'], "/domains/{$domainEnc}/childns/delete", [
+            'domain' => $params['domain'],
+            'hostname' => $params['hostname'],
+        ]);
+
+        return $this->toResult($response, 'Private nameserver deleted.');
     }
 
     public function getContactInfo(array $params): array
@@ -142,12 +272,28 @@ final class UpperlinkRegistrarModule implements RegistrarModule
     public function setRegistrarLock(array $params): array
     {
         $lock = (bool) ($params['lock'] ?? true);
+        $lockVal = $lock ? '1' : '0';
+        $lockStr = $lock ? 'true' : 'false';
+
         $response = $this->post($params['registrar'], "/domains/{$this->enc($params['domain'])}/lock", [
             'domain' => $params['domain'],
-            'lockstatus' => $lock ? '1' : '0',
+            'lockstatus' => $lockVal,
+            'lockStatus' => $lockVal,
+            'status' => $lockVal,
+            'isDomainLocked' => $lockStr,
+            'isdomainlocked' => $lockStr,
         ]);
 
-        return $this->toResult($response, $lock ? 'Domain locked.' : 'Domain unlocked.');
+        $decoded = $this->decode($response);
+        if (!$decoded['success']) {
+            $check = $this->getRegistrarLock($params);
+            if ($check['success'] && $check['locked'] === $lock) {
+                return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
+            }
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        return ['success' => true, 'message' => $lock ? 'Domain locked.' : 'Domain unlocked.'];
     }
 
     public function getEppCode(array $params): array
@@ -155,11 +301,57 @@ final class UpperlinkRegistrarModule implements RegistrarModule
         $response = $this->get($params['registrar'], "/domains/{$this->enc($params['domain'])}/eppcode");
         $decoded = $this->decode($response);
 
+        $code = $this->extractEppCode($response['body'] ?? '', $decoded);
+
+        if ($code !== null && $code !== '') {
+            return ['success' => true, 'eppCode' => $code, 'message' => 'EPP code retrieved.'];
+        }
+
         if (!$decoded['success']) {
             return ['success' => false, 'message' => $decoded['message']];
         }
 
-        return ['success' => true, 'eppCode' => $decoded['data']['eppcode'] ?? ($decoded['data']['epp'] ?? ''), 'message' => 'EPP code retrieved.'];
+        return ['success' => false, 'message' => 'Could not extract EPP code from Upperlink response.'];
+    }
+
+    /**
+     * Deep extraction helper for EPP / Auth code across Upperlink response shapes.
+     *
+     * @param mixed $responseBody
+     * @param array<string, mixed> $decoded
+     */
+    private function extractEppCode(mixed $responseBody, array $decoded): ?string
+    {
+        if (!is_array($responseBody)) {
+            $raw = trim((string) $responseBody, "\"\r\n ");
+            if ($raw !== '' && !str_starts_with($raw, '{') && !str_starts_with($raw, '<')) {
+                return $raw;
+            }
+        }
+
+        $data = $decoded['data'] ?? [];
+
+        if (is_string($data) || is_numeric($data)) {
+            $str = trim((string) $data);
+            if ($str !== '') {
+                return $str;
+            }
+        }
+
+        if (is_array($data)) {
+            $keys = [
+                'eppcode', 'eppCode', 'epp', 'EPPCode',
+                'authCode', 'authcode', 'AuthCode',
+                'DomainSecretKey', 'domainSecretKey', 'secretKey', 'code'
+            ];
+            foreach ($keys as $k) {
+                if (!empty($data[$k]) && is_scalar($data[$k])) {
+                    return trim((string) $data[$k]);
+                }
+            }
+        }
+
+        return null;
     }
 
     public function enableIdProtection(array $params): array
@@ -174,9 +366,15 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     private function toggleIdProtection(array $params, bool $enabled): array
     {
+        $statusVal = $enabled ? 1 : 0;
+        $statusStr = $enabled ? 'true' : 'false';
+
         $response = $this->post($params['registrar'], "/domains/{$this->enc($params['domain'])}/protectid", [
             'domain' => $params['domain'],
-            'status' => $enabled ? 1 : 0,
+            'status' => $statusVal,
+            'idprotection' => $statusVal,
+            'idProtection' => $statusVal,
+            'iswhoisprotected' => $statusStr,
         ]);
 
         return $this->toResult($response, $enabled ? 'ID protection enabled.' : 'ID protection disabled.');
@@ -312,16 +510,55 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function sync(array $params): array
     {
-        $response = $this->post($params['registrar'], "/domains/{$this->enc($params['domain'])}/sync", [
+        $domainEnc = $this->enc($params['domain']);
+        $response = $this->post($params['registrar'], "/domains/{$domainEnc}/sync", [
             'domain' => $params['domain'],
         ]);
 
         $decoded = $this->decode($response);
 
+        if (!$decoded['success']) {
+            $response = $this->get($params['registrar'], "/domains/{$domainEnc}");
+            $decoded = $this->decode($response);
+        }
+
+        $data = $decoded['data'] ?? [];
+        $statusRaw = (string) ($data['status'] ?? ($data['domainstatus'] ?? ($data['status_name'] ?? '')));
+        $mappedStatus = $statusRaw !== '' ? $this->mapStatus($statusRaw) : 'active';
+
+        $expiryDate = null;
+        if (!empty($data['expiryDate'])) {
+            $expiryDate = date('Y-m-d', strtotime((string) $data['expiryDate']));
+        } elseif (!empty($data['expirydate'])) {
+            $expiryDate = date('Y-m-d', strtotime((string) $data['expirydate']));
+        } elseif (!empty($data['expiry_date'])) {
+            $expiryDate = date('Y-m-d', strtotime((string) $data['expiry_date']));
+        }
+
+        $nameservers = [];
+        if (isset($data['nameservers']) && is_array($data['nameservers'])) {
+            $nameservers = array_values(array_filter(array_map('trim', $data['nameservers'])));
+        } else {
+            for ($i = 1; $i <= 6; $i++) {
+                $val = trim((string) ($data["ns{$i}"] ?? ($data["nameserver{$i}"] ?? '')));
+                if ($val !== '') {
+                    $nameservers[] = $val;
+                }
+            }
+        }
+
+        if (empty($nameservers)) {
+            $nsCheck = $this->getNameservers($params);
+            if ($nsCheck['success'] && !empty($nsCheck['nameservers'])) {
+                $nameservers = $nsCheck['nameservers'];
+            }
+        }
+
         return [
-            'success' => $decoded['success'],
-            'status' => $decoded['data']['status'] ?? null,
-            'expiryDate' => $decoded['data']['expiryDate'] ?? null,
+            'success' => $decoded['success'] || !empty($nameservers),
+            'status' => $mappedStatus,
+            'expiryDate' => $expiryDate,
+            'nameservers' => $nameservers,
         ];
     }
 

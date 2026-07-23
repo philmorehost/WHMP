@@ -5,6 +5,7 @@ declare(strict_types=1);
 use CodeVault\Import\EntityImportController;
 use CodeVault\Import\ImportController;
 use CodeVault\Import\WhmcsImportController;
+use CodeVault\Import\ResellerClubImportController;
 
 /** @var CodeVault\Router $router */
 
@@ -15,3 +16,5 @@ $router->get('/admin/import/whmcs/progress', [WhmcsImportController::class, 'pro
 $router->post('/admin/import/whmcs', [WhmcsImportController::class, 'run']);
 $router->get('/admin/import/{type}', [EntityImportController::class, 'form']);
 $router->post('/admin/import/{type}', [EntityImportController::class, 'run']);
+$router->get('/admin/import-resellerclub', [ResellerClubImportController::class, 'form']);
+$router->post('/admin/import-resellerclub', [ResellerClubImportController::class, 'run']);

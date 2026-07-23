@@ -58,6 +58,11 @@ final class WhmcsImportController
         $username = trim((string) $request->input('username', ''));
         $password = (string) $request->input('password', '');
         $prefix = trim((string) $request->input('prefix', ''));
+        if (str_ends_with(strtolower($prefix), 'tbl')) {
+            $prefix = substr($prefix, 0, -3);
+        } elseif (str_ends_with(strtolower($prefix), 'tbl_')) {
+            $prefix = substr($prefix, 0, -4);
+        }
         $overwrite = $request->input('overwrite') === '1';
         // Per-attempt identifier the frontend generates and echoes back so
         // it can distinguish this run's progress from a previous run's
