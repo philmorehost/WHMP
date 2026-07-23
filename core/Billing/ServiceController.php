@@ -14,6 +14,7 @@ use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
+use CodeVault\Provisioning\ServerRepository;
 
 final class ServiceController
 {
@@ -25,7 +26,8 @@ final class ServiceController
         private readonly ProductPricingRepository $pricing,
         private readonly ProrationService $proration,
         private readonly ProvisioningService $provisioning,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly ServerRepository $servers
     ) {
     }
 
@@ -56,12 +58,61 @@ final class ServiceController
             return Response::html('404 Not Found', 404);
         }
 
+        $product = $this->products->find((int) $service['product_id']);
+        $allServers = $this->servers->all();
+
+        $servers = $allServers;
+        if ($product !== null && $product['server_group_id'] !== null) {
+            $groupId = (int) $product['server_group_id'];
+            $servers = array_filter($allServers, fn ($srv) => (int) ($srv['server_group_id'] ?? 0) === $groupId);
+            $servers = array_values($servers);
+        }
+
         return $this->render('billing.service-show', [
             'service' => $service,
             'products' => $this->products->all(includeHidden: false),
             'cycles' => BillingCycle::labels(),
             'modes' => ProrationMode::labels(),
+            'servers' => $servers,
         ]);
+    }
+
+    public function updateDetails(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+
+        if ($service === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $serverId = $request->input('server_id');
+
+        $fields = [
+            'username' => trim((string) $request->input('username', '')) ?: null,
+            'domain' => trim((string) $request->input('domain', '')) ?: null,
+            'hostname' => trim((string) $request->input('hostname', '')) ?: null,
+            'server_id' => $serverId !== null && $serverId !== '' ? (int) $serverId : null,
+        ];
+
+        $this->services->updateDetails($id, $fields);
+
+        $admin = $this->guard->currentAdmin();
+        $this->activity->log(
+            'admin',
+            (int) $admin['id'],
+            'service.edit_details',
+            'service',
+            $id,
+            "Admin updated client service #{$id} details (username, domain, hostname, server_id)",
+            $request->ip()
+        );
+
+        return Response::redirect("/admin/services/{$id}");
     }
 
     public function upgrade(Request $request, array $params): Response
