@@ -12,6 +12,9 @@ return [
             register_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             transfer_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             renew_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            grace_period_days INT UNSIGNED DEFAULT 30,
+            redemption_period_days INT UNSIGNED DEFAULT 30,
+            redemption_fee DECIMAL(10,2) DEFAULT 0.00,
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
