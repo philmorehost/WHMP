@@ -644,24 +644,29 @@ final class WhmcsImportService
                         }
                         $domainAmount = (float) ($row['recurringamount'] ?? 0.00) / $clientRate;
 
-                        $this->db->insert(
-                            'INSERT INTO domains (client_id, domain_name, tld, registrar_slug, status, registration_date, expiry_date, next_due_date, auto_renew, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                            [
-                                $localClientId,
-                                $domainName,
-                                $tld,
-                                ($row['registrar'] ?: 'local'),
-                                $status,
-                                $row['registrationdate'] ?: null,
-                                $row['expirydate'] ?: null,
-                                $row['nextduedate'] ?: null,
-                                ($row['donotrenew'] ? 0 : 1),
-                                $domainAmount,
-                                $nowStr,
-                                $nowStr,
-                            ]
-                        );
-                        $imported['domains']++;
+                        try {
+                            $this->db->insert(
+                                'INSERT IGNORE INTO domains (client_id, domain_name, tld, registrar_slug, status, registration_date, expiry_date, next_due_date, auto_renew, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                                [
+                                    $localClientId,
+                                    $domainName,
+                                    $tld,
+                                    ($row['registrar'] ?: 'local'),
+                                    $status,
+                                    $row['registrationdate'] ?: null,
+                                    $row['expirydate'] ?: null,
+                                    $row['nextduedate'] ?: null,
+                                    ($row['donotrenew'] ? 0 : 1),
+                                    $domainAmount,
+                                    $nowStr,
+                                    $nowStr,
+                                ]
+                            );
+                            $imported['domains']++;
+                        } catch (\Throwable $e) {
+                            // Domain already exists - skip silently with INSERT IGNORE
+                            // If this catch fires, INSERT IGNORE already skipped the duplicate
+                        }
 
                         if ($imported['domains'] % 100 === 0) {
                             $this->updateProgress('running', 60, "Importing client domains... ({$imported['domains']} so far)", $imported, $errors);
@@ -798,18 +803,22 @@ final class WhmcsImportService
                     $amountOut = (float) ($row['amountout'] ?? 0);
                     $isRefund = $amountOut > 0;
 
-                    $this->db->insert(
-                        'INSERT INTO transactions (invoice_id, gateway_slug, amount, status, gateway_transaction_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-                        [
-                            $invoiceMap[$whmcsInvoiceId],
-                            $row['gateway'] ?: 'manual',
-                            $isRefund ? $amountOut : (float) ($row['amountin'] ?? 0),
-                            $isRefund ? 'refunded' : 'completed',
-                            $row['transid'] ?: null,
-                            $row['date'] ?? $nowStr,
-                        ]
-                    );
-                    $imported['transactions']++;
+                    try {
+                        $this->db->insert(
+                            'INSERT IGNORE INTO transactions (invoice_id, gateway_slug, amount, status, gateway_transaction_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                            [
+                                $invoiceMap[$whmcsInvoiceId],
+                                $row['gateway'] ?: 'manual',
+                                $isRefund ? $amountOut : (float) ($row['amountin'] ?? 0),
+                                $isRefund ? 'refunded' : 'completed',
+                                $row['transid'] ?: null,
+                                $row['date'] ?? $nowStr,
+                            ]
+                        );
+                        $imported['transactions']++;
+                    } catch (\Throwable $e) {
+                        // Transaction already exists - skip silently with INSERT IGNORE
+                    }
 
                     if ($imported['transactions'] % 100 === 0) {
                         $this->updateProgress('running', 75, "Importing payment transactions... ({$imported['transactions']} so far)", $imported, $errors);
