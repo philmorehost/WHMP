@@ -308,7 +308,13 @@
                             <code id="order-link-<?= (int) $product['id'] ?>" class="admin-prod-link"><?= e($orderLink) ?></code>
                             <button type="button" class="admin-prod-copy-btn" data-copy-target="#order-link-<?= (int) $product['id'] ?>">📋 Copy</button>
                         </td>
-                        <td><a class="admin-prod-edit-btn" href="/admin/products/<?= (int) $product['id'] ?>/edit">✏️ Edit</a></td>
+                        <td style="display:flex;gap:6px;">
+                            <a class="admin-prod-edit-btn" href="/admin/products/<?= (int) $product['id'] ?>/edit">✏️ Edit</a>
+                            <form method="post" action="/admin/products/<?= (int) $product['id'] ?>/delete" style="margin:0;display:inline;" data-confirm="Are you sure you want to delete this product? This action cannot be undone.">
+                                <?= csrf_field() ?>
+                                <button type="submit" class="admin-prod-edit-btn" style="background:linear-gradient(135deg,rgba(239,68,68,.2),rgba(239,68,68,.15));color:#ef4444;border-color:rgba(239,68,68,.3);cursor:pointer;padding:6px 12px;font-weight:600;font-size:.75rem;border-radius:6px;border:1px solid;text-decoration:none;">🗑️ Delete</button>
+                            </form>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
