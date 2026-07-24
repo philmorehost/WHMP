@@ -68,18 +68,9 @@ final class PayhubGateway implements GatewayModule
             return ['success' => false, 'message' => 'Payhub API is not configured — missing secret key. Please set Payhub Secret Key in Admin Gateway Settings.'];
         }
 
-        // PayHub's documented initialize API (merchant.payhub.com.ng/api-reference.php)
-        // takes form-urlencoded fields — its own example is
-        //   curl .../api/transaction/initialize -H "Authorization: Bearer KEY"
-        //        -d email=... -d amount=... -d name=... -d phone=...
-        // so it REQUIRES name and phone alongside email/amount, and expects a
-        // form body, not JSON. The previous version sent JSON and omitted
-        // name/phone, so initialize rejected every request and the checkout URL
-        // never came back — which is exactly why the button just reloaded the
-        // invoice. reference/callback_url/metadata are kept as extra fields
-        // (PayHub mirrors Paystack's API) so we can return the payer to the
-        // right invoice; a gateway that ignores them does no harm.
         $name = trim((string) ($params['name'] ?? ''));
+        $callbackUrl = (string) $params['callbackUrl'];
+
         $fields = [
             'email' => (string) $params['email'],
             // PayHub API expects the amount in the currency's major unit (Naira for NGN),
@@ -89,7 +80,10 @@ final class PayhubGateway implements GatewayModule
             'name' => $name !== '' ? $name : (string) $params['email'],
             'phone' => (string) ($params['phone'] ?? ''),
             'reference' => (string) $params['reference'],
-            'callback_url' => (string) $params['callbackUrl'],
+            // PayHub treats callback_url as a server-side webhook endpoint.
+            // Use redirect_url for the browser return URL after payment completes.
+            'callback_url' => $callbackUrl,
+            'redirect_url' => $callbackUrl,
             'metadata' => $params['metadata'] ?? [],
         ];
 
@@ -119,16 +113,24 @@ final class PayhubGateway implements GatewayModule
         $httpOk = $status >= 200 && $status < 300;
 
         if (!$httpOk || $redirectUrl === '') {
-            // Make the real reason visible instead of a silent "button reloaded":
-            // a bad key (401), a validation error (422), or an unexpected
-            // response shape all end up here, and the raw body is logged so it
-            // can be read in the server error log.
             error_log('Payhub initialize failed: HTTP ' . $status . ' body=' . substr((string) ($response['body'] ?? ''), 0, 600));
             $msg = is_array($decoded)
                 ? (string) ($decoded['message'] ?? $decoded['error'] ?? 'Payhub did not return a checkout URL. Check your Payhub Secret Key and that the account is live.')
                 : 'Could not reach the Payhub API. Please try again.';
             return ['success' => false, 'message' => $msg];
         }
+
+        // PayHub's hosted checkout does not pass through redirect_url from the API
+        // initialize request — it shows its own verify.php page after payment instead.
+        // We work around this by appending our callback URL directly as a query
+        // parameter to the checkout URL itself. PayHub's checkout.php reads
+        // ?redirect_url=... and bounces the browser there after a successful payment.
+        // We also include our own reference (trxref=cv-...) so the callback handler
+        // can identify the invoice even if PayHub returns a PH_ reference.
+        $ourReference = (string) $params['reference'];
+        $callbackWithRef = $callbackUrl . '?trxref=' . urlencode($ourReference);
+        $sep = (strpos($redirectUrl, '?') !== false) ? '&' : '?';
+        $redirectUrl .= $sep . 'redirect_url=' . urlencode($callbackWithRef);
 
         return [
             'success' => true,

@@ -206,7 +206,17 @@ final class PaymentCallbackController
         // verify takes, not the tx_ref we generated); PayPal returns
         // ?token=...&PayerID=... where token is the PayPal order id
         // (see PaypalGateway::capture()'s transactionId).
-        $reference = (string) ($request->query('reference') ?? $request->query('trxref') ?? $request->query('transaction_id') ?? $request->query('token') ?? '');
+        // PayHub returns ?reference=PH_... (its own reference) after the user
+        // pays on checkout.php. We also embed our own cv- reference as ?reference=
+        // in the redirect_url we pass to PayHub, so we check for our cv- reference
+        // first and use that for verifyTransaction if present.
+        $rawReference = (string) ($request->query('reference') ?? $request->query('trxref') ?? $request->query('transaction_id') ?? $request->query('token') ?? '');
+
+        // For PayHub: if the reference is a PH_ gateway reference rather than
+        // our own cv- reference, try to verify it directly (PayHub's verify
+        // endpoint accepts both the PH_ reference and the cv- reference we passed
+        // as 'reference' during initialize).
+        $reference = $rawReference;
 
         if ($reference === '') {
             return Response::redirect('/client/invoices');
@@ -215,6 +225,16 @@ final class PaymentCallbackController
         $config = $this->configFor($slug);
         $verification = $module->verifyTransaction($reference, $config);
         $invoiceId = $this->invoiceIdFrom($verification);
+
+        // PayHub may return a PH_ reference that doesn't carry our invoice metadata.
+        // In this case, fall back to extracting the invoice ID from our cv- reference
+        // pattern embedded in the query string as ?trxref= or ?cv_ref=.
+        if ($invoiceId === null && str_starts_with($reference, 'PH_')) {
+            $cvRef = (string) ($request->query('trxref') ?? $request->query('cv_ref') ?? '');
+            if ($cvRef !== '' && preg_match('/^cv-[a-z]+-(\d+)-/', $cvRef, $m) === 1) {
+                $invoiceId = (int) $m[1];
+            }
+        }
 
         if ($invoiceId === null) {
             return Response::redirect('/client/invoices');
