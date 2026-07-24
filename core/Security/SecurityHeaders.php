@@ -27,8 +27,8 @@ final class SecurityHeaders
             ->withHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
             ->withHeader(
                 'Content-Security-Policy',
-                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                . "img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
+                "default-src 'self' https://merchant.payhub.com.ng; script-src 'self' 'unsafe-inline' https://merchant.payhub.com.ng; style-src 'self' 'unsafe-inline'; "
+                . "img-src 'self' data: https:; font-src 'self'; frame-src 'self' https://merchant.payhub.com.ng; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
             );
     }
 }
