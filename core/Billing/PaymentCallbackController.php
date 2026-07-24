@@ -164,11 +164,32 @@ final class PaymentCallbackController
         }
 
         if ($verification['success']) {
+            error_log("[PAYMENT] Payment verified successfully for invoice {$invoiceId}");
+
+            // The gateway may have returned the amount in a different currency
+            // than the invoice's base currency. Convert it back to the base
+            // currency so the amount can be correctly matched against the
+            // invoice total. Example: invoice is 100,000 NGN, gateway is USD,
+            // client pays 250 USD, gateway verifies 250 USD. We need to convert
+            // 250 USD back to ~100,000 NGN before recording.
+            $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
+            $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+            $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+
+            $amountInGatewayGurrency = $verification['amount'];
+
+            // Convert amount from gateway currency back to base currency (inverse rate).
+            if ($gatewayRate > 0) {
+                $verification['amount'] = $verification['amount'] / $gatewayRate;
+                error_log("[PAYMENT] Currency conversion: {$amountInGatewayGurrency} {$gatewayCurrency} (rate={$gatewayRate}) → {$verification['amount']} base currency");
+            }
+
             $this->recordIfNew($slug, $verification, $invoiceId);
 
             return Response::redirect("/client/invoices/{$invoiceId}?payment=success");
         }
 
+        error_log("[PAYMENT] Payment verification FAILED for invoice {$invoiceId}");
         return Response::redirect("/client/invoices/{$invoiceId}?payment=failed");
     }
 
@@ -199,6 +220,19 @@ final class PaymentCallbackController
         $invoiceId = $this->invoiceIdFrom($verification);
 
         if ($verification['success'] && $invoiceId !== null) {
+            // Same currency conversion logic as callback() — convert amount from
+            // gateway currency back to base currency before recording.
+            $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
+            $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+            $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+
+            $amountInGatewayGurrency = $verification['amount'];
+
+            if ($gatewayRate > 0) {
+                $verification['amount'] = $verification['amount'] / $gatewayRate;
+                error_log("[PAYMENT-WEBHOOK] Currency conversion: {$amountInGatewayGurrency} {$gatewayCurrency} → {$verification['amount']} base currency");
+            }
+
             $this->recordIfNew($slug, $verification, $invoiceId);
         }
 
