@@ -33,7 +33,8 @@ final class GatewayController
             return $denied;
         }
 
-        $logFile = $this->config->basePath('storage/logs/payment_gateways.log');
+        // dirname(__DIR__, 2) goes up: core/Billing → core → project root
+        $logFile = dirname(__DIR__, 2) . '/storage/logs/payment_gateways.log';
         $logs = [];
         if (is_file($logFile)) {
             $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
