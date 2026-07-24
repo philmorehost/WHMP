@@ -77,27 +77,53 @@ final class PaymentCallbackController
         $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
         $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
 
-        // 1. Resolve Invoice Currency Exchange Rate
+        // ── Currency Conversion Logic ────────────────────────────────────────────
+        // The system base currency is USD (exchange_rate = 1.0).
+        // All currencies in the `currencies` table store their exchange rate as:
+        //   "how many units of this currency = 1 USD"
+        //   e.g. NGN = 1490 means 1 USD = 1490 NGN.
+        //
+        // invoice['total'] is stored in the INVOICE's own currency (e.g. NGN).
+        // NOTE: invoice['currency_rate'] is not reliable (stored as 1.0 by
+        // add-funds flow), so we always look up the live rate from the currencies table.
+        //
+        // Correct formula:
+        //   1. remaining (in invoice currency) → USD base = remaining / invoiceCurrencyRate
+        //   2. USD base → gateway currency amount = usdBase × gatewayCurrencyRate
+        //
+        // Same-currency case: invoiceCurrencyRate = gatewayCurrencyRate → divide and
+        // multiply cancel out → captureAmount = remaining exactly. ✓
+
+        // 1. Get invoice currency's exchange rate (units per USD) from currencies table
         $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
-        $invoiceCurr = $invoiceCurrencyId !== null ? $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId]) : null;
-        $invoiceRate = (float) ($invoice['currency_rate'] ?? $invoiceCurr['exchange_rate'] ?? 1.0000);
-        if ($invoiceRate <= 0) {
-            $invoiceRate = 1.0000;
-        }
+        $invoiceCurrRow = $invoiceCurrencyId !== null
+            ? $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId])
+            : null;
+        // If invoice currency unknown, assume it's already in USD base
+        $invoiceCurrRate = ($invoiceCurrRow !== null && (float) $invoiceCurrRow['exchange_rate'] > 0)
+            ? (float) $invoiceCurrRow['exchange_rate']
+            : 1.0;
 
-        // 2. Convert remaining amount from Invoice Currency to System Base Currency
-        $remainingBase = $remaining / $invoiceRate;
+        // 2. Convert invoice remaining → USD base amount
+        $usdBase = $remaining / $invoiceCurrRate;
 
-        // 3. Resolve Gateway Currency Exchange Rate
-        $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-        $gatewayRate = ($gatewayCurr !== null && (float) $gatewayCurr['exchange_rate'] > 0) ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+        // 3. Get gateway currency's exchange rate (units per USD) from currencies table
+        $gatewayCurrRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+        $gatewayRate = ($gatewayCurrRow !== null && (float) $gatewayCurrRow['exchange_rate'] > 0)
+            ? (float) $gatewayCurrRow['exchange_rate']
+            : 1.0;
 
-        // 4. Convert Base Currency Amount to Gateway Currency Amount
-        $captureAmount = round($remainingBase * $gatewayRate, 2);
+        // 4. Convert USD base → gateway currency amount
+        $captureAmount = round($usdBase * $gatewayRate, 2);
+
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
 
-        $this->writeGatewayLog($slug, $invoiceId, $clientId, 'INITIATING', "Capture: amount={$captureAmount} {$gatewayCurrency} (invoice_remaining={$remaining} rate_inv={$invoiceRate} rate_gw={$gatewayRate}), ref={$reference}");
+        $invoiceCurrCode = $invoiceCurrRow['code'] ?? 'USD';
+        $this->writeGatewayLog(
+            $slug, $invoiceId, $clientId, 'INITIATING',
+            "Remaining: {$remaining} {$invoiceCurrCode} → USD base: {$usdBase} → Capture: {$captureAmount} {$gatewayCurrency} (inv_rate={$invoiceCurrRate}, gw_rate={$gatewayRate}), ref={$reference}"
+        );
 
         try {
             $result = $module->capture([

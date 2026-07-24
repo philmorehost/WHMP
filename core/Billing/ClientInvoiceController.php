@@ -152,6 +152,13 @@ final class ClientInvoiceController
         $today = substr($now, 0, 10);
         $currency = $this->currency->resolveForClient($client);
 
+        // Store the actual live exchange rate (not 1.0) so PaymentCallbackController
+        // can accurately detect same-currency vs cross-currency payment scenarios.
+        $currencyRate = (float) ($currency['exchange_rate'] ?? 1.0000);
+        if ($currencyRate <= 0) {
+            $currencyRate = 1.0000;
+        }
+
         $invoiceId = (int) $db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
@@ -162,7 +169,7 @@ final class ClientInvoiceController
                 0.00,
                 $amount,
                 $currency['id'],
-                1.0000,
+                $currencyRate,
                 $today,
                 $now,
                 $now
