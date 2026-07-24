@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use CodeVault\Reports\ReportController;
+use CodeVault\Reports\ServerAuditController;
 
 /** @var CodeVault\Router $router */
 
@@ -15,3 +16,5 @@ $router->get('/admin/reports/affiliate-payouts', [ReportController::class, 'affi
 $router->post('/admin/reports/modules/{slug}/activate', [ReportController::class, 'activateModule']);
 $router->post('/admin/reports/modules/{slug}/deactivate', [ReportController::class, 'deactivateModule']);
 $router->get('/admin/reports/modules/{slug}', [ReportController::class, 'runModule']);
+
+$router->get('/admin/server-audit', [ServerAuditController::class, 'audit']);
