@@ -9,6 +9,7 @@ use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
+use CodeVault\Kernel;
 
 final class DomainPricingController
 {
@@ -16,7 +17,8 @@ final class DomainPricingController
         private readonly AuthGuard $guard,
         private readonly View $view,
         private readonly DomainPricingRepository $pricing,
-        private readonly RegistrarRepository $registrars
+        private readonly RegistrarRepository $registrars,
+        private readonly Kernel $kernel
     ) {
     }
 
@@ -143,6 +145,55 @@ final class DomainPricingController
         }
 
         return Response::redirect('/admin/domain-pricing');
+    }
+
+    public function whmcsExtensions(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $config = $this->kernel->config();
+        $whmcsHost = (string) ($config['whmcs_db_host'] ?? '');
+        $whmcsPort = (int) ($config['whmcs_db_port'] ?? 3306);
+        $whmcsDb = (string) ($config['whmcs_db_name'] ?? '');
+        $whmcsUser = (string) ($config['whmcs_db_username'] ?? '');
+        $whmcsPass = (string) ($config['whmcs_db_password'] ?? '');
+        $whmcsPrefix = (string) ($config['whmcs_db_prefix'] ?? 'tbl');
+
+        if ($whmcsHost === '' || $whmcsDb === '' || $whmcsUser === '') {
+            return Response::json([
+                'success' => false,
+                'message' => 'WHMCS database credentials not configured.',
+                'extensions' => [],
+            ]);
+        }
+
+        try {
+            $dsn = "mysql:host={$whmcsHost};port={$whmcsPort};dbname={$whmcsDb};charset=utf8mb4";
+            $pdo = new \PDO($dsn, $whmcsUser, $whmcsPass, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                \PDO::ATTR_TIMEOUT => 5,
+            ]);
+
+            $query = "SELECT DISTINCT extension FROM {$whmcsPrefix}domainpricing WHERE extension IS NOT NULL AND extension != '' ORDER BY extension";
+            $result = $pdo->query($query)->fetchAll();
+
+            $extensions = array_map(fn($row) => trim($row['extension']), $result);
+            $extensions = array_unique(array_filter($extensions));
+
+            return Response::json([
+                'success' => true,
+                'extensions' => array_values($extensions),
+            ]);
+        } catch (\Throwable $e) {
+            return Response::json([
+                'success' => false,
+                'message' => 'Failed to fetch WHMCS extensions: ' . $e->getMessage(),
+                'extensions' => [],
+            ]);
+        }
     }
 
     public function destroy(Request $request, array $params): Response

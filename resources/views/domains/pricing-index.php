@@ -13,8 +13,9 @@
         <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
     <?php endif; ?>
 
-    <div style="display:flex;gap:var(--cv-space-2);margin-bottom:var(--cv-space-3);">
+    <div style="display:flex;gap:var(--cv-space-2);margin-bottom:var(--cv-space-3);flex-wrap:wrap;">
         <button type="button" id="toggle-bulk-form" class="cv-btn cv-btn--secondary" style="cursor:pointer;">📋 Bulk Add Multiple TLDs</button>
+        <button type="button" id="toggle-whmcs-form" class="cv-btn cv-btn--secondary" style="cursor:pointer;">📦 Import from WHMCS</button>
     </div>
 
     <div id="bulk-form-section" style="display:none;margin-bottom:var(--cv-space-4);padding:var(--cv-space-3);background:var(--cv-bg-surface-sunken);border-radius:8px;">
@@ -113,6 +114,66 @@
             <div class="bulk-span4" style="grid-column:span 4;display:flex;gap:var(--cv-space-2);flex-wrap:wrap;">
                 <button class="cv-btn" type="submit">✓ Add All TLDs</button>
                 <button type="button" class="cv-btn cv-btn--secondary" onclick="document.getElementById('bulk-form-section').style.display='none';">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="whmcs-form-section" style="display:none;margin-bottom:var(--cv-space-4);padding:var(--cv-space-3);background:var(--cv-bg-surface-sunken);border-radius:8px;">
+        <h3 style="margin:0 0 var(--cv-space-3) 0;">Import Domain Extensions from WHMCS</h3>
+        <p style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin:0 0 var(--cv-space-3) 0;">Select domain extensions from your WHMCS database and assign them all to a registrar with pricing.</p>
+
+        <div style="margin-bottom:var(--cv-space-3);padding:var(--cv-space-2);background:var(--cv-bg-surface);border-radius:6px;">
+            <button type="button" id="fetch-whmcs-extensions" class="cv-btn cv-btn--secondary" style="margin-bottom:var(--cv-space-2);">🔄 Fetch WHMCS Extensions</button>
+            <div id="whmcs-extensions-loading" style="display:none;font-size:var(--cv-text-sm);color:var(--cv-text-secondary);">Loading extensions from WHMCS...</div>
+            <div id="whmcs-extensions-list" style="display:none;margin-top:var(--cv-space-2);max-height:300px;overflow-y:auto;border:1px solid var(--cv-border-default);border-radius:6px;padding:var(--cv-space-2);">
+                <!-- Extensions will be populated here -->
+            </div>
+            <div id="whmcs-error" style="display:none;color:#ef4444;font-size:var(--cv-text-sm);margin-top:var(--cv-space-2);"></div>
+        </div>
+
+        <form id="whmcs-import-form" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--cv-space-3);align-items:start;">
+            <?= csrf_field() ?>
+            <div class="cv-field" style="margin-bottom:0;grid-column:span 1;">
+                <label class="cv-label">Registrar</label>
+                <select class="cv-select" name="registrar_slug" required>
+                    <?php foreach ($registrars as $registrar): ?>
+                        <option value="<?= e($registrar['slug']) ?>"><?= e($registrar['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;grid-column:span 1;">
+                <label class="cv-label">Register Price</label>
+                <input class="cv-input" type="number" step="0.01" name="register_price" value="0.00" min="0" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;grid-column:span 1;">
+                <label class="cv-label">Transfer Price</label>
+                <input class="cv-input" type="number" step="0.01" name="transfer_price" value="0.00" min="0" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;grid-column:span 1;">
+                <label class="cv-label">Renewal Price</label>
+                <input class="cv-input" type="number" step="0.01" name="renew_price" value="0.00" min="0" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;grid-column:span 2;">
+                <label class="cv-label">Category</label>
+                <input class="cv-input" name="category" list="whmcs-category-list" placeholder="Popular" value="Popular">
+                <datalist id="whmcs-category-list">
+                    <option value="Popular"></option>
+                    <option value="Geographic"></option>
+                    <option value="Technology"></option>
+                    <option value="Shopping"></option>
+                    <option value="Novelty"></option>
+                    <option value="Other"></option>
+                </datalist>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;grid-column:span 2;">
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;margin-top:var(--cv-space-2);">
+                    <input type="checkbox" name="spinner_enabled">
+                    Allow in Domain Spinner
+                </label>
+            </div>
+            <div style="grid-column:span 4;display:flex;gap:var(--cv-space-2);flex-wrap:wrap;margin-top:var(--cv-space-2);">
+                <button class="cv-btn" type="submit" id="import-whmcs-btn" disabled>✓ Import Selected Extensions</button>
+                <button type="button" class="cv-btn cv-btn--secondary" onclick="document.getElementById('whmcs-form-section').style.display='none';">Cancel</button>
             </div>
         </form>
     </div>
@@ -301,5 +362,99 @@
 document.getElementById('toggle-bulk-form').addEventListener('click', function() {
     var section = document.getElementById('bulk-form-section');
     section.style.display = section.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('toggle-whmcs-form').addEventListener('click', function() {
+    var section = document.getElementById('whmcs-form-section');
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('fetch-whmcs-extensions').addEventListener('click', function() {
+    var btn = this;
+    var loading = document.getElementById('whmcs-extensions-loading');
+    var list = document.getElementById('whmcs-extensions-list');
+    var error = document.getElementById('whmcs-error');
+    var importBtn = document.getElementById('import-whmcs-btn');
+
+    btn.disabled = true;
+    loading.style.display = 'block';
+    list.style.display = 'none';
+    error.style.display = 'none';
+
+    fetch('/admin/domain-pricing/fetch-whmcs', {
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            error.textContent = data.message || 'Failed to fetch extensions';
+            error.style.display = 'block';
+            return;
+        }
+
+        if (!data.extensions || data.extensions.length === 0) {
+            error.textContent = 'No domain extensions found in WHMCS database';
+            error.style.display = 'block';
+            return;
+        }
+
+        list.innerHTML = data.extensions.map((ext, idx) => {
+            return '<label style="display:flex;align-items:center;gap:var(--cv-space-1);padding:var(--cv-space-1);cursor:pointer;border-bottom:1px solid var(--cv-border-default);">' +
+                '<input type="checkbox" class="whmcs-extension-check" value="' + ext + '" data-index="' + idx + '">' +
+                '<span>' + ext + '</span>' +
+            '</label>';
+        }).join('');
+
+        list.style.display = 'block';
+        importBtn.disabled = false;
+
+        document.querySelectorAll('.whmcs-extension-check').forEach(cb => {
+            cb.addEventListener('change', function() {
+                importBtn.disabled = !document.querySelector('.whmcs-extension-check:checked');
+            });
+        });
+    })
+    .catch(err => {
+        error.textContent = 'Network error: ' + err.message;
+        error.style.display = 'block';
+    })
+    .finally(() => {
+        btn.disabled = false;
+        loading.style.display = 'none';
+    });
+});
+
+document.getElementById('whmcs-import-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    var selected = Array.from(document.querySelectorAll('.whmcs-extension-check:checked'))
+        .map(cb => cb.value);
+
+    if (selected.length === 0) {
+        alert('Please select at least one extension');
+        return;
+    }
+
+    var form = new FormData(this);
+    form.set('tld_list', selected.join('\n'));
+
+    var importBtn = document.getElementById('import-whmcs-btn');
+    importBtn.disabled = true;
+    importBtn.textContent = '⏳ Importing...';
+
+    fetch('/admin/domain-pricing/bulk', {
+        method: 'POST',
+        body: form,
+    })
+    .then(r => r.text())
+    .then(() => {
+        window.location.href = '/admin/domain-pricing';
+    })
+    .catch(err => {
+        alert('Error: ' + err.message);
+        importBtn.disabled = false;
+        importBtn.textContent = '✓ Import Selected Extensions';
+    });
 });
 </script>
