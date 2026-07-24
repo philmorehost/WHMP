@@ -28,6 +28,12 @@ final class ClientAuthGuard
         return $id === null ? null : $this->clients->find((int) $id);
     }
 
+    /** @return array<string, mixed>|null */
+    public function current(): ?array
+    {
+        return $this->currentClient();
+    }
+
     public function check(): bool
     {
         return $this->currentClient() !== null;

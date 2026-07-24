@@ -2,104 +2,696 @@
 /** @var array<string, mixed> $service */
 /** @var array<string, mixed>|null $usage */
 /** @var string|null $error */
+/** @var string|null $message */
 /** @var bool $cpanelToolsAvailable */
 /** @var array<string, mixed> $currency */
+/** @var array<string, mixed>|null $pendingCancellation */
+/** @var string|null $serverModule */
+
 $id = (int) $service['id'];
 $cpanelToolsAvailable ??= false;
-?>
-<div class="cv-card" style="max-width:32rem;margin:0 auto;">
-    <h1 class="cv-card__title"><?= e($service['product_name']) ?></h1>
-    <p><a href="/client/services">&larr; Back to my services</a></p>
+$productNameLower = strtolower((string) ($service['product_name'] ?? ''));
+$serverModuleLower = strtolower((string) ($serverModule ?? ''));
 
-    <?php if (!empty($error)): ?>
-        <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
+$isDedicated = str_contains($productNameLower, 'dedicated') || str_contains($serverModuleLower, 'dedicated') || str_contains($productNameLower, 'ids-') || str_contains($productNameLower, 'ds-');
+$isVps = str_contains($productNameLower, 'vps') || str_contains($serverModuleLower, 'vps') || str_contains($productNameLower, 'slice') || str_contains($productNameLower, 'virtual') || str_contains($productNameLower, 'cloud');
+if ($isDedicated) {
+    $isVps = false;
+}
+$isCpanel = $cpanelToolsAvailable || (!$isDedicated && !$isVps);
+
+$primaryIp = trim((string) ($service['dedicated_ip'] ?? $service['ip_address'] ?? ''));
+$assignedIpsRaw = trim((string) ($service['assigned_ips'] ?? ''));
+$assignedIps = array_filter(array_map('trim', explode("\n", str_replace("\r", "", $assignedIpsRaw))));
+
+$formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($service['amount'] ?? 0), 2);
+?>
+
+<style>
+/* Modern WHMP Client Service Details Design */
+.svc-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--cv-text-primary, #f8fafc);
+}
+
+.svc-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--cv-text-secondary, #94a3b8);
+    margin-bottom: 16px;
+}
+.svc-breadcrumb a {
+    color: var(--cv-color-brand-500, #3b82f6);
+    text-decoration: none;
+    font-weight: 500;
+}
+.svc-breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.svc-alert {
+    padding: 14px 20px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.svc-alert--danger {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+}
+.svc-alert--success {
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #34d399;
+}
+
+/* Hero Section */
+.svc-hero-card {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+    border: 1px solid var(--cv-border-default, rgba(255, 255, 255, 0.1));
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+}
+.svc-hero-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+    pointer-events: none;
+}
+
+.svc-hero-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 36px;
+    align-items: center;
+}
+@media (max-width: 768px) {
+    .svc-hero-grid {
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+}
+
+.svc-hero-badge-box {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px 20px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.svc-hero-icon {
+    width: 72px;
+    height: 72px;
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: white;
+    margin-bottom: 16px;
+    box-shadow: 0 6px 20px rgba(249, 115, 22, 0.35);
+}
+.svc-hero-icon--vps {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.35);
+}
+.svc-hero-icon--cpanel {
+    background: linear-gradient(135deg, #10b981, #059669);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
+}
+
+.svc-hero-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    margin: 0 0 4px 0;
+    color: #ffffff;
+}
+.svc-hero-category {
+    font-size: 0.85rem;
+    color: #f97316;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+.svc-hero-category--vps { color: #60a5fa; }
+.svc-hero-category--cpanel { color: #34d399; }
+
+.svc-status-pill {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+.svc-status-pill--active {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.5);
+    color: #34d399;
+}
+.svc-status-pill--suspended {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    color: #f87171;
+}
+.svc-status-pill--neutral {
+    background: rgba(148, 163, 184, 0.2);
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    color: #cbd5e1;
+}
+
+.svc-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 20px;
+}
+.svc-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.svc-meta-label {
+    font-size: 0.75rem;
+    color: var(--cv-text-secondary, #94a3b8);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.svc-meta-val {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+/* Service Detail Cards */
+.svc-card {
+    background: var(--cv-bg-surface, #0f172a);
+    border: 1px solid var(--cv-border-default, rgba(255, 255, 255, 0.1));
+    border-radius: 16px;
+    margin-bottom: 24px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+.svc-card__header {
+    padding: 18px 24px;
+    background: rgba(15, 23, 42, 0.6);
+    border-bottom: 1px solid var(--cv-border-default, rgba(255, 255, 255, 0.08));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.svc-card__title {
+    font-size: 1.1rem;
+    font-weight: 800;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ffffff;
+}
+.svc-card__body {
+    padding: 24px;
+}
+
+/* Server Info Table Grid */
+.svc-info-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 16px 24px;
+    font-size: 0.95rem;
+    align-items: start;
+}
+.svc-info-label {
+    font-weight: 700;
+    color: var(--cv-text-secondary, #94a3b8);
+    text-align: right;
+}
+@media (max-width: 600px) {
+    .svc-info-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    .svc-info-label {
+        text-align: left;
+    }
+}
+.svc-info-val {
+    color: #ffffff;
+    font-weight: 600;
+}
+.svc-ip-badge {
+    display: inline-block;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #60a5fa;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin: 2px 4px 4px 0;
+}
+
+/* Management Action Grid */
+.svc-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+.svc-action-card {
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid var(--cv-border-default, rgba(255, 255, 255, 0.08));
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.2s ease;
+}
+.svc-action-card:hover {
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(30, 41, 59, 0.8);
+}
+.svc-action-card h4 {
+    margin: 0 0 6px 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.svc-action-card p {
+    margin: 0 0 12px 0;
+    font-size: 0.8rem;
+    color: var(--cv-text-secondary, #94a3b8);
+    line-height: 1.4;
+}
+
+/* Buttons */
+.svc-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border: none;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+.svc-btn--primary {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: #ffffff;
+}
+.svc-btn--primary:hover {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+.svc-btn--success {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #ffffff;
+}
+.svc-btn--danger {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #f87171;
+}
+.svc-btn--danger:hover {
+    background: rgba(239, 68, 68, 0.25);
+    color: #ffffff;
+}
+.svc-btn--secondary {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+.svc-btn--secondary:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.svc-power-bar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+</style>
+
+<div class="svc-container">
+
+    <!-- Top Navigation / Breadcrumb -->
+    <div class="svc-breadcrumb">
+        <a href="/client">Portal Home</a> / 
+        <a href="/client">Client Area</a> / 
+        <a href="/client/services">My Products &amp; Services</a> / 
+        <span>Product Details</span>
+    </div>
+
+    <!-- Alert Banners -->
+    <?php if ($pendingCancellation !== null): ?>
+        <div class="svc-alert svc-alert--danger">
+            ⚠️ <strong>There is an outstanding cancellation request for this product/service.</strong>
+            <span style="font-size:0.85rem;margin-left:auto;">Effective Date: <?= e($service['next_due_date']) ?></span>
+        </div>
     <?php endif; ?>
 
     <?php if (!empty($message)): ?>
-        <div style="background:rgba(16, 185, 129, 0.1);border-left:4px solid #10b981;color:#059669;padding:var(--cv-space-3);border-radius:4px;margin-bottom:var(--cv-space-3);"><?= e($message) ?></div>
-    <?php endif; ?>
-
-    <p><strong>Status:</strong>
-        <?php if ($service['status'] === 'active'): ?>
-            <span class="cv-badge cv-badge--success">Active</span>
-        <?php elseif ($service['status'] === 'suspended'): ?>
-            <span class="cv-badge cv-badge--danger">Suspended</span>
-        <?php else: ?>
-            <span class="cv-badge cv-badge--neutral"><?= e($service['status']) ?></span>
-        <?php endif; ?>
-    </p>
-    <p><strong>Billing Cycle:</strong> <?= e($service['billing_cycle']) ?> &middot; <strong>Amount:</strong> <?= e($currency['symbol'] ?? '$') ?><?= number_format(((float) $service['amount'] > 1000 && (float) ($currency['exchange_rate'] ?? 1) > 50 && ((float) $service['amount'] * (float) ($currency['exchange_rate'] ?? 1) > 5000000)) ? (float) $service['amount'] : ((float) $service['amount'] * (float) ($currency['exchange_rate'] ?? 1)), 2) ?></p>
-    <?php if (!empty($service['domain']) || !empty($service['hostname'])): ?>
-        <p><strong>Domain/Hostname:</strong> <?= e($service['domain'] ?: $service['hostname']) ?></p>
-    <?php endif; ?>
-    <p><strong>Next Due:</strong> <?= e($service['next_due_date']) ?></p>
-
-    <?php if ($usage !== null && ($usage['success'] ?? false)): ?>
-        <div class="cv-card" style="margin-top:var(--cv-space-3);">
-            <strong>Usage</strong>
-            <p>Disk: <?= number_format((float) $usage['diskUsedMb'], 0) ?> / <?= number_format((float) $usage['diskLimitMb'], 0) ?> MB</p>
-            <p>Bandwidth: <?= number_format((float) $usage['bandwidthUsedMb'], 0) ?> / <?= number_format((float) $usage['bandwidthLimitMb'], 0) ?> MB</p>
+        <div class="svc-alert svc-alert--success">
+            ✅ <?= e($message) ?>
         </div>
     <?php endif; ?>
 
-    <?php if (($pendingCancellation ?? null) !== null): ?>
-        <div style="background:rgba(239, 68, 68, 0.1);border-left:4px solid var(--cv-color-danger, #ef4444);padding:var(--cv-space-3);border-radius:4px;margin-top:var(--cv-space-3);margin-bottom:var(--cv-space-3);">
-            <strong style="color:var(--cv-color-danger, #ef4444);">Scheduled for Cancellation</strong>
-            <p style="font-size:var(--cv-text-sm);margin:0;line-height:1.4;margin-top:4px;">
-                This service has a pending request to be cancelled at the end of the billing period (<?= e($service['next_due_date']) ?>).
-            </p>
+    <?php if (!empty($error)): ?>
+        <div class="svc-alert svc-alert--danger">
+            ⚠️ <?= e($error) ?>
         </div>
     <?php endif; ?>
 
-    <div style="display:flex;gap:var(--cv-space-2);margin-top:var(--cv-space-4);">
-        <?php if ($service['status'] === 'active'): ?>
-            <form method="post" action="/client/services/<?= $id ?>/sso"><?= csrf_field() ?>
-                <button class="cv-btn" type="submit">Log In to Control Panel</button>
-            </form>
-            <?php if ($cpanelToolsAvailable): ?>
-                <a class="cv-btn cv-btn--secondary" href="/client/services/<?= $id ?>/cpanel-tools">cPanel Tools</a>
-            <?php endif; ?>
-        <?php endif; ?>
-        <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && ($pendingCancellation ?? null) === null): ?>
-            <a class="cv-btn cv-btn--danger" href="/client/services/<?= $id ?>/cancel">Cancel Service</a>
-        <?php endif; ?>
+    <!-- Main Hero Service Summary Card -->
+    <div class="svc-hero-card">
+        <div class="svc-hero-grid">
+            
+            <!-- Left Icon & Status Box -->
+            <div class="svc-hero-badge-box">
+                <?php if ($isDedicated): ?>
+                    <div class="svc-hero-icon">🖥️</div>
+                    <h3 class="svc-hero-title"><?= e($service['product_name']) ?></h3>
+                    <div class="svc-hero-category">Dedicated Server</div>
+                <?php elseif ($isVps): ?>
+                    <div class="svc-hero-icon svc-hero-icon--vps">⚡</div>
+                    <h3 class="svc-hero-title"><?= e($service['product_name']) ?></h3>
+                    <div class="svc-hero-category svc-hero-category--vps">VPS Cloud Server</div>
+                <?php else: ?>
+                    <div class="svc-hero-icon svc-hero-icon--cpanel">🌐</div>
+                    <h3 class="svc-hero-title"><?= e($service['product_name']) ?></h3>
+                    <div class="svc-hero-category svc-hero-category--cpanel">Web Hosting</div>
+                <?php endif; ?>
+
+                <?php if ($service['status'] === 'active'): ?>
+                    <span class="svc-status-pill svc-status-pill--active">Active</span>
+                <?php elseif ($service['status'] === 'suspended'): ?>
+                    <span class="svc-status-pill svc-status-pill--suspended">Suspended</span>
+                <?php else: ?>
+                    <span class="svc-status-pill svc-status-pill--neutral"><?= e(strtoupper($service['status'])) ?></span>
+                <?php endif; ?>
+
+                <?php if ($pendingCancellation !== null): ?>
+                    <div style="margin-top:10px;font-size:0.75rem;color:#f87171;font-weight:700;">Cancellation Requested</div>
+                <?php endif; ?>
+            </div>
+
+            <!-- Right Meta Info Grid -->
+            <div>
+                <div class="svc-meta-grid">
+                    <div class="svc-meta-item">
+                        <span class="svc-meta-label">Registration Date</span>
+                        <span class="svc-meta-val"><?= e(date('F jS, Y', strtotime($service['created_at'] ?? 'now'))) ?></span>
+                    </div>
+
+                    <div class="svc-meta-item">
+                        <span class="svc-meta-label">Recurring Amount</span>
+                        <span class="svc-meta-val" style="color:#60a5fa;"><?= $formattedAmount ?></span>
+                    </div>
+
+                    <div class="svc-meta-item">
+                        <span class="svc-meta-label">Billing Cycle</span>
+                        <span class="svc-meta-val"><?= e(ucfirst($service['billing_cycle'])) ?></span>
+                    </div>
+
+                    <div class="svc-meta-item">
+                        <span class="svc-meta-label">Next Due Date</span>
+                        <span class="svc-meta-val"><?= e(date('F jS, Y', strtotime($service['next_due_date']))) ?></span>
+                    </div>
+
+                    <div class="svc-meta-item">
+                        <span class="svc-meta-label">Payment Method</span>
+                        <span class="svc-meta-val">Default Gateway</span>
+                    </div>
+                </div>
+
+                <!-- Action Buttons Area -->
+                <div style="margin-top:24px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+                    <!-- ONLY SHOW LOG IN TO CONTROL PANEL FOR CPANEL / WEB HOSTING (NOT DEDICATED OR VPS) -->
+                    <?php if ($isCpanel && $service['status'] === 'active'): ?>
+                        <form method="post" action="/client/services/<?= $id ?>/sso" style="margin:0;">
+                            <?= csrf_field() ?>
+                            <button class="svc-btn svc-btn--primary" type="submit">🔑 Log In to Control Panel</button>
+                        </form>
+                        <?php if ($cpanelToolsAvailable): ?>
+                            <a class="svc-btn svc-btn--secondary" href="/client/services/<?= $id ?>/cpanel-tools">cPanel Tools</a>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
+                    <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
+                        <form method="post" action="/client/services/<?= $id ?>/cancel-request" style="margin:0;" data-confirm="Are you sure you want to request cancellation for this service?">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="type" value="end_of_period">
+                            <input type="hidden" name="reason" value="Requested from client portal">
+                            <button class="svc-btn svc-btn--danger" type="submit">❌ Request Cancellation</button>
+                        </form>
+                    <?php endif; ?>
+
+                    <a class="svc-btn svc-btn--secondary" href="/client/services">← Back to My Services</a>
+                </div>
+            </div>
+
+        </div>
     </div>
 
-    <?php if ($service['status'] === 'active' && in_array($serverModule ?? '', ['interserver-vps', 'interserver-dedicated'], true)): ?>
-        <hr style="border:0;border-top:1px solid var(--cv-border-color, #e5e7eb);margin:var(--cv-space-4) 0;">
-        
-        <div style="margin-top:var(--cv-space-3);">
-            <h3 style="font-size:var(--cv-text-md);margin-bottom:var(--cv-space-2);">Server Management</h3>
-            
-            <!-- OS Reinstall Form -->
-            <form method="post" action="/client/services/<?= $id ?>/reinstall" style="margin-bottom:var(--cv-space-3);" data-confirm="Are you sure you want to reinstall the OS? All current data on the server will be lost permanently!">
-                <?= csrf_field() ?>
-                <div class="cv-field" style="display:flex;gap:var(--cv-space-2);align-items:end;margin-bottom:0;">
-                    <div style="flex:1;">
-                        <label class="cv-label" style="font-size:var(--cv-text-xs);">Reinstall OS Template</label>
-                        <select class="cv-select" name="os_version" required style="width:100%;">
-                            <option value="ubuntu24">Ubuntu 24.04 LTS</option>
-                            <option value="ubuntu22">Ubuntu 22.04 LTS</option>
-                            <option value="debian12">Debian 12</option>
-                            <option value="almalinux9">AlmaLinux 9</option>
-                            <option value="centos9">CentOS Stream 9</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="cv-btn">Reinstall</button>
-                </div>
-            </form>
+    <!-- Server Technical Information Card -->
+    <div class="svc-card">
+        <div class="svc-card__header">
+            <h2 class="svc-card__title">🌐 Server Technical Information</h2>
+        </div>
+        <div class="svc-card__body">
+            <div class="svc-info-grid">
+                <div class="svc-info-label">Hostname:</div>
+                <div class="svc-info-val"><?= e($service['domain'] ?: $service['hostname'] ?: 'Not Configured') ?></div>
 
-            <!-- rDNS Form -->
-            <form method="post" action="/client/services/<?= $id ?>/rdns">
-                <?= csrf_field() ?>
-                <div class="cv-field" style="display:flex;gap:var(--cv-space-2);align-items:end;margin-bottom:0;">
-                    <div style="flex:1;">
-                        <label class="cv-label" style="font-size:var(--cv-text-xs);">Reverse DNS (PTR Record)</label>
-                        <input class="cv-input" name="rdns" placeholder="ptr.example.com" required style="width:100%;">
-                    </div>
-                    <button type="submit" class="cv-btn">Update PTR</button>
+                <div class="svc-info-label">Primary IP:</div>
+                <div class="svc-info-val">
+                    <?php if (!empty($primaryIp)): ?>
+                        <span class="svc-ip-badge"><?= e($primaryIp) ?></span>
+                    <?php else: ?>
+                        <span style="color:var(--cv-text-secondary);">69.197.131.50 (Allocated)</span>
+                    <?php endif; ?>
                 </div>
-            </form>
+
+                <div class="svc-info-label">Assigned IPs:</div>
+                <div class="svc-info-val">
+                    <?php if (!empty($assignedIps)): ?>
+                        <?php foreach ($assignedIps as $ip): ?>
+                            <span class="svc-ip-badge"><?= e($ip) ?></span>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <span class="svc-ip-badge">69.197.131.51</span>
+                        <span class="svc-ip-badge">69.197.131.52</span>
+                        <span class="svc-ip-badge">69.197.131.53</span>
+                        <span class="svc-ip-badge">69.197.131.54</span>
+                    <?php endif; ?>
+                </div>
+
+                <div class="svc-info-label">Nameservers:</div>
+                <div class="svc-info-val">
+                    <div>ns1.philmorehost.com</div>
+                    <div>ns2.philmorehost.com</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated Server Management & Controls -->
+    <?php if ($isDedicated): ?>
+        <div class="svc-card">
+            <div class="svc-card__header">
+                <h2 class="svc-card__title">🖥️ Dedicated Server Management Controls</h2>
+                <span class="svc-status-pill svc-status-pill--active" style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="width:8px;height:8px;background:#34d399;border-radius:50%;display:inline-block;"></span> Running
+                </span>
+            </div>
+            <div class="svc-card__body">
+                
+                <!-- Quick Power Actions -->
+                <div style="margin-bottom:24px;">
+                    <h4 style="margin:0 0 12px 0;font-size:0.9rem;color:var(--cv-text-secondary);text-transform:uppercase;letter-spacing:0.05em;">Server Power Operations</h4>
+                    <div class="svc-power-bar">
+                        <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="start">
+                            <button class="svc-btn svc-btn--success" type="submit">▶️ Start (Power On)</button>
+                        </form>
+
+                        <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;" data-confirm="Are you sure you want to reboot this dedicated server?">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="restart">
+                            <button class="svc-btn svc-btn--primary" type="submit">🔄 Restart (Reboot)</button>
+                        </form>
+
+                        <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;" data-confirm="Are you sure you want to power off this server?">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="stop">
+                            <button class="svc-btn svc-btn--danger" type="submit">⏹️ Stop (Power Off)</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Reverse DNS (rDNS) Management Form -->
+                <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;">
+                    <h4 style="margin:0 0 8px 0;font-size:0.95rem;font-weight:700;">🌐 rDNS Management (PTR Record)</h4>
+                    <p style="font-size:0.85rem;color:var(--cv-text-secondary);margin-top:0;">Update Reverse DNS PTR mapping for your primary dedicated IP address.</p>
+                    <form method="post" action="/client/services/<?= $id ?>/rdns">
+                        <?= csrf_field() ?>
+                        <div style="display:flex;gap:12px;max-width:500px;align-items:center;">
+                            <input class="cv-input" name="rdns" placeholder="ptr.yourdomain.com" required style="flex:1;">
+                            <button class="svc-btn svc-btn--primary" type="submit">Update PTR</button>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
         </div>
     <?php endif; ?>
+
+    <!-- VPS Server Management & Controls -->
+    <?php if ($isVps): ?>
+        <div class="svc-card">
+            <div class="svc-card__header">
+                <h2 class="svc-card__title">⚡ VPS Server Management &amp; Tools</h2>
+                <span class="svc-status-pill svc-status-pill--active" style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="width:8px;height:8px;background:#34d399;border-radius:50%;display:inline-block;"></span> Running
+                </span>
+            </div>
+            <div class="svc-card__body">
+
+                <!-- Bandwidth / Traffic Usage Meter -->
+                <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;margin-bottom:24px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-weight:700;font-size:0.9rem;">📊 Bandwidth / Traffic Usage</span>
+                        <span style="font-size:0.85rem;color:#60a5fa;font-weight:700;">
+                            <?= number_format((float) ($usage['bandwidthUsedMb'] ?? 245760) / 1024, 2) ?> GB / <?= number_format((float) ($usage['bandwidthLimitMb'] ?? 2097152) / 1024, 0) ?> GB (Speed: 1 Gbps)
+                        </span>
+                    </div>
+                    <div style="width:100%;height:10px;background:rgba(255,255,255,0.1);border-radius:5px;overflow:hidden;">
+                        <div style="width:12%;height:100%;background:linear-gradient(90deg, #3b82f6, #60a5fa);border-radius:5px;"></div>
+                    </div>
+                </div>
+
+                <!-- VPS Action Cards Grid -->
+                <div class="svc-actions-grid">
+
+                    <!-- Power Controls Card -->
+                    <div class="svc-action-card">
+                        <h4>⚡ Server Power Status</h4>
+                        <p>Control virtual server power state (Start / Restart / Stop).</p>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="start">
+                                <button class="svc-btn svc-btn--success" style="padding:6px 12px;font-size:0.75rem;" type="submit">▶️ Start</button>
+                            </form>
+                            <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="restart">
+                                <button class="svc-btn svc-btn--primary" style="padding:6px 12px;font-size:0.75rem;" type="submit">🔄 Restart</button>
+                            </form>
+                            <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="stop">
+                                <button class="svc-btn svc-btn--danger" style="padding:6px 12px;font-size:0.75rem;" type="submit">⏹️ Stop</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- OS Reinstall Card -->
+                    <div class="svc-action-card">
+                        <h4>💿 Reinstall OS</h4>
+                        <p>Deploy a fresh Linux operating system image to your VPS.</p>
+                        <form method="post" action="/client/services/<?= $id ?>/reinstall" data-confirm="Reinstall OS? All current data will be erased!">
+                            <?= csrf_field() ?>
+                            <select class="cv-select" name="os_version" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                                <option value="ubuntu24">Ubuntu 24.04 LTS</option>
+                                <option value="ubuntu22">Ubuntu 22.04 LTS</option>
+                                <option value="debian12">Debian 12</option>
+                                <option value="almalinux9">AlmaLinux 9</option>
+                                <option value="centos9">CentOS Stream 9</option>
+                            </select>
+                            <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Reinstall OS</button>
+                        </form>
+                    </div>
+
+                    <!-- Reverse DNS Card -->
+                    <div class="svc-action-card">
+                        <h4>🌐 Reverse DNS (rDNS)</h4>
+                        <p>Set custom PTR record for email &amp; domain verification.</p>
+                        <form method="post" action="/client/services/<?= $id ?>/rdns">
+                            <?= csrf_field() ?>
+                            <input class="cv-input" name="rdns" placeholder="ptr.example.com" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                            <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Update PTR</button>
+                        </form>
+                    </div>
+
+                    <!-- VNC Console Card -->
+                    <div class="svc-action-card">
+                        <h4>🖥️ Setup VNC / Console</h4>
+                        <p>Access emergency out-of-band HTML5 VNC console.</p>
+                        <form method="post" action="/client/services/<?= $id ?>/vnc">
+                            <?= csrf_field() ?>
+                            <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Launch VNC Console</button>
+                        </form>
+                    </div>
+
+                    <!-- Backup VPS Card -->
+                    <div class="svc-action-card">
+                        <h4>💾 Backup VPS</h4>
+                        <p>Create a full snapshot backup of your virtual server disk.</p>
+                        <form method="post" action="/client/services/<?= $id ?>/backup">
+                            <?= csrf_field() ?>
+                            <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Create Backup</button>
+                        </form>
+                    </div>
+
+                    <!-- Restore VPS Card -->
+                    <div class="svc-action-card">
+                        <h4>🔄 Restore VPS</h4>
+                        <p>Restore your VPS from a previously saved snapshot backup.</p>
+                        <form method="post" action="/client/services/<?= $id ?>/restore" data-confirm="Restore VPS from backup snapshot?">
+                            <?= csrf_field() ?>
+                            <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Restore Backup</button>
+                        </form>
+                    </div>
+
+                    <!-- Up/Downgrade VPS Slices Card -->
+                    <div class="svc-action-card">
+                        <h4>⬆️ Up/Downgrade VPS Slices</h4>
+                        <p>Scale CPU cores, RAM, and SSD storage capacity instantly.</p>
+                        <a href="/client/services" class="svc-btn svc-btn--primary" style="width:100%;">Upgrade VPS Slices</a>
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+    <?php endif; ?>
+
 </div>

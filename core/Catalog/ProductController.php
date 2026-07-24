@@ -229,8 +229,18 @@ final class ProductController
 
     public function bulkUpdate(Request $request): Response
     {
-        if ($denied = $this->requirePermission()) {
-            return $denied;
+        if (!$this->guard->check()) {
+            return Response::json([
+                'success' => false,
+                'message' => 'Session expired — please refresh and log in again.',
+            ], 401);
+        }
+
+        if (!$this->guard->can(PermissionRegistry::PRODUCTS_MANAGE)) {
+            return Response::json([
+                'success' => false,
+                'message' => 'Permission denied — products.manage permission required.',
+            ], 403);
         }
 
         $productIds = array_filter(
@@ -246,14 +256,22 @@ final class ProductController
         }
 
         $serverGroupId = $request->input('server_group_id');
+        $autosetup = $request->input('autosetup');
         $requireDomain = $request->input('require_domain');
+        $isUpsell = $request->input('is_upsell');
 
         $fields = [];
         if ($serverGroupId !== null && $serverGroupId !== '') {
             $fields['server_group_id'] = (int) $serverGroupId;
         }
-        if ($requireDomain !== null) {
+        if ($autosetup !== null && $autosetup !== '') {
+            $fields['autosetup'] = (string) $autosetup;
+        }
+        if ($requireDomain !== null && $requireDomain !== '') {
             $fields['require_domain'] = (int) $requireDomain ? 1 : 0;
+        }
+        if ($isUpsell !== null && $isUpsell !== '') {
+            $fields['is_upsell'] = (int) $isUpsell ? 1 : 0;
         }
 
         if (empty($fields)) {

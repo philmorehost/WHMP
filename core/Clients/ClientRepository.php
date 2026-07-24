@@ -427,4 +427,22 @@ final class ClientRepository
             [$hashedRecoveryCodes, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
+
+    public function delete(int $id): bool
+    {
+        $this->db->delete('DELETE FROM clients WHERE id = ?', [$id]);
+        return true;
+    }
+
+    /** @param array<int, int> $ids */
+    public function bulkDelete(array $ids): int
+    {
+        $cleanIds = array_filter(array_map('intval', $ids), fn($id) => $id > 0);
+        if (empty($cleanIds)) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($cleanIds), '?'));
+        return $this->db->delete("DELETE FROM clients WHERE id IN ({$placeholders})", array_values($cleanIds));
+    }
 }

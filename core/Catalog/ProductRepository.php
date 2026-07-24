@@ -66,60 +66,112 @@ final class ProductRepository
         return $this->db->selectOne('SELECT * FROM products WHERE LOWER(name) = LOWER(?)', [$name]);
     }
 
+    /** @var array<string, bool>|null */
+    private static ?array $productColumnsCache = null;
+
+    /** @return array<string, bool> */
+    private function getProductColumns(): array
+    {
+        if (self::$productColumnsCache !== null) {
+            return self::$productColumnsCache;
+        }
+
+        try {
+            $rows = $this->db->select('SHOW COLUMNS FROM products');
+            $cols = [];
+            foreach ($rows as $row) {
+                if (isset($row['Field'])) {
+                    $cols[(string) $row['Field']] = true;
+                }
+            }
+            self::$productColumnsCache = $cols;
+            return $cols;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
     /** @param array<string, mixed> $fields */
     public function create(array $fields): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $dbCols = $this->getProductColumns();
 
-        return (int) $this->db->insert(
-            'INSERT INTO products (product_group_id, server_group_id, whm_package_name, autosetup, name, description, status, type, pay_type, is_upsell, free_duration_type, free_duration_days, require_domain, upsell_pitch, stock_quantity, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [
-                $fields['product_group_id'],
-                $fields['server_group_id'] ?? null,
-                $fields['whm_package_name'] ?? null,
-                $fields['autosetup'] ?? 'payment',
-                $fields['name'],
-                $fields['description'] ?? null,
-                $fields['status'] ?? 'active',
-                $fields['type'] ?? 'other',
-                $fields['pay_type'] ?? 'paid',
-                !empty($fields['is_upsell']) ? 1 : 0,
-                $fields['free_duration_type'] ?? 'lifetime',
-                $fields['free_duration_days'] ?? null,
-                !empty($fields['require_domain']) ? 1 : 0,
-                $fields['upsell_pitch'] ?? null,
-                $fields['stock_quantity'] ?? null,
-                $fields['sort_order'] ?? 0,
-                $now,
-                $now,
-            ]
-        );
+        $candidateMap = [
+            'product_group_id' => $fields['product_group_id'],
+            'server_group_id' => $fields['server_group_id'] ?? null,
+            'whm_package_name' => $fields['whm_package_name'] ?? null,
+            'autosetup' => $fields['autosetup'] ?? 'payment',
+            'name' => $fields['name'],
+            'description' => $fields['description'] ?? null,
+            'status' => $fields['status'] ?? 'active',
+            'type' => $fields['type'] ?? 'other',
+            'pay_type' => $fields['pay_type'] ?? 'paid',
+            'is_upsell' => !empty($fields['is_upsell']) ? 1 : 0,
+            'free_duration_type' => $fields['free_duration_type'] ?? 'lifetime',
+            'free_duration_days' => $fields['free_duration_days'] ?? null,
+            'require_domain' => !empty($fields['require_domain']) ? 1 : 0,
+            'upsell_pitch' => $fields['upsell_pitch'] ?? null,
+            'stock_quantity' => $fields['stock_quantity'] ?? null,
+            'sort_order' => $fields['sort_order'] ?? 0,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+
+        $colsToInsert = [];
+        $bindings = [];
+        foreach ($candidateMap as $col => $val) {
+            if ($dbCols === [] || isset($dbCols[$col])) {
+                $colsToInsert[] = $col;
+                $bindings[] = $val;
+            }
+        }
+
+        $colList = implode(', ', $colsToInsert);
+        $placeholders = implode(', ', array_fill(0, count($colsToInsert), '?'));
+
+        return (int) $this->db->insert("INSERT INTO products ({$colList}) VALUES ({$placeholders})", $bindings);
     }
 
     /** @param array<string, mixed> $fields */
     public function update(int $id, array $fields): void
     {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $dbCols = $this->getProductColumns();
+
+        $candidateMap = [
+            'product_group_id' => $fields['product_group_id'],
+            'server_group_id' => $fields['server_group_id'] ?? null,
+            'whm_package_name' => $fields['whm_package_name'] ?? null,
+            'autosetup' => $fields['autosetup'] ?? 'payment',
+            'name' => $fields['name'],
+            'description' => $fields['description'] ?? null,
+            'status' => $fields['status'] ?? 'active',
+            'type' => $fields['type'] ?? 'other',
+            'pay_type' => $fields['pay_type'] ?? 'paid',
+            'is_upsell' => !empty($fields['is_upsell']) ? 1 : 0,
+            'free_duration_type' => $fields['free_duration_type'] ?? 'lifetime',
+            'free_duration_days' => $fields['free_duration_days'] ?? null,
+            'require_domain' => !empty($fields['require_domain']) ? 1 : 0,
+            'upsell_pitch' => $fields['upsell_pitch'] ?? null,
+            'stock_quantity' => $fields['stock_quantity'] ?? null,
+            'updated_at' => $now,
+        ];
+
+        $setClauses = [];
+        $bindings = [];
+        foreach ($candidateMap as $col => $val) {
+            if ($dbCols === [] || isset($dbCols[$col])) {
+                $setClauses[] = "{$col} = ?";
+                $bindings[] = $val;
+            }
+        }
+
+        $bindings[] = $id;
+
         $this->db->update(
-            'UPDATE products SET product_group_id = ?, server_group_id = ?, whm_package_name = ?, autosetup = ?, name = ?, description = ?, status = ?, type = ?, pay_type = ?, is_upsell = ?, free_duration_type = ?, free_duration_days = ?, require_domain = ?, upsell_pitch = ?, stock_quantity = ?, updated_at = ? WHERE id = ?',
-            [
-                $fields['product_group_id'],
-                $fields['server_group_id'] ?? null,
-                $fields['whm_package_name'] ?? null,
-                $fields['autosetup'] ?? 'payment',
-                $fields['name'],
-                $fields['description'] ?? null,
-                $fields['status'] ?? 'active',
-                $fields['type'] ?? 'other',
-                $fields['pay_type'] ?? 'paid',
-                !empty($fields['is_upsell']) ? 1 : 0,
-                $fields['free_duration_type'] ?? 'lifetime',
-                $fields['free_duration_days'] ?? null,
-                !empty($fields['require_domain']) ? 1 : 0,
-                $fields['upsell_pitch'] ?? null,
-                $fields['stock_quantity'] ?? null,
-                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
-                $id,
-            ]
+            'UPDATE products SET ' . implode(', ', $setClauses) . ' WHERE id = ?',
+            $bindings
         );
     }
 
@@ -129,25 +181,31 @@ final class ProductRepository
             return 0;
         }
 
+        $dbCols = $this->getProductColumns();
         $setClauses = [];
         $bindings = [];
 
         $fieldMap = [
             'server_group_id' => 'server_group_id',
+            'autosetup' => 'autosetup',
             'require_domain' => 'require_domain',
+            'is_upsell' => 'is_upsell',
         ];
 
         foreach ($fieldMap as $fieldKey => $columnName) {
-            if (!isset($fields[$fieldKey])) {
+            if (!array_key_exists($fieldKey, $fields)) {
+                continue;
+            }
+            if ($dbCols !== [] && !isset($dbCols[$columnName])) {
                 continue;
             }
 
             $setClauses[] = "{$columnName} = ?";
 
-            if ($fieldKey === 'require_domain') {
+            if ($fieldKey === 'require_domain' || $fieldKey === 'is_upsell') {
                 $bindings[] = !empty($fields[$fieldKey]) ? 1 : 0;
             } else {
-                $bindings[] = $fields[$fieldKey] ?? null;
+                $bindings[] = $fields[$fieldKey] !== null && $fields[$fieldKey] !== '' ? $fields[$fieldKey] : null;
             }
         }
 

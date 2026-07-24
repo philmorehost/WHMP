@@ -18,7 +18,8 @@ final class MailCampaignController
         private readonly View $view,
         private readonly MailCampaignRepository $campaigns,
         private readonly ClientGroupRepository $groups,
-        private readonly MailCampaignService $service
+        private readonly MailCampaignService $service,
+        private readonly \CodeVault\Clients\ClientRepository $clients
     ) {
     }
 
@@ -28,7 +29,12 @@ final class MailCampaignController
             return $denied;
         }
 
-        return $this->render('marketing.campaigns-index', ['campaigns' => $this->campaigns->all(), 'groups' => $this->groups->all(), 'error' => null]);
+        return $this->render('marketing.campaigns-index', [
+            'campaigns' => $this->campaigns->all(),
+            'groups' => $this->groups->all(),
+            'clients' => $this->clients->all(),
+            'error' => null
+        ]);
     }
 
     public function store(Request $request): Response
@@ -39,13 +45,26 @@ final class MailCampaignController
 
         $subject = trim((string) $request->input('subject', ''));
         $body = trim((string) $request->input('body', ''));
-        $groupId = (string) $request->input('client_group_id', '') !== '' ? (int) $request->input('client_group_id') : null;
+        $targetType = (string) $request->input('target_type', 'all');
 
-        if ($subject === '' || $body === '') {
-            return $this->render('marketing.campaigns-index', ['campaigns' => $this->campaigns->all(), 'groups' => $this->groups->all(), 'error' => 'Subject and body are required.']);
+        $groupId = null;
+        $clientId = null;
+        if ($targetType === 'group' && (string) $request->input('client_group_id', '') !== '') {
+            $groupId = (int) $request->input('client_group_id');
+        } elseif ($targetType === 'individual' && (string) $request->input('client_id', '') !== '') {
+            $clientId = (int) $request->input('client_id');
         }
 
-        $this->campaigns->create($subject, $body, $groupId);
+        if ($subject === '' || $body === '') {
+            return $this->render('marketing.campaigns-index', [
+                'campaigns' => $this->campaigns->all(),
+                'groups' => $this->groups->all(),
+                'clients' => $this->clients->all(),
+                'error' => 'Subject and body are required.'
+            ]);
+        }
+
+        $this->campaigns->create($subject, $body, $groupId, $clientId);
 
         return Response::redirect('/admin/campaigns');
     }

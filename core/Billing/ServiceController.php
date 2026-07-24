@@ -96,6 +96,8 @@ final class ServiceController
             'username' => trim((string) $request->input('username', '')) ?: null,
             'domain' => trim((string) $request->input('domain', '')) ?: null,
             'hostname' => trim((string) $request->input('hostname', '')) ?: null,
+            'dedicated_ip' => trim((string) $request->input('dedicated_ip', '')) ?: null,
+            'assigned_ips' => trim((string) $request->input('assigned_ips', '')) ?: null,
             'server_id' => $serverId !== null && $serverId !== '' ? (int) $serverId : null,
         ];
 
@@ -108,7 +110,7 @@ final class ServiceController
             'service.edit_details',
             'service',
             $id,
-            "Admin updated client service #{$id} details (username, domain, hostname, server_id)",
+            "Admin updated client service #{$id} details (username, domain, hostname, dedicated_ip, assigned_ips, server_id)",
             $request->ip()
         );
 
@@ -209,6 +211,48 @@ final class ServiceController
         }
 
         return null;
+    }
+
+    public function delete(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+
+        if ($service !== null) {
+            $this->services->delete($id);
+            $admin = $this->guard->currentAdmin();
+            $adminId = $admin ? (int) $admin['id'] : null;
+            $this->activity->log('admin', $adminId, 'service.delete', 'service', $id, "Deleted service #{$id} ({$service['product_name']})");
+        }
+
+        return Response::redirect('/admin/services?msg=' . urlencode('Service deleted successfully.'));
+    }
+
+    public function bulkDelete(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = array_filter(
+            array_map('intval', (array) $request->input('service_ids', [])),
+            fn($id) => $id > 0
+        );
+
+        if (empty($ids)) {
+            return Response::redirect('/admin/services?msg=' . urlencode('No services were selected for deletion.'));
+        }
+
+        $deletedCount = $this->services->bulkDelete($ids);
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $this->activity->log('admin', $adminId, 'service.bulk_delete', 'service', null, "Bulk deleted {$deletedCount} service(s).");
+
+        return Response::redirect('/admin/services?msg=' . urlencode("Successfully deleted {$deletedCount} service(s)."));
     }
 
     private function render(string $template, array $data): Response

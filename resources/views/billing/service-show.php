@@ -270,6 +270,9 @@ $id = (int) $service['id'];
                     <button class="admin-service-btn admin-service-btn--danger" type="submit">🗑️ Terminate</button>
                 </form>
             <?php endif; ?>
+            <form method="post" action="/admin/services/<?= $id ?>/delete" data-confirm="Are you sure you want to delete this service permanently? This action cannot be undone."><?= csrf_field() ?>
+                <button class="admin-service-btn admin-service-btn--danger" style="background:linear-gradient(135deg,rgba(239,68,68,.3),rgba(185,28,28,.25));border-color:rgba(239,68,68,.5);" type="submit">❌ Delete Service</button>
+            </form>
         </div>
     </div>
 </div>
@@ -293,6 +296,15 @@ $id = (int) $service['id'];
             <div class="admin-service-field">
                 <label>Hostname</label>
                 <input name="hostname" value="<?= e((string) ($service['hostname'] ?? '')) ?>" placeholder="vps.example.com">
+            </div>
+            <div class="admin-service-field">
+                <label>Primary IP (Main Server IP)</label>
+                <input name="dedicated_ip" value="<?= e((string) ($service['dedicated_ip'] ?? '')) ?>" placeholder="e.g. 69.197.131.50">
+            </div>
+            <div class="admin-service-field">
+                <label>Assigned Sub IPs (Additional IPs — 1 per line)</label>
+                <textarea name="assigned_ips" rows="4" class="cv-input" style="width:100%;font-family:monospace;font-size:0.85rem;" placeholder="69.197.131.51&#10;69.197.131.52&#10;69.197.131.53"><?= e((string) ($service['assigned_ips'] ?? '')) ?></textarea>
+                <small style="color:var(--cv-text-secondary);">Clients will see these additional IPs in their server details panel (1 per line).</small>
             </div>
             <div class="admin-service-field">
                 <label>Assigned Server</label>

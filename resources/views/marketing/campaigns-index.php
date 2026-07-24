@@ -24,7 +24,15 @@
         <?php foreach ($campaigns as $campaign): ?>
             <tr>
                 <td><a href="/admin/campaigns/<?= (int) $campaign['id'] ?>"><?= e($campaign['subject']) ?></a></td>
-                <td><?= e((string) ($campaign['group_name'] ?? 'All active clients')) ?></td>
+                <td>
+                    <?php if (!empty($campaign['client_first_name'])): ?>
+                        👤 <?= e($campaign['client_first_name'] . ' ' . $campaign['client_last_name'] . ' (' . $campaign['client_email'] . ')') ?>
+                    <?php elseif (!empty($campaign['group_name'])): ?>
+                        📁 Group: <?= e($campaign['group_name']) ?>
+                    <?php else: ?>
+                        🌐 All active clients
+                    <?php endif; ?>
+                </td>
                 <td>
                     <?php if ($campaign['status'] === 'sent'): ?>
                         <span class="cv-badge cv-badge--success">Sent</span>
@@ -55,12 +63,31 @@
     <h3>New Campaign</h3>
     <form method="post" action="/admin/campaigns"><?= csrf_field() ?>
         <div class="cv-field">
-            <label class="cv-label">Audience</label>
+            <label class="cv-label">Audience Target</label>
+            <select class="cv-select" name="target_type" id="campaign-target-type">
+                <option value="all">🌐 All active clients</option>
+                <option value="group">📁 Client Group</option>
+                <option value="individual">👤 Individual Client</option>
+            </select>
+        </div>
+        <div class="cv-field" id="target-group-field" style="display:none;">
+            <label class="cv-label">Target Client Group</label>
             <select class="cv-select" name="client_group_id">
-                <option value="">All active clients</option>
+                <option value="">— Select Group —</option>
                 <?php foreach ($groups as $group): ?>
                     <option value="<?= (int) $group['id'] ?>"><?= e($group['name']) ?></option>
                 <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="cv-field" id="target-individual-field" style="display:none;">
+            <label class="cv-label">Target Individual Client</label>
+            <select class="cv-select" name="client_id">
+                <option value="">— Select Client —</option>
+                <?php if (isset($clients)): ?>
+                    <?php foreach ($clients as $client): ?>
+                        <option value="<?= (int) $client['id'] ?>"><?= e($client['first_name'] . ' ' . $client['last_name'] . ' (' . $client['email'] . ')') ?></option>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </select>
         </div>
         <div class="cv-field">

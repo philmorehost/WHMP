@@ -41,7 +41,10 @@ final class ClientController
         private readonly CreditService $creditService,
         private readonly VatLookupService $vatLookup,
         private readonly \CodeVault\Session\SessionManager $session,
-        private readonly CurrencyService $currencyService
+        private readonly CurrencyService $currencyService,
+        private readonly \CodeVault\Support\DepartmentRepository $departments,
+        private readonly \CodeVault\Support\TicketRepository $tickets,
+        private readonly \CodeVault\Support\TicketReplyRepository $ticketReplies
     ) {
     }
 
@@ -161,7 +164,7 @@ final class ClientController
         return $this->render('clients.show', [
             'client' => $client,
             'currency' => $this->currencyService->resolveForClient($client),
-            'tab' => in_array($tab, ['summary', 'profile', 'contacts', 'billing', 'log'], true) ? $tab : 'summary',
+            'tab' => in_array($tab, ['summary', 'profile', 'contacts', 'billing', 'log', 'message'], true) ? $tab : 'summary',
             'contacts' => $this->contacts->forClient((int) $client['id']),
             'activity' => $this->activity->forSubject('client', (int) $client['id']),
             'services' => $this->services->forClient((int) $client['id']),
@@ -169,7 +172,84 @@ final class ClientController
             'billingPagination' => $billingPagination,
             'creditBalance' => $this->credit->balance((int) $client['id']),
             'creditLedger' => $this->credit->forClient((int) $client['id']),
+            'departments' => $this->departments->all(),
+            'msg' => (string) $request->query('msg', ''),
+            'error' => (string) $request->query('error', ''),
         ]);
+    }
+
+    public function sendMessage(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $client = $this->clients->find($id);
+        if ($client === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $subject = trim((string) $request->input('subject', ''));
+        $message = trim((string) $request->input('message', ''));
+
+        if ($subject === '' || $message === '') {
+            return Response::redirect("/admin/clients/{$id}?tab=message&error=" . urlencode('Subject and message body are required.'));
+        }
+
+        $this->mail->sendRaw($subject, nl2br(e($message)), $client['email'], $id);
+
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $this->activity->log('admin', $adminId, 'client.message_sent', 'client', $id, "Sent direct email message: {$subject}");
+
+        return Response::redirect("/admin/clients/{$id}?tab=message&msg=" . urlencode('Direct email message sent successfully to ' . $client['email']));
+    }
+
+    public function createTicket(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $client = $this->clients->find($id);
+        if ($client === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $departmentId = (int) $request->input('department_id', 1);
+        $subject = trim((string) $request->input('subject', ''));
+        $message = trim((string) $request->input('message', ''));
+        $priority = (string) $request->input('priority', 'medium');
+
+        if ($subject === '' || $message === '') {
+            return Response::redirect("/admin/clients/{$id}?tab=message&error=" . urlencode('Subject and message body are required to open a support ticket.'));
+        }
+
+        $ticketId = $this->tickets->create([
+            'client_id' => $id,
+            'email' => $client['email'],
+            'department_id' => $departmentId,
+            'subject' => $subject,
+            'status' => 'open',
+            'priority' => in_array($priority, ['low', 'medium', 'high'], true) ? $priority : 'medium',
+        ]);
+
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $adminName = $admin ? trim(($admin['first_name'] ?? '') . ' ' . ($admin['last_name'] ?? '')) : 'Support Staff';
+
+        $this->ticketReplies->create($ticketId, 'admin', $adminId, $adminName ?: 'Support Staff', $message, false);
+
+        // Notify client via email
+        $ticketEmailSubject = "[Ticket #{$ticketId}] {$subject}";
+        $ticketEmailBody = "<p>Dear " . e($client['first_name']) . ",</p><p>A support ticket has been opened on your behalf:</p><hr><p><strong>Subject:</strong> " . e($subject) . "</p><p>" . nl2br(e($message)) . "</p><hr><p>You can reply directly to this ticket in your client portal.</p>";
+        $this->mail->sendRaw($ticketEmailSubject, $ticketEmailBody, $client['email'], $id);
+
+        $this->activity->log('admin', $adminId, 'ticket.created_for_client', 'client', $id, "Opened support ticket #{$ticketId}: {$subject}");
+
+        return Response::redirect("/admin/clients/{$id}?tab=message&msg=" . urlencode("Support ticket #{$ticketId} created successfully for client."));
     }
 
     public function grantCredit(Request $request, array $params): Response
@@ -390,6 +470,48 @@ final class ClientController
         $this->session->set('client_id', $clientId);
 
         return Response::redirect('/client/dashboard');
+    }
+
+    public function delete(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $client = $this->clients->find($id);
+
+        if ($client !== null) {
+            $this->clients->delete($id);
+            $admin = $this->guard->currentAdmin();
+            $adminId = $admin ? (int) $admin['id'] : null;
+            $this->activity->log('admin', $adminId, 'client.delete', 'client', $id, "Deleted client account #{$id} ({$client['first_name']} {$client['last_name']} <{$client['email']}>)");
+        }
+
+        return Response::redirect('/admin/clients?msg=' . urlencode('Client account deleted successfully.'));
+    }
+
+    public function bulkDelete(Request $request): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $ids = array_filter(
+            array_map('intval', (array) $request->input('client_ids', [])),
+            fn($id) => $id > 0
+        );
+
+        if (empty($ids)) {
+            return Response::redirect('/admin/clients?msg=' . urlencode('No client accounts were selected for deletion.'));
+        }
+
+        $deletedCount = $this->clients->bulkDelete($ids);
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $this->activity->log('admin', $adminId, 'client.bulk_delete', 'client', null, "Bulk deleted {$deletedCount} client account(s).");
+
+        return Response::redirect('/admin/clients?msg=' . urlencode("Successfully deleted {$deletedCount} client account(s)."));
     }
 
     private function requirePermission(string $permissionKey): ?Response

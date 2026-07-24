@@ -54,7 +54,7 @@ final class PayhubGateway implements GatewayModule
         $secretKey = (string) ($params['config']['secret_key'] ?? '');
 
         if ($secretKey === '') {
-            return ['success' => false, 'message' => 'Payhub is not configured — missing secret key.'];
+            return ['success' => false, 'message' => 'Payhub API is not configured — missing secret key. Please set Payhub Secret Key in Admin Gateway Settings.'];
         }
 
         $body = json_encode([
@@ -67,20 +67,29 @@ final class PayhubGateway implements GatewayModule
         ]);
 
         $response = $this->http->request('POST', self::BASE_URL . '/transaction/initialize', $this->headers($secretKey), $body);
-        $decoded = json_decode($response['body'], true);
+        $decoded = json_decode((string) ($response['body'] ?? ''), true);
 
         if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? false) !== true) {
-            return ['success' => false, 'message' => $decoded['message'] ?? 'Payhub initialization failed.'];
+            $msg = is_array($decoded) ? ($decoded['message'] ?? 'Payhub initialization returned an error.') : 'Payhub gateway API connection failed.';
+            return ['success' => false, 'message' => $msg];
         }
 
-        $data = $decoded['data'] ?? [];
-        $redirectUrl = (string) ($data['authorization_url'] ?? $data['checkout_url'] ?? $data['link'] ?? '');
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
+        $redirectUrl = (string) (
+            $data['authorization_url'] ??
+            $data['checkout_url'] ??
+            $data['link'] ??
+            $data['payment_url'] ??
+            $data['url'] ??
+            $data['redirect_url'] ??
+            ''
+        );
 
         return [
             'success' => $redirectUrl !== '',
             'redirectUrl' => $redirectUrl,
             'transactionId' => $data['reference'] ?? $params['reference'],
-            'message' => 'Redirecting to Payhub.',
+            'message' => $redirectUrl !== '' ? 'Redirecting to Payhub.' : 'Payhub initialization failed — no redirect URL returned.',
         ];
     }
 

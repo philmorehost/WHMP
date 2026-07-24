@@ -1094,4 +1094,180 @@
     if (serverModuleSelect) {
         serverModuleSelect.dispatchEvent(new Event('change', { bubbles: true }));
     }
+
+    // Admin Products: Bulk Update Server Settings Toggle & Submit (CSP-compliant event delegation)
+    document.addEventListener('click', function(event) {
+        var toggle = event.target.closest('#toggle-bulk-update-form, [data-toggle-bulk-update]');
+        if (toggle) {
+            event.preventDefault();
+            var section = document.getElementById('bulk-update-section');
+            if (section) {
+                var isHidden = window.getComputedStyle(section).display === 'none';
+                section.style.setProperty('display', isHidden ? 'block' : 'none', 'important');
+            }
+            return;
+        }
+
+        var cancel = event.target.closest('#cancel-bulk-update-btn, [data-cancel-bulk-update]');
+        if (cancel) {
+            event.preventDefault();
+            var sectionCancel = document.getElementById('bulk-update-section');
+            if (sectionCancel) {
+                sectionCancel.style.setProperty('display', 'none', 'important');
+            }
+            return;
+        }
+    });
+
+    document.addEventListener('change', function(event) {
+        if (event.target.id === 'select-all-products') {
+            var checked = event.target.checked;
+            document.querySelectorAll('.product-select-checkbox').forEach(function(cb) {
+                cb.checked = checked;
+            });
+            updateBulkProductsState();
+        } else if (event.target.classList && event.target.classList.contains('product-select-checkbox')) {
+            updateBulkProductsState();
+        }
+    });
+
+    function updateBulkProductsState() {
+        var selected = document.querySelectorAll('.product-select-checkbox:checked');
+        var count = selected.length;
+        var btn = document.getElementById('bulk-submit-btn');
+        var countLabel = document.getElementById('selected-count-label');
+        var section = document.getElementById('bulk-update-section');
+
+        if (countLabel) {
+            countLabel.textContent = count;
+        }
+        if (btn) {
+            btn.disabled = (count === 0);
+        }
+        if (count > 0 && section) {
+            section.style.setProperty('display', 'block', 'important');
+        }
+    }
+
+    document.addEventListener('submit', function(event) {
+        var form = event.target.closest('#bulk-update-form');
+        if (!form) return;
+        event.preventDefault();
+
+        var selected = Array.from(document.querySelectorAll('.product-select-checkbox:checked'))
+            .map(function(cb) { return cb.value; });
+
+        if (selected.length === 0) {
+            alert('Please select at least one product using the checkboxes below.');
+            return;
+        }
+
+        var serverGroupId = form.querySelector('[name="server_group_id"]').value;
+        var autosetup = form.querySelector('[name="autosetup"]').value;
+        var requireDomain = form.querySelector('[name="require_domain"]').value;
+        var isUpsell = form.querySelector('[name="is_upsell"]').value;
+
+        if (!serverGroupId && !autosetup && !requireDomain && !isUpsell) {
+            alert('Please select at least one setting to update.');
+            return;
+        }
+
+        var btn = document.getElementById('bulk-submit-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ Updating...';
+        }
+
+        var formData = new FormData();
+        var tokenEl = form.querySelector('[name="_token"]');
+        if (tokenEl) {
+            formData.append('_token', tokenEl.value);
+        }
+        selected.forEach(function(id) { formData.append('product_ids[]', id); });
+        if (serverGroupId) formData.append('server_group_id', serverGroupId);
+        if (autosetup) formData.append('autosetup', autosetup);
+        if (requireDomain) formData.append('require_domain', requireDomain);
+        if (isUpsell) formData.append('is_upsell', isUpsell);
+
+        fetch('/admin/products/bulk-update', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: formData,
+        })
+        .then(async function(r) {
+            var contentType = r.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) {
+                var text = await r.text();
+                throw new Error('Server returned non-JSON response (Status ' + r.status + '). Please refresh and try again.');
+            }
+            return r.json();
+        })
+        .then(function(data) {
+            if (data && data.success) {
+                alert(data.message || 'Products updated successfully!');
+                window.location.reload();
+            } else {
+                alert('Error: ' + ((data && data.message) ? data.message : 'Unknown error during bulk update'));
+            }
+        })
+        .catch(function(err) {
+            alert('Bulk Update Error: ' + (err.message || 'Network error'));
+        })
+        .finally(function() {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '✓ Update Selected Products';
+            }
+        });
+    });
+
+    // Campaign target type switcher (All vs Group vs Individual)
+    document.addEventListener('change', function(event) {
+        if (event.target.id === 'campaign-target-type') {
+            var val = event.target.value;
+            var groupField = document.getElementById('target-group-field');
+            var individualField = document.getElementById('target-individual-field');
+
+            if (groupField) groupField.style.display = (val === 'group') ? 'block' : 'none';
+            if (individualField) individualField.style.display = (val === 'individual') ? 'block' : 'none';
+        } else if (event.target.id === 'select-all-clients') {
+            var isChecked = event.target.checked;
+            var checkboxes = document.querySelectorAll('.client-checkbox');
+            checkboxes.forEach(function(cb) {
+                cb.checked = isChecked;
+            });
+            var bulkBtn = document.getElementById('bulk-delete-clients-btn');
+            if (bulkBtn) bulkBtn.disabled = !isChecked && document.querySelectorAll('.client-checkbox:checked').length === 0;
+        } else if (event.target.classList.contains('client-checkbox')) {
+            var checkedCount = document.querySelectorAll('.client-checkbox:checked').length;
+            var bulkBtn = document.getElementById('bulk-delete-clients-btn');
+            if (bulkBtn) bulkBtn.disabled = checkedCount === 0;
+            var selectAll = document.getElementById('select-all-clients');
+            if (selectAll) {
+                var total = document.querySelectorAll('.client-checkbox').length;
+                selectAll.checked = (total > 0 && checkedCount === total);
+            }
+        }
+    });
+
+    // Admin clients live search (debounced auto-search as user types)
+    var clientSearchInput = document.getElementById('client-search-input');
+    if (clientSearchInput) {
+        var searchDebounceTimer = null;
+        // Keep focus at end of input if redirected with search query
+        if (clientSearchInput.value) {
+            clientSearchInput.focus();
+            clientSearchInput.setSelectionRange(clientSearchInput.value.length, clientSearchInput.value.length);
+        }
+        clientSearchInput.addEventListener('input', function() {
+            clearTimeout(searchDebounceTimer);
+            var query = this.value;
+            searchDebounceTimer = setTimeout(function() {
+                var url = new URL(window.location.href);
+                url.searchParams.set('q', query);
+                url.searchParams.set('page', '1');
+                window.location.href = url.toString();
+            }, 500);
+        });
+    }
 })();

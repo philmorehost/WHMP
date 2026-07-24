@@ -25,9 +25,9 @@ $paymentStatus ??= null;
             ✓ Payment received — thank you.
         </div>
     <?php elseif ($paymentStatus === 'failed'): ?>
-        <div class="cv-field-error" style="margin-bottom:var(--cv-space-4);">Payment was not completed. You can try again below.</div>
+        <div class="cv-field-error" style="margin-bottom:var(--cv-space-4);"><?= e($_GET['msg'] ?? 'Payment was not completed. You can try again below.') ?></div>
     <?php elseif ($paymentStatus === 'error'): ?>
-        <div class="cv-field-error" style="margin-bottom:var(--cv-space-4);">Couldn't start the payment — please try again.</div>
+        <div class="cv-field-error" style="margin-bottom:var(--cv-space-4);"><?= e($_GET['msg'] ?? "Couldn't start the payment — please try again.") ?></div>
     <?php endif; ?>
 
     <!-- Main Invoice Document -->

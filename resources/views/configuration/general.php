@@ -99,6 +99,54 @@
             </div>
         </div>
 
+        <!-- SMTP Mail Delivery Server Configuration Card -->
+        <div class="cv-card" style="grid-column: 1 / -1;">
+            <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">📧 SMTP Mail Server Configuration (Inbox Delivery)</h2>
+            <p style="font-size:0.85rem;color:var(--cv-text-secondary);margin-top:0;">Configure authenticating SMTP credentials to ensure system notifications, invoices, and campaign emails land in client and admin <strong>Inbox</strong> instead of Spam.</p>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:var(--cv-space-3);">
+                <div class="cv-field">
+                    <label class="cv-label">SMTP Host Server</label>
+                    <input class="cv-input" type="text" name="smtp_host" value="<?= e($smtpHost ?? '') ?>" placeholder="e.g. mail.philmorehost.com or smtp.gmail.com">
+                    <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Leave blank or set to 'mail' to use local server sendmail daemon.</span>
+                </div>
+
+                <div class="cv-field">
+                    <label class="cv-label">SMTP Port</label>
+                    <input class="cv-input" type="number" name="smtp_port" value="<?= e($smtpPort ?? '587') ?>" placeholder="587 or 465">
+                </div>
+
+                <div class="cv-field">
+                    <label class="cv-label">SMTP Username / Email</label>
+                    <input class="cv-input" type="text" name="smtp_user" value="<?= e($smtpUser ?? '') ?>" placeholder="e.g. support@philmorehost.com">
+                </div>
+
+                <div class="cv-field">
+                    <label class="cv-label">SMTP Password</label>
+                    <input class="cv-input" type="password" name="smtp_pass" value="<?= e($smtpPass ?? '') ?>" placeholder="••••••••">
+                </div>
+
+                <div class="cv-field">
+                    <label class="cv-label">SMTP Encryption</label>
+                    <select class="cv-select" name="smtp_encryption">
+                        <option value="tls" <?= ($smtpEncryption ?? 'tls') === 'tls' ? 'selected' : '' ?>>TLS (Port 587 / 25)</option>
+                        <option value="ssl" <?= ($smtpEncryption ?? '') === 'ssl' ? 'selected' : '' ?>>SSL (Port 465)</option>
+                        <option value="none" <?= ($smtpEncryption ?? '') === 'none' ? 'selected' : '' ?>>None (Plaintext)</option>
+                    </select>
+                </div>
+
+                <div class="cv-field">
+                    <label class="cv-label">Sender From Email</label>
+                    <input class="cv-input" type="email" name="smtp_from_email" value="<?= e($smtpFromEmail ?? '') ?>" placeholder="e.g. support@philmorehost.com">
+                </div>
+
+                <div class="cv-field">
+                    <label class="cv-label">Sender From Name</label>
+                    <input class="cv-input" type="text" name="smtp_from_name" value="<?= e($smtpFromName ?? '') ?>" placeholder="e.g. PhilmoreHost Support">
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <div style="margin-top:var(--cv-space-4);">

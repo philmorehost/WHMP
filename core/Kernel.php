@@ -537,11 +537,11 @@ class Kernel
         $this->container->singleton(Mailer::class, function (Container $c) use ($basePath) {
             $settings = $c->make(\CodeVault\Settings\SettingsRepository::class);
             $config = $c->make(\CodeVault\Config::class);
-            $smtpHost = $settings->get('smtp.host') ?: $config->env('SMTP_HOST');
-            if ($smtpHost !== null && $smtpHost !== '') {
-                return new SmtpMailer($settings, $config);
+            $driver = strtolower((string) ($settings->get('mail.driver') ?: $config->env('MAIL_DRIVER', 'smtp')));
+            if ($driver === 'log') {
+                return new LogMailer($basePath . '/storage/cache/mail.log');
             }
-            return new LogMailer($basePath . '/storage/cache/mail.log');
+            return new SmtpMailer($settings, $config);
         });
 
         $this->container->singleton(EmailTemplateRepository::class, function (Container $c) {

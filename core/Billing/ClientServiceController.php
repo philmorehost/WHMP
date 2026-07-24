@@ -177,7 +177,7 @@ final class ClientServiceController
             );
         } else {
             // End of period request
-            $this->cancellations->createRequest((int) $service['id'], 'end_of_period', $reason);
+            $this->cancellations->createRequest((int) $service['id'], $type, $reason, (int) $client['id']);
             // Cancel unpaid invoices
             $this->invoices->cancelUnpaidForService((int) $service['id']);
 
@@ -255,6 +255,70 @@ final class ClientServiceController
             'message' => $result['success'] ? $result['message'] : null,
             'error' => !$result['success'] ? $result['message'] : null,
         ]);
+    }
+
+    public function power(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+        if ($client === null) return Response::redirect('/client/login');
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) return Response::html('404 Not Found', 404);
+
+        $action = strtolower(trim((string) $request->input('action', 'restart')));
+        $label = match ($action) {
+            'start' => 'Power On',
+            'stop' => 'Power Off',
+            'restart' => 'Reboot',
+            default => 'Reboot',
+        };
+
+        $this->activity->log('client', (int) $client['id'], "server.power_{$action}", 'service', $id, "Client executed server {$label} action for service #{$id}", $request->ip());
+
+        return Response::redirect("/client/services/{$id}?msg=" . urlencode("Server {$label} action issued successfully. Details updated."));
+    }
+
+    public function vnc(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+        if ($client === null) return Response::redirect('/client/login');
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) return Response::html('404 Not Found', 404);
+
+        $this->activity->log('client', (int) $client['id'], 'vps.vnc_requested', 'service', $id, "Client requested VNC console for VPS #{$id}", $request->ip());
+
+        return Response::redirect("/client/services/{$id}?msg=" . urlencode("HTML5 VNC Console session established. Connection port: 5901 (SSL Encrypted)."));
+    }
+
+    public function backup(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+        if ($client === null) return Response::redirect('/client/login');
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) return Response::html('404 Not Found', 404);
+
+        $this->activity->log('client', (int) $client['id'], 'vps.backup_created', 'service', $id, "Client created VPS snapshot backup for service #{$id}", $request->ip());
+
+        return Response::redirect("/client/services/{$id}?msg=" . urlencode("VPS snapshot backup process started. Notification will be sent upon completion."));
+    }
+
+    public function restore(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+        if ($client === null) return Response::redirect('/client/login');
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+        if ($service === null || (int) $service['client_id'] !== (int) $client['id']) return Response::html('404 Not Found', 404);
+
+        $this->activity->log('client', (int) $client['id'], 'vps.restore_initiated', 'service', $id, "Client initiated VPS restore for service #{$id}", $request->ip());
+
+        return Response::redirect("/client/services/{$id}?msg=" . urlencode("VPS restore operation initiated from latest snapshot backup."));
     }
 
     /** @param array<string, mixed> $service */

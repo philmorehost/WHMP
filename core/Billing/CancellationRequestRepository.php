@@ -14,11 +14,52 @@ final class CancellationRequestRepository
 
     public function create(int $serviceId, int $clientId, string $type, string $reason, ?string $cancelDate = null): int
     {
+        $this->ensureSchema();
+
         return (int) $this->db->insert(
             'INSERT INTO cancellation_requests (service_id, client_id, cancellation_type, cancel_date, reason, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
             [$serviceId, $clientId, $type, $reason, $cancelDate]
         );
+    }
+
+    private function ensureSchema(): void
+    {
+        static $checked = false;
+        if ($checked) return;
+        $checked = true;
+
+        try {
+            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN client_id INT UNSIGNED NULL AFTER service_id');
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement("ALTER TABLE cancellation_requests ADD COLUMN cancellation_type VARCHAR(32) NOT NULL DEFAULT 'immediate' AFTER client_id");
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN cancel_date DATE NULL AFTER cancellation_type');
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN admin_notes TEXT NULL AFTER reason');
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN reviewed_by INT UNSIGNED NULL AFTER status');
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN reviewed_at DATETIME NULL AFTER reviewed_by');
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN completed_at DATETIME NULL AFTER reviewed_at');
+        } catch (\Throwable) {}
+    }
+
+    public function createRequest(int $serviceId, string $type, string $reason, ?int $clientId = null, ?string $cancelDate = null): int
+    {
+        if ($clientId === null || $clientId <= 0) {
+            $service = $this->db->selectOne('SELECT client_id FROM services WHERE id = ?', [$serviceId]);
+            $clientId = $service ? (int) $service['client_id'] : 0;
+        }
+
+        return $this->create($serviceId, $clientId, $type, $reason, $cancelDate);
     }
 
     public function findById(int $id): ?array

@@ -320,10 +320,11 @@ $pendingCount = 0;
 </div>
 
 <!-- Search Toolbar -->
-<div class="admin-toolbar">
+<div class="admin-toolbar" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
     <div style="flex: 1; min-width: 250px;">
         <?= $view->partial('partials.table-search', ['target' => '#services-table', 'placeholder' => 'Search by client name, email, or product...']) ?>
     </div>
+    <button type="submit" form="bulk-delete-services-form" class="cv-btn cv-btn--danger" data-bulk-delete-for="[data-service-checkbox]" data-confirm="Are you sure you want to delete the selected service(s)? This action cannot be undone." style="display:none;padding:8px 16px;font-size:0.85rem;font-weight:700;cursor:pointer;">🗑️ Delete Selected</button>
 </div>
 
 <!-- Services Table -->
@@ -337,55 +338,64 @@ $pendingCount = 0;
             </p>
         </div>
     <?php else: ?>
-        <div class="admin-table-wrapper">
-            <table class="admin-table" id="services-table">
-                <thead>
-                    <tr>
-                        <th>Client</th>
-                        <th>Product</th>
-                        <th>Cycle</th>
-                        <th>Amount</th>
-                        <th>Next Due</th>
-                        <th>Status</th>
-                        <th style="width: 80px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($results['data'] as $service): ?>
-                    <tr>
-                        <td>
-                            <div style="display: flex; flex-direction: column; gap: 4px;">
-                                <strong><?= e($service['first_name'] . ' ' . $service['last_name']) ?></strong>
-                                <span style="font-size: .8rem; color: var(--cv-text-secondary);"><?= e($service['client_email']) ?></span>
-                            </div>
-                        </td>
-                        <td><strong><?= e($service['product_name']) ?></strong></td>
-                        <td><?= e($service['billing_cycle']) ?></td>
-                        <td>
-                            <span style="font-family: 'Monaco', 'Courier New', monospace; font-weight: 700;">
-                                <?= e($service['currency_symbol'] ?? '$') ?><?= number_format((float) $service['amount'], 2) ?>
-                            </span>
-                        </td>
-                        <td style="font-size: .85rem; color: var(--cv-text-secondary);"><?= e($service['next_due_date']) ?></td>
-                        <td>
-                            <?php if ($service['status'] === 'active'): ?>
-                                <span class="admin-badge admin-badge--active">Active</span>
-                            <?php elseif ($service['status'] === 'suspended'): ?>
-                                <span class="admin-badge admin-badge--suspended">Suspended</span>
-                            <?php elseif ($service['status'] === 'pending'): ?>
-                                <span class="admin-badge admin-badge--pending">Pending</span>
-                            <?php else: ?>
-                                <span class="admin-badge" style="background: rgba(107,114,128,.1); color: #6b7280; border: 1px solid rgba(107,114,128,.2);"><?= e($service['status']) ?></span>
-                            <?php endif; ?>
-                        </td>
-                        <td style="text-align: center;">
-                            <a href="/admin/services/<?= (int) $service['id'] ?>" class="admin-btn admin-btn--secondary" style="padding: 6px 12px; font-size: .75rem; margin: 0;">Edit</a>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+        <form id="bulk-delete-services-form" method="post" action="/admin/services/bulk-delete">
+            <?= csrf_field() ?>
+            <div class="admin-table-wrapper">
+                <table class="admin-table" id="services-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;"><input type="checkbox" data-bulk-select-all="[data-service-checkbox]" style="cursor:pointer;"></th>
+                            <th>Client</th>
+                            <th>Product</th>
+                            <th>Cycle</th>
+                            <th>Amount</th>
+                            <th>Next Due</th>
+                            <th>Status</th>
+                            <th style="width: 140px; text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($results['data'] as $service): ?>
+                        <tr>
+                            <td style="padding: 16px 8px;"><input type="checkbox" name="service_ids[]" class="service-checkbox" data-service-checkbox value="<?= (int) $service['id'] ?>" style="cursor:pointer;"></td>
+                            <td>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <strong><?= e($service['first_name'] . ' ' . $service['last_name']) ?></strong>
+                                    <span style="font-size: .8rem; color: var(--cv-text-secondary);"><?= e($service['client_email']) ?></span>
+                                </div>
+                            </td>
+                            <td><strong><?= e($service['product_name']) ?></strong></td>
+                            <td><?= e($service['billing_cycle']) ?></td>
+                            <td>
+                                <span style="font-family: 'Monaco', 'Courier New', monospace; font-weight: 700;">
+                                    <?= e($service['currency_symbol'] ?? '$') ?><?= number_format((float) $service['amount'], 2) ?>
+                                </span>
+                            </td>
+                            <td style="font-size: .85rem; color: var(--cv-text-secondary);"><?= e($service['next_due_date']) ?></td>
+                            <td>
+                                <?php if ($service['status'] === 'active'): ?>
+                                    <span class="admin-badge admin-badge--active">Active</span>
+                                <?php elseif ($service['status'] === 'suspended'): ?>
+                                    <span class="admin-badge admin-badge--suspended">Suspended</span>
+                                <?php elseif ($service['status'] === 'pending'): ?>
+                                    <span class="admin-badge admin-badge--pending">Pending</span>
+                                <?php else: ?>
+                                    <span class="admin-badge" style="background: rgba(107,114,128,.1); color: #6b7280; border: 1px solid rgba(107,114,128,.2);"><?= e($service['status']) ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="text-align: right; white-space: nowrap;">
+                                <a href="/admin/services/<?= (int) $service['id'] ?>" class="admin-btn admin-btn--secondary" style="padding: 6px 12px; font-size: .75rem; margin: 0; display: inline-block;">Edit</a>
+                                <form method="post" action="/admin/services/<?= (int) $service['id'] ?>/delete" style="margin:0;display:inline;" data-confirm="Are you sure you want to delete this service? This action cannot be undone.">
+                                    <?= csrf_field() ?>
+                                    <button type="submit" class="admin-btn" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);padding:6px 12px;font-size:.75rem;cursor:pointer;border-radius:6px;margin-left:4px;">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </form>
 
         <!-- Pagination -->
         <div class="admin-pagination">

@@ -35,6 +35,13 @@ final class GeneralSettingsController
             'minAffiliatePayout' => $this->settings->get('affiliates.min_payout', '50.00'),
             'ticketRatingEnabled' => $this->settings->get('support.ticket_rating_enabled', '1') === '1',
             'randomCpanelUsernames' => $this->settings->get('cpanel.random_usernames', '1') === '1',
+            'smtpHost' => $this->settings->get('smtp.host', ''),
+            'smtpPort' => $this->settings->get('smtp.port', '587'),
+            'smtpUser' => $this->settings->get('smtp.user', ''),
+            'smtpPass' => $this->settings->get('smtp.pass', ''),
+            'smtpEncryption' => $this->settings->get('smtp.encryption', 'tls'),
+            'smtpFromEmail' => $this->settings->get('smtp.from_email', ''),
+            'smtpFromName' => $this->settings->get('smtp.from_name', ''),
             'saved' => $request->query('saved') === '1',
         ]);
 
@@ -58,6 +65,14 @@ final class GeneralSettingsController
         $this->settings->set('affiliates.min_payout', (string) max(0.0, (float) $request->input('min_affiliate_payout', 50.0)));
         $this->settings->set('support.ticket_rating_enabled', $request->input('ticket_rating_enabled') ? '1' : '0');
         $this->settings->set('cpanel.random_usernames', $request->input('random_cpanel_usernames') ? '1' : '0');
+
+        $this->settings->set('smtp.host', trim((string) $request->input('smtp_host', '')));
+        $this->settings->set('smtp.port', (string) max(1, (int) $request->input('smtp_port', 587)));
+        $this->settings->set('smtp.user', trim((string) $request->input('smtp_user', '')));
+        $this->settings->set('smtp.pass', (string) $request->input('smtp_pass', ''));
+        $this->settings->set('smtp.encryption', trim((string) $request->input('smtp_encryption', 'tls')));
+        $this->settings->set('smtp.from_email', trim((string) $request->input('smtp_from_email', '')));
+        $this->settings->set('smtp.from_name', trim((string) $request->input('smtp_from_name', '')));
 
         return Response::redirect('/admin/settings/general?saved=1');
     }

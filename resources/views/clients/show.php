@@ -7,7 +7,7 @@
 /** @var array<int, array<string, mixed>> $invoices */
 /** @var float $creditBalance */
 /** @var array<int, array<string, mixed>> $creditLedger */
-$tabs = ['summary' => 'Summary', 'profile' => 'Profile', 'contacts' => 'Contacts', 'billing' => 'Billing', 'log' => 'Log'];
+$tabs = ['summary' => 'Summary', 'profile' => 'Profile', 'contacts' => 'Contacts', 'billing' => 'Billing', 'log' => 'Log', 'message' => 'Message'];
 $id = (int) $client['id'];
 ?>
 <style>
@@ -364,6 +364,9 @@ $id = (int) $client['id'];
                 <button class="admin-detail-btn admin-detail-btn--danger" type="submit" title="Close Account">🛑 Close</button>
             </form>
             <?php endif; ?>
+            <form method="post" action="/admin/clients/<?= $id ?>/delete" data-confirm="Are you sure you want to delete this client account permanently? All associated services, invoices, and data will be removed. This action cannot be undone."><?= csrf_field() ?>
+                <button class="admin-detail-btn admin-detail-btn--danger" style="background:linear-gradient(135deg,rgba(239,68,68,.35),rgba(185,28,28,.3));border-color:rgba(239,68,68,.5);" type="submit" title="Delete Account">❌ Delete Account</button>
+            </form>
         </div>
     </div>
 </div>
@@ -611,6 +614,77 @@ $id = (int) $client['id'];
                     <?php endif; ?>
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+<?php elseif ($tab === 'message'): ?>
+    <?php if (!empty($msg)): ?>
+        <div style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.3);color:#10b981;padding:12px 16px;border-radius:8px;margin-bottom:20px;font-weight:600;">
+            ✅ <?= e($msg) ?>
+        </div>
+    <?php endif; ?>
+    <?php if (!empty($error)): ?>
+        <div style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:12px 16px;border-radius:8px;margin-bottom:20px;font-weight:600;">
+            ⚠️ <?= e($error) ?>
+        </div>
+    <?php endif; ?>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:24px;">
+        <!-- Direct Email Message Card -->
+        <div class="admin-detail-card">
+            <h2 class="admin-detail-card__title">✉️ Send Direct Email to Client</h2>
+            <div class="admin-detail-card__body">
+                <p style="font-size:.85rem;color:var(--cv-text-secondary);margin-top:0;">Send an email message directly to <strong><?= e($client['email']) ?></strong>.</p>
+                <form method="post" action="/admin/clients/<?= $id ?>/send-message">
+                    <?= csrf_field() ?>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Email Subject</label>
+                        <input type="text" name="subject" class="cv-input" style="width:100%;" placeholder="e.g. Important Update Regarding Your Account" required>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Message Content</label>
+                        <textarea name="message" class="cv-input" rows="6" style="width:100%;" placeholder="Type your message here..." required></textarea>
+                    </div>
+                    <button type="submit" class="admin-detail-btn admin-detail-btn--primary">✉️ Send Email Message</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Create Support Ticket Card -->
+        <div class="admin-detail-card">
+            <h2 class="admin-detail-card__title">🎫 Open Support Ticket for Client</h2>
+            <div class="admin-detail-card__body">
+                <p style="font-size:.85rem;color:var(--cv-text-secondary);margin-top:0;">Create a support ticket on behalf of this client (e.g. for phone call or chat support).</p>
+                <form method="post" action="/admin/clients/<?= $id ?>/create-ticket">
+                    <?= csrf_field() ?>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Department</label>
+                        <select name="department_id" class="cv-select" style="width:100%;" required>
+                            <?php if (isset($departments)): ?>
+                                <?php foreach ($departments as $dept): ?>
+                                    <option value="<?= (int) $dept['id'] ?>"><?= e($dept['name']) ?></option>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Priority</label>
+                        <select name="priority" class="cv-select" style="width:100%;">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Ticket Subject</label>
+                        <input type="text" name="subject" class="cv-input" style="width:100%;" placeholder="e.g. Phone Support Request: VPS Setup" required>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Initial Ticket Message</label>
+                        <textarea name="message" class="cv-input" rows="5" style="width:100%;" placeholder="Details of the support request..." required></textarea>
+                    </div>
+                    <button type="submit" class="admin-detail-btn admin-detail-btn--primary">🎫 Open Support Ticket</button>
+                </form>
             </div>
         </div>
     </div>

@@ -179,6 +179,17 @@ final class ServiceRepository
         $this->setStatus($id, 'cancelled');
     }
 
+    /** @return array<string, mixed>|null */
+    public function findById(int $id): ?array
+    {
+        return $this->find($id);
+    }
+
+    public function updateStatus(int $id, string $status): void
+    {
+        $this->setStatus($id, $status);
+    }
+
     public function assignServer(int $id, int $serverId, string $username): void
     {
         $this->db->update(
@@ -291,21 +302,55 @@ final class ServiceRepository
         );
     }
 
+    private function ensureSchema(): void
+    {
+        static $checked = false;
+        if ($checked) return;
+        $checked = true;
+
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN dedicated_ip VARCHAR(255) NULL AFTER username');
+        } catch (\Throwable) {}
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN assigned_ips TEXT NULL AFTER dedicated_ip');
+        } catch (\Throwable) {}
+    }
+
     /**
      * @param array<string, mixed> $fields
      */
     public function updateDetails(int $id, array $fields): void
     {
+        $this->ensureSchema();
         $this->db->update(
-            'UPDATE services SET username = ?, domain = ?, hostname = ?, server_id = ?, updated_at = ? WHERE id = ?',
+            'UPDATE services SET username = ?, domain = ?, hostname = ?, dedicated_ip = ?, assigned_ips = ?, server_id = ?, updated_at = ? WHERE id = ?',
             [
-                $fields['username'],
-                $fields['domain'],
-                $fields['hostname'],
-                $fields['server_id'],
+                $fields['username'] ?? null,
+                $fields['domain'] ?? null,
+                $fields['hostname'] ?? null,
+                $fields['dedicated_ip'] ?? null,
+                $fields['assigned_ips'] ?? null,
+                $fields['server_id'] ?? null,
                 (new DateTimeImmutable())->format('Y-m-d H:i:s'),
                 $id,
             ]
         );
+    }
+
+    public function delete(int $id): void
+    {
+        $this->db->delete('DELETE FROM services WHERE id = ?', [$id]);
+    }
+
+    /** @param array<int, int> $ids */
+    public function bulkDelete(array $ids): int
+    {
+        $ids = array_filter(array_map('intval', $ids), fn($id) => $id > 0);
+        if (empty($ids)) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        return $this->db->delete("DELETE FROM services WHERE id IN ({$placeholders})", $ids);
     }
 }

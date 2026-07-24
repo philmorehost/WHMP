@@ -25,41 +25,30 @@ final class CancellationRequestsController
     public function clientCreate(Request $request, array $params): Response
     {
         $id = (int) $params['id'];
-        $client = $this->clientGuard->current();
+        $client = $this->clientGuard->currentClient();
         if (!$client) return Response::redirect('/client/login');
 
-        $service = $this->services->findById($id);
+        $service = $this->services->find($id);
         if (!$service || (int) $service['client_id'] !== (int) $client['id']) {
             return Response::html('Service not found', 404);
         }
 
-        if ($request->method() === 'POST') {
-            $type = (string) $request->input('type', 'immediate');
-            $reason = trim((string) $request->input('reason', ''));
-            $cancelDate = (string) $request->input('cancel_date', '');
-
-            if ($reason === '') {
-                return Response::html($this->view->render('partials.cancellation-form', [
-                    'service' => $service,
-                    'error' => 'Please provide a reason for cancellation'
-                ]), 200);
-            }
-
-            $this->service->requestCancellation(
-                $id,
-                (int) $client['id'],
-                $type,
-                $reason,
-                $type === 'due_date' ? $cancelDate : null
-            );
-
-            return Response::redirect("/client/services/{$id}?notice=cancellation_requested");
+        $type = (string) $request->input('type', 'end_of_period');
+        $reason = trim((string) $request->input('reason', ''));
+        if ($reason === '') {
+            $reason = 'Cancellation requested from client portal.';
         }
+        $cancelDate = (string) $request->input('cancel_date', '');
 
-        return Response::html($this->view->render('partials.cancellation-form', [
-            'service' => $service,
-            'error' => null
-        ]), 200);
+        $this->service->requestCancellation(
+            $id,
+            (int) $client['id'],
+            $type,
+            $reason,
+            $type === 'due_date' ? $cancelDate : null
+        );
+
+        return Response::redirect("/client/services/{$id}?msg=" . urlencode("Cancellation request submitted successfully."));
     }
 
     public function adminIndex(Request $request): Response

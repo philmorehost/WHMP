@@ -18,15 +18,16 @@ final class SmtpMailer implements Mailer
 
     public function send(string $to, string $subject, string $html): void
     {
-        $host = $this->settings->get('smtp.host') ?: $this->config->env('SMTP_HOST', 'localhost');
+        $host = (string) ($this->settings->get('smtp.host') ?: $this->config->env('SMTP_HOST', ''));
         $port = (int) ($this->settings->get('smtp.port') ?: $this->config->env('SMTP_PORT', '25'));
-        $username = $this->settings->get('smtp.user') ?: $this->config->env('SMTP_USER', '');
-        $password = $this->settings->get('smtp.pass') ?: $this->config->env('SMTP_PASS', '');
-        $encryption = $this->settings->get('smtp.encryption') ?: $this->config->env('SMTP_ENCRYPTION', '');
-        $fromEmail = $this->settings->get('smtp.from_email') ?: $this->config->env('SMTP_FROM_EMAIL', 'noreply@codevault.com');
-        $fromName = $this->settings->get('smtp.from_name') ?: $this->config->env('SMTP_FROM_NAME', 'CodeVault Support');
+        $username = (string) ($this->settings->get('smtp.user') ?: $this->config->env('SMTP_USER', ''));
+        $password = (string) ($this->settings->get('smtp.pass') ?: $this->config->env('SMTP_PASS', ''));
+        $encryption = (string) ($this->settings->get('smtp.encryption') ?: $this->config->env('SMTP_ENCRYPTION', ''));
+        $defaultHost = $_SERVER['HTTP_HOST'] ?? 'philmorehost.com';
+        $fromEmail = (string) ($this->settings->get('smtp.from_email') ?: $this->config->env('SMTP_FROM_EMAIL', 'noreply@' . $defaultHost));
+        $fromName = (string) ($this->settings->get('smtp.from_name') ?: $this->config->env('SMTP_FROM_NAME', 'PhilmoreHost Support'));
 
-        if ($host === 'localhost' && $username === '') {
+        if (empty($host) || in_array(strtolower($host), ['localhost', 'mail', 'phpmail', 'php_mail', '127.0.0.1'], true) || ($username === '' && $password === '')) {
             $headers = [
                 'MIME-Version: 1.0',
                 'Content-type: text/html; charset=utf-8',
@@ -34,9 +35,9 @@ final class SmtpMailer implements Mailer
                 "Reply-To: {$fromEmail}",
                 'X-Mailer: PHP/' . phpversion()
             ];
-            $success = mail($to, $subject, $html, implode("\r\n", $headers));
+            $success = @mail($to, $subject, $html, implode("\r\n", $headers));
             if (!$success) {
-                throw new Exception("mail() failed to deliver the message.");
+                throw new Exception("PHP mail() failed to deliver message to {$to}. Check server mail configuration.");
             }
             return;
         }

@@ -24,6 +24,12 @@ final class AuthGuard
         return $id === null ? null : $this->admins->findById((int) $id);
     }
 
+    /** @return array<string, mixed>|null */
+    public function current(): ?array
+    {
+        return $this->currentAdmin();
+    }
+
     public function check(): bool
     {
         return $this->currentAdmin() !== null;

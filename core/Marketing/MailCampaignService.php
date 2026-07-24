@@ -32,8 +32,14 @@ final class MailCampaignService
 
         $this->campaigns->markSending($campaignId);
 
-        $clientGroupId = $campaign['client_group_id'] !== null ? (int) $campaign['client_group_id'] : null;
-        $recipients = $this->clients->activeForGroup($clientGroupId);
+        if (!empty($campaign['client_id'])) {
+            $singleClient = $this->clients->find((int) $campaign['client_id']);
+            $recipients = $singleClient !== null ? [$singleClient] : [];
+        } else {
+            $clientGroupId = $campaign['client_group_id'] !== null ? (int) $campaign['client_group_id'] : null;
+            $recipients = $this->clients->activeForGroup($clientGroupId);
+        }
+
         $sent = 0;
 
         foreach ($recipients as $client) {
