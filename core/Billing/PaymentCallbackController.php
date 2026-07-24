@@ -77,14 +77,27 @@ final class PaymentCallbackController
         $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
         $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
 
-        $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-        $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+        // 1. Resolve Invoice Currency Exchange Rate
+        $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
+        $invoiceCurr = $invoiceCurrencyId !== null ? $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId]) : null;
+        $invoiceRate = (float) ($invoice['currency_rate'] ?? $invoiceCurr['exchange_rate'] ?? 1.0000);
+        if ($invoiceRate <= 0) {
+            $invoiceRate = 1.0000;
+        }
 
-        $captureAmount = round($remaining * $gatewayRate, 2);
+        // 2. Convert remaining amount from Invoice Currency to System Base Currency
+        $remainingBase = $remaining / $invoiceRate;
+
+        // 3. Resolve Gateway Currency Exchange Rate
+        $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+        $gatewayRate = ($gatewayCurr !== null && (float) $gatewayCurr['exchange_rate'] > 0) ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+
+        // 4. Convert Base Currency Amount to Gateway Currency Amount
+        $captureAmount = round($remainingBase * $gatewayRate, 2);
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
 
-        $this->writeGatewayLog($slug, $invoiceId, $clientId, 'INITIATING', "Capture: amount={$captureAmount} {$gatewayCurrency}, ref={$reference}");
+        $this->writeGatewayLog($slug, $invoiceId, $clientId, 'INITIATING', "Capture: amount={$captureAmount} {$gatewayCurrency} (invoice_remaining={$remaining} rate_inv={$invoiceRate} rate_gw={$gatewayRate}), ref={$reference}");
 
         try {
             $result = $module->capture([

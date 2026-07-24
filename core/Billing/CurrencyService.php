@@ -74,21 +74,14 @@ final class CurrencyService
     public function formatLocked(float $baseAmount, ?int $currencyId, float $lockedRate): string
     {
         $currency = $this->resolveLocked($currencyId);
-
-        $effectiveRate = $lockedRate;
-        if ($baseAmount > 1000 && $lockedRate > 50 && ($baseAmount * $lockedRate > 5000000)) {
-            $effectiveRate = 1.0;
-        }
+        $effectiveRate = $lockedRate > 0 ? $lockedRate : 1.0;
 
         return ($currency['symbol'] ?? '$') . number_format(round($baseAmount * $effectiveRate, 2), 2);
     }
 
     public function convert(float $baseAmount, float $rate): float
     {
-        $effectiveRate = $rate;
-        if ($baseAmount > 1000 && $rate > 50 && ($baseAmount * $rate > 5000000)) {
-            $effectiveRate = 1.0;
-        }
+        $effectiveRate = $rate > 0 ? $rate : 1.0;
 
         return round($baseAmount * $effectiveRate, 2);
     }

@@ -28,7 +28,7 @@ final class SecurityHeaders
             ->withHeader(
                 'Content-Security-Policy',
                 "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                . "img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+                . "img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
             );
     }
 }
