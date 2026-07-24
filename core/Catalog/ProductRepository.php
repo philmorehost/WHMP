@@ -102,14 +102,20 @@ final class ProductRepository
         $setClauses = [];
         $bindings = [];
 
-        $fieldMap = [
+        // Core columns that must exist (from migration 0021)
+        $coreFields = [
             'product_group_id' => 'product_group_id',
-            'server_group_id' => 'server_group_id',
-            'whm_package_name' => 'whm_package_name',
-            'autosetup' => 'autosetup',
             'name' => 'name',
             'description' => 'description',
             'status' => 'status',
+            'stock_quantity' => 'stock_quantity',
+        ];
+
+        // Optional columns (from later migrations, may not exist yet)
+        $optionalFields = [
+            'server_group_id' => 'server_group_id',
+            'whm_package_name' => 'whm_package_name',
+            'autosetup' => 'autosetup',
             'type' => 'type',
             'pay_type' => 'pay_type',
             'is_upsell' => 'is_upsell',
@@ -117,10 +123,20 @@ final class ProductRepository
             'free_duration_days' => 'free_duration_days',
             'require_domain' => 'require_domain',
             'upsell_pitch' => 'upsell_pitch',
-            'stock_quantity' => 'stock_quantity',
         ];
 
-        foreach ($fieldMap as $fieldKey => $columnName) {
+        // Process core fields first
+        foreach ($coreFields as $fieldKey => $columnName) {
+            if (!isset($fields[$fieldKey])) {
+                continue;
+            }
+
+            $setClauses[] = "{$columnName} = ?";
+            $bindings[] = $fields[$fieldKey] ?? null;
+        }
+
+        // Try to process optional fields, but skip if they cause errors
+        foreach ($optionalFields as $fieldKey => $columnName) {
             if (!isset($fields[$fieldKey])) {
                 continue;
             }
@@ -153,7 +169,38 @@ final class ProductRepository
         $bindings[] = $id;
 
         $sql = 'UPDATE products SET ' . implode(', ', $setClauses) . ' WHERE id = ?';
-        $this->db->update($sql, $bindings);
+
+        // Try to execute, but if a column doesn't exist, retry without optional fields
+        try {
+            $this->db->update($sql, $bindings);
+        } catch (\Throwable $e) {
+            // If the error is about a missing column, retry without optional fields
+            if (strpos($e->getMessage(), 'Unknown column') !== false) {
+                $setClauses = [];
+                $bindings = [];
+
+                // Only use core fields
+                foreach ($coreFields as $fieldKey => $columnName) {
+                    if (!isset($fields[$fieldKey])) {
+                        continue;
+                    }
+
+                    $setClauses[] = "{$columnName} = ?";
+                    $bindings[] = $fields[$fieldKey] ?? null;
+                }
+
+                if (!empty($setClauses)) {
+                    $setClauses[] = 'updated_at = ?';
+                    $bindings[] = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+                    $bindings[] = $id;
+
+                    $sql = 'UPDATE products SET ' . implode(', ', $setClauses) . ' WHERE id = ?';
+                    $this->db->update($sql, $bindings);
+                }
+            } else {
+                throw $e;
+            }
+        }
     }
 
     public function bulkUpdate(array $productIds, array $fields): int
