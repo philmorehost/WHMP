@@ -102,41 +102,31 @@ final class ProductRepository
         $setClauses = [];
         $bindings = [];
 
-        // Core columns that must exist (from migration 0021)
+        // Core columns that must exist (from earlier migrations)
         $coreFields = [
-            'product_group_id' => 'product_group_id',
-            'name' => 'name',
-            'description' => 'description',
-            'status' => 'status',
-            'stock_quantity' => 'stock_quantity',
+            'product_group_id' => 'product_group_id',  // migration 0021
+            'name' => 'name',                           // migration 0021
+            'description' => 'description',             // migration 0021
+            'status' => 'status',                       // migration 0021
+            'stock_quantity' => 'stock_quantity',       // migration 0021
+            'autosetup' => 'autosetup',                 // migration 0111
+            'type' => 'type',                           // migration 0102
+            'is_upsell' => 'is_upsell',                 // migration 0064
+            'require_domain' => 'require_domain',       // migration 0100
+            'upsell_pitch' => 'upsell_pitch',           // migration 0064
         ];
 
         // Optional columns (from later migrations, may not exist yet)
         $optionalFields = [
-            'server_group_id' => 'server_group_id',
-            'whm_package_name' => 'whm_package_name',
-            'autosetup' => 'autosetup',
-            'type' => 'type',
-            'pay_type' => 'pay_type',
-            'is_upsell' => 'is_upsell',
-            'free_duration_type' => 'free_duration_type',
-            'free_duration_days' => 'free_duration_days',
-            'require_domain' => 'require_domain',
-            'upsell_pitch' => 'upsell_pitch',
+            'server_group_id' => 'server_group_id',    // migration 0043
+            'whm_package_name' => 'whm_package_name',  // migration 0120
+            'pay_type' => 'pay_type',                   // migration 0120
+            'free_duration_type' => 'free_duration_type', // migration 0120
+            'free_duration_days' => 'free_duration_days', // migration 0120
         ];
 
         // Process core fields first
         foreach ($coreFields as $fieldKey => $columnName) {
-            if (!isset($fields[$fieldKey])) {
-                continue;
-            }
-
-            $setClauses[] = "{$columnName} = ?";
-            $bindings[] = $fields[$fieldKey] ?? null;
-        }
-
-        // Try to process optional fields, but skip if they cause errors
-        foreach ($optionalFields as $fieldKey => $columnName) {
             if (!isset($fields[$fieldKey])) {
                 continue;
             }
@@ -151,13 +141,19 @@ final class ProductRepository
                 $bindings[] = $fields[$fieldKey] ?? 'active';
             } elseif ($fieldKey === 'type') {
                 $bindings[] = $fields[$fieldKey] ?? 'other';
-            } elseif ($fieldKey === 'pay_type') {
-                $bindings[] = $fields[$fieldKey] ?? 'paid';
-            } elseif ($fieldKey === 'free_duration_type') {
-                $bindings[] = $fields[$fieldKey] ?? 'lifetime';
             } else {
                 $bindings[] = $fields[$fieldKey] ?? null;
             }
+        }
+
+        // Process optional fields (may not exist in older databases)
+        foreach ($optionalFields as $fieldKey => $columnName) {
+            if (!isset($fields[$fieldKey])) {
+                continue;
+            }
+
+            $setClauses[] = "{$columnName} = ?";
+            $bindings[] = $fields[$fieldKey] ?? null;
         }
 
         if (empty($setClauses)) {
