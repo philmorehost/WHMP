@@ -164,78 +164,14 @@ $companyDept ??= 'Payments Dept.';
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <?php if ($gateway['slug'] === 'payhub' && $hasKeys && !empty($config['public_key'])): ?>
-                                <button class="cv-btn payhub-pop-trigger" data-public-key="<?= e($config['public_key']) ?>" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                            <?php else: ?>
-                                <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
-                                    <?= csrf_field() ?>
-                                    <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                                </form>
-                            <?php endif; ?>
+                            <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" target="_blank" style="margin:0;">
+                                <?= csrf_field() ?>
+                                <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                            </form>
                         </div>
                     <?php endif; ?>
                 <?php endforeach; ?>
             </div>
-
-            <!-- Payhub Inline Javascript (Loaded outside the loop to prevent duplicating script and breaking other gateway views) -->
-            <?php
-            $payhubGateway = null;
-            foreach ($gateways as $gw) {
-                if ($gw['slug'] === 'payhub') {
-                    $payhubGateway = $gw;
-                    break;
-                }
-            }
-            if ($payhubGateway !== null):
-                $phConfig = json_decode((string) ($payhubGateway['config'] ?? '{}'), true) ?: [];
-                $phHasKeys = !empty($phConfig['secret_key']) && !empty($phConfig['public_key']);
-                if ($phHasKeys):
-                    // Pre-calculate amounts
-                    $invoiceRate = (float)($invoice['currency_rate'] ?? 1.0);
-                    
-                    // Sum completed transactions from the passed $transactions array
-                    $completedSum = 0.0;
-                    foreach ($transactions as $tx) {
-                        if (($tx['status'] ?? '') === 'completed') {
-                            $completedSum += (float) ($tx['amount'] ?? 0.0);
-                        }
-                    }
-                    $remainingDue = max(0.0, (float) $invoice['total'] - $completedSum);
-                    $usdBase = $remainingDue / ($invoiceRate ?: 1.0);
-
-                    // Fetch NGN exchange rate from database helper
-                    $dbHelper = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
-                    $gwRateRow = $dbHelper->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', ['NGN']);
-                    $gwRate = ($gwRateRow !== null && (float)$gwRateRow['exchange_rate'] > 0) ? (float)$gwRateRow['exchange_rate'] : 1490.0;
-                    $popAmount = round($usdBase * $gwRate, 2);
-                    $popRef = "cv-payhub-" . (int)$invoice['id'] . "-" . bin2hex(random_bytes(6));
-            ?>
-                <script src="https://merchant.payhub.com.ng/inline.js"></script>
-                <script>
-                document.querySelectorAll('.payhub-pop-trigger').forEach(function(btn) {
-                    btn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        btn.disabled = true;
-                        btn.innerText = 'Initializing...';
-                        
-                        let handler = PayhubPop.setup({
-                            key: btn.getAttribute('data-public-key'),
-                            email: '<?= e($client['email']) ?>',
-                            amount: <?= $popAmount ?>,
-                            ref: '<?= $popRef ?>',
-                            onClose: function(){
-                                btn.disabled = false;
-                                btn.innerText = 'Pay with Payhub';
-                            },
-                            callback: function(response){
-                                window.location.href = "/pay/payhub/callback?reference=" + encodeURIComponent(response.reference) + "&trxref=<?= $popRef ?>";
-                            }
-                        });
-                        handler.openIframe();
-                    });
-                });
-                </script>
-            <?php endif; endif; ?>
         <?php endif; ?>
 
         <!-- Transactions Ledger -->
