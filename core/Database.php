@@ -31,12 +31,17 @@ class Database
         if ($this->pdo === null) {
             $dsn = "mysql:host={$this->host};port={$this->port};dbname={$this->database};charset={$this->charset}";
 
-            $this->pdo = new PDO($dsn, $this->username, $this->password, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-                PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,
-            ]);
+            try {
+                $this->pdo = new PDO($dsn, $this->username, $this->password, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false,
+                ]);
+            } catch (\PDOException $e) {
+                // Log connection details for debugging
+                error_log("Database connection failed: host={$this->host}, port={$this->port}, database={$this->database}, user={$this->username}");
+                throw $e;
+            }
         }
 
         return $this->pdo;
