@@ -15,7 +15,8 @@ use CodeVault\Billing\CurrencyService;
 final class InvoicePdfBuilder
 {
     public function __construct(
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly \CodeVault\Settings\SettingsRepository $settings
     ) {
     }
 
@@ -31,10 +32,14 @@ final class InvoicePdfBuilder
         $currencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
         $money = fn (float $amount): string => $this->currency->formatLocked($amount, $currencyId, $rate);
 
+        $companyName = (string) ($this->settings->get('company.name') ?? 'Your Company');
+        $companyEmail = (string) ($this->settings->get('company.email') ?? '');
+        $companyDept = (string) ($this->settings->get('company.billing_dept') ?? 'Payments Dept.');
+
         $y = 800.0;
 
         // 1. Logo & Document Title
-        $pdf->text(50, $y, 'CodeVault', 24, true);
+        $pdf->text(50, $y, $companyName, 24, true);
         
         $statusStr = strtoupper((string) $invoice['status']);
         $pdf->text(400, $y, $statusStr, 20, true);
@@ -54,16 +59,24 @@ final class InvoicePdfBuilder
 
         $clientName = trim("{$client['first_name']} {$client['last_name']}");
         $pdf->text(50, $y, $clientName, 10, true);
-        $pdf->text(300, $y, 'CodeVault Limited', 10, true);
+        $pdf->text(300, $y, $companyName, 10, true);
         $y -= 14;
 
         $company = !empty($client['company_name']) ? (string) $client['company_name'] : '';
         $pdf->text(50, $y, $company ?: $client['email'], 10);
-        $pdf->text(300, $y, 'Payments Dept.', 10);
-        $y -= 14;
+        
+        if ($companyDept !== '') {
+            $pdf->text(300, $y, $companyDept, 10);
+            $y -= 14;
+        }
 
         if ($company) {
             $pdf->text(50, $y, $client['email'], 10);
+            $y -= 14;
+        }
+        
+        if ($companyEmail !== '') {
+            $pdf->text(300, $y, $companyEmail, 10);
             $y -= 14;
         }
         $y -= 20;

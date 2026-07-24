@@ -6,9 +6,15 @@
 /** @var float $creditBalance */
 /** @var array<string, mixed> $currency */
 /** @var string|null $paymentStatus */
+/** @var string $companyName */
+/** @var string $companyEmail */
+/** @var string $companyDept */
 $rate = (float) $invoice['currency_rate'];
 $money = static fn (float $amount): string => $currency['symbol'] . number_format($amount * $rate, 2);
 $paymentStatus ??= null;
+$companyName ??= 'Your Company';
+$companyEmail ??= '';
+$companyDept ??= 'Payments Dept.';
 ?>
 <div style="max-width:54rem; margin:0 auto; padding:0 var(--cv-space-4);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--cv-space-4); flex-wrap:wrap; gap:var(--cv-space-2);">
@@ -39,7 +45,7 @@ $paymentStatus ??= null;
         <!-- Invoice Header -->
         <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #f3f4f6; padding-bottom:var(--cv-space-4); margin-bottom:var(--cv-space-5); flex-wrap:wrap; gap:var(--cv-space-4);">
             <div>
-                <h1 style="margin:0; font-family:'Hanken Grotesk',sans-serif; font-size:1.75rem; font-weight:800; color:#111827;">CodeVault</h1>
+                <h1 style="margin:0; font-family:'Hanken Grotesk',sans-serif; font-size:1.75rem; font-weight:800; color:#111827;"><?= e($companyName) ?></h1>
                 <p style="margin:4px 0 0 0; color:#6b7280; font-size:var(--cv-text-sm);">Proforma Invoice #<?= (int) $invoice['id'] ?></p>
             </div>
             <div style="text-align:right;">
@@ -62,9 +68,13 @@ $paymentStatus ??= null;
             </div>
             <div>
                 <strong style="color:#4b5563; text-transform:uppercase; font-size:var(--cv-text-xs); display:block; margin-bottom:6px;">Pay To</strong>
-                <span style="font-weight:700; color:#111827; display:block; margin-bottom:2px;">CodeVault Limited</span>
-                <span style="color:#4b5563; display:block;">Payments Dept.</span>
-                <span style="color:#6b7280; display:block; font-size:var(--cv-text-xs); margin-top:4px;">billing@codevault.com</span>
+                <span style="font-weight:700; color:#111827; display:block; margin-bottom:2px;"><?= e($companyName) ?></span>
+                <?php if ($companyDept !== ''): ?>
+                <span style="color:#4b5563; display:block;"><?= e($companyDept) ?></span>
+                <?php endif; ?>
+                <?php if ($companyEmail !== ''): ?>
+                <span style="color:#6b7280; display:block; font-size:var(--cv-text-xs); margin-top:4px;"><?= e($companyEmail) ?></span>
+                <?php endif; ?>
             </div>
             <div>
                 <strong style="color:#4b5563; text-transform:uppercase; font-size:var(--cv-text-xs); display:block; margin-bottom:6px;">Invoice Details</strong>

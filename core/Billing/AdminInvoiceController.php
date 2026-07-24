@@ -10,6 +10,7 @@ use CodeVault\Clients\ClientRepository;
 use CodeVault\Pdf\InvoicePdfBuilder;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
 
@@ -25,7 +26,8 @@ final class AdminInvoiceController
         private readonly ClientRepository $clients,
         private readonly InvoicePdfBuilder $pdf,
         private readonly RefundService $refunds,
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly SettingsRepository $settings
     ) {
     }
 
@@ -87,6 +89,9 @@ final class AdminInvoiceController
             'refundSuccess' => $request->query('refund_success'),
             'refundError' => $request->query('refund_error'),
             'currency' => $this->currency->resolveLocked($currencyId),
+            'companyName' => (string) ($this->settings->get('company.name') ?? 'Your Company'),
+            'companyEmail' => (string) ($this->settings->get('company.email') ?? ''),
+            'companyDept' => (string) ($this->settings->get('company.billing_dept') ?? 'Payments Dept.'),
         ]);
     }
 
