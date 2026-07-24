@@ -11,6 +11,7 @@ use CodeVault\Modules\GatewayModule;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Request;
 use CodeVault\Response;
+use DateTimeImmutable;
 
 /**
  * Initiates a redirect-gateway payment and handles both ways a gateway
@@ -128,7 +129,7 @@ final class PaymentCallbackController
         string $message,
         array $extra = []
     ): void {
-        $timestamp = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $timestamp = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $extraJson = !empty($extra) ? ' | Extra: ' . json_encode($extra, JSON_UNESCAPED_SLASHES) : '';
         $logLine = sprintf(
             "[%s] Gateway: %s | Invoice: #%d | Client: #%d | Status: %s | Message: %s%s\n",
