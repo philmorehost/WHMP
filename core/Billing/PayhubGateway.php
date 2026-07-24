@@ -82,8 +82,10 @@ final class PayhubGateway implements GatewayModule
         $name = trim((string) ($params['name'] ?? ''));
         $fields = [
             'email' => (string) $params['email'],
-            // Amount in kobo (smallest unit) — the docs' amount=500000 == ₦5,000.
-            'amount' => (int) round($params['amount'] * 100),
+            // PayHub API expects the amount in the currency's major unit (Naira for NGN),
+            // NOT in kobo. Confirmed by live test: sending 10000 showed ₦10,000 on checkout.
+            // (Paystack uses kobo; PayHub does NOT.)
+            'amount' => round($params['amount'], 2),
             'name' => $name !== '' ? $name : (string) $params['email'],
             'phone' => (string) ($params['phone'] ?? ''),
             'reference' => (string) $params['reference'],
@@ -167,7 +169,8 @@ final class PayhubGateway implements GatewayModule
             'success' => in_array($status, ['success', 'successful', 'completed', 'paid'], true),
             'status' => $status,
             'reference' => (string) ($data['reference'] ?? $reference),
-            'amount' => ((float) ($data['amount'] ?? 0)) / 100,
+            // Amount returned by PayHub is in Naira (major units), not kobo.
+            'amount' => (float) ($data['amount'] ?? 0),
             'metadata' => (array) ($data['metadata'] ?? []),
         ];
     }
