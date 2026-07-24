@@ -55,13 +55,14 @@ final class PaymentCallbackController
         $module = $this->modules->get(GatewayModule::class, $slug);
 
         if ($gatewayRow === null || (int) $gatewayRow['is_enabled'] !== 1 || !$module instanceof GatewayModule) {
-            return Response::redirect("/client/invoices/{$invoiceId}");
+            $msg = urlencode("The {$slug} payment gateway is currently disabled or not installed.");
+            return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$msg}");
         }
 
         $remaining = round((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice($invoiceId), 2);
 
         if ($remaining <= 0) {
-            return Response::redirect("/client/invoices/{$invoiceId}");
+            return Response::redirect("/client/invoices/{$invoiceId}?payment=success");
         }
 
         $reference = "cv-{$slug}-{$invoiceId}-" . bin2hex(random_bytes(6));
@@ -76,18 +77,33 @@ final class PaymentCallbackController
 
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
 
-        $result = $module->capture([
-            'config' => $config,
-            'email' => (string) $client['email'],
-            'amount' => $captureAmount,
-            'currency' => $gatewayCurrency,
-            'reference' => $reference,
-            'callbackUrl' => "{$baseUrl}/pay/{$slug}/callback",
-            'metadata' => ['invoice_id' => $invoiceId, 'client_id' => (int) $client['id']],
-        ]);
+        // Without this try/catch, any exception from the gateway module (a
+        // missing PHP extension the module's HTTP client needs, a network
+        // library error, etc.) propagates as an uncaught fatal error — the
+        // customer's browser just gets a blank/500 page with no indication
+        // payment even attempted to start, which is indistinguishable from
+        // the button "not responding". Converting it to the same error
+        // banner every other failure path already uses makes the real
+        // reason visible instead.
+        try {
+            $result = $module->capture([
+                'config' => $config,
+                'email' => (string) $client['email'],
+                'amount' => $captureAmount,
+                'currency' => $gatewayCurrency,
+                'reference' => $reference,
+                'callbackUrl' => "{$baseUrl}/pay/{$slug}/callback",
+                'metadata' => ['invoice_id' => $invoiceId, 'client_id' => (int) $client['id']],
+            ]);
+        } catch (\Throwable $e) {
+            error_log("Gateway [{$slug}] capture() threw: " . $e->getMessage());
+            $errMsg = urlencode('Payment gateway error: ' . $e->getMessage());
+            return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$errMsg}");
+        }
 
         if (!$result['success'] || empty($result['redirectUrl'])) {
-            return Response::redirect("/client/invoices/{$invoiceId}?payment=error");
+            $errMsg = urlencode($result['message'] ?? 'Payment initialization failed. Please verify gateway settings.');
+            return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$errMsg}");
         }
 
         return Response::redirect($result['redirectUrl']);
