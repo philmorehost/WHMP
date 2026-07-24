@@ -37,33 +37,47 @@ final class PaymentCallbackController
 
     public function initiate(Request $request, array $params): Response
     {
+        $slug = (string) ($params['gateway'] ?? 'unknown');
+        $invoiceId = (int) ($params['id'] ?? 0);
+        error_log("[PAYMENT] ==> initiate() started: gateway={$slug} invoice_id={$invoiceId}");
+
         $client = $this->guard->currentClient();
 
         if ($client === null) {
+            error_log("[PAYMENT] ERROR: Client not authenticated");
             return Response::redirect('/client/login');
         }
 
-        $invoiceId = (int) $params['id'];
+        error_log("[PAYMENT] Client authenticated: client_id=" . (int) $client['id']);
+
         $invoice = $this->invoices->find($invoiceId);
 
         if ($invoice === null || (int) $invoice['client_id'] !== (int) $client['id']) {
+            error_log("[PAYMENT] ERROR: Invoice not found or permission denied: invoice_id={$invoiceId}");
             return Response::html('404 Not Found', 404);
         }
 
-        $slug = (string) $params['gateway'];
+        error_log("[PAYMENT] Invoice found: total=" . (float) $invoice['total']);
+
         $gatewayRow = $this->gateways->findBySlug($slug);
         $module = $this->modules->get(GatewayModule::class, $slug);
 
         if ($gatewayRow === null || (int) $gatewayRow['is_enabled'] !== 1 || !$module instanceof GatewayModule) {
+            error_log("[PAYMENT] ERROR: Gateway not configured: slug={$slug} found=" . ($gatewayRow !== null ? 'yes' : 'no') . " enabled=" . (($gatewayRow !== null && (int) $gatewayRow['is_enabled'] === 1) ? 'yes' : 'no'));
             $msg = urlencode("The {$slug} payment gateway is currently disabled or not installed.");
             return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$msg}");
         }
 
+        error_log("[PAYMENT] Gateway module loaded successfully");
+
         $remaining = round((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice($invoiceId), 2);
 
         if ($remaining <= 0) {
+            error_log("[PAYMENT] Invoice already paid, redirecting to success");
             return Response::redirect("/client/invoices/{$invoiceId}?payment=success");
         }
+
+        error_log("[PAYMENT] Remaining balance to pay: {$remaining}");
 
         $reference = "cv-{$slug}-{$invoiceId}-" . bin2hex(random_bytes(6));
         $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
@@ -77,6 +91,8 @@ final class PaymentCallbackController
 
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
 
+        error_log("[PAYMENT] Capture details: amount={$captureAmount} currency={$gatewayCurrency} rate={$gatewayRate} reference={$reference}");
+
         // Without this try/catch, any exception from the gateway module (a
         // missing PHP extension the module's HTTP client needs, a network
         // library error, etc.) propagates as an uncaught fatal error — the
@@ -88,6 +104,7 @@ final class PaymentCallbackController
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
 
         try {
+            error_log("[PAYMENT] Calling gateway->capture() for {$slug}...");
             $result = $module->capture([
                 'config' => $config,
                 'email' => (string) $client['email'],
@@ -101,17 +118,20 @@ final class PaymentCallbackController
                 'callbackUrl' => "{$baseUrl}/pay/{$slug}/callback",
                 'metadata' => ['invoice_id' => $invoiceId, 'client_id' => (int) $client['id']],
             ]);
+            error_log("[PAYMENT] gateway->capture() returned: success=" . ($result['success'] ? 'true' : 'false') . " message=" . (string) ($result['message'] ?? ''));
         } catch (\Throwable $e) {
-            error_log("Gateway [{$slug}] capture() threw: " . $e->getMessage());
+            error_log("[PAYMENT] CRITICAL ERROR: gateway->capture() threw exception: " . get_class($e) . ": " . $e->getMessage() . "\n" . $e->getTraceAsString());
             $errMsg = urlencode('Payment gateway error: ' . $e->getMessage());
             return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$errMsg}");
         }
 
         if (!$result['success'] || empty($result['redirectUrl'])) {
+            error_log("[PAYMENT] Gateway returned failure: success=" . ($result['success'] ? 'true' : 'false') . " has_url=" . (!empty($result['redirectUrl']) ? 'yes' : 'no'));
             $errMsg = urlencode($result['message'] ?? 'Payment initialization failed. Please verify gateway settings.');
             return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$errMsg}");
         }
 
+        error_log("[PAYMENT] SUCCESS: Redirecting to gateway checkout at " . substr((string) $result['redirectUrl'], 0, 100) . "...");
         return Response::redirect($result['redirectUrl']);
     }
 

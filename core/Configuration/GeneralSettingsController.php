@@ -27,6 +27,9 @@ final class GeneralSettingsController
         }
 
         $content = $this->view->render('configuration.general', [
+            'companyName' => $this->settings->get('company.name', ''),
+            'companyEmail' => $this->settings->get('company.email', ''),
+            'companyDept' => $this->settings->get('company.billing_dept', ''),
             'lateFeePercentage' => $this->settings->get('billing.late_fee_percentage', '5.00'),
             'newOrderDueDays' => $this->settings->get('billing.new_order_due_days', '7'),
             'allowCheckoutNotes' => $this->settings->get('checkout.allow_notes', '1') === '1',
@@ -56,6 +59,10 @@ final class GeneralSettingsController
         if ($denied = $this->requirePermission()) {
             return $denied;
         }
+
+        $this->settings->set('company.name', trim((string) $request->input('company_name', '')));
+        $this->settings->set('company.email', trim((string) $request->input('company_email', '')));
+        $this->settings->set('company.billing_dept', trim((string) $request->input('company_billing_dept', '')));
 
         $this->settings->set('billing.late_fee_percentage', (string) max(0.0, (float) $request->input('late_fee_percentage', 5.0)));
         $this->settings->set('billing.new_order_due_days', (string) max(0, (int) $request->input('new_order_due_days', 7)));

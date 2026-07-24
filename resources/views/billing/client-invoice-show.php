@@ -58,9 +58,9 @@ $paymentStatus ??= null;
             </div>
             <div>
                 <strong style="color:#4b5563; text-transform:uppercase; font-size:var(--cv-text-xs); display:block; margin-bottom:6px;">Pay To</strong>
-                <span style="font-weight:700; color:#111827; display:block; margin-bottom:2px;">CodeVault Limited</span>
-                <span style="color:#4b5563; display:block;">Payments Dept.</span>
-                <span style="color:#6b7280; display:block; font-size:var(--cv-text-xs); margin-top:4px;">billing@codevault.com</span>
+                <span style="font-weight:700; color:#111827; display:block; margin-bottom:2px;"><?= e($companyName ?? 'Your Company') ?></span>
+                <span style="color:#4b5563; display:block;"><?= e($companyDept ?? 'Payments Dept.') ?></span>
+                <span style="color:#6b7280; display:block; font-size:var(--cv-text-xs); margin-top:4px;"><?= e($companyEmail ?? 'billing@example.com') ?></span>
             </div>
             <div>
                 <strong style="color:#4b5563; text-transform:uppercase; font-size:var(--cv-text-xs); display:block; margin-bottom:6px;">Invoice Details</strong>

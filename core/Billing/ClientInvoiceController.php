@@ -8,6 +8,7 @@ use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Pdf\InvoicePdfBuilder;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\View;
 
 final class ClientInvoiceController
@@ -21,7 +22,8 @@ final class ClientInvoiceController
         private readonly ClientCreditRepository $credit,
         private readonly CreditService $creditService,
         private readonly CurrencyService $currency,
-        private readonly InvoicePdfBuilder $pdf
+        private readonly InvoicePdfBuilder $pdf,
+        private readonly SettingsRepository $settings
     ) {
     }
 
@@ -70,6 +72,9 @@ final class ClientInvoiceController
             'creditBalance' => $this->credit->balance((int) $client['id']),
             'currency' => $this->currency->resolveLocked($currencyId),
             'paymentStatus' => $request->query('payment'),
+            'companyName' => (string) ($this->settings->get('company.name') ?? 'Your Company'),
+            'companyEmail' => (string) ($this->settings->get('company.email') ?? 'billing@example.com'),
+            'companyDept' => (string) ($this->settings->get('company.billing_dept') ?? 'Payments Dept.'),
         ]);
     }
 

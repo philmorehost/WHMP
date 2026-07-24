@@ -24,6 +24,29 @@
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:var(--cv-space-4);">
 
+        <!-- Company Information Card -->
+        <div class="cv-card">
+            <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Company Information</h2>
+
+            <div class="cv-field">
+                <label class="cv-label">Company Name</label>
+                <input class="cv-input" type="text" name="company_name" value="<?= e($companyName ?? '') ?>" placeholder="Your Company Name">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Displayed in invoices under "Pay To" section.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Billing Email</label>
+                <input class="cv-input" type="email" name="company_email" value="<?= e($companyEmail ?? '') ?>" placeholder="billing@example.com">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Displayed on invoices and sent payment receipts from this address.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Billing Department</label>
+                <input class="cv-input" type="text" name="company_billing_dept" value="<?= e($companyDept ?? '') ?>" placeholder="Payments Dept.">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Department name shown under company name on invoices.</span>
+            </div>
+        </div>
+
         <!-- Billing & Invoices Card -->
         <div class="cv-card">
             <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Invoice &amp; Billing Rules</h2>
