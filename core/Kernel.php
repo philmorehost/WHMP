@@ -12,6 +12,8 @@ use CodeVault\Billing\ClientCreditRepository;
 use CodeVault\Billing\CreditService;
 use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\CancellationRequestRepository;
+use CodeVault\Billing\CancellationRequestService;
+use CodeVault\Billing\CancellationCronJob;
 use CodeVault\Billing\FlutterwaveGateway;
 use CodeVault\Billing\ManualGateway;
 use CodeVault\Billing\PaystackGateway;
@@ -506,6 +508,10 @@ class Kernel
             );
         });
 
+        $this->container->singleton(CancellationCronJob::class, function (Container $c) {
+            return new CancellationCronJob($c->make(CancellationRequestService::class));
+        });
+
         // No SMTP server is configured in this environment — LogMailer
         // writes rendered emails to storage/cache/mail.log instead of
         // transmitting them. Swap for a real SMTP-backed Mailer once
@@ -678,6 +684,15 @@ class Kernel
 
         $this->container->singleton(CancellationRequestRepository::class, function (Container $c) {
             return new CancellationRequestRepository($c->make(Database::class));
+        });
+
+        $this->container->singleton(CancellationRequestService::class, function (Container $c) {
+            return new CancellationRequestService(
+                $c->make(CancellationRequestRepository::class),
+                $c->make(ServiceRepository::class),
+                $c->make(EmailDispatcher::class),
+                $c->make(Database::class)
+            );
         });
 
         $this->container->singleton(TransactionRepository::class, function (Container $c) {

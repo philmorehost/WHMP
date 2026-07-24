@@ -5,6 +5,7 @@
 /** @var int $newClientsThisMonth */
 /** @var float $incomeThisMonth */
 /** @var int $pendingOrders */
+/** @var int $pendingCancellations */
 /** @var int $overdueInvoiceCount */
 /** @var float $overdueInvoiceTotal */
 /** @var int $openTickets */
@@ -331,6 +332,13 @@
         <span class="admin-stat-label">Renewing Soon (7d)</span>
         <span class="admin-stat-value"><?= (int) ($renewingServices + $renewingDomains) ?></span>
         <span class="admin-stat-meta"><?= (int) $renewingServices ?> services · <?= (int) $renewingDomains ?> domains</span>
+    </div>
+
+    <div class="admin-stat-card">
+        <div class="admin-stat-icon" style="background:linear-gradient(135deg, #ef4444, #f97316);">❌</div>
+        <span class="admin-stat-label">Cancellation Requests</span>
+        <span class="admin-stat-value"><?= (int) $pendingCancellations ?></span>
+        <span class="admin-stat-meta"><a href="/admin/cancellations">Review requests →</a></span>
     </div>
 </div>
 

@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use CodeVault\Billing\ServiceController;
-use CodeVault\Billing\AdminCancellationController;
+use CodeVault\Billing\CancellationRequestsController;
 
 /** @var CodeVault\Router $router */
 
@@ -16,5 +16,8 @@ $router->post('/admin/services/{id}/terminate', [ServiceController::class, 'term
 $router->post('/admin/services/{id}/retry-provisioning', [ServiceController::class, 'retryProvisioning']);
 $router->post('/admin/services/{id}/edit', [ServiceController::class, 'updateDetails']);
 
-$router->get('/admin/cancellations', [AdminCancellationController::class, 'index']);
-$router->post('/admin/cancellations/{id}/process', [AdminCancellationController::class, 'process']);
+$router->get('/admin/cancellations', [CancellationRequestsController::class, 'adminIndex']);
+$router->post('/admin/cancellations/{id}/approve', [CancellationRequestsController::class, 'adminApprove']);
+$router->post('/admin/cancellations/{id}/reject', [CancellationRequestsController::class, 'adminReject']);
+
+$router->post('/client/services/{id}/cancel-request', [CancellationRequestsController::class, 'clientCreate']);

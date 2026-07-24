@@ -6,6 +6,7 @@ namespace CodeVault\Reports;
 
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Billing\CancellationRequestRepository;
 use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\OrderRepository;
 use CodeVault\Billing\ServiceRepository;
@@ -45,7 +46,8 @@ final class AdminDashboardController
         private readonly DomainRepository $domains,
         private readonly ReportRepository $reports,
         private readonly SvgChartRenderer $chart,
-        private readonly WidgetModuleService $widgets
+        private readonly WidgetModuleService $widgets,
+        private readonly CancellationRequestRepository $cancellations
     ) {
     }
 
@@ -63,6 +65,7 @@ final class AdminDashboardController
             'newClientsThisMonth' => $this->clients->countNewThisMonth(),
             'incomeThisMonth' => $this->invoices->totalPaidThisMonth(),
             'pendingOrders' => $this->orders->countPending(),
+            'pendingCancellations' => $this->cancellations->countPending(),
             'overdueInvoiceCount' => $this->invoices->countOverdue(),
             'overdueInvoiceTotal' => $this->invoices->sumOverdue(),
             'openTickets' => $this->tickets->countOpen(),
