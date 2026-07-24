@@ -72,7 +72,11 @@ class Migrator
             // an implicit commit in MySQL/MariaDB, which would leave a
             // later commit()/rollback() call with no active transaction.
             foreach ($definition['up'] as $statement) {
-                $this->db->connection()->exec($statement);
+                // Use prepared statement to ensure proper buffering and result cleanup
+                $stmt = $this->db->connection()->prepare($statement);
+                $stmt->execute();
+                // Explicitly close the statement to release any locks
+                $stmt = null;
             }
 
             $this->db->insert(
