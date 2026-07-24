@@ -81,6 +81,70 @@ final class DomainPricingController
         return Response::redirect('/admin/domain-pricing');
     }
 
+    public function bulkStore(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $tldList = trim((string) $request->input('tld_list', ''));
+        $registrarSlug = trim((string) $request->input('registrar_slug', ''));
+        $registerPrice = (float) $request->input('register_price', 0.0);
+        $transferPrice = (float) $request->input('transfer_price', 0.0);
+        $renewPrice = (float) $request->input('renew_price', 0.0);
+
+        if ($tldList === '' || $registrarSlug === '') {
+            $content = $this->view->render('domains.pricing-index', [
+                'pricingList' => $this->pricing->all(),
+                'registrars' => $this->registrars->allEnabled(),
+                'error' => 'TLD list and Registrar are required fields.',
+            ]);
+
+            return Response::html($this->view->render('layouts.admin', [
+                'title' => 'CodeVault Admin — Domain Pricing',
+                'content' => $content,
+            ]));
+        }
+
+        $tlds = array_filter(
+            array_map('trim', preg_split('/[\s,\n]+/', $tldList)),
+            fn($t) => $t !== ''
+        );
+
+        if (empty($tlds)) {
+            $content = $this->view->render('domains.pricing-index', [
+                'pricingList' => $this->pricing->all(),
+                'registrars' => $this->registrars->allEnabled(),
+                'error' => 'No valid TLDs found in the input list.',
+            ]);
+
+            return Response::html($this->view->render('layouts.admin', [
+                'title' => 'CodeVault Admin — Domain Pricing',
+                'content' => $content,
+            ]));
+        }
+
+        $baseData = [
+            'registrar_slug' => $registrarSlug,
+            'register_price' => $registerPrice,
+            'transfer_price' => $transferPrice,
+            'renew_price' => $renewPrice,
+            'grace_period_days' => max(0, (int) $request->input('grace_period_days', 30)),
+            'redemption_period_days' => max(0, (int) $request->input('redemption_period_days', 30)),
+            'redemption_fee' => max(0.0, (float) $request->input('redemption_fee', 0.0)),
+            'spinner_enabled' => $request->input('spinner_enabled') ? 1 : 0,
+            'category' => trim((string) $request->input('category', 'Popular')),
+            'autosetup_registration' => (string) $request->input('autosetup_registration', 'payment'),
+            'autosetup_transfer' => (string) $request->input('autosetup_transfer', 'payment'),
+        ];
+
+        foreach ($tlds as $tld) {
+            $this->pricing->save(array_merge($baseData, ['tld' => $tld]));
+        }
+
+        return Response::redirect('/admin/domain-pricing');
+    }
+
     public function destroy(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {

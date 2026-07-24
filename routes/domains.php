@@ -36,6 +36,7 @@ $router->post('/admin/domains/{id}/contact', [DomainController::class, 'saveCont
 
 $router->get('/admin/domain-pricing', [DomainPricingController::class, 'index']);
 $router->post('/admin/domain-pricing', [DomainPricingController::class, 'store']);
+$router->post('/admin/domain-pricing/bulk', [DomainPricingController::class, 'bulkStore']);
 $router->post('/admin/domain-pricing/{id}/delete', [DomainPricingController::class, 'destroy']);
 
 $router->get('/admin/registrars', [RegistrarController::class, 'index']);

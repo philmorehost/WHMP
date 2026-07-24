@@ -13,7 +13,111 @@
         <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
     <?php endif; ?>
 
-    <h2 class="cv-card__title" id="tld-form-title">Add or Update TLD</h2>
+    <div style="display:flex;gap:var(--cv-space-2);margin-bottom:var(--cv-space-3);">
+        <button type="button" id="toggle-bulk-form" class="cv-btn cv-btn--secondary" style="cursor:pointer;">📋 Bulk Add Multiple TLDs</button>
+    </div>
+
+    <div id="bulk-form-section" style="display:none;margin-bottom:var(--cv-space-4);padding:var(--cv-space-3);background:var(--cv-bg-surface-sunken);border-radius:8px;">
+        <h3 style="margin:0 0 var(--cv-space-3) 0;">Bulk Add Multiple TLDs</h3>
+        <p style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin:0 0 var(--cv-space-2) 0;">Enter multiple TLDs separated by commas or newlines. All will be added with the same registrar and pricing.</p>
+        <style>
+        #bulk-tld-form {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: var(--cv-space-3);
+            align-items: start;
+        }
+        @media (max-width: 1100px) {
+            #bulk-tld-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            #bulk-tld-form .bulk-span4 { grid-column: span 2; }
+        }
+        @media (max-width: 700px) {
+            #bulk-tld-form { grid-template-columns: 1fr; }
+            #bulk-tld-form .bulk-span4 { grid-column: span 1; }
+        }
+        </style>
+        <form id="bulk-tld-form" method="post" action="/admin/domain-pricing/bulk"><?= csrf_field() ?>
+            <div class="cv-field bulk-span4" style="margin-bottom:0;grid-column:span 4;">
+                <label class="cv-label">TLD List (comma or newline separated)</label>
+                <textarea class="cv-input" name="tld_list" placeholder=".com, .net, .org&#10;.info&#10;.biz" style="min-height:120px;font-family:monospace;font-size:.85rem;" required></textarea>
+                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">Examples: .com, .net, .org or paste one per line</div>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Registrar</label>
+                <select class="cv-select" name="registrar_slug" required>
+                    <?php foreach ($registrars as $registrar): ?>
+                        <option value="<?= e($registrar['slug']) ?>"><?= e($registrar['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Register Price</label>
+                <input class="cv-input" type="number" step="0.01" name="register_price" value="0.00" min="0">
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Transfer Price</label>
+                <input class="cv-input" type="number" step="0.01" name="transfer_price" value="0.00" min="0">
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Renewal Price</label>
+                <input class="cv-input" type="number" step="0.01" name="renew_price" value="0.00" min="0">
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Category</label>
+                <input class="cv-input" name="category" list="bulk-category-list" placeholder="Popular" value="Popular">
+                <datalist id="bulk-category-list">
+                    <option value="Popular"></option>
+                    <option value="Geographic"></option>
+                    <option value="Technology"></option>
+                    <option value="Shopping"></option>
+                    <option value="Novelty"></option>
+                    <option value="Other"></option>
+                </datalist>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Grace Period (Days)</label>
+                <input class="cv-input" type="number" name="grace_period_days" value="30" min="0">
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Redemption Period (Days)</label>
+                <input class="cv-input" type="number" name="redemption_period_days" value="30" min="0">
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Redemption Fee</label>
+                <input class="cv-input" type="number" step="0.01" name="redemption_fee" value="0.00" min="0">
+            </div>
+            <div class="cv-field bulk-span4" style="margin-bottom:0;grid-column:span 4;">
+                <label class="cv-label">Registration Auto-Setup</label>
+                <select class="cv-select" name="autosetup_registration">
+                    <option value="order">Automatically setup as soon as an order is placed</option>
+                    <option value="payment" selected>Automatically setup as soon as first payment is received</option>
+                    <option value="on_accept">Automatically setup when manually accepting pending order</option>
+                    <option value="off">Do not automatically setup</option>
+                </select>
+            </div>
+            <div class="cv-field bulk-span4" style="margin-bottom:0;grid-column:span 4;">
+                <label class="cv-label">Transfer Auto-Setup</label>
+                <select class="cv-select" name="autosetup_transfer">
+                    <option value="order">Automatically setup as soon as an order is placed</option>
+                    <option value="payment" selected>Automatically setup as soon as first payment is received</option>
+                    <option value="on_accept">Automatically setup when manually accepting pending order</option>
+                    <option value="off">Do not automatically setup</option>
+                </select>
+            </div>
+            <div class="cv-field bulk-span4" style="margin-bottom:0;grid-column:span 4;">
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                    <input type="checkbox" name="spinner_enabled">
+                    Allow these TLDs in the Domain Spinner
+                </label>
+            </div>
+            <div class="bulk-span4" style="grid-column:span 4;display:flex;gap:var(--cv-space-2);flex-wrap:wrap;">
+                <button class="cv-btn" type="submit">✓ Add All TLDs</button>
+                <button type="button" class="cv-btn cv-btn--secondary" onclick="document.getElementById('bulk-form-section').style.display='none';">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <h2 class="cv-card__title" id="tld-form-title">Add or Update Single TLD</h2>
     <style>
     #tld-form {
         display: grid;
@@ -192,3 +296,10 @@
         </tbody>
     </table>
 </div>
+
+<script>
+document.getElementById('toggle-bulk-form').addEventListener('click', function() {
+    var section = document.getElementById('bulk-form-section');
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+});
+</script>
