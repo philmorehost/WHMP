@@ -166,18 +166,50 @@ final class ProductRepository
 
         $sql = 'UPDATE products SET ' . implode(', ', $setClauses) . ' WHERE id = ?';
 
-        // Try to execute, but if a column doesn't exist, retry without optional fields
+        // Try to execute the full update first (core + optional fields)
         try {
             $this->db->update($sql, $bindings);
+            return;
         } catch (\Throwable $e) {
-            // If the error is about a missing column, retry without optional fields
+            // If error is about a missing column, try a smarter approach
             if (strpos($e->getMessage(), 'Unknown column') !== false) {
+                // Extract which column is missing from the error
+                preg_match("/Unknown column '(\w+)'/", $e->getMessage(), $matches);
+                $missingColumn = $matches[1] ?? null;
+
+                // Update all fields that we know exist, skip the ones that don't
                 $setClauses = [];
                 $bindings = [];
 
-                // Only use core fields
+                // Always try core fields
                 foreach ($coreFields as $fieldKey => $columnName) {
                     if (!isset($fields[$fieldKey])) {
+                        continue;
+                    }
+
+                    $setClauses[] = "{$columnName} = ?";
+
+                    if ($fieldKey === 'is_upsell' || $fieldKey === 'require_domain') {
+                        $bindings[] = !empty($fields[$fieldKey]) ? 1 : 0;
+                    } elseif ($fieldKey === 'autosetup') {
+                        $bindings[] = $fields[$fieldKey] ?? 'payment';
+                    } elseif ($fieldKey === 'status') {
+                        $bindings[] = $fields[$fieldKey] ?? 'active';
+                    } elseif ($fieldKey === 'type') {
+                        $bindings[] = $fields[$fieldKey] ?? 'other';
+                    } else {
+                        $bindings[] = $fields[$fieldKey] ?? null;
+                    }
+                }
+
+                // Try optional fields one at a time, skip ones that don't exist
+                foreach ($optionalFields as $fieldKey => $columnName) {
+                    if (!isset($fields[$fieldKey])) {
+                        continue;
+                    }
+
+                    // Skip the column that was missing
+                    if ($missingColumn && $columnName === $missingColumn) {
                         continue;
                     }
 
