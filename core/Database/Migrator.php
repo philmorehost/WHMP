@@ -71,7 +71,18 @@ class Migrator
             // Not wrapped in a transaction: DDL (CREATE TABLE, etc.) causes
             // an implicit commit in MySQL/MariaDB, which would leave a
             // later commit()/rollback() call with no active transaction.
+            //
+            // A statement may be a raw SQL string, or a closure(Database $db)
+            // for migrations that need to branch on current schema state
+            // (e.g. "add this column only if it's missing") — needed because
+            // `ADD COLUMN IF NOT EXISTS` is MySQL 8.0.29+/MariaDB-only syntax
+            // and isn't safe to rely on across hosts (see migration 0117).
             foreach ($definition['up'] as $statement) {
+                if ($statement instanceof \Closure) {
+                    $statement($this->db);
+                    continue;
+                }
+
                 // Use prepared statement to ensure proper buffering and result cleanup
                 $stmt = $this->db->connection()->prepare($statement);
                 $stmt->execute();

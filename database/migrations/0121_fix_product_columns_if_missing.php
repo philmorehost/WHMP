@@ -2,16 +2,15 @@
 
 declare(strict_types=1);
 
-// Fallback migration to ensure all required product columns exist.
-// If migration 0120 didn't run (older MySQL without IF NOT EXISTS support),
-// this migration will add any missing columns one by one.
+// No-op: migration 0120 was rewritten to check INFORMATION_SCHEMA.COLUMNS
+// before adding each column (portable across MySQL/MariaDB versions), so it
+// now reliably creates whm_package_name, pay_type, free_duration_type, and
+// free_duration_days itself. This migration's own ADD COLUMN statements
+// (without any existence check) would fail with "Duplicate column" once
+// 0120 succeeds, so it's kept only so the filename isn't reused.
 
 return [
     'up' => [
-        // These will fail silently if column already exists (using catch-all approach)
-        "ALTER TABLE products ADD COLUMN whm_package_name VARCHAR(191) NULL AFTER server_group_id",
-        "ALTER TABLE products ADD COLUMN pay_type VARCHAR(20) NOT NULL DEFAULT 'paid' AFTER type",
-        "ALTER TABLE products ADD COLUMN free_duration_type VARCHAR(50) NOT NULL DEFAULT 'lifetime' AFTER require_domain",
-        "ALTER TABLE products ADD COLUMN free_duration_days INT NULL AFTER free_duration_type",
+        'SELECT 1',
     ],
 ];
