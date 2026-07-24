@@ -1048,6 +1048,9 @@
         } else if (module === 'nocix-dedicated' || module === 'nocix_dedicated' || module === 'nocix') {
             hintEl.innerHTML = 'Hint: Use <strong>https://manage.nocix.net/</strong>';
             hintEl.style.display = 'block';
+        } else if (module === 'resellerclub-email' || module === 'resellerclub_email') {
+            hintEl.innerHTML = 'Hint: Use <strong>https://httpapi.com/api</strong>';
+            hintEl.style.display = 'block';
         } else {
             hintEl.style.display = 'none';
         }
