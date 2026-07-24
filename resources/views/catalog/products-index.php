@@ -318,79 +318,96 @@
 </div>
 
 <script>
-document.getElementById('toggle-bulk-update-form').addEventListener('click', function() {
-    var section = document.getElementById('bulk-update-section');
-    section.style.display = section.style.display === 'none' ? 'block' : 'none';
-});
+document.addEventListener('DOMContentLoaded', function() {
+    var toggleBtn = document.getElementById('toggle-bulk-update-form');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function() {
+            var section = document.getElementById('bulk-update-section');
+            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+        });
+    }
 
-// Select/Deselect all products
-document.getElementById('select-all-products').addEventListener('change', function() {
-    var checked = this.checked;
+    // Select/Deselect all products
+    var selectAllCheckbox = document.getElementById('select-all-products');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            var checked = this.checked;
+            document.querySelectorAll('.product-select-checkbox').forEach(cb => {
+                cb.checked = checked;
+            });
+            updateBulkSubmitButton();
+        });
+    }
+
+    // Individual checkbox handlers
     document.querySelectorAll('.product-select-checkbox').forEach(cb => {
-        cb.checked = checked;
+        cb.addEventListener('change', updateBulkSubmitButton);
     });
-    updateBulkSubmitButton();
-});
 
-// Individual checkbox handlers
-document.querySelectorAll('.product-select-checkbox').forEach(cb => {
-    cb.addEventListener('change', updateBulkSubmitButton);
-});
-
-function updateBulkSubmitButton() {
-    var anyChecked = document.querySelector('.product-select-checkbox:checked') !== null;
-    document.getElementById('bulk-submit-btn').disabled = !anyChecked;
-}
-
-// Bulk update form submission
-document.getElementById('bulk-update-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    var selected = Array.from(document.querySelectorAll('.product-select-checkbox:checked'))
-        .map(cb => cb.value);
-
-    if (selected.length === 0) {
-        alert('Please select at least one product');
-        return;
-    }
-
-    var serverGroupId = this.querySelector('[name="server_group_id"]').value;
-    var requireDomain = this.querySelector('[name="require_domain"]').value;
-
-    if (!serverGroupId && !requireDomain) {
-        alert('Please select at least one field to update');
-        return;
-    }
-
-    var btn = document.getElementById('bulk-submit-btn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Updating...';
-
-    var formData = new FormData();
-    formData.append('_token', document.querySelector('[name="_token"]').value);
-    selected.forEach(id => formData.append('product_ids[]', id));
-    if (serverGroupId) formData.append('server_group_id', serverGroupId);
-    if (requireDomain) formData.append('require_domain', requireDomain);
-
-    fetch('/admin/products/bulk-update', {
-        method: 'POST',
-        body: formData,
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message);
-            window.location.reload();
-        } else {
-            alert('Error: ' + (data.message || 'Unknown error'));
+    function updateBulkSubmitButton() {
+        var anyChecked = document.querySelector('.product-select-checkbox:checked') !== null;
+        var btn = document.getElementById('bulk-submit-btn');
+        if (btn) {
+            btn.disabled = !anyChecked;
         }
-    })
-    .catch(err => {
-        alert('Error: ' + err.message);
-    })
-    .finally(() => {
-        btn.disabled = false;
-        btn.textContent = '✓ Update Selected';
-    });
+    }
+
+    // Bulk update form submission
+    var bulkForm = document.getElementById('bulk-update-form');
+    if (bulkForm) {
+        bulkForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            var selected = Array.from(document.querySelectorAll('.product-select-checkbox:checked'))
+                .map(cb => cb.value);
+
+            if (selected.length === 0) {
+                alert('Please select at least one product');
+                return;
+            }
+
+            var serverGroupId = this.querySelector('[name="server_group_id"]').value;
+            var requireDomain = this.querySelector('[name="require_domain"]').value;
+
+            if (!serverGroupId && !requireDomain) {
+                alert('Please select at least one field to update');
+                return;
+            }
+
+            var btn = document.getElementById('bulk-submit-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Updating...';
+
+            var formData = new FormData();
+            var tokenEl = document.querySelector('[name="_token"]');
+            if (tokenEl) {
+                formData.append('_token', tokenEl.value);
+            }
+            selected.forEach(id => formData.append('product_ids[]', id));
+            if (serverGroupId) formData.append('server_group_id', serverGroupId);
+            if (requireDomain) formData.append('require_domain', requireDomain);
+
+            fetch('/admin/products/bulk-update', {
+                method: 'POST',
+                body: formData,
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(err => {
+                alert('Error: ' + err.message);
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.textContent = '✓ Update Selected';
+            });
+        });
+    }
 });
 </script>
