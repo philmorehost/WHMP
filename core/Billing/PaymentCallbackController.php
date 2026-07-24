@@ -85,10 +85,16 @@ final class PaymentCallbackController
         // the button "not responding". Converting it to the same error
         // banner every other failure path already uses makes the real
         // reason visible instead.
+        $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
+
         try {
             $result = $module->capture([
                 'config' => $config,
                 'email' => (string) $client['email'],
+                // PayHub's initialize endpoint requires name + phone (not just
+                // email); other gateway modules simply ignore params they don't use.
+                'name' => $clientName !== '' ? $clientName : (string) $client['email'],
+                'phone' => (string) ($client['phone'] ?? ''),
                 'amount' => $captureAmount,
                 'currency' => $gatewayCurrency,
                 'reference' => $reference,
@@ -123,7 +129,7 @@ final class PaymentCallbackController
         // verify takes, not the tx_ref we generated); PayPal returns
         // ?token=...&PayerID=... where token is the PayPal order id
         // (see PaypalGateway::capture()'s transactionId).
-        $reference = (string) ($request->query('reference') ?? $request->query('transaction_id') ?? $request->query('token') ?? '');
+        $reference = (string) ($request->query('reference') ?? $request->query('trxref') ?? $request->query('transaction_id') ?? $request->query('token') ?? '');
 
         if ($reference === '') {
             return Response::redirect('/client/invoices');
