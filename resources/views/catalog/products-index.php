@@ -238,7 +238,7 @@
 
 <div class="admin-prod-card">
     <div style="padding:24px;border-bottom:1px solid var(--cv-border-default);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-        <button type="button" id="toggle-bulk-update-form" class="cv-btn cv-btn--secondary" style="cursor:pointer;">⚙️ Bulk Update Server Settings</button>
+        <button type="button" id="toggle-bulk-update-form" class="cv-btn cv-btn--secondary" onclick="toggleBulkUpdateForm();" style="cursor:pointer;">⚙️ Bulk Update Server Settings</button>
     </div>
 
     <div id="bulk-update-section" style="display:none;padding:24px;background:var(--cv-bg-surface-sunken);border-bottom:1px solid var(--cv-border-default);">
@@ -416,4 +416,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// Global function for button toggle (fallback if DOMContentLoaded event listener fails)
+function toggleBulkUpdateForm() {
+    var section = document.getElementById('bulk-update-section');
+    if (section) {
+        section.style.display = section.style.display === 'none' ? 'block' : 'none';
+    }
+}
 </script>

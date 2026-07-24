@@ -102,13 +102,14 @@ final class ProductRepository
         $setClauses = [];
         $bindings = [];
 
-        // Core columns that must exist (from earlier migrations)
+        // Core columns that must exist (from earlier migrations, all pre-2024)
         $coreFields = [
             'product_group_id' => 'product_group_id',  // migration 0021
             'name' => 'name',                           // migration 0021
             'description' => 'description',             // migration 0021
             'status' => 'status',                       // migration 0021
             'stock_quantity' => 'stock_quantity',       // migration 0021
+            'server_group_id' => 'server_group_id',    // migration 0043
             'autosetup' => 'autosetup',                 // migration 0111
             'type' => 'type',                           // migration 0102
             'is_upsell' => 'is_upsell',                 // migration 0064
@@ -116,9 +117,8 @@ final class ProductRepository
             'upsell_pitch' => 'upsell_pitch',           // migration 0064
         ];
 
-        // Optional columns (from later migrations, may not exist yet)
+        // Optional columns (from latest migrations, may not exist in older databases)
         $optionalFields = [
-            'server_group_id' => 'server_group_id',    // migration 0043
             'whm_package_name' => 'whm_package_name',  // migration 0120
             'pay_type' => 'pay_type',                   // migration 0120
             'free_duration_type' => 'free_duration_type', // migration 0120
