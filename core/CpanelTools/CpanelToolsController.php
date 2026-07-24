@@ -38,7 +38,7 @@ final class CpanelToolsController
             return $denied;
         }
 
-        return $this->render($id, $service, (string) $request->query('tab', 'email'), null);
+        return $this->render($id, $service, (string) $request->query('tab', 'logins'), null);
     }
 
     public function storeEmail(Request $request, array $params): Response
