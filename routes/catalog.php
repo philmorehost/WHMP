@@ -17,6 +17,7 @@ $router->post('/admin/products/groups/{id}/delete', [ProductGroupController::cla
 $router->get('/admin/products', [ProductController::class, 'index']);
 $router->get('/admin/products/create', [ProductController::class, 'createForm']);
 $router->post('/admin/products', [ProductController::class, 'store']);
+$router->post('/admin/products/bulk-update', [ProductController::class, 'bulkUpdate']);
 $router->get('/admin/products/{id}/edit', [ProductController::class, 'editForm']);
 $router->post('/admin/products/{id}', [ProductController::class, 'update']);
 $router->post('/admin/products/{id}/delete', [ProductController::class, 'destroy']);

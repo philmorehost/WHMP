@@ -237,6 +237,42 @@
 </div>
 
 <div class="admin-prod-card">
+    <div style="padding:24px;border-bottom:1px solid var(--cv-border-default);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button type="button" id="toggle-bulk-update-form" class="cv-btn cv-btn--secondary" style="cursor:pointer;">⚙️ Bulk Update Server Settings</button>
+    </div>
+
+    <div id="bulk-update-section" style="display:none;padding:24px;background:var(--cv-bg-surface-sunken);border-bottom:1px solid var(--cv-border-default);">
+        <h3 style="margin:0 0 var(--cv-space-3) 0;font-weight:700;">Bulk Update Products</h3>
+        <p style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin:0 0 var(--cv-space-2) 0;">Select multiple products below and use this form to quickly set their provisioning server and domain requirement across all at once.</p>
+
+        <form id="bulk-update-form" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--cv-space-3);margin-top:var(--cv-space-3);">
+            <?= csrf_field() ?>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Server Group (optional)</label>
+                <select class="cv-select" name="server_group_id">
+                    <option value="">— No Change —</option>
+                    <?php if (isset($serverGroups)): ?>
+                        <?php foreach ($serverGroups as $group): ?>
+                            <option value="<?= (int) $group['id'] ?>"><?= e($group['name']) ?></option>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </select>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Require Domain (optional)</label>
+                <select class="cv-select" name="require_domain">
+                    <option value="">— No Change —</option>
+                    <option value="0">No - Not required</option>
+                    <option value="1">Yes - Required</option>
+                </select>
+            </div>
+            <div style="display:flex;gap:var(--cv-space-2);align-items:flex-end;">
+                <button class="cv-btn" type="submit" id="bulk-submit-btn" disabled>✓ Update Selected</button>
+                <button type="button" class="cv-btn cv-btn--secondary" onclick="document.getElementById('bulk-update-section').style.display='none';">Cancel</button>
+            </div>
+        </form>
+    </div>
+
     <div class="admin-prod-toolbar">
         <h2 style="font-family:'Hanken Grotesk',sans-serif;font-weight:800;font-size:1.25rem;color:var(--cv-text-primary);margin:0;">📦 All Products</h2>
         <?= $view->partial('partials.table-search', ['target' => '#products-table', 'placeholder' => 'Search products...']) ?>
@@ -252,11 +288,12 @@
     <?php else: ?>
         <div class="admin-prod-table-wrapper">
             <table class="admin-prod-table" id="products-table">
-                <thead><tr><th>Name</th><th>Group</th><th>Status</th><th>Stock</th><th>Order Link</th><th style="width:80px;">Action</th></tr></thead>
+                <thead><tr><th style="width:40px;"><input type="checkbox" id="select-all-products" style="cursor:pointer;"></th><th>Name</th><th>Group</th><th>Status</th><th>Stock</th><th>Order Link</th><th style="width:80px;">Action</th></tr></thead>
                 <tbody>
                 <?php foreach ($products as $product): ?>
                     <?php $orderLink = $baseUrl . '/store/' . (int) $product['id']; ?>
                     <tr>
+                        <td style="padding:16px 8px;"><input type="checkbox" class="product-select-checkbox" value="<?= (int) $product['id'] ?>" style="cursor:pointer;"></td>
                         <td><strong><?= e($product['name']) ?></strong></td>
                         <td><?= e($product['group_name']) ?></td>
                         <td>
@@ -279,3 +316,81 @@
         </div>
     <?php endif; ?>
 </div>
+
+<script>
+document.getElementById('toggle-bulk-update-form').addEventListener('click', function() {
+    var section = document.getElementById('bulk-update-section');
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+});
+
+// Select/Deselect all products
+document.getElementById('select-all-products').addEventListener('change', function() {
+    var checked = this.checked;
+    document.querySelectorAll('.product-select-checkbox').forEach(cb => {
+        cb.checked = checked;
+    });
+    updateBulkSubmitButton();
+});
+
+// Individual checkbox handlers
+document.querySelectorAll('.product-select-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateBulkSubmitButton);
+});
+
+function updateBulkSubmitButton() {
+    var anyChecked = document.querySelector('.product-select-checkbox:checked') !== null;
+    document.getElementById('bulk-submit-btn').disabled = !anyChecked;
+}
+
+// Bulk update form submission
+document.getElementById('bulk-update-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    var selected = Array.from(document.querySelectorAll('.product-select-checkbox:checked'))
+        .map(cb => cb.value);
+
+    if (selected.length === 0) {
+        alert('Please select at least one product');
+        return;
+    }
+
+    var serverGroupId = this.querySelector('[name="server_group_id"]').value;
+    var requireDomain = this.querySelector('[name="require_domain"]').value;
+
+    if (!serverGroupId && !requireDomain) {
+        alert('Please select at least one field to update');
+        return;
+    }
+
+    var btn = document.getElementById('bulk-submit-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Updating...';
+
+    var formData = new FormData();
+    formData.append('_token', document.querySelector('[name="_token"]').value);
+    selected.forEach(id => formData.append('product_ids[]', id));
+    if (serverGroupId) formData.append('server_group_id', serverGroupId);
+    if (requireDomain) formData.append('require_domain', requireDomain);
+
+    fetch('/admin/products/bulk-update', {
+        method: 'POST',
+        body: formData,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        alert('Error: ' + err.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = '✓ Update Selected';
+    });
+});
+</script>

@@ -99,28 +99,105 @@ final class ProductRepository
     /** @param array<string, mixed> $fields */
     public function update(int $id, array $fields): void
     {
-        $this->db->update(
-            'UPDATE products SET product_group_id = ?, server_group_id = ?, whm_package_name = ?, autosetup = ?, name = ?, description = ?, status = ?, type = ?, pay_type = ?, is_upsell = ?, free_duration_type = ?, free_duration_days = ?, require_domain = ?, upsell_pitch = ?, stock_quantity = ?, updated_at = ? WHERE id = ?',
-            [
-                $fields['product_group_id'],
-                $fields['server_group_id'] ?? null,
-                $fields['whm_package_name'] ?? null,
-                $fields['autosetup'] ?? 'payment',
-                $fields['name'],
-                $fields['description'] ?? null,
-                $fields['status'] ?? 'active',
-                $fields['type'] ?? 'other',
-                $fields['pay_type'] ?? 'paid',
-                !empty($fields['is_upsell']) ? 1 : 0,
-                $fields['free_duration_type'] ?? 'lifetime',
-                $fields['free_duration_days'] ?? null,
-                !empty($fields['require_domain']) ? 1 : 0,
-                $fields['upsell_pitch'] ?? null,
-                $fields['stock_quantity'] ?? null,
-                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
-                $id,
-            ]
-        );
+        $setClauses = [];
+        $bindings = [];
+
+        $fieldMap = [
+            'product_group_id' => 'product_group_id',
+            'server_group_id' => 'server_group_id',
+            'whm_package_name' => 'whm_package_name',
+            'autosetup' => 'autosetup',
+            'name' => 'name',
+            'description' => 'description',
+            'status' => 'status',
+            'type' => 'type',
+            'pay_type' => 'pay_type',
+            'is_upsell' => 'is_upsell',
+            'free_duration_type' => 'free_duration_type',
+            'free_duration_days' => 'free_duration_days',
+            'require_domain' => 'require_domain',
+            'upsell_pitch' => 'upsell_pitch',
+            'stock_quantity' => 'stock_quantity',
+        ];
+
+        foreach ($fieldMap as $fieldKey => $columnName) {
+            if (!isset($fields[$fieldKey])) {
+                continue;
+            }
+
+            $setClauses[] = "{$columnName} = ?";
+
+            if ($fieldKey === 'is_upsell' || $fieldKey === 'require_domain') {
+                $bindings[] = !empty($fields[$fieldKey]) ? 1 : 0;
+            } elseif ($fieldKey === 'autosetup') {
+                $bindings[] = $fields[$fieldKey] ?? 'payment';
+            } elseif ($fieldKey === 'status') {
+                $bindings[] = $fields[$fieldKey] ?? 'active';
+            } elseif ($fieldKey === 'type') {
+                $bindings[] = $fields[$fieldKey] ?? 'other';
+            } elseif ($fieldKey === 'pay_type') {
+                $bindings[] = $fields[$fieldKey] ?? 'paid';
+            } elseif ($fieldKey === 'free_duration_type') {
+                $bindings[] = $fields[$fieldKey] ?? 'lifetime';
+            } else {
+                $bindings[] = $fields[$fieldKey] ?? null;
+            }
+        }
+
+        if (empty($setClauses)) {
+            return;
+        }
+
+        $setClauses[] = 'updated_at = ?';
+        $bindings[] = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $bindings[] = $id;
+
+        $sql = 'UPDATE products SET ' . implode(', ', $setClauses) . ' WHERE id = ?';
+        $this->db->update($sql, $bindings);
+    }
+
+    public function bulkUpdate(array $productIds, array $fields): int
+    {
+        if (empty($productIds) || empty($fields)) {
+            return 0;
+        }
+
+        $setClauses = [];
+        $bindings = [];
+
+        $fieldMap = [
+            'server_group_id' => 'server_group_id',
+            'require_domain' => 'require_domain',
+        ];
+
+        foreach ($fieldMap as $fieldKey => $columnName) {
+            if (!isset($fields[$fieldKey])) {
+                continue;
+            }
+
+            $setClauses[] = "{$columnName} = ?";
+
+            if ($fieldKey === 'require_domain') {
+                $bindings[] = !empty($fields[$fieldKey]) ? 1 : 0;
+            } else {
+                $bindings[] = $fields[$fieldKey] ?? null;
+            }
+        }
+
+        if (empty($setClauses)) {
+            return 0;
+        }
+
+        $setClauses[] = 'updated_at = ?';
+        $bindings[] = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+        foreach ($productIds as $id) {
+            $bindings[] = $id;
+        }
+
+        $sql = 'UPDATE products SET ' . implode(', ', $setClauses) . " WHERE id IN ({$placeholders})";
+        return $this->db->update($sql, $bindings);
     }
 
     public function delete(int $id): void

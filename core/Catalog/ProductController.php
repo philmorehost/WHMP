@@ -36,6 +36,7 @@ final class ProductController
 
         return $this->render('catalog.products-index', [
             'products' => $this->products->all(),
+            'serverGroups' => $this->serverGroups->all(),
             // Every product's direct order link — /store/{id} — works
             // the same regardless of whether the product was created here
             // or came in via the WHMCS importer, since it's keyed purely
@@ -224,6 +225,50 @@ final class ProductController
         }
 
         return null;
+    }
+
+    public function bulkUpdate(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $productIds = array_filter(
+            array_map('intval', (array) $request->input('product_ids', [])),
+            fn($id) => $id > 0
+        );
+
+        if (empty($productIds)) {
+            return Response::json([
+                'success' => false,
+                'message' => 'No products selected.',
+            ]);
+        }
+
+        $serverGroupId = $request->input('server_group_id');
+        $requireDomain = $request->input('require_domain');
+
+        $fields = [];
+        if ($serverGroupId !== null && $serverGroupId !== '') {
+            $fields['server_group_id'] = (int) $serverGroupId;
+        }
+        if ($requireDomain !== null) {
+            $fields['require_domain'] = (int) $requireDomain ? 1 : 0;
+        }
+
+        if (empty($fields)) {
+            return Response::json([
+                'success' => false,
+                'message' => 'No fields to update.',
+            ]);
+        }
+
+        $updated = $this->products->bulkUpdate($productIds, $fields);
+
+        return Response::json([
+            'success' => true,
+            'message' => "Updated {$updated} product(s).",
+        ]);
     }
 
     private function render(string $template, array $data): Response
