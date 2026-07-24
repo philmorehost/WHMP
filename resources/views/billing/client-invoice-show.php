@@ -192,8 +192,20 @@ $companyDept ??= 'Payments Dept.';
                 if ($phHasKeys):
                     // Pre-calculate amounts
                     $invoiceRate = (float)($invoice['currency_rate'] ?? 1.0);
-                    $usdBase = ((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice((int)$invoice['id'])) / ($invoiceRate ?: 1.0);
-                    $gwRateRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', ['NGN']);
+                    
+                    // Sum completed transactions from the passed $transactions array
+                    $completedSum = 0.0;
+                    foreach ($transactions as $tx) {
+                        if (($tx['status'] ?? '') === 'completed') {
+                            $completedSum += (float) ($tx['amount'] ?? 0.0);
+                        }
+                    }
+                    $remainingDue = max(0.0, (float) $invoice['total'] - $completedSum);
+                    $usdBase = $remainingDue / ($invoiceRate ?: 1.0);
+
+                    // Fetch NGN exchange rate from database helper
+                    $dbHelper = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
+                    $gwRateRow = $dbHelper->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', ['NGN']);
                     $gwRate = ($gwRateRow !== null && (float)$gwRateRow['exchange_rate'] > 0) ? (float)$gwRateRow['exchange_rate'] : 1490.0;
                     $popAmount = round($usdBase * $gwRate, 2);
                     $popRef = "cv-payhub-" . (int)$invoice['id'] . "-" . bin2hex(random_bytes(6));
