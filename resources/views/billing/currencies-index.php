@@ -2,52 +2,206 @@
 /** @var array<int, array<string, mixed>> $currencies */
 /** @var string|null $error */
 ?>
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Currencies</h1>
-    <p><a href="/admin">&larr; Back to dashboard</a></p>
+<style>
+.admin-cur-hero {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 45%, #0c0e1a 100%);
+    padding: 48px 40px;
+    margin-bottom: 32px;
+    border-radius: 16px;
+    position: relative;
+    overflow: hidden;
+}
+.admin-cur-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 80% 50%, rgba(37,99,235,.08) 0%, transparent 70%);
+    pointer-events: none;
+}
+.admin-cur-hero__back {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #3b82f6;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: .9rem;
+    margin-bottom: 12px;
+}
+.admin-cur-hero__title {
+    position: relative;
+    z-index: 1;
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: 2rem;
+    font-weight: 900;
+    color: #fff;
+    margin: 0;
+}
+.admin-cur-alert {
+    background: rgba(239,68,68,.1);
+    border: 1px solid rgba(239,68,68,.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #ef4444;
+    margin-bottom: 24px;
+    font-size: .9rem;
+}
+.admin-cur-card {
+    background: var(--cv-bg-surface);
+    border: 1px solid var(--cv-border-default);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    margin-bottom: 24px;
+}
+.admin-cur-card__title {
+    font-weight: 800;
+    font-size: 1.25rem;
+    color: var(--cv-text-primary);
+    padding: 24px 24px 16px 24px;
+    border-bottom: 1px solid var(--cv-border-default);
+    margin: 0;
+}
+.admin-cur-card__body {
+    padding: 24px;
+}
+.admin-cur-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .9rem;
+}
+.admin-cur-table thead {
+    background: linear-gradient(135deg, var(--cv-bg-surface-sunken), var(--cv-bg-surface));
+    border-bottom: 2px solid var(--cv-border-default);
+}
+.admin-cur-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 700;
+    color: var(--cv-text-secondary);
+    font-size: .8rem;
+    text-transform: uppercase;
+}
+.admin-cur-table td {
+    padding: 12px 16px;
+    color: var(--cv-text-primary);
+    border-bottom: 1px solid var(--cv-border-default);
+}
+.admin-cur-table tbody tr:hover {
+    background: linear-gradient(135deg, rgba(37,99,235,0.02), transparent);
+}
+.admin-cur-input {
+    padding: 8px 12px;
+    border: 1px solid var(--cv-border-default);
+    border-radius: 6px;
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    font-size: .9rem;
+}
+.admin-cur-input:focus {
+    outline: none;
+    border-color: var(--cv-color-brand-500);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+.admin-cur-badge--default {
+    background: linear-gradient(135deg, rgba(16,185,129,.2), rgba(5,150,105,.15));
+    color: #10b981;
+    border: 1px solid rgba(16,185,129,.3);
+    padding: 4px 10px;
+    border-radius: 6px;
+    display: inline-block;
+    font-size: .7rem;
+    font-weight: 700;
+}
+.admin-cur-btn {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: .75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.admin-cur-btn:hover {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+.admin-cur-btn--secondary {
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    border: 1px solid var(--cv-border-default);
+}
+.admin-cur-btn--secondary:hover {
+    background: var(--cv-bg-surface-sunken);
+    border-color: var(--cv-color-brand-500);
+}
+.admin-cur-btn--danger {
+    background: rgba(239,68,68,.2);
+    color: #ef4444;
+    border: 1px solid rgba(239,68,68,.3);
+}
+.admin-cur-btn--danger:hover {
+    background: rgba(239,68,68,.3);
+}
+</style>
+
+<div class="admin-cur-hero">
+    <a href="/admin" class="admin-cur-hero__back">← Back to Dashboard</a>
+    <h1 class="admin-cur-hero__title">💱 Currencies</h1>
 </div>
 
 <?php if ($error !== null): ?>
-    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-        <div class="cv-field-error"><?= e($error) ?></div>
-    </div>
+    <div class="admin-cur-alert">⚠️ <?= e($error) ?></div>
 <?php endif; ?>
 
-<div class="cv-card">
-    <div class="cv-datatable__toolbar">
-        <?= $view->partial('partials.table-search', ['target' => '#currencies-table', 'placeholder' => 'Search currencies...']) ?>
+<div class="admin-cur-card">
+    <h2 class="admin-cur-card__title">💱 Active Currencies</h2>
+    <div class="admin-cur-card__body" style="padding:0;overflow-x:auto;">
+        <div style="overflow-x:auto;">
+            <table class="admin-cur-table" id="currencies-table">
+                <thead><tr><th>Code</th><th>Symbol</th><th>Exchange Rate</th><th>Status</th><th style="width:200px;">Actions</th></tr></thead>
+                <tbody>
+                <?php foreach ($currencies as $currency): ?>
+                    <tr>
+                        <td>
+                            <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>" style="display:contents;"><?= csrf_field() ?>
+                                <input class="admin-cur-input" name="code" value="<?= e($currency['code']) ?>" maxlength="3" style="width:5rem;" required>
+                        </td>
+                        <td><input class="admin-cur-input" name="symbol" value="<?= e($currency['symbol']) ?>" style="width:4rem;" required></td>
+                        <td><input class="admin-cur-input" type="number" step="0.0001" name="exchange_rate" value="<?= e((string) $currency['exchange_rate']) ?>" style="width:8rem;" required></td>
+                        <td>
+                            <?php if ((int) $currency['is_default'] === 1): ?>
+                                <span class="admin-cur-badge--default">⭐ Default</span>
+                            <?php else: ?>
+                                <span style="color:var(--cv-text-secondary);font-size:.85rem;">Active</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="display:flex;gap:6px;align-items:center;">
+                            <button class="admin-cur-btn" type="submit">💾 Save</button>
+                            </form>
+                            <?php if ((int) $currency['is_default'] !== 1): ?>
+                                <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>/default" style="margin:0;">
+                                    <?= csrf_field() ?>
+                                    <button class="admin-cur-btn--secondary" type="submit" style="padding:6px 12px;">⭐ Default</button>
+                                </form>
+                                <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>/delete" style="margin:0;">
+                                    <?= csrf_field() ?>
+                                    <button class="admin-cur-btn--danger" type="submit" style="padding:6px 12px;">🗑️ Delete</button>
+                                </form>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                <?php if ($currencies === []): ?>
+                    <tr><td colspan="5" style="color:var(--cv-text-secondary);text-align:center;padding:32px;">No currencies configured.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <table class="cv-table" id="currencies-table">
-        <thead><tr><th>Code</th><th>Symbol</th><th>Exchange Rate</th><th>Default</th><th></th></tr></thead>
-        <tbody>
-        <?php foreach ($currencies as $currency): ?>
-            <tr>
-                <td>
-                    <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>" style="display:flex;gap:var(--cv-space-2);align-items:center;"><?= csrf_field() ?>
-                        <input class="cv-input" name="code" value="<?= e($currency['code']) ?>" maxlength="3" style="width:5rem;" required>
-                </td>
-                <td><input class="cv-input" name="symbol" value="<?= e($currency['symbol']) ?>" style="width:4rem;" required></td>
-                <td>
-                    <input class="cv-input" type="number" step="0.0001" name="exchange_rate" value="<?= e((string) $currency['exchange_rate']) ?>" style="width:7rem;" required>
-                </td>
-                <td>
-                    <?php if ((int) $currency['is_default'] === 1): ?>
-                        <span class="cv-badge cv-badge--success">Default</span>
-                    <?php else: ?>
-                        <span style="color:var(--cv-text-secondary);">—</span>
-                    <?php endif; ?>
-                </td>
-                <td style="display:flex;gap:var(--cv-space-2);">
-                    <button class="cv-btn cv-btn--secondary" type="submit">Save</button>
-                    </form>
-                    <?php if ((int) $currency['is_default'] !== 1): ?>
-                        <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>/default"><?= csrf_field() ?>
-                            <button class="cv-btn cv-btn--secondary" type="submit">Make Default</button>
-                        </form>
-                        <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>/delete"><?= csrf_field() ?>
-                            <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
-                        </form>
-                    <?php endif; ?>
+</div>
                 </td>
             </tr>
         <?php endforeach; ?>
