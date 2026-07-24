@@ -164,7 +164,7 @@ $companyDept ??= 'Payments Dept.';
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" target="_blank" style="margin:0;">
+                            <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
                                 <?= csrf_field() ?>
                                 <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
                             </form>

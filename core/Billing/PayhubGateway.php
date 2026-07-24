@@ -80,10 +80,9 @@ final class PayhubGateway implements GatewayModule
             'name' => $name !== '' ? $name : (string) $params['email'],
             'phone' => (string) ($params['phone'] ?? ''),
             'reference' => (string) $params['reference'],
-            // PayHub treats callback_url as a server-side webhook endpoint.
-            // Use redirect_url for the browser return URL after payment completes.
-            'callback_url' => $callbackUrl,
-            'redirect_url' => $callbackUrl,
+            // PayHub API uses 'callback_url' to redirect the customer's browser 
+            // back to the website after a successful transaction.
+            'callback_url' => $callbackUrl . '?trxref=' . urlencode((string) $params['reference']),
             'metadata' => $params['metadata'] ?? [],
         ];
 
@@ -119,18 +118,6 @@ final class PayhubGateway implements GatewayModule
                 : 'Could not reach the Payhub API. Please try again.';
             return ['success' => false, 'message' => $msg];
         }
-
-        // PayHub's hosted checkout does not pass through redirect_url from the API
-        // initialize request — it shows its own verify.php page after payment instead.
-        // We work around this by appending our callback URL directly as a query
-        // parameter to the checkout URL itself. PayHub's checkout.php reads
-        // ?redirect_url=... and bounces the browser there after a successful payment.
-        // We also include our own reference (trxref=cv-...) so the callback handler
-        // can identify the invoice even if PayHub returns a PH_ reference.
-        $ourReference = (string) $params['reference'];
-        $callbackWithRef = $callbackUrl . '?trxref=' . urlencode($ourReference);
-        $sep = (strpos($redirectUrl, '?') !== false) ? '&' : '?';
-        $redirectUrl .= $sep . 'redirect_url=' . urlencode($callbackWithRef);
 
         return [
             'success' => true,
