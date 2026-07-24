@@ -243,22 +243,37 @@ final class PaymentCallbackController
         if ($verification['success']) {
             error_log("[PAYMENT] Payment verified successfully for invoice {$invoiceId}");
 
-            // The gateway may have returned the amount in a different currency
-            // than the invoice's base currency. Convert it back to the base
-            // currency so the amount can be correctly matched against the
-            // invoice total. Example: invoice is 100,000 NGN, gateway is USD,
-            // client pays 250 USD, gateway verifies 250 USD. We need to convert
-            // 250 USD back to ~100,000 NGN before recording.
-            $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
-            $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-            $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+            $invoice = $this->invoices->find($invoiceId);
+            if ($invoice !== null) {
+                // The gateway may have returned payment in a different currency than the invoice.
+                // Convert the payment amount from gateway currency to invoice currency so it
+                // matches invoice['total'] exactly. Both are then in the same currency when
+                // PaymentService::recordPayment() compares totalPaid >= invoice['total'].
+                $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
+                $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
 
-            $amountInGatewayGurrency = $verification['amount'];
+                // Convert to invoice currency only if needed (and only if we can determine it)
+                if ($invoiceCurrencyId !== null) {
+                    $invoiceCurrRow = $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId]);
 
-            // Convert amount from gateway currency back to base currency (inverse rate).
-            if ($gatewayRate > 0) {
-                $verification['amount'] = $verification['amount'] / $gatewayRate;
-                error_log("[PAYMENT] Currency conversion: {$amountInGatewayGurrency} {$gatewayCurrency} (rate={$gatewayRate}) → {$verification['amount']} base currency");
+                    if ($invoiceCurrRow !== null) {
+                        $invoiceCurrCode = (string) ($invoiceCurrRow['code'] ?? '');
+
+                        if ($invoiceCurrCode !== '' && $invoiceCurrCode !== $gatewayCurrency) {
+                            // Invoice and gateway in different currencies — convert payment to invoice currency
+                            $gatewayRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+                            $gatewayRate = $gatewayRow !== null ? (float) $gatewayRow['exchange_rate'] : 1.0;
+                            $invoiceRate = (float) ($invoiceCurrRow['exchange_rate'] ?? 1.0);
+
+                            if ($gatewayRate > 0 && $invoiceRate > 0) {
+                                $originalAmount = $verification['amount'];
+                                $usdBase = $verification['amount'] / $gatewayRate;
+                                $verification['amount'] = $usdBase * $invoiceRate;
+                                error_log("[PAYMENT] Currency conversion: {$originalAmount} {$gatewayCurrency} → {$verification['amount']} {$invoiceCurrCode}");
+                            }
+                        }
+                    }
+                }
             }
 
             $this->recordIfNew($slug, $verification, $invoiceId);
@@ -297,17 +312,33 @@ final class PaymentCallbackController
         $invoiceId = $this->invoiceIdFrom($verification);
 
         if ($verification['success'] && $invoiceId !== null) {
-            // Same currency conversion logic as callback() — convert amount from
-            // gateway currency back to base currency before recording.
-            $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
-            $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-            $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
+            $invoice = $this->invoices->find($invoiceId);
+            if ($invoice !== null) {
+                // Convert webhook payment amount from gateway currency to invoice currency
+                // so it can be correctly compared against the invoice total in the same currency.
+                $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
+                $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
 
-            $amountInGatewayGurrency = $verification['amount'];
+                if ($invoiceCurrencyId !== null) {
+                    $invoiceCurrRow = $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId]);
 
-            if ($gatewayRate > 0) {
-                $verification['amount'] = $verification['amount'] / $gatewayRate;
-                error_log("[PAYMENT-WEBHOOK] Currency conversion: {$amountInGatewayGurrency} {$gatewayCurrency} → {$verification['amount']} base currency");
+                    if ($invoiceCurrRow !== null) {
+                        $invoiceCurrCode = (string) ($invoiceCurrRow['code'] ?? '');
+
+                        if ($invoiceCurrCode !== '' && $invoiceCurrCode !== $gatewayCurrency) {
+                            $gatewayRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+                            $gatewayRate = $gatewayRow !== null ? (float) $gatewayRow['exchange_rate'] : 1.0;
+                            $invoiceRate = (float) ($invoiceCurrRow['exchange_rate'] ?? 1.0);
+
+                            if ($gatewayRate > 0 && $invoiceRate > 0) {
+                                $originalAmount = $verification['amount'];
+                                $usdBase = $verification['amount'] / $gatewayRate;
+                                $verification['amount'] = $usdBase * $invoiceRate;
+                                error_log("[PAYMENT-WEBHOOK] Currency conversion: {$originalAmount} {$gatewayCurrency} → {$verification['amount']} {$invoiceCurrCode}");
+                            }
+                        }
+                    }
+                }
             }
 
             $this->recordIfNew($slug, $verification, $invoiceId);
