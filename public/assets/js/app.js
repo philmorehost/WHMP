@@ -109,21 +109,54 @@
     function updateServerModuleFields(select) {
         var form = select.closest('form');
         var usernameField = form && form.querySelector('[data-server-username-field]');
+        var usernameLabel = form && form.querySelector('[data-server-username-label]');
+        var usernameInput = form && form.querySelector('[data-server-username-input]');
         var tokenLabel = form && form.querySelector('[data-server-token-label]');
+        var tokenInput = form && form.querySelector('[data-server-token-input]');
+        var portField = form && form.querySelector('[data-server-port-field]');
+
         if (!usernameField || !tokenLabel) {
             return;
         }
 
         var val = select.value;
-        if (val === 'interserver-vps') {
+
+        if (val === 'interserver-vps' || val === 'interserver_vps') {
             usernameField.style.display = 'none';
             tokenLabel.textContent = 'API Key';
+            if (portField) portField.style.display = 'block';
+        } else if (val === 'interserver-dedicated' || val === 'interserver_dedicated') {
+            usernameField.style.display = 'block';
+            if (usernameLabel) usernameLabel.textContent = 'API Username';
+            if (usernameInput) usernameInput.placeholder = 'e.g., api_username';
+            tokenLabel.textContent = 'API Token / Password';
+            if (tokenInput) tokenInput.placeholder = '';
+            if (portField) portField.style.display = 'block';
+        } else if (val === 'resellerclub-email' || val === 'resellerclub_email') {
+            usernameField.style.display = 'block';
+            if (usernameLabel) usernameLabel.textContent = 'Reseller ID';
+            if (usernameInput) usernameInput.placeholder = 'e.g., 123456';
+            tokenLabel.textContent = 'API Token';
+            if (tokenInput) tokenInput.placeholder = '';
+            if (portField) portField.style.display = 'block';
         } else if (val === 'local') {
             usernameField.style.display = 'none';
             tokenLabel.textContent = 'API Token / Password';
+            if (portField) portField.style.display = 'block';
+        } else if (val === 'nocix-dedicated' || val === 'nocix_dedicated' || val === 'nocix') {
+            usernameField.style.display = 'block';
+            if (usernameLabel) usernameLabel.textContent = 'API Username';
+            if (usernameInput) usernameInput.placeholder = 'e.g., api_user';
+            tokenLabel.textContent = 'API Token';
+            if (tokenInput) tokenInput.placeholder = '';
+            if (portField) portField.style.display = 'block';
         } else {
             usernameField.style.display = 'block';
+            if (usernameLabel) usernameLabel.textContent = 'API Username';
+            if (usernameInput) usernameInput.placeholder = '';
             tokenLabel.textContent = 'API Token / Password';
+            if (tokenInput) tokenInput.placeholder = '';
+            if (portField) portField.style.display = 'block';
         }
     }
 

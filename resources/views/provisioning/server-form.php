@@ -46,14 +46,14 @@ $formId = 'server-form-' . ($server['id'] ?? 'new');
         </select>
     </div>
     <div class="cv-field" data-server-username-field>
-        <label class="cv-label">API Username</label>
-        <input class="cv-input" name="api_username" value="<?= e((string) ($server['api_username'] ?? '')) ?>">
+        <label class="cv-label" data-server-username-label>API Username</label>
+        <input class="cv-input" name="api_username" value="<?= e((string) ($server['api_username'] ?? '')) ?>" data-server-username-input>
     </div>
     <div class="cv-field">
         <label class="cv-label" data-server-token-label>API Token / Password</label>
-        <input class="cv-input" type="password" name="api_token" placeholder="<?= !empty($server['api_token']) ? '••••••••  (leave blank to keep)' : '' ?>">
+        <input class="cv-input" type="password" name="api_token" placeholder="<?= !empty($server['api_token']) ? '••••••••  (leave blank to keep)' : '' ?>" data-server-token-input>
     </div>
-    <div class="cv-field">
+    <div class="cv-field" data-server-port-field>
         <label class="cv-label">API Port (blank = module default)</label>
         <input class="cv-input" type="number" name="api_port" value="<?= e((string) ($server['api_port'] ?? '')) ?>">
     </div>
