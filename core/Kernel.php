@@ -14,6 +14,8 @@ use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\CancellationRequestRepository;
 use CodeVault\Billing\CancellationRequestService;
 use CodeVault\Billing\CancellationCronJob;
+use CodeVault\Billing\OrderCancellationService;
+use CodeVault\Billing\InvoiceCancellationService;
 use CodeVault\Billing\FlutterwaveGateway;
 use CodeVault\Billing\ManualGateway;
 use CodeVault\Billing\PaystackGateway;
@@ -510,6 +512,22 @@ class Kernel
 
         $this->container->singleton(CancellationCronJob::class, function (Container $c) {
             return new CancellationCronJob($c->make(CancellationRequestService::class));
+        });
+
+        $this->container->singleton(OrderCancellationService::class, function (Container $c) {
+            return new OrderCancellationService(
+                $c->make(OrderRepository::class),
+                $c->make(EmailDispatcher::class),
+                $c->make(Database::class)
+            );
+        });
+
+        $this->container->singleton(InvoiceCancellationService::class, function (Container $c) {
+            return new InvoiceCancellationService(
+                $c->make(InvoiceRepository::class),
+                $c->make(EmailDispatcher::class),
+                $c->make(Database::class)
+            );
         });
 
         // No SMTP server is configured in this environment — LogMailer

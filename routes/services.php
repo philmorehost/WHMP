@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use CodeVault\Billing\ServiceController;
 use CodeVault\Billing\CancellationRequestsController;
+use CodeVault\Billing\ClientCancellationController;
 
 /** @var CodeVault\Router $router */
 
@@ -21,3 +22,6 @@ $router->post('/admin/cancellations/{id}/approve', [CancellationRequestsControll
 $router->post('/admin/cancellations/{id}/reject', [CancellationRequestsController::class, 'adminReject']);
 
 $router->post('/client/services/{id}/cancel-request', [CancellationRequestsController::class, 'clientCreate']);
+
+$router->post('/client/orders/{id}/cancel', [ClientCancellationController::class, 'cancelOrder']);
+$router->post('/client/invoices/{id}/cancel', [ClientCancellationController::class, 'cancelInvoice']);
