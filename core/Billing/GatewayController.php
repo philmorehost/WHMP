@@ -33,9 +33,17 @@ final class GatewayController
             return $denied;
         }
 
+        $logFile = $this->config->basePath('storage/logs/payment_gateways.log');
+        $logs = [];
+        if (is_file($logFile)) {
+            $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+            $logs = array_reverse(array_slice($lines, -100));
+        }
+
         return $this->render('billing.gateways-index', [
             'gateways' => $this->gateways->all(),
             'baseUrl' => rtrim((string) $this->config->env('APP_URL', ''), '/'),
+            'gatewayLogs' => $logs,
         ]);
     }
 

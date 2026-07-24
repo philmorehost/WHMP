@@ -365,3 +365,22 @@ $webhookUrl = static fn (string $slug): string => $baseUrl . '/pay/' . $slug . '
         <?php endif; ?>
     </div>
 <?php endforeach; ?>
+
+<!-- Gateway Execution Logs Card -->
+<div class="admin-gw-card" style="margin-top: 32px;">
+    <div class="admin-gw-card__header">
+        <h3 class="admin-gw-card__title">📜 Live Payment Gateway Execution Logs</h3>
+        <span style="font-size: .8rem; color: var(--cv-text-secondary);">Recorded automatically whenever a client clicks any payment button</span>
+    </div>
+    <div style="padding: 20px 24px;">
+        <?php if (empty($gatewayLogs)): ?>
+            <p style="color: var(--cv-text-secondary); margin: 0; font-size: .85rem;">No payment gateway execution logs recorded yet. Logs will automatically appear here when clients click any payment button on invoices.</p>
+        <?php else: ?>
+            <div style="background: #0f172a; color: #38bdf8; font-family: monospace; font-size: .8rem; padding: 16px; border-radius: 8px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5;">
+                <?php foreach ($gatewayLogs as $logEntry): ?>
+                    <?= e($logEntry) . "\n" ?>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
