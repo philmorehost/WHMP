@@ -63,6 +63,14 @@ final class CancellationRequestRepository
         );
     }
 
+    public function findPendingForService(int $serviceId): ?array
+    {
+        return $this->db->selectOne(
+            'SELECT * FROM cancellation_requests WHERE service_id = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
+            [$serviceId, 'pending']
+        );
+    }
+
     public function countPending(): int
     {
         $result = $this->db->selectOne(
