@@ -8,10 +8,12 @@ use CodeVault\Modules\ProvisioningModule;
 
 /**
  * Dedicated-server management against Nocix's real, live client API
- * (blueprint §3 — `https://my.nocix.net/api/{call}/`, HTTP Basic auth with
+ * (blueprint §3 — `https://manage.nocix.net/api/{call}/`, HTTP Basic auth with
  * `username:token`). Endpoint paths, variables, and response shapes below
  * are read directly from Nocix's own published API documentation
- * (my.nocix.net/apidoc, explicitly marked BETA) — not guessed.
+ * (my.nocix.net/apidoc, explicitly marked BETA) — not guessed. Note: API
+ * documentation is hosted at https://my.nocix.net/api/ but actual requests
+ * go to https://manage.nocix.net/api/.
  *
  * Nocix's documented API has real, honest gaps this module does not paper
  * over: there is no order-placement endpoint (a dedicated server is bought
@@ -34,7 +36,7 @@ use CodeVault\Modules\ProvisioningModule;
  */
 final class NocixDedicatedServerModule implements ProvisioningModule
 {
-    private const BASE_URL = 'https://my.nocix.net/api';
+    private const BASE_URL = 'https://manage.nocix.net/api';
 
     public function __construct(
         private readonly HttpClient $http
