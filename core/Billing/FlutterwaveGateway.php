@@ -62,7 +62,7 @@ final class FlutterwaveGateway implements GatewayModule
         $secretKey = (string) ($params['config']['secret_key'] ?? '');
 
         if ($secretKey === '') {
-            return ['success' => false, 'message' => 'Flutterwave is not configured — missing secret key.'];
+            return ['success' => false, 'message' => 'Flutterwave API is not configured — missing secret key. Please configure Flutterwave Secret Key in Admin -> Gateways.'];
         }
 
         $body = json_encode([
@@ -75,17 +75,21 @@ final class FlutterwaveGateway implements GatewayModule
         ]);
 
         $response = $this->http->request('POST', self::BASE_URL . '/payments', $this->headers($secretKey), $body);
-        $decoded = json_decode($response['body'], true);
+        $decoded = json_decode((string) ($response['body'] ?? ''), true);
 
         if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? '') !== 'success') {
-            return ['success' => false, 'message' => $decoded['message'] ?? 'Flutterwave initialization failed.'];
+            $msg = is_array($decoded) ? ($decoded['message'] ?? 'Flutterwave initialization returned an error.') : 'Flutterwave API connection failed.';
+            return ['success' => false, 'message' => $msg];
         }
 
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
+        $redirectUrl = (string) ($data['link'] ?? $data['authorization_url'] ?? $data['checkout_url'] ?? $data['url'] ?? '');
+
         return [
-            'success' => true,
-            'redirectUrl' => $decoded['data']['link'] ?? '',
+            'success' => $redirectUrl !== '',
+            'redirectUrl' => $redirectUrl,
             'transactionId' => $params['reference'],
-            'message' => 'Redirecting to Flutterwave.',
+            'message' => $redirectUrl !== '' ? 'Redirecting to Flutterwave.' : 'Flutterwave initialization failed — no redirect URL returned.',
         ];
     }
 

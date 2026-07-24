@@ -67,7 +67,7 @@ final class PaystackGateway implements GatewayModule
         $secretKey = (string) ($params['config']['secret_key'] ?? '');
 
         if ($secretKey === '') {
-            return ['success' => false, 'message' => 'Paystack is not configured — missing secret key.'];
+            return ['success' => false, 'message' => 'Paystack API is not configured — missing secret key. Please configure Paystack Secret Key in Admin -> Gateways.'];
         }
 
         $body = json_encode([
@@ -80,17 +80,21 @@ final class PaystackGateway implements GatewayModule
         ]);
 
         $response = $this->http->request('POST', self::BASE_URL . '/transaction/initialize', $this->headers($secretKey), $body);
-        $decoded = json_decode($response['body'], true);
+        $decoded = json_decode((string) ($response['body'] ?? ''), true);
 
         if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? false) !== true) {
-            return ['success' => false, 'message' => $decoded['message'] ?? 'Paystack initialization failed.'];
+            $msg = is_array($decoded) ? ($decoded['message'] ?? 'Paystack initialization returned an error.') : 'Paystack API connection failed.';
+            return ['success' => false, 'message' => $msg];
         }
 
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
+        $redirectUrl = (string) ($data['authorization_url'] ?? $data['checkout_url'] ?? $data['link'] ?? $data['url'] ?? '');
+
         return [
-            'success' => true,
-            'redirectUrl' => $decoded['data']['authorization_url'] ?? '',
-            'transactionId' => $decoded['data']['reference'] ?? $params['reference'],
-            'message' => 'Redirecting to Paystack.',
+            'success' => $redirectUrl !== '',
+            'redirectUrl' => $redirectUrl,
+            'transactionId' => $data['reference'] ?? $params['reference'],
+            'message' => $redirectUrl !== '' ? 'Redirecting to Paystack.' : 'Paystack initialization failed — no redirect URL returned.',
         ];
     }
 

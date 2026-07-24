@@ -52,7 +52,7 @@ final class PlisioGateway implements GatewayModule
         $apiKey = (string) ($params['config']['api_key'] ?? '');
 
         if ($apiKey === '') {
-            return ['success' => false, 'message' => 'Plisio is not configured — missing API key.'];
+            return ['success' => false, 'message' => 'Plisio API is not configured — missing API key. Please configure Plisio Secret / API Key in Admin -> Gateways.'];
         }
 
         $invoiceId = (int) ($params['metadata']['invoice_id'] ?? 0);
@@ -72,20 +72,21 @@ final class PlisioGateway implements GatewayModule
 
         $url = self::BASE_URL . '/invoices/new?' . http_build_query($queryParams);
         $response = $this->http->request('GET', $url);
-        $decoded = json_decode($response['body'], true);
+        $decoded = json_decode((string) ($response['body'] ?? ''), true);
 
         if ($response['status'] !== 200 || !is_array($decoded) || ($decoded['status'] ?? '') !== 'success') {
-            return ['success' => false, 'message' => $decoded['data']['message'] ?? $decoded['message'] ?? 'Plisio initialization failed.'];
+            $msg = is_array($decoded) ? ($decoded['data']['message'] ?? $decoded['message'] ?? 'Plisio initialization returned an error.') : 'Plisio API connection failed.';
+            return ['success' => false, 'message' => $msg];
         }
 
-        $data = $decoded['data'] ?? [];
-        $redirectUrl = (string) ($data['invoice_url'] ?? '');
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
+        $redirectUrl = (string) ($data['invoice_url'] ?? $data['url'] ?? '');
 
         return [
             'success' => $redirectUrl !== '',
             'redirectUrl' => $redirectUrl,
             'transactionId' => $data['txn_id'] ?? $params['reference'],
-            'message' => 'Redirecting to Plisio.',
+            'message' => $redirectUrl !== '' ? 'Redirecting to Plisio.' : 'Plisio initialization failed — no redirect URL returned.',
         ];
     }
 

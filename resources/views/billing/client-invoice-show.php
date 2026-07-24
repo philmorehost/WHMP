@@ -21,13 +21,17 @@ $paymentStatus ??= null;
     </div>
 
     <?php if ($paymentStatus === 'success'): ?>
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); color: #065f46; padding: var(--cv-space-3); border-radius: var(--cv-radius-md); margin-bottom: var(--cv-space-4); font-size: var(--cv-text-sm);">
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); color: #065f46; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; font-weight: 600;">
             ✓ Payment received — thank you.
         </div>
     <?php elseif ($paymentStatus === 'failed'): ?>
-        <div class="cv-field-error" style="margin-bottom:var(--cv-space-4);"><?= e($_GET['msg'] ?? 'Payment was not completed. You can try again below.') ?></div>
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-weight: 600; font-size: 0.9rem;">
+            ⚠️ Payment Notice: <?= e($_GET['msg'] ?? 'Payment was not completed. You can try again below.') ?>
+        </div>
     <?php elseif ($paymentStatus === 'error'): ?>
-        <div class="cv-field-error" style="margin-bottom:var(--cv-space-4);"><?= e($_GET['msg'] ?? "Couldn't start the payment — please try again.") ?></div>
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-weight: 600; font-size: 0.9rem;">
+            ⚠️ Payment Gateway Error: <?= e($_GET['msg'] ?? "Couldn't start the payment — please check gateway settings or try again.") ?>
+        </div>
     <?php endif; ?>
 
     <!-- Main Invoice Document -->
@@ -58,9 +62,9 @@ $paymentStatus ??= null;
             </div>
             <div>
                 <strong style="color:#4b5563; text-transform:uppercase; font-size:var(--cv-text-xs); display:block; margin-bottom:6px;">Pay To</strong>
-                <span style="font-weight:700; color:#111827; display:block; margin-bottom:2px;"><?= e($companyName ?? 'Your Company') ?></span>
-                <span style="color:#4b5563; display:block;"><?= e($companyDept ?? 'Payments Dept.') ?></span>
-                <span style="color:#6b7280; display:block; font-size:var(--cv-text-xs); margin-top:4px;"><?= e($companyEmail ?? 'billing@example.com') ?></span>
+                <span style="font-weight:700; color:#111827; display:block; margin-bottom:2px;">CodeVault Limited</span>
+                <span style="color:#4b5563; display:block;">Payments Dept.</span>
+                <span style="color:#6b7280; display:block; font-size:var(--cv-text-xs); margin-top:4px;">billing@codevault.com</span>
             </div>
             <div>
                 <strong style="color:#4b5563; text-transform:uppercase; font-size:var(--cv-text-xs); display:block; margin-bottom:6px;">Invoice Details</strong>
@@ -135,11 +139,20 @@ $paymentStatus ??= null;
                             <p style="color:#4b5563; font-size:var(--cv-text-xs); white-space:pre-line; margin:0 0 var(--cv-space-3) 0; line-height:1.4;"><?= e($config['bank_details'] ?? 'Contact us for bank transfer details, then we will confirm your payment.') ?></p>
                             <p style="color:#6b7280; font-size:var(--cv-text-2xs); margin:0;">Once transfer is made, contact support to confirm.</p>
                         </div>
-                    <?php elseif (in_array($gateway['slug'], ['paystack', 'flutterwave', 'payhub', 'plisio', 'paypal'], true)): ?>
+                    <?php else: ?>
                         <div style="border:1px solid #e5e7eb; border-radius:8px; padding:var(--cv-space-4); background:#f9fafb; display:flex; flex-direction:column; justify-content:space-between;">
                             <div>
                                 <strong style="color:#111827; display:block; margin-bottom:4px;"><?= e($gateway['name']) ?></strong>
-                                <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-4) 0;">Secure instant online payment processing.</p>
+                                <?php
+                                $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: [];
+                                $hasKeys = !empty($config['secret_key']) || !empty($config['api_key']) || !empty($config['client_id']);
+                                ?>
+                                <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Secure instant online payment processing.</p>
+                                <?php if (!$hasKeys): ?>
+                                    <div style="font-size:0.75rem; color:#b91c1c; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); padding:4px 8px; border-radius:4px; margin-bottom:8px;">
+                                        ⚠️ API Keys Unconfigured in Admin
+                                    </div>
+                                <?php endif; ?>
                             </div>
                             <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
                                 <?= csrf_field() ?>

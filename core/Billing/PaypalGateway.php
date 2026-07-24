@@ -111,14 +111,14 @@ final class PaypalGateway implements GatewayModule
 
         $approveUrl = null;
         foreach ((array) ($decoded['links'] ?? []) as $link) {
-            if (($link['rel'] ?? '') === 'approve') {
+            if (in_array(($link['rel'] ?? ''), ['approve', 'payer-action'], true)) {
                 $approveUrl = (string) $link['href'];
                 break;
             }
         }
 
-        if ($approveUrl === null) {
-            return ['success' => false, 'message' => 'PayPal did not return an approval link.'];
+        if ($approveUrl === null || $approveUrl === '') {
+            return ['success' => false, 'message' => 'PayPal API did not return an approval redirect link.'];
         }
 
         return [
