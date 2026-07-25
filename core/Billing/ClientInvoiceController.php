@@ -151,25 +151,28 @@ final class ClientInvoiceController
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
         $currency = $this->currency->resolveForClient($client);
+        $currencyLock = $this->currency->lockColumns($currency);
 
-        // Store the actual live exchange rate (not 1.0) so PaymentCallbackController
-        // can accurately detect same-currency vs cross-currency payment scenarios.
-        $currencyRate = (float) ($currency['exchange_rate'] ?? 1.0000);
-        if ($currencyRate <= 0) {
-            $currencyRate = 1.0000;
-        }
+        // $amount is what the client typed, i.e. in the currency they are being
+        // shown (e.g. NGN). Every stored monetary amount is authoritative in the
+        // BASE currency (see CurrencyService) and is converted back up for
+        // display via the locked rate — so divide by that same locked rate here.
+        // Storing the typed figure directly would make a ₦100 top-up render as
+        // ₦100 × rate on every screen that formats it.
+        $lockedRate = (float) $currencyLock['currency_rate'] > 0 ? (float) $currencyLock['currency_rate'] : 1.0;
+        $baseAmount = round($amount / $lockedRate, 2);
 
         $invoiceId = (int) $db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $client['id'],
                 'unpaid',
-                $amount,
+                $baseAmount,
                 0.00,
                 0.00,
-                $amount,
-                $currency['id'],
-                $currencyRate,
+                $baseAmount,
+                $currencyLock['currency_id'],
+                $currencyLock['currency_rate'],
                 $today,
                 $now,
                 $now
@@ -178,7 +181,7 @@ final class ClientInvoiceController
 
         $db->insert(
             'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
-            [$invoiceId, "Deposit / Add Funds to Wallet", $amount]
+            [$invoiceId, "Deposit / Add Funds to Wallet", $baseAmount]
         );
 
         return Response::redirect("/client/invoices/{$invoiceId}");
@@ -228,7 +231,11 @@ final class ClientInvoiceController
         // Create consolidated Mass Payment invoice
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
-        $currency = $this->currency->resolveForClient($client);
+        // The summed totals are already base-currency amounts copied from the
+        // source invoices, so the consolidated invoice only needs the matching
+        // display lock — pairing a currency_id with a hardcoded 1.0 rate would
+        // under-display it by the whole exchange rate.
+        $currencyLock = $this->currency->lockColumns($this->currency->resolveForClient($client));
 
         $massInvoiceId = (int) $db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -239,8 +246,8 @@ final class ClientInvoiceController
                 $totalTax,
                 $totalDiscount,
                 $grandTotal,
-                $currency['id'],
-                1.0000,
+                $currencyLock['currency_id'],
+                $currencyLock['currency_rate'],
                 $today,
                 $now,
                 $now

@@ -5,7 +5,10 @@
 /** @var string|null $refundSuccess */
 /** @var string|null $refundError */
 /** @var array<string, mixed> $currency */
-$money = static fn (float $amount): string => $currency['symbol'] . number_format($amount, 2);
+// Stored amounts are authoritative in the BASE currency (see CurrencyService);
+// the invoice's locked rate converts them for display only.
+$rate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
+$money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $rate, 2), 2);
 ?>
 <style>
 /* Admin Invoice Detail Styles */

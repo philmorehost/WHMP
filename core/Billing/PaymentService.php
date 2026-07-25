@@ -42,7 +42,15 @@ final class PaymentService
         $totalPaid = $this->transactions->totalCompletedForInvoice($invoiceId);
         $invoicePaid = false;
 
-        if ($invoice !== null && $invoice['status'] === 'unpaid' && $totalPaid >= (float) $invoice['total']) {
+        // A payment that round-trips through a gateway's own currency (charged as
+        // base × rate, recorded back as gateway ÷ rate) can land a fraction of a
+        // cent under the total, which would leave a fully-paid invoice unpaid
+        // forever. Half a cent of slack absorbs that without letting a genuine
+        // underpayment through.
+        $isCovered = $invoice !== null
+            && round($totalPaid, 2) >= round((float) $invoice['total'], 2) - 0.005;
+
+        if ($invoice !== null && $invoice['status'] === 'unpaid' && $isCovered) {
             $rowsAffected = $this->invoices->markPaid($invoiceId);
 
             if ($rowsAffected > 0) {

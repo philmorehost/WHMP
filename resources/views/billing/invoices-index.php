@@ -434,7 +434,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                         </td>
                         <td>
                             <span style="font-family: 'Monaco', 'Courier New', monospace; font-weight: 700;">
-                                <?= e($invoice['currency_symbol'] ?? '$') ?><?= number_format((float) $invoice['total'], 2) ?>
+                                <?= e($invoice['currency_symbol'] ?? '$') ?><?= number_format(round((float) $invoice['total'] * (float) ($invoice['currency_rate'] ?: 1), 2), 2) ?>
                             </span>
                             <span style="font-size: .75rem; color: var(--cv-text-secondary); margin-left: 6px;">
                                 <?= e($invoice['currency_code'] ?? 'USD') ?>

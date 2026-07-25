@@ -78,54 +78,40 @@ final class PaymentCallbackController
         $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
 
         // ── Currency Conversion Logic ────────────────────────────────────────────
-        // The system base currency is USD (exchange_rate = 1.0).
-        // All currencies in the `currencies` table store their exchange rate as:
-        //   "how many units of this currency = 1 USD"
-        //   e.g. NGN = 1490 means 1 USD = 1490 NGN.
+        // Every stored monetary amount — invoice totals included — is authoritative
+        // in the system BASE currency (see CurrencyService); currency_id/currency_rate
+        // are a *display* lock, not a statement about the unit `total` is stored in.
+        // So $remaining is already a base-currency figure.
         //
-        // invoice['total'] is stored in the INVOICE's own currency (e.g. NGN).
-        // NOTE: invoice['currency_rate'] is not reliable (stored as 1.0 by
-        // add-funds flow), so we always look up the live rate from the currencies table.
+        // Exchange rates read "units of this currency per 1 base unit"
+        // (e.g. NGN = 1490 means 1 base unit = 1490 NGN).
         //
-        // Correct formula:
-        //   1. remaining (in invoice currency) → USD base = remaining / invoiceCurrencyRate
-        //   2. USD base → gateway currency amount = usdBase × gatewayCurrencyRate
+        // The gateway must be charged in ITS currency, so there is exactly one
+        // conversion to do:
+        //   captureAmount = remaining (base) × gatewayRate
         //
-        // Same-currency case: invoiceCurrencyRate = gatewayCurrencyRate → divide and
-        // multiply cancel out → captureAmount = remaining exactly. ✓
+        // Dividing by the invoice's rate first would convert an already-base
+        // amount a second time and charge ~1/rate of the real price.
 
-        // 1. Get invoice currency's exchange rate (units per USD) from currencies table
-        $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
-        $invoiceCurrRow = $invoiceCurrencyId !== null
-            ? $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId])
-            : null;
-        $invoiceCurrCode = $invoiceCurrRow['code'] ?? 'USD';
-        $invoiceCurrRate = ($invoiceCurrRow !== null && (float) $invoiceCurrRow['exchange_rate'] > 0)
-            ? (float) $invoiceCurrRow['exchange_rate']
-            : 1.0;
-
-        // 3. Get gateway currency's exchange rate (units per USD) from currencies table
         $gatewayCurrRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
         $gatewayRate = ($gatewayCurrRow !== null && (float) $gatewayCurrRow['exchange_rate'] > 0)
             ? (float) $gatewayCurrRow['exchange_rate']
             : 1.0;
 
-        // 4. Calculate capture amount: if same currency, send directly; if different, convert via USD
-        if ($invoiceCurrCode === $gatewayCurrency) {
-            // Same currency — no conversion needed
-            $captureAmount = round($remaining, 2);
-        } else {
-            // Different currencies — convert through USD
-            $usdBase = $remaining / $invoiceCurrRate;
-            $captureAmount = round($usdBase * $gatewayRate, 2);
-        }
+        $captureAmount = round($remaining * $gatewayRate, 2);
 
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
         $this->writeGatewayLog(
             $slug, $invoiceId, $clientId, 'INITIATING',
-            "Remaining: {$remaining} {$invoiceCurrCode} → Capture: {$captureAmount} {$gatewayCurrency} (same_currency=" . ($invoiceCurrCode === $gatewayCurrency ? 'yes' : 'no') . ", inv_rate={$invoiceCurrRate}, gw_rate={$gatewayRate}), ref={$reference}"
+            "Remaining: {$remaining} (base) → Capture: {$captureAmount} {$gatewayCurrency} (gw_rate={$gatewayRate}), ref={$reference}"
         );
+
+        if ($captureAmount <= 0) {
+            $reason = "Computed charge amount is {$captureAmount} {$gatewayCurrency} — refusing to start a zero-value payment.";
+            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'FAILED', $reason);
+            return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg=" . urlencode($reason));
+        }
 
         try {
             $result = $module->capture([
@@ -245,38 +231,7 @@ final class PaymentCallbackController
         if ($verification['success']) {
             error_log("[PAYMENT] Payment verified successfully for invoice {$invoiceId}");
 
-            $invoice = $this->invoices->find($invoiceId);
-            if ($invoice !== null) {
-                // The gateway may have returned payment in a different currency than the invoice.
-                // Convert the payment amount from gateway currency to invoice currency so it
-                // matches invoice['total'] exactly. Both are then in the same currency when
-                // PaymentService::recordPayment() compares totalPaid >= invoice['total'].
-                $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
-                $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
-
-                // Convert to invoice currency only if needed (and only if we can determine it)
-                if ($invoiceCurrencyId !== null) {
-                    $invoiceCurrRow = $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId]);
-
-                    if ($invoiceCurrRow !== null) {
-                        $invoiceCurrCode = (string) ($invoiceCurrRow['code'] ?? '');
-
-                        if ($invoiceCurrCode !== '' && $invoiceCurrCode !== $gatewayCurrency) {
-                            // Invoice and gateway in different currencies — convert payment to invoice currency
-                            $gatewayRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-                            $gatewayRate = $gatewayRow !== null ? (float) $gatewayRow['exchange_rate'] : 1.0;
-                            $invoiceRate = (float) ($invoiceCurrRow['exchange_rate'] ?? 1.0);
-
-                            if ($gatewayRate > 0 && $invoiceRate > 0) {
-                                $originalAmount = $verification['amount'];
-                                $usdBase = $verification['amount'] / $gatewayRate;
-                                $verification['amount'] = $usdBase * $invoiceRate;
-                                error_log("[PAYMENT] Currency conversion: {$originalAmount} {$gatewayCurrency} → {$verification['amount']} {$invoiceCurrCode}");
-                            }
-                        }
-                    }
-                }
-            }
+            $verification['amount'] = $this->toBaseCurrency($verification['amount'], $config, '[PAYMENT]');
 
             $this->recordIfNew($slug, $verification, $invoiceId);
 
@@ -314,39 +269,35 @@ final class PaymentCallbackController
         $invoiceId = $this->invoiceIdFrom($verification);
 
         if ($verification['success'] && $invoiceId !== null) {
-            $invoice = $this->invoices->find($invoiceId);
-            if ($invoice !== null) {
-                // Convert webhook payment amount from gateway currency to invoice currency
-                // so it can be correctly compared against the invoice total in the same currency.
-                $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
-                $invoiceCurrencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
-
-                if ($invoiceCurrencyId !== null) {
-                    $invoiceCurrRow = $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId]);
-
-                    if ($invoiceCurrRow !== null) {
-                        $invoiceCurrCode = (string) ($invoiceCurrRow['code'] ?? '');
-
-                        if ($invoiceCurrCode !== '' && $invoiceCurrCode !== $gatewayCurrency) {
-                            $gatewayRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-                            $gatewayRate = $gatewayRow !== null ? (float) $gatewayRow['exchange_rate'] : 1.0;
-                            $invoiceRate = (float) ($invoiceCurrRow['exchange_rate'] ?? 1.0);
-
-                            if ($gatewayRate > 0 && $invoiceRate > 0) {
-                                $originalAmount = $verification['amount'];
-                                $usdBase = $verification['amount'] / $gatewayRate;
-                                $verification['amount'] = $usdBase * $invoiceRate;
-                                error_log("[PAYMENT-WEBHOOK] Currency conversion: {$originalAmount} {$gatewayCurrency} → {$verification['amount']} {$invoiceCurrCode}");
-                            }
-                        }
-                    }
-                }
-            }
+            $verification['amount'] = $this->toBaseCurrency($verification['amount'], $config, '[PAYMENT-WEBHOOK]');
 
             $this->recordIfNew($slug, $verification, $invoiceId);
         }
 
         return Response::html('ok', 200);
+    }
+
+    /**
+     * Converts an amount the gateway reported (in the gateway's own currency)
+     * back into the system base currency, which is the unit every stored
+     * monetary amount — including invoice totals — is held in.
+     *
+     * This is the exact inverse of the `remaining × gatewayRate` conversion
+     * initiate() applies when deciding what to charge, so a full payment
+     * round-trips back to precisely the invoice total.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function toBaseCurrency(float $gatewayAmount, array $config, string $logPrefix): float
+    {
+        $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
+        $row = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+        $gatewayRate = ($row !== null && (float) $row['exchange_rate'] > 0) ? (float) $row['exchange_rate'] : 1.0;
+
+        $baseAmount = round($gatewayAmount / $gatewayRate, 2);
+        error_log("{$logPrefix} Currency conversion: {$gatewayAmount} {$gatewayCurrency} (rate={$gatewayRate}) → {$baseAmount} base");
+
+        return $baseAmount;
     }
 
     /** @param array{success: bool, status: string, reference: string, amount: float, metadata: array<string, mixed>} $verification */
