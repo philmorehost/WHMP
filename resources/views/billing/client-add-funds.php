@@ -2,7 +2,16 @@
 /** @var float $creditBalance */
 /** @var array<string, mixed> $currency */
 /** @var string|null $error */
-$money = static fn (float $amount): string => $currency['symbol'] . number_format($amount, 2);
+// The wallet balance is a STORED amount, so it is held in the base currency
+// (see CurrencyService) and has to be converted up for display.
+$rate = (float) ($currency['exchange_rate'] ?? 1.0) > 0 ? (float) $currency['exchange_rate'] : 1.0;
+$money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $rate, 2), 2);
+
+// The deposit limits are different: they are compared against the figure the
+// client types into the form, which is already in the currency being shown, so
+// converting them would print bounds that disagree with the input's own
+// min/max and with what the server actually enforces.
+$typedMoney = static fn (float $amount): string => $currency['symbol'] . number_format($amount, 2);
 ?>
 <div class="cv-card" style="max-width:32rem;margin:0 auto;padding:var(--cv-space-6);border-radius:12px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
     <h1 class="cv-card__title" style="font-family:'Hanken Grotesk',sans-serif;font-weight:800;font-size:1.5rem;margin-bottom:var(--cv-space-2);display:flex;align-items:center;gap:8px;">
@@ -29,7 +38,7 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
                 <span style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:var(--cv-text-secondary);font-weight:600;"><?= e($currency['symbol']) ?></span>
                 <input class="cv-input" type="number" step="0.01" min="10.00" max="10000.00" name="amount" placeholder="100.00" style="padding-left:2rem;width:100%;font-size:var(--cv-text-md);" required>
             </div>
-            <p style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">Minimum deposit is <?= $money(10.00) ?>, maximum is <?= $money(10000.00) ?>.</p>
+            <p style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">Minimum deposit is <?= $typedMoney(10.00) ?>, maximum is <?= $typedMoney(10000.00) ?>.</p>
         </div>
 
         <button class="cv-btn" type="submit" style="width:100%;padding:var(--cv-space-3);font-size:var(--cv-text-md);font-weight:700;">Generate Deposit Invoice</button>
