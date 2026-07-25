@@ -335,17 +335,27 @@
         <div class="invoices-hero__icon">📄</div>
     </div>
 
-    <!-- Search Toolbar -->
+    <!-- Search Toolbar & View Switcher -->
     <div class="invoices-toolbar">
         <div style="flex: 1; min-width: 200px;">
-            <?= $view->partial('partials.table-search', ['target' => '#invoices-list', 'placeholder' => 'Search invoices by number...']) ?>
+            <?= $view->partial('partials.table-search', ['target' => '#invoices-list, #invoices-table-body', 'placeholder' => 'Search invoices by number...']) ?>
         </div>
-        <div style="color: var(--cv-text-secondary); font-size: .9rem;">
-            <?= count($invoices) ?> invoice<?= count($invoices) !== 1 ? 's' : '' ?>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="display: inline-flex; background: var(--cv-bg-surface-sunken); padding: 3px; border-radius: 8px; border: 1px solid var(--cv-border-default);">
+                <button type="button" id="btn-view-grid" style="background: var(--cv-color-brand-500); color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-size: .8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                    <span>田</span> Grid
+                </button>
+                <button type="button" id="btn-view-list" style="background: transparent; color: var(--cv-text-secondary); border: none; padding: 6px 12px; border-radius: 6px; font-size: .8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                    <span>☰</span> List
+                </button>
+            </div>
+            <div style="color: var(--cv-text-secondary); font-size: .9rem;">
+                <?= count($invoices) ?> invoice<?= count($invoices) !== 1 ? 's' : '' ?>
+            </div>
         </div>
     </div>
 
-    <!-- Invoices Grid or Empty State -->
+    <!-- Invoices Grid / List or Empty State -->
     <?php if ($invoices === []): ?>
         <div class="empty-state-invoices">
             <div class="empty-state-invoices__icon">📋</div>
@@ -353,44 +363,101 @@
             <p class="empty-state-invoices__text">You don't have any invoices. When you purchase services, invoices will appear here.</p>
         </div>
     <?php else: ?>
-        <div class="invoices-grid" id="invoices-list">
-            <?php foreach ($invoices as $invoice): ?>
-                <div class="invoice-card" style="<?= $invoice['status'] === 'unpaid' ? 'border-left: 4px solid #ef4444;' : 'border-left: 4px solid #10b981;' ?>">
-                    <div class="invoice-card__header">
-                        <h3 class="invoice-card__number">INV-<?= (int) $invoice['id'] ?></h3>
-                        <div class="invoice-card__status">
-                            <?php if ($invoice['status'] === 'paid'): ?>
-                                <span class="cv-badge" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700; text-transform: uppercase;">Paid</span>
-                            <?php elseif ($invoice['status'] === 'cancelled'): ?>
-                                <span class="cv-badge" style="background: linear-gradient(135deg, #6b7280, #4b5563); color: white; padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700; text-transform: uppercase;">Cancelled</span>
-                            <?php else: ?>
-                                <span class="cv-badge" style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700; text-transform: uppercase;">Unpaid</span>
+        <!-- Grid Container -->
+        <div class="invoices-grid" id="invoices-container-grid">
+            <div class="invoices-grid" id="invoices-list">
+                <?php foreach ($invoices as $invoice): ?>
+                    <div class="invoice-card" style="<?= $invoice['status'] === 'unpaid' ? 'border-left: 4px solid #ef4444;' : ($invoice['status'] === 'cancelled' ? 'border-left: 4px solid #6b7280;' : 'border-left: 4px solid #10b981;') ?>">
+                        <div class="invoice-card__header">
+                            <h3 class="invoice-card__number">INV-<?= (int) $invoice['id'] ?></h3>
+                            <div class="invoice-card__status">
+                                <?php if ($invoice['status'] === 'paid'): ?>
+                                    <span class="cv-badge" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700; text-transform: uppercase;">Paid</span>
+                                <?php elseif ($invoice['status'] === 'cancelled'): ?>
+                                    <span class="cv-badge" style="background: linear-gradient(135deg, #6b7280, #4b5563); color: white; padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700; text-transform: uppercase;">Cancelled</span>
+                                <?php else: ?>
+                                    <span class="cv-badge" style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700; text-transform: uppercase;">Unpaid</span>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <div class="invoice-card__body">
+                            <div class="invoice-card__amount">
+                                <span class="invoice-card__amount-label">Amount Due</span>
+                                <span class="invoice-card__amount-value"><?= e($invoice['currency']['symbol']) ?><?= number_format(round((float) $invoice['total'] * ((float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0), 2), 2) ?></span>
+                            </div>
+
+                            <div class="invoice-card__info-row">
+                                <span class="invoice-card__info-label">Due Date</span>
+                                <span class="invoice-card__info-value"><?= e($invoice['due_date']) ?></span>
+                            </div>
+                        </div>
+
+                        <div class="invoice-card__footer">
+                            <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="invoice-card__action">View Details</a>
+                            <?php if ($invoice['status'] === 'unpaid'): ?>
+                                <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="invoice-card__action" style="background: #dc2626; flex: 0 0 auto; margin-right: 4px;" onclick="return confirm('Are you sure you want to cancel Invoice #INV-<?= (int) $invoice['id'] ?>?');">Cancel</button>
+                                <label class="invoice-card__checkbox">
+                                    <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 18px; height: 18px;">
+                                </label>
                             <?php endif; ?>
                         </div>
                     </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
 
-                    <div class="invoice-card__body">
-                        <div class="invoice-card__amount">
-                            <span class="invoice-card__amount-label">Amount Due</span>
-                            <span class="invoice-card__amount-value"><?= e($invoice['currency']['symbol']) ?><?= number_format(round((float) $invoice['total'] * ((float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0), 2), 2) ?></span>
-                        </div>
-
-                        <div class="invoice-card__info-row">
-                            <span class="invoice-card__info-label">Due Date</span>
-                            <span class="invoice-card__info-value"><?= e($invoice['due_date']) ?></span>
-                        </div>
-                    </div>
-
-                    <div class="invoice-card__footer">
-                        <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="invoice-card__action">View Details</a>
-                        <?php if ($invoice['status'] === 'unpaid'): ?>
-                            <label class="invoice-card__checkbox">
-                                <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 18px; height: 18px;">
-                            </label>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            <?php endforeach; ?>
+        <!-- Table / List Container -->
+        <div id="invoices-container-list" style="display: none; margin-bottom: 32px; background: var(--cv-bg-surface); border: 1px solid var(--cv-border-default); border-radius: 12px; overflow: hidden;">
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; text-align: left;">
+                    <thead>
+                        <tr style="background: var(--cv-bg-surface-sunken); border-bottom: 1px solid var(--cv-border-default); color: var(--cv-text-secondary); font-weight: 700; font-size: 0.8rem; text-transform: uppercase;">
+                            <th style="padding: 14px 16px; width: 40px; text-align: center;"></th>
+                            <th style="padding: 14px 16px;">Invoice #</th>
+                            <th style="padding: 14px 16px;">Status</th>
+                            <th style="padding: 14px 16px;">Due Date</th>
+                            <th style="padding: 14px 16px; text-align: right;">Amount Due</th>
+                            <th style="padding: 14px 16px; text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoices-table-body">
+                        <?php foreach ($invoices as $invoice): ?>
+                            <tr style="border-bottom: 1px solid var(--cv-border-default);">
+                                <td style="padding: 14px 16px; text-align: center;">
+                                    <?php if ($invoice['status'] === 'unpaid'): ?>
+                                        <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 16px; height: 16px;">
+                                    <?php endif; ?>
+                                </td>
+                                <td style="padding: 14px 16px; font-weight: 700; font-family: monospace;">
+                                    <a href="/client/invoices/<?= (int) $invoice['id'] ?>" style="color: var(--cv-color-brand-500); text-decoration: none;">INV-<?= (int) $invoice['id'] ?></a>
+                                </td>
+                                <td style="padding: 14px 16px;">
+                                    <?php if ($invoice['status'] === 'paid'): ?>
+                                        <span style="color: #10b981; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(16,185,129,0.1); padding: 4px 8px; border-radius: 4px;">Paid</span>
+                                    <?php elseif ($invoice['status'] === 'cancelled'): ?>
+                                        <span style="color: #6b7280; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(107,114,128,0.1); padding: 4px 8px; border-radius: 4px;">Cancelled</span>
+                                    <?php else: ?>
+                                        <span style="color: #ef4444; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(239,68,68,0.1); padding: 4px 8px; border-radius: 4px;">Unpaid</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td style="padding: 14px 16px; color: var(--cv-text-secondary);"><?= e($invoice['due_date']) ?></td>
+                                <td style="padding: 14px 16px; text-align: right; font-weight: 700; font-family: monospace;">
+                                    <?= e($invoice['currency']['symbol']) ?><?= number_format(round((float) $invoice['total'] * ((float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0), 2), 2) ?>
+                                </td>
+                                <td style="padding: 14px 16px; text-align: right;">
+                                    <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
+                                        <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="cv-btn cv-btn--secondary" style="padding: 4px 10px; font-size: 0.75rem; text-decoration: none;">View</a>
+                                        <?php if ($invoice['status'] === 'unpaid'): ?>
+                                            <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="cv-btn" style="background: #dc2626; color: #fff; border: none; padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer;" onclick="return confirm('Are you sure you want to cancel Invoice #INV-<?= (int) $invoice['id'] ?>?');">Cancel</button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Pay Selected Invoices Footer -->
@@ -414,7 +481,85 @@
                     btn.disabled = selected === 0;
                 }
                 document.querySelectorAll('.inv-chk').forEach(cb => cb.addEventListener('change', updatePayButton));
+
+                // Grid / List Toggle Logic
+                const btnGrid = document.getElementById('btn-view-grid');
+                const btnList = document.getElementById('btn-view-list');
+                const gridContainer = document.getElementById('invoices-container-grid');
+                const listContainer = document.getElementById('invoices-container-list');
+
+                function setViewMode(mode) {
+                    if (mode === 'list') {
+                        gridContainer.style.display = 'none';
+                        listContainer.style.display = 'block';
+                        btnList.style.background = 'var(--cv-color-brand-500)';
+                        btnList.style.color = '#fff';
+                        btnGrid.style.background = 'transparent';
+                        btnGrid.style.color = 'var(--cv-text-secondary)';
+                        localStorage.setItem('invoices_view_mode', 'list');
+                    } else {
+                        gridContainer.style.display = 'block';
+                        listContainer.style.display = 'none';
+                        btnGrid.style.background = 'var(--cv-color-brand-500)';
+                        btnGrid.style.color = '#fff';
+                        btnList.style.background = 'transparent';
+                        btnList.style.color = 'var(--cv-text-secondary)';
+                        localStorage.setItem('invoices_view_mode', 'grid');
+                    }
+                }
+
+                btnGrid.addEventListener('click', () => setViewMode('grid'));
+                btnList.addEventListener('click', () => setViewMode('list'));
+
+                if (localStorage.getItem('invoices_view_mode') === 'list') {
+                    setViewMode('list');
+                }
+            </script>
+        <?php else: ?>
+            <script>
+                const btnGrid = document.getElementById('btn-view-grid');
+                const btnList = document.getElementById('btn-view-list');
+                const gridContainer = document.getElementById('invoices-container-grid');
+                const listContainer = document.getElementById('invoices-container-list');
+
+                function setViewMode(mode) {
+                    if (mode === 'list') {
+                        gridContainer.style.display = 'none';
+                        listContainer.style.display = 'block';
+                        btnList.style.background = 'var(--cv-color-brand-500)';
+                        btnList.style.color = '#fff';
+                        btnGrid.style.background = 'transparent';
+                        btnGrid.style.color = 'var(--cv-text-secondary)';
+                        localStorage.setItem('invoices_view_mode', 'list');
+                    } else {
+                        gridContainer.style.display = 'block';
+                        listContainer.style.display = 'none';
+                        btnGrid.style.background = 'var(--cv-color-brand-500)';
+                        btnGrid.style.color = '#fff';
+                        btnList.style.background = 'transparent';
+                        btnList.style.color = 'var(--cv-text-secondary)';
+                        localStorage.setItem('invoices_view_mode', 'grid');
+                    }
+                }
+
+                if (btnGrid && btnList) {
+                    btnGrid.addEventListener('click', () => setViewMode('grid'));
+                    btnList.addEventListener('click', () => setViewMode('list'));
+
+                    if (localStorage.getItem('invoices_view_mode') === 'list') {
+                        setViewMode('list');
+                    }
+                }
             </script>
         <?php endif; ?>
+
+        <!-- Hidden forms for direct invoice cancellation -->
+        <?php foreach ($invoices as $invoice): ?>
+            <?php if ($invoice['status'] === 'unpaid'): ?>
+                <form id="cancel-form-<?= (int) $invoice['id'] ?>" method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="display:none;">
+                    <?= csrf_field() ?>
+                </form>
+            <?php endif; ?>
+        <?php endforeach; ?>
     <?php endif; ?>
 </form>

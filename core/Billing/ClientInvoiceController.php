@@ -120,6 +120,23 @@ final class ClientInvoiceController
         return Response::redirect("/client/invoices/{$params['id']}");
     }
 
+    public function cancel(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $invoice = $this->invoices->find((int) $params['id']);
+
+        if ($invoice !== null && (int) $invoice['client_id'] === (int) $client['id'] && $invoice['status'] === 'unpaid') {
+            $this->invoices->markCancelled((int) $invoice['id']);
+        }
+
+        return Response::redirect("/client/invoices/" . (int) $params['id']);
+    }
+
     public function addFundsForm(Request $request): Response
     {
         $client = $this->guard->currentClient();

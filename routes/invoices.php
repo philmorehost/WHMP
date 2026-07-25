@@ -13,6 +13,7 @@ $router->post('/client/invoices/mass-pay', [ClientInvoiceController::class, 'mas
 $router->get('/client/invoices/{id}', [ClientInvoiceController::class, 'show']);
 $router->get('/client/invoices/{id}/pdf', [ClientInvoiceController::class, 'downloadPdf']);
 $router->post('/client/invoices/{id}/apply-credit', [ClientInvoiceController::class, 'applyCredit']);
+$router->post('/client/invoices/{id}/cancel', [ClientInvoiceController::class, 'cancel']);
 
 $router->get('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsForm']);
 $router->post('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsSubmit']);

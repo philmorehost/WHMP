@@ -58,8 +58,14 @@ $companyDept ??= 'Payments Dept.';
             <div style="text-align:right;">
                 <?php if ($invoice['status'] === 'paid'): ?>
                     <span style="font-size:1.5rem; font-weight:900; color:#10b981; text-transform:uppercase; letter-spacing:0.05em; display:block;">PAID</span>
+                <?php elseif ($invoice['status'] === 'cancelled'): ?>
+                    <span style="font-size:1.5rem; font-weight:900; color:#6b7280; text-transform:uppercase; letter-spacing:0.05em; display:block;">CANCELLED</span>
                 <?php else: ?>
                     <span style="font-size:1.5rem; font-weight:900; color:#ef4444; text-transform:uppercase; letter-spacing:0.05em; display:block;">UNPAID</span>
+                    <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="margin-top:6px;" onsubmit="return confirm('Are you sure you want to cancel this unpaid invoice?');">
+                        <?= csrf_field() ?>
+                        <button type="submit" class="cv-btn" style="background:#dc2626; color:#fff; font-size:var(--cv-text-xs); padding:3px 8px; border-radius:4px; border:none; cursor:pointer;">Cancel Invoice</button>
+                    </form>
                 <?php endif; ?>
                 <p style="margin:4px 0 0 0; color:#6b7280; font-size:var(--cv-text-sm);">Due Date: <?= e($invoice['due_date']) ?></p>
             </div>
