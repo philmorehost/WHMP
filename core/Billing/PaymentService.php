@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Billing;
 
+use CodeVault\Database;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 
@@ -15,10 +16,20 @@ use CodeVault\Hooks\HookPoints;
  */
 final class PaymentService
 {
+    /**
+     * $db and $credit are only needed to top up a client's wallet when a
+     * deposit invoice settles, and are optional so this service can still be
+     * constructed somewhere the application container was never built (unit
+     * tests, CLI jobs). They used to be pulled from the global container at
+     * the moment a payment settled, which meant recording a covering payment
+     * threw outright in any such context — the payment itself needs neither.
+     */
     public function __construct(
         private readonly InvoiceRepository $invoices,
         private readonly TransactionRepository $transactions,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly ?Database $db = null,
+        private readonly ?ClientCreditRepository $credit = null
     ) {
     }
 
@@ -54,21 +65,7 @@ final class PaymentService
             $rowsAffected = $this->invoices->markPaid($invoiceId);
 
             if ($rowsAffected > 0) {
-                // Check if it is a deposit invoice
-                $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
-                $items = $db->select('SELECT * FROM invoice_items WHERE invoice_id = ?', [$invoiceId]);
-                $isDeposit = false;
-                foreach ($items as $item) {
-                    if (stripos((string) $item['description'], 'Add Funds') !== false || stripos((string) $item['description'], 'Deposit') !== false) {
-                        $isDeposit = true;
-                        break;
-                    }
-                }
-
-                if ($isDeposit) {
-                    $creditRepo = \CodeVault\Support\App::container()->make(\CodeVault\Billing\ClientCreditRepository::class);
-                    $creditRepo->add((int) $invoice['client_id'], (float) $invoice['total'], "Wallet deposit: Invoice #{$invoiceId}", $invoiceId);
-                }
+                $this->creditWalletIfDeposit($invoiceId, $invoice);
 
                 $this->hooks->fire(HookPoints::INVOICE_PAID, ['invoiceId' => $invoiceId]);
                 $invoicePaid = true;
@@ -78,5 +75,41 @@ final class PaymentService
         $this->hooks->fire(HookPoints::TRANSACTION_ADDED, ['invoiceId' => $invoiceId, 'amount' => $amount, 'gateway' => $gatewaySlug]);
 
         return ['transactionId' => $transactionId, 'invoicePaid' => $invoicePaid];
+    }
+
+    /**
+     * A settled "Add Funds" invoice becomes wallet credit. The amount is
+     * copied straight from the invoice total, which is already a base-currency
+     * figure, so the balance stays in the same unit every other stored amount
+     * uses (see CurrencyService).
+     *
+     * Best-effort by design: without the optional collaborators there is
+     * nothing to credit against, and a payment must still record correctly
+     * rather than fail because a wallet could not be topped up.
+     *
+     * @param array<string, mixed> $invoice
+     */
+    private function creditWalletIfDeposit(int $invoiceId, array $invoice): void
+    {
+        if ($this->db === null || $this->credit === null) {
+            return;
+        }
+
+        $items = $this->db->select('SELECT description FROM invoice_items WHERE invoice_id = ?', [$invoiceId]);
+
+        foreach ($items as $item) {
+            $description = (string) $item['description'];
+
+            if (stripos($description, 'Add Funds') !== false || stripos($description, 'Deposit') !== false) {
+                $this->credit->add(
+                    (int) $invoice['client_id'],
+                    (float) $invoice['total'],
+                    "Wallet deposit: Invoice #{$invoiceId}",
+                    $invoiceId
+                );
+
+                return;
+            }
+        }
     }
 }

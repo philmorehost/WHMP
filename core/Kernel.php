@@ -726,6 +726,11 @@ class Kernel
                 $c->make(InvoiceRepository::class),
                 $c->make(TransactionRepository::class),
                 $c->make(HookDispatcher::class),
+                // Needed to turn a settled deposit invoice into wallet credit;
+                // PaymentService used to reach for these through the global
+                // container at payment time instead of being handed them.
+                $c->make(Database::class),
+                $c->make(ClientCreditRepository::class),
             );
         });
 
