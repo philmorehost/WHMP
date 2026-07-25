@@ -115,7 +115,7 @@ final class CheckoutController
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
             'domainTlds' => array_column($this->domainPricing->all(), 'tld'),
         ], [
-            'title' => "{$product['name']} — CodeVault Store",
+            'title' => "{$product['name']}",
             'canonicalUrl' => $url,
             'metaDescription' => mb_strimwidth(strip_tags((string) ($product['description'] ?? $product['name'])), 0, 160, '...'),
             'currencies' => $this->currencies->all(),
@@ -288,7 +288,7 @@ final class CheckoutController
         $content = $this->view->render($template, $data);
 
         return Response::html($this->view->render('layouts.client', array_merge([
-            'title' => 'CodeVault Store',
+            'title' => 'Store',
             'content' => $content,
             'jsonLd' => [$this->seo->organization()],
             't' => $t,

@@ -36,11 +36,11 @@ final class ThemeSettings
         }
 
         $companyName = trim((string) ($this->settings->get('company.name') ?? ''));
-        $configuredBrand = $this->settings->get(self::BRAND_NAME_KEY);
+        $configuredBrand = trim((string) ($this->settings->get(self::BRAND_NAME_KEY) ?? ''));
         
-        $brandName = (!empty($configuredBrand) && $configuredBrand !== self::DEFAULT_BRAND_NAME) 
-            ? $configuredBrand 
-            : ($companyName !== '' ? $companyName : self::DEFAULT_BRAND_NAME);
+        $brandName = $companyName !== '' 
+            ? $companyName 
+            : ($configuredBrand !== '' ? $configuredBrand : self::DEFAULT_BRAND_NAME);
 
         return [
             'brandName' => $brandName,
