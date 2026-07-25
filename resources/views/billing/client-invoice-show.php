@@ -11,8 +11,14 @@
 /** @var string $companyDept */
 // Stored amounts are authoritative in the BASE currency (see CurrencyService);
 // the invoice's locked rate converts them for display only.
-$rate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
-$money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $rate, 2), 2);
+$invoiceRate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
+$money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $invoiceRate, 2), 2);
+
+// The wallet balance, however, should be displayed in the CLIENT's currency, not
+// the invoice's currency — which can differ if the invoice was created in a
+// different currency than the account's current setting. Use the client's rate.
+$clientRate = (float) $currency['exchange_rate'] > 0 ? (float) $currency['exchange_rate'] : 1.0;
+$moneyClientCurrency = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $clientRate, 2), 2);
 $paymentStatus ??= null;
 $companyName ??= 'Your Company';
 $companyEmail ??= '';
@@ -22,7 +28,7 @@ $companyDept ??= 'Payments Dept.';
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--cv-space-4); flex-wrap:wrap; gap:var(--cv-space-2);">
         <p><a href="/client/invoices" style="text-decoration:none; font-weight:600; color:var(--cv-color-brand-500);">&larr; Back to Invoices</a></p>
         <div style="display:flex; gap:var(--cv-space-2); align-items:center;">
-            <span style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary);">Wallet Balance: <strong><?= $money($creditBalance) ?></strong></span>
+            <span style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary);">Wallet Balance: <strong><?= $moneyClientCurrency($creditBalance) ?></strong></span>
             <a href="/client/wallet/add-funds" class="cv-btn cv-btn--secondary" style="padding:4px 10px; font-size:var(--cv-text-xs); text-decoration:none; display:inline-block;">+ Add Funds</a>
             <a class="cv-btn cv-btn--secondary" href="/client/invoices/<?= (int) $invoice['id'] ?>/pdf" target="_blank" style="padding:4px 10px; font-size:var(--cv-text-xs); text-decoration:none; display:inline-block;">🖨️ Print / PDF</a>
         </div>
