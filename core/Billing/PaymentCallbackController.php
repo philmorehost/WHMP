@@ -137,17 +137,70 @@ final class PaymentCallbackController
             return $this->json(['success' => false, 'message' => $reason], 422);
         }
 
+        // The popup still has to be backed by a real transaction on the
+        // gateway. PayHub's checkout looks the reference up and, finding
+        // nothing, would fall back to whatever amount sat in the query string;
+        // worse, its verify endpoint matches on (reference, merchant) and 404s
+        // for a reference it never issued — so a payment made against a
+        // self-minted reference could never be confirmed, and the invoice would
+        // never settle. Initialising here means the gateway knows the amount
+        // and owns the reference before the client ever sees a card form.
+        $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
+        $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
+
+        try {
+            $result = $prepared['module']->capture([
+                'config' => $prepared['config'],
+                'email' => (string) $client['email'],
+                'name' => $clientName !== '' ? $clientName : (string) $client['email'],
+                'phone' => (string) ($client['phone'] ?? ''),
+                'amount' => $prepared['amount'],
+                'currency' => $prepared['currency'],
+                'reference' => $prepared['reference'],
+                'callbackUrl' => "{$baseUrl}/pay/{$slug}/callback",
+                'metadata' => ['invoice_id' => $invoiceId, 'client_id' => (int) $client['id']],
+            ]);
+        } catch (\Throwable $e) {
+            $message = 'Exception in gateway module: ' . $e->getMessage();
+            $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'EXCEPTIONAL_ERROR', $message, [
+                'exception' => get_class($e),
+            ]);
+
+            return $this->json(['success' => false, 'message' => $message], 502);
+        }
+
+        if (!$result['success']) {
+            $message = $result['message'] ?? 'Could not start the payment.';
+            $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'FAILED', $message, ['result' => $result]);
+
+            return $this->json(['success' => false, 'message' => $message], 502);
+        }
+
+        // Use the reference the GATEWAY issued, not ours — PayHub mints its own
+        // PH_… reference and ignores the one we send, and that is the only one
+        // its checkout and verify endpoints recognise. Our own reference rides
+        // along as trxref purely so the callback can still recover the invoice
+        // id if the gateway does not echo our metadata back.
+        $gatewayReference = (string) ($result['transactionId'] ?? $prepared['reference']);
+
+        $this->writeGatewayLog(
+            $slug, $invoiceId, (int) $client['id'], 'SUCCESS',
+            "Inline checkout initialised, gateway ref={$gatewayReference}"
+        );
+
         return $this->json([
             'success' => true,
             'publicKey' => $publicKey,
-            'reference' => $prepared['reference'],
+            'reference' => $gatewayReference,
             'amount' => $prepared['amount'],
             'currency' => $prepared['currency'],
             'email' => (string) $client['email'],
             // Where the browser should land once the popup closes with a
             // result — the server-side verification endpoint, never a page
             // that would treat the popup's own word as proof of payment.
-            'callbackUrl' => '/pay/' . rawurlencode($slug) . '/callback?reference=' . rawurlencode($prepared['reference']),
+            'callbackUrl' => '/pay/' . rawurlencode($slug) . '/callback'
+                . '?reference=' . rawurlencode($gatewayReference)
+                . '&trxref=' . rawurlencode($prepared['reference']),
         ]);
     }
 

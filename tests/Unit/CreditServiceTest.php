@@ -164,7 +164,10 @@ final class CreditServiceTest extends DatabaseTestCase
 
         $hooks = new HookDispatcher();
         $transactions = new TransactionRepository($this->db);
-        $payments = new PaymentService($this->invoices, $transactions, $hooks);
+        // Crediting the wallet is what this test is about, so it has to hand
+        // PaymentService the collaborators that do it — they are optional
+        // precisely because most callers only care about recording the payment.
+        $payments = new PaymentService($this->invoices, $transactions, $hooks, $this->db, $this->credit);
 
         // Pay the deposit invoice
         $payments->recordPayment($invoiceId, 'paypal', 100.00);

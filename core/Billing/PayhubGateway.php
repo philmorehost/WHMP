@@ -158,8 +158,12 @@ final class PayhubGateway implements GatewayModule
             'success' => in_array($status, ['success', 'successful', 'completed', 'paid'], true),
             'status' => $status,
             'reference' => (string) ($data['reference'] ?? $reference),
-            // Amount returned by PayHub is in Naira (major units), not kobo.
-            'amount' => (float) ($data['amount'] ?? 0),
+            // PayHub's verify endpoint returns the amount in the MINOR unit:
+            // its api/transaction/verify.php emits `$tx['amount'] * 100` even
+            // though the same platform's initialize endpoint takes Naira. The
+            // two directions genuinely disagree, so this must be scaled back
+            // down — reading it as Naira overstated every PayHub payment 100x.
+            'amount' => ((float) ($data['amount'] ?? 0)) / 100,
             'metadata' => (array) ($data['metadata'] ?? []),
         ];
     }
