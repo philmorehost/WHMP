@@ -115,6 +115,26 @@
         payhubSdk = new Promise(function (resolve, reject) {
             if (window.PayhubPop) { resolve(window.PayhubPop); return; }
 
+            // Check if the script is already in the DOM to avoid loading it twice
+            // (which would cause a "PayhubPop already declared" error).
+            var existing = document.querySelector('script[src="https://merchant.payhub.com.ng/inline.js"]');
+            if (existing) {
+                // The script is in the DOM but hasn't finished loading yet (or loaded
+                // but PayhubPop isn't ready). Wait a moment for it to settle.
+                var checkInterval = setInterval(function () {
+                    if (window.PayhubPop) {
+                        clearInterval(checkInterval);
+                        resolve(window.PayhubPop);
+                    }
+                }, 100);
+                // Fail after 5 seconds of waiting.
+                setTimeout(function () {
+                    clearInterval(checkInterval);
+                    if (!window.PayhubPop) { reject(new Error('PayHub checkout took too long to load.')); }
+                }, 5000);
+                return;
+            }
+
             var script = document.createElement('script');
             script.src = 'https://merchant.payhub.com.ng/inline.js';
             script.onload = function () {
