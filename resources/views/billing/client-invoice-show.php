@@ -94,7 +94,7 @@ $companyDept ??= 'Payments Dept.';
         <?php if ($invoice['status'] === 'unpaid' && $creditBalance > 0): ?>
             <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.15); padding: var(--cv-space-4); border-radius: 8px; margin-bottom: var(--cv-space-6);">
                 <strong style="color:#065f46; font-size:var(--cv-text-sm); display:block; margin-bottom:4px;">Apply Credit</strong>
-                <p style="color:#047857; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Your credit balance is <strong><?= $moneyClientCurrency($creditBalance) ?></strong>. This can be applied to the invoice using the form below. Enter the amount to apply:</p>
+                <p style="color:#047857; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Your credit balance is <strong><?= $money($creditBalance) ?></strong>. This can be applied to the invoice using the form below. Enter the amount to apply:</p>
                 <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/apply-credit" style="display:flex; gap:var(--cv-space-2); max-width:300px; margin:0;">
                     <?= csrf_field() ?>
                     <input class="cv-input" type="number" step="0.01" max="<?= $creditBalance ?>" name="amount" value="<?= number_format($creditBalance, 2, '.', '') ?>" style="flex:1; padding:6px 12px; font-size:var(--cv-text-xs); border:1px solid #10b981;" required>
