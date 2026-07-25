@@ -372,7 +372,7 @@
                     <div class="invoice-card__body">
                         <div class="invoice-card__amount">
                             <span class="invoice-card__amount-label">Amount Due</span>
-                            <span class="invoice-card__amount-value"><?= e($invoice['currency']['symbol']) ?><?= number_format((float) $invoice['total'] * (float) $invoice['currency_rate'], 2) ?></span>
+                            <span class="invoice-card__amount-value"><?= e($invoice['currency']['symbol']) ?><?= number_format((float) $invoice['total'], 2) ?></span>
                         </div>
 
                         <div class="invoice-card__info-row">

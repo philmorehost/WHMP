@@ -9,8 +9,7 @@
 /** @var string $companyName */
 /** @var string $companyEmail */
 /** @var string $companyDept */
-$rate = (float) $invoice['currency_rate'];
-$money = static fn (float $amount): string => $currency['symbol'] . number_format($amount * $rate, 2);
+$money = static fn (float $amount): string => $currency['symbol'] . number_format($amount, 2);
 $paymentStatus ??= null;
 $companyName ??= 'Your Company';
 $companyEmail ??= '';

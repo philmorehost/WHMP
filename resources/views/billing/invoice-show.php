@@ -5,8 +5,7 @@
 /** @var string|null $refundSuccess */
 /** @var string|null $refundError */
 /** @var array<string, mixed> $currency */
-$rate = (float) $invoice['currency_rate'];
-$money = static fn (float $amount): string => $currency['symbol'] . number_format($amount * $rate, 2);
+$money = static fn (float $amount): string => $currency['symbol'] . number_format($amount, 2);
 ?>
 <style>
 /* Admin Invoice Detail Styles */
