@@ -99,13 +99,10 @@ final class PaymentCallbackController
         $invoiceCurrRow = $invoiceCurrencyId !== null
             ? $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrencyId])
             : null;
-        // If invoice currency unknown, assume it's already in USD base
+        $invoiceCurrCode = $invoiceCurrRow['code'] ?? 'USD';
         $invoiceCurrRate = ($invoiceCurrRow !== null && (float) $invoiceCurrRow['exchange_rate'] > 0)
             ? (float) $invoiceCurrRow['exchange_rate']
             : 1.0;
-
-        // 2. Convert invoice remaining → USD base amount
-        $usdBase = $remaining / $invoiceCurrRate;
 
         // 3. Get gateway currency's exchange rate (units per USD) from currencies table
         $gatewayCurrRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
@@ -113,16 +110,21 @@ final class PaymentCallbackController
             ? (float) $gatewayCurrRow['exchange_rate']
             : 1.0;
 
-        // 4. Convert USD base → gateway currency amount
-        $captureAmount = round($usdBase * $gatewayRate, 2);
+        // 4. Calculate capture amount: if same currency, send directly; if different, convert via USD
+        if ($invoiceCurrCode === $gatewayCurrency) {
+            // Same currency — no conversion needed
+            $captureAmount = round($remaining, 2);
+        } else {
+            // Different currencies — convert through USD
+            $usdBase = $remaining / $invoiceCurrRate;
+            $captureAmount = round($usdBase * $gatewayRate, 2);
+        }
 
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
-
-        $invoiceCurrCode = $invoiceCurrRow['code'] ?? 'USD';
         $this->writeGatewayLog(
             $slug, $invoiceId, $clientId, 'INITIATING',
-            "Remaining: {$remaining} {$invoiceCurrCode} → USD base: {$usdBase} → Capture: {$captureAmount} {$gatewayCurrency} (inv_rate={$invoiceCurrRate}, gw_rate={$gatewayRate}), ref={$reference}"
+            "Remaining: {$remaining} {$invoiceCurrCode} → Capture: {$captureAmount} {$gatewayCurrency} (same_currency=" . ($invoiceCurrCode === $gatewayCurrency ? 'yes' : 'no') . ", inv_rate={$invoiceCurrRate}, gw_rate={$gatewayRate}), ref={$reference}"
         );
 
         try {
