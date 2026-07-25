@@ -35,8 +35,15 @@ final class ThemeSettings
             $primaryColor = '#ff8f28';
         }
 
+        $companyName = trim((string) ($this->settings->get('company.name') ?? ''));
+        $configuredBrand = $this->settings->get(self::BRAND_NAME_KEY);
+        
+        $brandName = (!empty($configuredBrand) && $configuredBrand !== self::DEFAULT_BRAND_NAME) 
+            ? $configuredBrand 
+            : ($companyName !== '' ? $companyName : self::DEFAULT_BRAND_NAME);
+
         return [
-            'brandName' => $this->settings->get(self::BRAND_NAME_KEY, self::DEFAULT_BRAND_NAME) ?? self::DEFAULT_BRAND_NAME,
+            'brandName' => $brandName,
             'logoUrl' => $this->settings->get(self::LOGO_URL_KEY) ?: null,
             'primaryColor' => $primaryColor,
             'primaryColorDark' => $this->darken($primaryColor, 0.82),
