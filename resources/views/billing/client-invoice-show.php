@@ -14,10 +14,10 @@
 $invoiceRate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
 $money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $invoiceRate, 2), 2);
 
-// creditBalance is stored in the same base currency unit as invoice totals.
-// Using the invoice's own locked rate and symbol is correct — the credit will
-// be applied against this invoice, so showing it in the same currency as the
-// invoice totals avoids any cross-currency confusion.
+// creditBalance is stored directly in the client's primary/operating currency units
+// (or base units depending on entry method). Showing raw $creditBalance formatted with the
+// currency symbol matches the Dashboard WALLET widget (N5,600.00).
+$moneyCredit = static fn (float $amount): string => ($clientCurrency['symbol'] ?? $currency['symbol'] ?? '₦') . number_format(round($amount, 2), 2);
 $paymentStatus ??= null;
 $companyName ??= 'Your Company';
 $companyEmail ??= '';
@@ -27,7 +27,7 @@ $companyDept ??= 'Payments Dept.';
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--cv-space-4); flex-wrap:wrap; gap:var(--cv-space-2);">
         <p><a href="/client/invoices" style="text-decoration:none; font-weight:600; color:var(--cv-color-brand-500);">&larr; Back to Invoices</a></p>
         <div style="display:flex; gap:var(--cv-space-2); align-items:center;">
-            <span style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary);">Wallet Balance: <strong><?= $money($creditBalance) ?></strong></span>
+            <span style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary);">Wallet Balance: <strong><?= $moneyCredit($creditBalance) ?></strong></span>
             <a href="/client/wallet/add-funds" class="cv-btn cv-btn--secondary" style="padding:4px 10px; font-size:var(--cv-text-xs); text-decoration:none; display:inline-block;">+ Add Funds</a>
             <a class="cv-btn cv-btn--secondary" href="/client/invoices/<?= (int) $invoice['id'] ?>/pdf" target="_blank" style="padding:4px 10px; font-size:var(--cv-text-xs); text-decoration:none; display:inline-block;">🖨️ Print / PDF</a>
         </div>
@@ -94,7 +94,7 @@ $companyDept ??= 'Payments Dept.';
         <?php if ($invoice['status'] === 'unpaid' && $creditBalance > 0): ?>
             <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.15); padding: var(--cv-space-4); border-radius: 8px; margin-bottom: var(--cv-space-6);">
                 <strong style="color:#065f46; font-size:var(--cv-text-sm); display:block; margin-bottom:4px;">Apply Credit</strong>
-                <p style="color:#047857; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Your credit balance is <strong><?= $money($creditBalance) ?></strong>. This can be applied to the invoice using the form below. Enter the amount to apply:</p>
+                <p style="color:#047857; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Your credit balance is <strong><?= $moneyCredit($creditBalance) ?></strong>. This can be applied to the invoice using the form below. Enter the amount to apply:</p>
                 <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/apply-credit" style="display:flex; gap:var(--cv-space-2); max-width:300px; margin:0;">
                     <?= csrf_field() ?>
                     <input class="cv-input" type="number" step="0.01" max="<?= $creditBalance ?>" name="amount" value="<?= number_format($creditBalance, 2, '.', '') ?>" style="flex:1; padding:6px 12px; font-size:var(--cv-text-xs); border:1px solid #10b981;" required>
