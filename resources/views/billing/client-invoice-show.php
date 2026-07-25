@@ -14,14 +14,10 @@
 $invoiceRate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
 $money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $invoiceRate, 2), 2);
 
-// The wallet balance must be displayed in the CLIENT's own currency, not the
-// invoice's locked currency — which can differ if the invoice was created in a
-// different currency than the account's current preference. The controller
-// passes $clientCurrency resolved via CurrencyService::resolveForClient().
-$clientCurrencyData = $clientCurrency ?? $currency;
-$clientRate = (float) $clientCurrencyData['exchange_rate'] > 0 ? (float) $clientCurrencyData['exchange_rate'] : 1.0;
-$clientSymbol = (string) ($clientCurrencyData['symbol'] ?? $currency['symbol']);
-$moneyClientCurrency = static fn (float $amount): string => $clientSymbol . number_format(round($amount * $clientRate, 2), 2);
+// creditBalance is stored in the same base currency unit as invoice totals.
+// Using the invoice's own locked rate and symbol is correct — the credit will
+// be applied against this invoice, so showing it in the same currency as the
+// invoice totals avoids any cross-currency confusion.
 $paymentStatus ??= null;
 $companyName ??= 'Your Company';
 $companyEmail ??= '';
@@ -31,7 +27,7 @@ $companyDept ??= 'Payments Dept.';
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--cv-space-4); flex-wrap:wrap; gap:var(--cv-space-2);">
         <p><a href="/client/invoices" style="text-decoration:none; font-weight:600; color:var(--cv-color-brand-500);">&larr; Back to Invoices</a></p>
         <div style="display:flex; gap:var(--cv-space-2); align-items:center;">
-            <span style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary);">Wallet Balance: <strong><?= $moneyClientCurrency($creditBalance) ?></strong></span>
+            <span style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary);">Wallet Balance: <strong><?= $money($creditBalance) ?></strong></span>
             <a href="/client/wallet/add-funds" class="cv-btn cv-btn--secondary" style="padding:4px 10px; font-size:var(--cv-text-xs); text-decoration:none; display:inline-block;">+ Add Funds</a>
             <a class="cv-btn cv-btn--secondary" href="/client/invoices/<?= (int) $invoice['id'] ?>/pdf" target="_blank" style="padding:4px 10px; font-size:var(--cv-text-xs); text-decoration:none; display:inline-block;">🖨️ Print / PDF</a>
         </div>
@@ -176,32 +172,16 @@ $companyDept ??= 'Payments Dept.';
                                 <?php endif; ?>
                             </div>
                             <?php
-                            // PayHub supports an on-page popup. The button carries only
-                            // identifiers — the reference and the amount are issued by the
-                            // server when it is clicked (see PaymentCallbackController::
-                            // initiateInline), never rendered into the page here.
-                            $useInline = $gateway['slug'] === 'payhub' && $hasKeys && !empty($config['public_key']);
+                            // PayHub uses the same server-side redirect flow as Paystack/Flutterwave.
+                            // The inline popup SDK (merchant.payhub.com.ng/inline.js) was removed
+                            // because window.PayhubPop is not reliably exposed by that CDN script,
+                            // causing a consistent "took too long to load" timeout for users.
+                            // The redirect flow in PayhubGateway::capture() works correctly.
                             ?>
-                            <?php if ($useInline): ?>
-                                <button class="cv-btn" type="button"
-                                        data-payhub-pay
-                                        data-invoice-id="<?= (int) $invoice['id'] ?>"
-                                        data-gateway-slug="<?= e($gateway['slug']) ?>"
-                                        data-gateway-name="<?= e($gateway['name']) ?>"
-                                        data-token="<?= e(csrf_token()) ?>"
-                                        style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                                <noscript>
-                                    <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:8px 0 0 0;">
-                                        <?= csrf_field() ?>
-                                        <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                                    </form>
-                                </noscript>
-                            <?php else: ?>
-                                <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
-                                    <?= csrf_field() ?>
-                                    <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                                </form>
-                            <?php endif; ?>
+                            <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
+                                <?= csrf_field() ?>
+                                <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                            </form>
                         </div>
                     <?php endif; ?>
                 <?php endforeach; ?>
