@@ -99,6 +99,102 @@
         }
     });
 
+    // PayHub inline checkout: pay without leaving the invoice page.
+    //
+    // The button carries no payment details. Clicking it asks the server to
+    // issue them, and the server decides the reference and the amount from the
+    // invoice itself — so nothing here can choose what to charge. The popup's
+    // own success callback is likewise not trusted as proof of payment: it only
+    // sends the browser to the server's verification endpoint, which confirms
+    // the transaction with PayHub before anything is recorded.
+    var payhubSdk = null;
+
+    function loadPayhubSdk() {
+        if (payhubSdk) { return payhubSdk; }
+
+        payhubSdk = new Promise(function (resolve, reject) {
+            if (window.PayhubPop) { resolve(window.PayhubPop); return; }
+
+            var script = document.createElement('script');
+            script.src = 'https://merchant.payhub.com.ng/inline.js';
+            script.onload = function () {
+                if (window.PayhubPop) { resolve(window.PayhubPop); }
+                else { reject(new Error('PayHub checkout loaded but did not initialise.')); }
+            };
+            script.onerror = function () { reject(new Error('Could not reach PayHub checkout.')); };
+            document.head.appendChild(script);
+        });
+
+        // Let a failed load be retried on the next click rather than caching
+        // the rejection forever (a dropped connection should not disable the
+        // button for the rest of the session).
+        payhubSdk.catch(function () { payhubSdk = null; });
+
+        return payhubSdk;
+    }
+
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-payhub-pay]');
+        if (!button || button.disabled) { return; }
+        event.preventDefault();
+
+        var invoiceId = button.getAttribute('data-invoice-id');
+        var slug = button.getAttribute('data-gateway-slug');
+        var label = 'Pay with ' + (button.getAttribute('data-gateway-name') || 'PayHub');
+        var idle = function (text) { button.disabled = false; button.textContent = text || label; };
+
+        button.disabled = true;
+        button.textContent = 'Starting…';
+
+        var body = new FormData();
+        body.append('_token', button.getAttribute('data-token') || '');
+
+        Promise.all([
+            fetch('/client/invoices/' + encodeURIComponent(invoiceId) + '/pay/' + encodeURIComponent(slug) + '/init', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: body,
+            }).then(function (r) { return r.json(); }),
+            loadPayhubSdk(),
+        ])
+        .then(function (results) {
+            var data = results[0];
+            var PayhubPop = results[1];
+
+            if (!data || !data.success) {
+                // An invoice that is already settled is not an error — send the
+                // client to the page that says so.
+                if (data && data.redirectUrl) { window.location.href = data.redirectUrl; return; }
+                idle();
+                window.alert((data && data.message) || 'Could not start the payment. Please try again.');
+                return;
+            }
+
+            PayhubPop.setup({
+                key: data.publicKey,
+                email: data.email,
+                // PayHub's inline checkout takes the amount in the MINOR unit
+                // (kobo) — its documented example multiplies by 100. This is the
+                // opposite of PayHub's /transaction/initialize endpoint, which
+                // takes Naira and is what the redirect flow posts, so the server
+                // sends major units and only this popup call scales them.
+                amount: Math.round(data.amount * 100),
+                ref: data.reference,
+                onClose: function () { idle(); },
+                callback: function () {
+                    // Hand off to server-side verification; the popup's word is
+                    // not what marks the invoice paid.
+                    button.textContent = 'Confirming…';
+                    window.location.href = data.callbackUrl;
+                },
+            }).openIframe();
+        })
+        .catch(function (err) {
+            idle();
+            window.alert((err && err.message) || 'Could not start the payment. Please try again.');
+        });
+    });
+
     // Server admin add/edit form (provisioning/server-form.php): the
     // module-slug select shows/hides the API-username field and relabels
     // the token field per module. This used to be an inline <script> block

@@ -18,6 +18,9 @@ $router->get('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFu
 $router->post('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsSubmit']);
 
 $router->post('/client/invoices/{id}/pay/{gateway}', [PaymentCallbackController::class, 'initiate']);
+// Server-issued init for on-page popup checkout — returns the reference and
+// amount the server decided, so the popup never chooses either itself.
+$router->post('/client/invoices/{id}/pay/{gateway}/init', [PaymentCallbackController::class, 'initiateInline']);
 $router->get('/pay/{gateway}/callback', [PaymentCallbackController::class, 'callback']);
 $router->post('/pay/{gateway}/webhook', [PaymentCallbackController::class, 'webhook']);
 

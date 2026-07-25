@@ -27,8 +27,16 @@ final class SecurityHeaders
             ->withHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
             ->withHeader(
                 'Content-Security-Policy',
-                "default-src 'self' https://merchant.payhub.com.ng; script-src 'self' 'unsafe-inline' https://merchant.payhub.com.ng; style-src 'self' 'unsafe-inline'; "
-                . "img-src 'self' data: https:; font-src 'self'; frame-src 'self' https://merchant.payhub.com.ng; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
+                // merchant.payhub.com.ng is allowed as a script/frame/connect
+                // source so PayHub's inline checkout can load and run its popup.
+                // script-src deliberately does NOT carry 'unsafe-inline': the
+                // PayHub integration lives in app.js behind a [data-payhub-pay]
+                // delegated listener precisely so this stays locked down —
+                // re-adding it would silently re-enable every injected inline
+                // script across the app, which is what this class exists to stop.
+                "default-src 'self'; script-src 'self' https://merchant.payhub.com.ng; style-src 'self' 'unsafe-inline'; "
+                . "img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://merchant.payhub.com.ng; "
+                . "frame-src 'self' https://merchant.payhub.com.ng; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
             );
     }
 }

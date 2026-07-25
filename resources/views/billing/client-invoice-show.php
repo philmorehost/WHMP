@@ -166,10 +166,33 @@ $companyDept ??= 'Payments Dept.';
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
-                                <?= csrf_field() ?>
-                                <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                            </form>
+                            <?php
+                            // PayHub supports an on-page popup. The button carries only
+                            // identifiers — the reference and the amount are issued by the
+                            // server when it is clicked (see PaymentCallbackController::
+                            // initiateInline), never rendered into the page here.
+                            $useInline = $gateway['slug'] === 'payhub' && $hasKeys && !empty($config['public_key']);
+                            ?>
+                            <?php if ($useInline): ?>
+                                <button class="cv-btn" type="button"
+                                        data-payhub-pay
+                                        data-invoice-id="<?= (int) $invoice['id'] ?>"
+                                        data-gateway-slug="<?= e($gateway['slug']) ?>"
+                                        data-gateway-name="<?= e($gateway['name']) ?>"
+                                        data-token="<?= e(csrf_token()) ?>"
+                                        style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                                <noscript>
+                                    <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:8px 0 0 0;">
+                                        <?= csrf_field() ?>
+                                        <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                                    </form>
+                                </noscript>
+                            <?php else: ?>
+                                <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
+                                    <?= csrf_field() ?>
+                                    <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                 <?php endforeach; ?>

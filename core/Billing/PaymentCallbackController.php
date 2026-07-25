@@ -41,93 +41,37 @@ final class PaymentCallbackController
         $slug = (string) ($params['gateway'] ?? 'unknown');
         $invoiceId = (int) ($params['id'] ?? 0);
 
-        $client = $this->guard->currentClient();
-        $clientId = $client ? (int) $client['id'] : null;
+        $prepared = $this->prepareCharge($slug, $invoiceId);
 
-        if ($client === null) {
-            $this->writeGatewayLog($slug, $invoiceId, null, 'FAILED', 'Client not authenticated.');
-            return Response::redirect('/client/login');
+        if ($prepared['error'] !== null) {
+            return match ($prepared['status']) {
+                'unauthenticated' => Response::redirect('/client/login'),
+                'not_found' => Response::html('404 Not Found', 404),
+                'settled' => Response::redirect("/client/invoices/{$invoiceId}?payment=success"),
+                default => Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg=" . urlencode($prepared['error'])),
+            };
         }
 
-        $invoice = $this->invoices->find($invoiceId);
-
-        if ($invoice === null || (int) $invoice['client_id'] !== (int) $client['id']) {
-            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'FAILED', 'Invoice not found or permission denied.');
-            return Response::html('404 Not Found', 404);
-        }
-
-        $gatewayRow = $this->gateways->findBySlug($slug);
-        $module = $this->modules->get(GatewayModule::class, $slug);
-
-        if ($gatewayRow === null || (int) $gatewayRow['is_enabled'] !== 1 || !$module instanceof GatewayModule) {
-            $reason = "Gateway '{$slug}' is disabled or uninstalled in database.";
-            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'DISABLED', $reason);
-            $msg = urlencode($reason);
-            return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$msg}");
-        }
-
-        $remaining = round((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice($invoiceId), 2);
-
-        if ($remaining <= 0) {
-            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'PAID', 'Invoice has zero remaining balance.');
-            return Response::redirect("/client/invoices/{$invoiceId}?payment=success");
-        }
-
-        $reference = "cv-{$slug}-{$invoiceId}-" . bin2hex(random_bytes(6));
-        $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
-        $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
-
-        // ── Currency Conversion Logic ────────────────────────────────────────────
-        // Every stored monetary amount — invoice totals included — is authoritative
-        // in the system BASE currency (see CurrencyService); currency_id/currency_rate
-        // are a *display* lock, not a statement about the unit `total` is stored in.
-        // So $remaining is already a base-currency figure.
-        //
-        // Exchange rates read "units of this currency per 1 base unit"
-        // (e.g. NGN = 1490 means 1 base unit = 1490 NGN).
-        //
-        // The gateway must be charged in ITS currency, so there is exactly one
-        // conversion to do:
-        //   captureAmount = remaining (base) × gatewayRate
-        //
-        // Dividing by the invoice's rate first would convert an already-base
-        // amount a second time and charge ~1/rate of the real price.
-
-        $gatewayCurrRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-        $gatewayRate = ($gatewayCurrRow !== null && (float) $gatewayCurrRow['exchange_rate'] > 0)
-            ? (float) $gatewayCurrRow['exchange_rate']
-            : 1.0;
-
-        $captureAmount = round($remaining * $gatewayRate, 2);
-
+        $client = $prepared['client'];
+        $module = $prepared['module'];
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
-        $this->writeGatewayLog(
-            $slug, $invoiceId, $clientId, 'INITIATING',
-            "Remaining: {$remaining} (base) → Capture: {$captureAmount} {$gatewayCurrency} (gw_rate={$gatewayRate}), ref={$reference}"
-        );
-
-        if ($captureAmount <= 0) {
-            $reason = "Computed charge amount is {$captureAmount} {$gatewayCurrency} — refusing to start a zero-value payment.";
-            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'FAILED', $reason);
-            return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg=" . urlencode($reason));
-        }
 
         try {
             $result = $module->capture([
-                'config' => $config,
+                'config' => $prepared['config'],
                 'email' => (string) $client['email'],
                 'name' => $clientName !== '' ? $clientName : (string) $client['email'],
                 'phone' => (string) ($client['phone'] ?? ''),
-                'amount' => $captureAmount,
-                'currency' => $gatewayCurrency,
-                'reference' => $reference,
+                'amount' => $prepared['amount'],
+                'currency' => $prepared['currency'],
+                'reference' => $prepared['reference'],
                 'callbackUrl' => "{$baseUrl}/pay/{$slug}/callback",
                 'metadata' => ['invoice_id' => $invoiceId, 'client_id' => (int) $client['id']],
             ]);
         } catch (\Throwable $e) {
             $errMessage = 'Exception in gateway module: ' . $e->getMessage();
-            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'EXCEPTIONAL_ERROR', $errMessage, [
+            $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'EXCEPTIONAL_ERROR', $errMessage, [
                 'exception' => get_class($e),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -137,15 +81,172 @@ final class PaymentCallbackController
 
         if (!$result['success'] || empty($result['redirectUrl'])) {
             $failureMsg = $result['message'] ?? 'Payment initialization failed — no redirect URL returned.';
-            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'FAILED', $failureMsg, [
+            $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'FAILED', $failureMsg, [
                 'result' => $result,
             ]);
             $errMsg = urlencode($failureMsg);
             return Response::redirect("/client/invoices/{$invoiceId}?payment=error&msg={$errMsg}");
         }
 
-        $this->writeGatewayLog($slug, $invoiceId, $clientId, 'SUCCESS', "Redirecting to checkout URL: " . $result['redirectUrl']);
+        $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'SUCCESS', "Redirecting to checkout URL: " . $result['redirectUrl']);
         return Response::redirect($result['redirectUrl']);
+    }
+
+    /**
+     * JSON init for gateways rendered as an on-page popup rather than an
+     * off-site redirect (PayHub's inline checkout today).
+     *
+     * The popup is handed *only* values the server decided: the reference and
+     * the charge amount are computed here by the same prepareCharge() the
+     * redirect flow uses, so a tampered page cannot invent a cheaper amount or
+     * reuse someone else's reference. Nothing here marks anything paid —
+     * settlement still goes through /pay/{gateway}/callback, which verifies the
+     * transaction server-side against the gateway before a single naira is
+     * recorded. The public key is safe to expose; it is publishable by design.
+     */
+    public function initiateInline(Request $request, array $params): Response
+    {
+        $slug = (string) ($params['gateway'] ?? 'unknown');
+        $invoiceId = (int) ($params['id'] ?? 0);
+
+        $prepared = $this->prepareCharge($slug, $invoiceId);
+
+        if ($prepared['error'] !== null) {
+            $httpStatus = match ($prepared['status']) {
+                'unauthenticated' => 401,
+                'not_found' => 404,
+                'settled' => 200,
+                default => 422,
+            };
+
+            return $this->json([
+                'success' => false,
+                'settled' => $prepared['status'] === 'settled',
+                'message' => $prepared['error'],
+                'redirectUrl' => "/client/invoices/{$invoiceId}?payment=" . ($prepared['status'] === 'settled' ? 'success' : 'error'),
+            ], $httpStatus);
+        }
+
+        $client = $prepared['client'];
+        $publicKey = (string) ($prepared['config']['public_key'] ?? '');
+
+        if ($publicKey === '') {
+            $reason = 'Inline checkout needs a Public Key — set it in Admin → Gateways, or use the redirect flow.';
+            $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'FAILED', $reason);
+
+            return $this->json(['success' => false, 'message' => $reason], 422);
+        }
+
+        return $this->json([
+            'success' => true,
+            'publicKey' => $publicKey,
+            'reference' => $prepared['reference'],
+            'amount' => $prepared['amount'],
+            'currency' => $prepared['currency'],
+            'email' => (string) $client['email'],
+            // Where the browser should land once the popup closes with a
+            // result — the server-side verification endpoint, never a page
+            // that would treat the popup's own word as proof of payment.
+            'callbackUrl' => '/pay/' . rawurlencode($slug) . '/callback?reference=' . rawurlencode($prepared['reference']),
+        ]);
+    }
+
+    /**
+     * Everything that must be true, and every figure that must be decided,
+     * before a client can be sent to a gateway — shared by the redirect flow
+     * and the inline popup so the two cannot disagree about who may pay, how
+     * much, or under which reference.
+     *
+     * @return array{error: ?string, status: string, client: array<string, mixed>|null, module: GatewayModule|null, config: array<string, mixed>, reference: string, amount: float, currency: string}
+     */
+    private function prepareCharge(string $slug, int $invoiceId): array
+    {
+        $fail = static fn (string $status, string $error): array => [
+            'error' => $error, 'status' => $status, 'client' => null, 'module' => null,
+            'config' => [], 'reference' => '', 'amount' => 0.0, 'currency' => '',
+        ];
+
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            $this->writeGatewayLog($slug, $invoiceId, null, 'FAILED', 'Client not authenticated.');
+            return $fail('unauthenticated', 'Please sign in to pay this invoice.');
+        }
+
+        $clientId = (int) $client['id'];
+        $invoice = $this->invoices->find($invoiceId);
+
+        if ($invoice === null || (int) $invoice['client_id'] !== $clientId) {
+            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'FAILED', 'Invoice not found or permission denied.');
+            return $fail('not_found', 'Invoice not found.');
+        }
+
+        $gatewayRow = $this->gateways->findBySlug($slug);
+        $module = $this->modules->get(GatewayModule::class, $slug);
+
+        if ($gatewayRow === null || (int) $gatewayRow['is_enabled'] !== 1 || !$module instanceof GatewayModule) {
+            $reason = "Gateway '{$slug}' is disabled or uninstalled in database.";
+            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'DISABLED', $reason);
+            return $fail('disabled', $reason);
+        }
+
+        $remaining = round((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice($invoiceId), 2);
+
+        if ($remaining <= 0) {
+            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'PAID', 'Invoice has zero remaining balance.');
+            return $fail('settled', 'This invoice is already paid.');
+        }
+
+        $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
+        $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
+        $reference = "cv-{$slug}-{$invoiceId}-" . bin2hex(random_bytes(6));
+
+        // ── Currency Conversion ──────────────────────────────────────────────
+        // Every stored monetary amount — invoice totals included — is
+        // authoritative in the system BASE currency (see CurrencyService);
+        // currency_id/currency_rate are a *display* lock, not a statement about
+        // the unit `total` is stored in. So $remaining is already base.
+        //
+        // Rates read "units of this currency per 1 base unit" (NGN = 1490 means
+        // 1 base unit = 1490 NGN), and the gateway must be charged in ITS
+        // currency, so there is exactly one conversion to do. Dividing by the
+        // invoice's own rate first would convert an already-base amount twice
+        // and charge roughly 1/rate of the real price.
+        $gatewayCurrRow = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
+        $gatewayRate = ($gatewayCurrRow !== null && (float) $gatewayCurrRow['exchange_rate'] > 0)
+            ? (float) $gatewayCurrRow['exchange_rate']
+            : 1.0;
+
+        $captureAmount = round($remaining * $gatewayRate, 2);
+
+        $this->writeGatewayLog(
+            $slug, $invoiceId, $clientId, 'INITIATING',
+            "Remaining: {$remaining} (base) → Capture: {$captureAmount} {$gatewayCurrency} (gw_rate={$gatewayRate}), ref={$reference}"
+        );
+
+        if ($captureAmount <= 0) {
+            $reason = "Computed charge amount is {$captureAmount} {$gatewayCurrency} — refusing to start a zero-value payment.";
+            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'FAILED', $reason);
+            return $fail('invalid_amount', $reason);
+        }
+
+        return [
+            'error' => null,
+            'status' => 'ok',
+            'client' => $client,
+            'module' => $module,
+            'config' => $config,
+            'reference' => $reference,
+            'amount' => $captureAmount,
+            'currency' => $gatewayCurrency,
+        ];
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function json(array $payload, int $status = 200): Response
+    {
+        return (new Response((string) json_encode($payload), $status))
+            ->withHeader('Content-Type', 'application/json');
     }
 
     private function writeGatewayLog(
