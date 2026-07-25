@@ -1,18 +1,23 @@
 <?php
 /** @var array<int, array<string, mixed>> $invoices */
+/** @var array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int} $pagination */
+/** @var string $statusFilter */
+$totalPages = max(1, (int) ceil(($pagination['total'] ?? count($invoices)) / ($pagination['perPage'] ?? 12)));
+$currentPage = $pagination['page'] ?? 1;
+$statusFilter = $statusFilter ?? '';
 ?>
 <style>
 /* ====== Invoices Page Styles ====== */
 .invoices-hero {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 45%, #0f3460 100%);
-    padding: 56px 40px;
+    padding: 48px 40px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 40px;
     position: relative;
     overflow: hidden;
-    margin-bottom: 48px;
+    margin-bottom: 32px;
     border-radius: 16px;
 }
 .invoices-hero::after {
@@ -29,24 +34,23 @@
 }
 .invoices-hero__title {
     font-family: 'Hanken Grotesk', sans-serif;
-    font-size: 2.5rem;
+    font-size: 2.25rem;
     font-weight: 900;
     color: #fff;
-    margin: 0 0 16px 0;
+    margin: 0 0 12px 0;
     line-height: 1.2;
 }
 .invoices-hero__subtitle {
-    font-size: 1.1rem;
+    font-size: 1rem;
     color: rgba(255,255,255,.75);
-    margin: 0 0 24px 0;
-    line-height: 1.6;
+    margin: 0 0 16px 0;
+    line-height: 1.5;
 }
 .invoices-hero__actions {
     display: flex;
     gap: 12px;
     flex-wrap: wrap;
     align-items: center;
-    margin-top: 20px;
 }
 .invoices-hero__link {
     display: inline-flex;
@@ -63,19 +67,49 @@
     color: #60a5fa;
 }
 .invoices-hero__icon {
-    width: 120px;
-    height: 120px;
+    width: 100px;
+    height: 100px;
     background: linear-gradient(135deg, rgba(59,130,246,.2), rgba(37,99,235,.15));
     border-radius: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 3rem;
+    font-size: 2.5rem;
     flex-shrink: 0;
     border: 2px solid rgba(59,130,246,.3);
     position: relative;
     z-index: 1;
     box-shadow: 0 20px 40px rgba(59,130,246,.1);
+}
+
+/* Status Filter Bar */
+.invoices-status-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+.invoices-status-link {
+    padding: 8px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: .85rem;
+    color: var(--cv-text-secondary);
+    background: var(--cv-bg-surface-sunken);
+    border: 1px solid var(--cv-border-default);
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.invoices-status-link:hover {
+    color: var(--cv-text-primary);
+    border-color: var(--cv-color-brand-500);
+}
+.invoices-status-link.active {
+    background: var(--cv-color-brand-500);
+    color: #fff;
+    border-color: var(--cv-color-brand-500);
 }
 
 /* Toolbar & Search */
@@ -84,14 +118,14 @@
     justify-content: space-between;
     align-items: center;
     gap: 16px;
-    margin-bottom: 32px;
+    margin-bottom: 24px;
     flex-wrap: wrap;
 }
 
-/* Invoices Grid */
+/* Invoices Grid - Exactly 3 Columns on Desktop */
 .invoices-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 24px;
     margin-bottom: 32px;
 }
@@ -109,13 +143,13 @@
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 .invoice-card:hover {
-    transform: translateY(-8px);
+    transform: translateY(-4px);
     border-color: var(--cv-color-brand-500);
-    box-shadow: 0 16px 32px rgba(0,0,0,0.12);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.1);
 }
 .invoice-card__header {
     background: linear-gradient(135deg, var(--cv-bg-surface-sunken), var(--cv-bg-surface));
-    padding: 24px;
+    padding: 20px;
     border-bottom: 1px solid var(--cv-border-default);
     display: flex;
     justify-content: space-between;
@@ -124,7 +158,7 @@
 }
 .invoice-card__number {
     font-family: 'Monaco', 'Courier New', monospace;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
     color: var(--cv-text-primary);
     margin: 0;
@@ -135,17 +169,17 @@
     flex-shrink: 0;
 }
 .invoice-card__body {
-    padding: 24px;
+    padding: 20px;
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
 }
 .invoice-card__amount {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px;
+    padding: 14px;
     background: var(--cv-bg-surface-sunken);
     border-radius: 8px;
     border: 1px solid var(--cv-border-default);
@@ -158,7 +192,7 @@
 .invoice-card__amount-value {
     font-family: 'Monaco', 'Courier New', monospace;
     color: var(--cv-color-brand-500);
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     font-weight: 800;
 }
 .invoice-card__info-row {
@@ -176,11 +210,12 @@
     font-weight: 600;
 }
 .invoice-card__footer {
-    padding: 16px 24px;
+    padding: 16px 20px;
     background: var(--cv-bg-surface-sunken);
     border-top: 1px solid var(--cv-border-default);
     display: flex;
     gap: 8px;
+    align-items: center;
 }
 .invoice-card__action {
     background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -203,19 +238,54 @@
     transform: translateX(2px);
     box-shadow: 0 8px 16px rgba(37,99,235,.3);
 }
-.invoice-card__action--pay {
-    background: linear-gradient(135deg, #10b981, #059669);
+
+/* Responsive Pagination Bar */
+.invoices-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: var(--cv-bg-surface);
+    border: 1px solid var(--cv-border-default);
+    border-radius: 12px;
+    margin-top: 24px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    gap: 16px;
 }
-.invoice-card__action--pay:hover {
-    background: linear-gradient(135deg, #059669, #047857);
-    box-shadow: 0 8px 16px rgba(16,185,129,.3);
+.invoices-pagination__info {
+    color: var(--cv-text-secondary);
+    font-size: .875rem;
 }
-.invoice-card__checkbox {
-    padding: 6px 12px;
+.invoices-pagination__controls {
     display: flex;
     align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    gap: 6px;
+}
+.invoices-pagination__btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: var(--cv-bg-surface-sunken);
+    border: 1px solid var(--cv-border-default);
+    color: var(--cv-text-primary);
+    text-decoration: none;
+    font-size: .85rem;
+    font-weight: 600;
+    transition: all .2s;
+}
+.invoices-pagination__btn:hover:not(.disabled) {
+    border-color: var(--cv-color-brand-500);
+    color: var(--cv-color-brand-500);
+}
+.invoices-pagination__btn.active {
+    background: var(--cv-color-brand-500);
+    color: #fff;
+    border-color: var(--cv-color-brand-500);
+}
+.invoices-pagination__btn.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: default;
 }
 
 /* Empty State */
@@ -225,6 +295,7 @@
     background: var(--cv-bg-surface);
     border-radius: 16px;
     border: 1px dashed var(--cv-border-default);
+    margin-bottom: 32px;
 }
 .empty-state-invoices__icon {
     font-size: 3.5rem;
@@ -287,12 +358,17 @@
     cursor: not-allowed;
 }
 
-/* Mobile Responsive */
+/* Responsive Breakpoints */
+@media (max-width: 1024px) {
+    .invoices-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
 @media (max-width: 768px) {
     .invoices-hero {
         flex-direction: column;
-        padding: 40px 24px;
-        gap: 24px;
+        padding: 32px 24px;
+        gap: 20px;
     }
     .invoices-hero__title {
         font-size: 1.75rem;
@@ -303,6 +379,11 @@
     .invoices-toolbar {
         flex-direction: column;
         align-items: stretch;
+    }
+    .invoices-pagination {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
     }
     .invoices-footer {
         flex-direction: column;
@@ -335,6 +416,15 @@
         <div class="invoices-hero__icon">📄</div>
     </div>
 
+    <!-- Status Filter Bar -->
+    <div class="invoices-status-bar">
+        <a href="/client/invoices" class="invoices-status-link <?= $statusFilter === '' ? 'active' : '' ?>">All Invoices</a>
+        <a href="/client/invoices?status=unpaid" class="invoices-status-link <?= $statusFilter === 'unpaid' ? 'active' : '' ?>">Unpaid</a>
+        <a href="/client/invoices?status=paid" class="invoices-status-link <?= $statusFilter === 'paid' ? 'active' : '' ?>">Paid</a>
+        <a href="/client/invoices?status=cancelled" class="invoices-status-link <?= $statusFilter === 'cancelled' ? 'active' : '' ?>">Cancelled</a>
+        <a href="/client/invoices?status=refunded" class="invoices-status-link <?= $statusFilter === 'refunded' ? 'active' : '' ?>">Refunded</a>
+    </div>
+
     <!-- Search Toolbar & View Switcher -->
     <div class="invoices-toolbar">
         <div style="flex: 1; min-width: 200px;">
@@ -342,15 +432,15 @@
         </div>
         <div style="display: flex; align-items: center; gap: 16px;">
             <div style="display: inline-flex; background: var(--cv-bg-surface-sunken); padding: 3px; border-radius: 8px; border: 1px solid var(--cv-border-default);">
-                <button type="button" id="btn-view-grid" style="background: var(--cv-color-brand-500); color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-size: .8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <button type="button" id="btn-view-grid" style="background: var(--cv-color-brand-500); color: #fff; border: none; padding: 6px 14px; border-radius: 6px; font-size: .8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
                     <span>田</span> Grid
                 </button>
-                <button type="button" id="btn-view-list" style="background: transparent; color: var(--cv-text-secondary); border: none; padding: 6px 12px; border-radius: 6px; font-size: .8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <button type="button" id="btn-view-list" style="background: transparent; color: var(--cv-text-secondary); border: none; padding: 6px 14px; border-radius: 6px; font-size: .8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
                     <span>☰</span> List
                 </button>
             </div>
             <div style="color: var(--cv-text-secondary); font-size: .9rem;">
-                <?= count($invoices) ?> invoice<?= count($invoices) !== 1 ? 's' : '' ?>
+                Showing <strong><?= count($invoices) ?></strong> of <strong><?= (int) ($pagination['total'] ?? count($invoices)) ?></strong> invoices
             </div>
         </div>
     </div>
@@ -359,12 +449,14 @@
     <?php if ($invoices === []): ?>
         <div class="empty-state-invoices">
             <div class="empty-state-invoices__icon">📋</div>
-            <h2 class="empty-state-invoices__title">No Invoices Yet</h2>
-            <p class="empty-state-invoices__text">You don't have any invoices. When you purchase services, invoices will appear here.</p>
+            <h2 class="empty-state-invoices__title">No Invoices Found</h2>
+            <p class="empty-state-invoices__text">
+                <?= $statusFilter !== '' ? 'No invoices match this status filter.' : 'You do not have any invoices yet.' ?>
+            </p>
         </div>
     <?php else: ?>
         <!-- Grid Container -->
-        <div class="invoices-grid" id="invoices-container-grid">
+        <div id="invoices-container-grid">
             <div class="invoices-grid" id="invoices-list">
                 <?php foreach ($invoices as $invoice): ?>
                     <div class="invoice-card" style="<?= $invoice['status'] === 'unpaid' ? 'border-left: 4px solid #ef4444;' : ($invoice['status'] === 'cancelled' ? 'border-left: 4px solid #6b7280;' : 'border-left: 4px solid #10b981;') ?>">
@@ -396,7 +488,7 @@
                         <div class="invoice-card__footer">
                             <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="invoice-card__action">View Details</a>
                             <?php if ($invoice['status'] === 'unpaid'): ?>
-                                <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="invoice-card__action" style="background: #dc2626; flex: 0 0 auto; margin-right: 4px;" onclick="return confirm('Are you sure you want to cancel Invoice #INV-<?= (int) $invoice['id'] ?>?');">Cancel</button>
+                                <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="invoice-card__action" style="background: #dc2626; flex: 0 0 auto;" onclick="return confirm('Are you sure you want to cancel Invoice #INV-<?= (int) $invoice['id'] ?>?');">Cancel</button>
                                 <label class="invoice-card__checkbox">
                                     <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 18px; height: 18px;">
                                 </label>
@@ -460,6 +552,40 @@
             </div>
         </div>
 
+        <!-- 100% Responsive Pagination Controls -->
+        <?php if ($totalPages > 1): ?>
+            <?php
+            $queryBase = '/client/invoices?' . ($statusFilter !== '' ? 'status=' . urlencode($statusFilter) . '&' : '');
+            ?>
+            <div class="invoices-pagination">
+                <div class="invoices-pagination__info">
+                    Page <strong><?= $currentPage ?></strong> of <strong><?= $totalPages ?></strong> (Total <strong><?= number_format((int) ($pagination['total'] ?? 0)) ?></strong> invoices)
+                </div>
+                <div class="invoices-pagination__controls">
+                    <!-- First Page -->
+                    <a class="invoices-pagination__btn <?= $currentPage <= 1 ? 'disabled' : '' ?>" href="<?= $queryBase ?>page=1">« First</a>
+                    
+                    <!-- Previous Page -->
+                    <a class="invoices-pagination__btn <?= $currentPage <= 1 ? 'disabled' : '' ?>" href="<?= $queryBase ?>page=<?= max(1, $currentPage - 1) ?>">← Prev</a>
+
+                    <!-- Numbered Pages -->
+                    <?php
+                    $startP = max(1, $currentPage - 2);
+                    $endP = min($totalPages, $currentPage + 2);
+                    for ($p = $startP; $p <= $endP; $p++):
+                    ?>
+                        <a class="invoices-pagination__btn <?= $p === $currentPage ? 'active' : '' ?>" href="<?= $queryBase ?>page=<?= $p ?>"><?= $p ?></a>
+                    <?php endfor; ?>
+
+                    <!-- Next Page -->
+                    <a class="invoices-pagination__btn <?= $currentPage >= $totalPages ? 'disabled' : '' ?>" href="<?= $queryBase ?>page=<?= min($totalPages, $currentPage + 1) ?>">Next →</a>
+
+                    <!-- Last Page -->
+                    <a class="invoices-pagination__btn <?= $currentPage >= $totalPages ? 'disabled' : '' ?>" href="<?= $queryBase ?>page=<?= $totalPages ?>">Last »</a>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <!-- Pay Selected Invoices Footer -->
         <?php $unpaidCount = count(array_filter($invoices, fn ($inv) => $inv['status'] === 'unpaid')); ?>
         <?php if ($unpaidCount > 0): ?>
@@ -481,85 +607,63 @@
                     btn.disabled = selected === 0;
                 }
                 document.querySelectorAll('.inv-chk').forEach(cb => cb.addEventListener('change', updatePayButton));
-
-                // Grid / List Toggle Logic
-                const btnGrid = document.getElementById('btn-view-grid');
-                const btnList = document.getElementById('btn-view-list');
-                const gridContainer = document.getElementById('invoices-container-grid');
-                const listContainer = document.getElementById('invoices-container-list');
-
-                function setViewMode(mode) {
-                    if (mode === 'list') {
-                        gridContainer.style.display = 'none';
-                        listContainer.style.display = 'block';
-                        btnList.style.background = 'var(--cv-color-brand-500)';
-                        btnList.style.color = '#fff';
-                        btnGrid.style.background = 'transparent';
-                        btnGrid.style.color = 'var(--cv-text-secondary)';
-                        localStorage.setItem('invoices_view_mode', 'list');
-                    } else {
-                        gridContainer.style.display = 'block';
-                        listContainer.style.display = 'none';
-                        btnGrid.style.background = 'var(--cv-color-brand-500)';
-                        btnGrid.style.color = '#fff';
-                        btnList.style.background = 'transparent';
-                        btnList.style.color = 'var(--cv-text-secondary)';
-                        localStorage.setItem('invoices_view_mode', 'grid');
-                    }
-                }
-
-                btnGrid.addEventListener('click', () => setViewMode('grid'));
-                btnList.addEventListener('click', () => setViewMode('list'));
-
-                if (localStorage.getItem('invoices_view_mode') === 'list') {
-                    setViewMode('list');
-                }
-            </script>
-        <?php else: ?>
-            <script>
-                const btnGrid = document.getElementById('btn-view-grid');
-                const btnList = document.getElementById('btn-view-list');
-                const gridContainer = document.getElementById('invoices-container-grid');
-                const listContainer = document.getElementById('invoices-container-list');
-
-                function setViewMode(mode) {
-                    if (mode === 'list') {
-                        gridContainer.style.display = 'none';
-                        listContainer.style.display = 'block';
-                        btnList.style.background = 'var(--cv-color-brand-500)';
-                        btnList.style.color = '#fff';
-                        btnGrid.style.background = 'transparent';
-                        btnGrid.style.color = 'var(--cv-text-secondary)';
-                        localStorage.setItem('invoices_view_mode', 'list');
-                    } else {
-                        gridContainer.style.display = 'block';
-                        listContainer.style.display = 'none';
-                        btnGrid.style.background = 'var(--cv-color-brand-500)';
-                        btnGrid.style.color = '#fff';
-                        btnList.style.background = 'transparent';
-                        btnList.style.color = 'var(--cv-text-secondary)';
-                        localStorage.setItem('invoices_view_mode', 'grid');
-                    }
-                }
-
-                if (btnGrid && btnList) {
-                    btnGrid.addEventListener('click', () => setViewMode('grid'));
-                    btnList.addEventListener('click', () => setViewMode('list'));
-
-                    if (localStorage.getItem('invoices_view_mode') === 'list') {
-                        setViewMode('list');
-                    }
-                }
             </script>
         <?php endif; ?>
-
-        <!-- Hidden forms for direct invoice cancellation -->
-        <?php foreach ($invoices as $invoice): ?>
-            <?php if ($invoice['status'] === 'unpaid'): ?>
-                <form id="cancel-form-<?= (int) $invoice['id'] ?>" method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="display:none;">
-                    <?= csrf_field() ?>
-                </form>
-            <?php endif; ?>
-        <?php endforeach; ?>
     <?php endif; ?>
+
+    <!-- Hidden forms for direct invoice cancellation -->
+    <?php foreach ($invoices as $invoice): ?>
+        <?php if ($invoice['status'] === 'unpaid'): ?>
+            <form id="cancel-form-<?= (int) $invoice['id'] ?>" method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="display:none;">
+                <?= csrf_field() ?>
+            </form>
+        <?php endif; ?>
+    <?php endforeach; ?>
 </form>
+
+<script>
+    (function () {
+        const btnGrid = document.getElementById('btn-view-grid');
+        const btnList = document.getElementById('btn-view-list');
+        const gridContainer = document.getElementById('invoices-container-grid');
+        const listContainer = document.getElementById('invoices-container-list');
+
+        if (!btnGrid || !btnList || !gridContainer || !listContainer) {
+            return;
+        }
+
+        function setViewMode(mode) {
+            if (mode === 'list') {
+                gridContainer.style.display = 'none';
+                listContainer.style.display = 'block';
+                btnList.style.background = 'var(--cv-color-brand-500)';
+                btnList.style.color = '#fff';
+                btnGrid.style.background = 'transparent';
+                btnGrid.style.color = 'var(--cv-text-secondary)';
+                localStorage.setItem('invoices_view_mode', 'list');
+            } else {
+                gridContainer.style.display = 'block';
+                listContainer.style.display = 'none';
+                btnGrid.style.background = 'var(--cv-color-brand-500)';
+                btnGrid.style.color = '#fff';
+                btnList.style.background = 'transparent';
+                btnList.style.color = 'var(--cv-text-secondary)';
+                localStorage.setItem('invoices_view_mode', 'grid');
+            }
+        }
+
+        btnGrid.addEventListener('click', function (e) {
+            e.preventDefault();
+            setViewMode('grid');
+        });
+
+        btnList.addEventListener('click', function (e) {
+            e.preventDefault();
+            setViewMode('list');
+        });
+
+        if (localStorage.getItem('invoices_view_mode') === 'list') {
+            setViewMode('list');
+        }
+    })();
+</script>

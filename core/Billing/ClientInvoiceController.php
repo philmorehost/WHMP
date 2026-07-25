@@ -35,16 +35,49 @@ final class ClientInvoiceController
             return Response::redirect('/client/login');
         }
 
-        $invoices = $this->invoices->forClient((int) $client['id']);
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = max(6, min(60, (int) $request->query('per_page', 12)));
+        $status = trim((string) $request->query('status', ''));
+        $statusFilter = in_array($status, ['unpaid', 'paid', 'cancelled', 'refunded'], true) ? $status : null;
 
-        foreach ($invoices as &$invoice) {
+        $pagination = $this->paginateForClient((int) $client['id'], $statusFilter, $page, $perPage);
+
+        foreach ($pagination['data'] as &$invoice) {
             $invoice['currency'] = $this->currency->resolveLocked($invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null);
         }
         unset($invoice);
 
         return $this->page('billing.client-invoices-index', [
-            'invoices' => $invoices,
+            'pagination' => $pagination,
+            'invoices' => $pagination['data'],
+            'statusFilter' => $statusFilter ?? '',
         ]);
+    }
+
+    private function paginateForClient(int $clientId, ?string $status, int $page, int $perPage): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        $where = 'WHERE client_id = ?';
+        $bindings = [$clientId];
+
+        if ($status !== null) {
+            $where .= ' AND status = ?';
+            $bindings[] = $status;
+        }
+
+        $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
+        $totalRow = $db->selectOne("SELECT COUNT(*) AS c FROM invoices {$where}", $bindings);
+        $total = (int) ($totalRow['c'] ?? 0);
+
+        $data = $db->select(
+            "SELECT * FROM invoices {$where} ORDER BY id DESC LIMIT {$perPage} OFFSET {$offset}",
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
     }
 
     public function show(Request $request, array $params): Response
