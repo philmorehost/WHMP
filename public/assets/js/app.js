@@ -30,18 +30,34 @@
     });
 
     // Onboarding copilot (client dashboard): ask a question, POST it to the
-    // AI endpoint, render the answer. Suggestion chips prefill + submit.
+    // AI endpoint, render the answer as chat bubbles.
     function copilotAsk(widget, question) {
-        var answerBox = widget.querySelector('[data-copilot-answer]');
-        var submit = widget.querySelector('[data-copilot-submit]');
-        var token = widget.getAttribute('data-copilot-token') || '';
+        var chatBox = widget.querySelector('#dbd-chat') || widget.querySelector('[data-copilot-chat]');
+        var submitBtn = widget.querySelector('#dbd-ask') || widget.querySelector('[data-copilot-submit]');
+        var inputEl = widget.querySelector('#dbd-q') || widget.querySelector('[data-copilot-input]');
+        var token = widget.getAttribute('data-token') || widget.getAttribute('data-copilot-token') || '';
+
+        question = (question || '').trim();
         if (!question) { return; }
 
-        if (answerBox) {
-            answerBox.style.display = 'block';
-            answerBox.textContent = 'Thinking…';
+        function appendBubble(text, type) {
+            if (!chatBox) { return null; }
+            chatBox.style.display = 'flex';
+            chatBox.classList.add('has-messages');
+            var el = document.createElement('div');
+            el.className = 'dbd-msg dbd-msg--' + type;
+            el.textContent = text;
+            chatBox.appendChild(el);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            return el;
         }
-        if (submit) { submit.disabled = true; }
+
+        // Show user bubble & thinking bubble
+        appendBubble(question, 'user');
+        if (inputEl) { inputEl.value = ''; }
+        if (submitBtn) { submitBtn.disabled = true; }
+
+        var thinkingEl = appendBubble('Thinking…', 'thinking');
 
         var body = new FormData();
         body.append('question', question);
@@ -54,31 +70,48 @@
         })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-            if (answerBox) { answerBox.textContent = data && data.success ? data.answer : ((data && data.message) || 'Sorry, I could not answer that right now.'); }
+            if (thinkingEl && thinkingEl.parentNode) { thinkingEl.parentNode.removeChild(thinkingEl); }
+            var answerText = data && data.success && data.answer ? data.answer : ((data && data.message) || 'Sorry, I could not answer that right now.');
+            appendBubble(answerText, 'ai');
         })
         .catch(function () {
-            if (answerBox) { answerBox.textContent = 'Sorry, something went wrong. Please try again.'; }
+            if (thinkingEl && thinkingEl.parentNode) { thinkingEl.parentNode.removeChild(thinkingEl); }
+            appendBubble('Sorry, something went wrong. Please check your connection and try again.', 'ai');
         })
-        .then(function () { if (submit) { submit.disabled = false; } });
+        .then(function () {
+            if (submitBtn) { submitBtn.disabled = false; }
+        });
     }
 
+    // Chip button clicks
     document.addEventListener('click', function (event) {
-        var chip = event.target.closest('[data-copilot-suggest]');
+        var chip = event.target.closest('[data-q], [data-copilot-suggest]');
         if (!chip) { return; }
-        var widget = chip.closest('[data-copilot]');
-        var input = widget && widget.querySelector('[data-copilot-input]');
-        var q = chip.getAttribute('data-copilot-suggest');
-        if (input) { input.value = q; }
+        var widget = chip.closest('#dbd-copilot, [data-copilot]');
+        if (!widget) { return; }
+        var q = chip.getAttribute('data-q') || chip.getAttribute('data-copilot-suggest') || '';
         copilotAsk(widget, q);
     });
 
-    document.addEventListener('submit', function (event) {
-        var form = event.target.closest('[data-copilot-form]');
-        if (!form) { return; }
+    // Ask button click
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest('#dbd-ask, [data-copilot-submit]');
+        if (!btn) { return; }
+        var widget = btn.closest('#dbd-copilot, [data-copilot]');
+        if (!widget) { return; }
+        var inputEl = widget.querySelector('#dbd-q, [data-copilot-input]');
+        copilotAsk(widget, inputEl ? inputEl.value : '');
+    });
+
+    // Enter key press in question input box
+    document.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter') { return; }
+        var inputEl = event.target.closest('#dbd-q, [data-copilot-input]');
+        if (!inputEl) { return; }
         event.preventDefault();
-        var widget = form.closest('[data-copilot]');
-        var input = widget && widget.querySelector('[data-copilot-input]');
-        copilotAsk(widget, input ? input.value.trim() : '');
+        var widget = inputEl.closest('#dbd-copilot, [data-copilot]');
+        if (!widget) { return; }
+        copilotAsk(widget, inputEl.value);
     });
 
     // TLD category tabs on the public domain register page: clicking a
