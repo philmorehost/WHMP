@@ -99,75 +99,89 @@
         }
     });
 
-    // PayHub inline checkout: pay without leaving the invoice page.
+    // PayHub inline checkout — self-contained iframe implementation.
     //
-    // ROOT CAUSE OF PREVIOUS FAILURES: PayHub's inline.js declares
-    //   const PayhubPop = { ... }
-    // which is a script-scoped const, NOT window.PayhubPop. Checking
-    // window.PayhubPop always returned undefined regardless of load state.
+    // WHY WE DO NOT USE inline.js:
+    //   PayHub's inline.js line 6-7:
+    //     const scriptSource = document.currentScript ? document.currentScript.src : '';
+    //     const baseUrl = scriptSource ? scriptSource.substring(...) : '';
+    //   When loaded dynamically (document.createElement('script')), document.currentScript
+    //   is always null, so baseUrl = '' and the iframe src becomes the RELATIVE path
+    //   'checkout.php?...' which the browser resolves against client.philmorehost.com.
+    //   WHMP's own 'frame-ancestors: none' CSP then blocks that self-load, showing
+    //   "client.philmorehost.com refused to connect" inside the popup.
     //
-    // CSP-SAFE FIX: After loading inline.js, we load /assets/js/payhub-bridge.js
-    // (a 'self'-hosted script) which contains: window.PayhubPop = PayhubPop;
-    // This bridges the const into a window property without needing unsafe-inline.
-    var payhubSdk = null;
+    // FIX: Build the iframe ourselves with the ABSOLUTE URL we already know:
+    //   https://merchant.payhub.com.ng/checkout.php?ref=REF&amount=AMOUNT&email=EMAIL&embed=1&origin=ORIGIN
+    // PayHub's checkout.php in embed mode fires postMessage({type:'payhub_success',...})
+    // to the parent — we listen for that and trigger server-side verification.
+    // No external script loading required at all.
 
-    function loadPayhubSdk() {
-        if (payhubSdk) { return payhubSdk; }
+    function openPayhubCheckout(opts) {
+        // opts: { ref, amount (major units NGN), email, callbackUrl, onClose }
+        var PAYHUB_ORIGIN = 'https://merchant.payhub.com.ng';
+        var checkoutUrl = PAYHUB_ORIGIN + '/checkout.php'
+            + '?ref='    + encodeURIComponent(opts.ref)
+            + '&amount=' + encodeURIComponent(opts.amount)
+            + '&email='  + encodeURIComponent(opts.email)
+            + '&embed=1'
+            + '&origin=' + encodeURIComponent(window.location.origin);
 
-        payhubSdk = new Promise(function (resolve, reject) {
-            // Already bridged from a previous successful load
-            if (window.PayhubPop) { resolve(window.PayhubPop); return; }
-
-            function startPolling() {
-                var tries = 0;
-                var poll = setInterval(function () {
-                    tries++;
-                    if (window.PayhubPop) {
-                        clearInterval(poll);
-                        resolve(window.PayhubPop);
-                        return;
-                    }
-                    if (tries >= 150) { // 15 s timeout
-                        clearInterval(poll);
-                        reject(new Error('PayHub checkout took too long to load.'));
-                    }
-                }, 100);
-            }
-
-            function loadBridgeThen() {
-                // payhub-bridge.js contains: window.PayhubPop = PayhubPop;
-                // It must load AFTER inline.js so the const is already declared.
-                // It is hosted on 'self' so it is permitted by CSP script-src.
-                var bridge = document.createElement('script');
-                bridge.src = '/assets/js/payhub-bridge.js';
-                bridge.onload = startPolling;
-                bridge.onerror = function () {
-                    reject(new Error('Could not load PayHub bridge script.'));
-                };
-                document.head.appendChild(bridge);
-            }
-
-            // Avoid adding inline.js twice
-            var existing = document.querySelector('script[src="https://merchant.payhub.com.ng/inline.js"]');
-            if (existing) {
-                // inline.js already in DOM — bridge it if not already done
-                if (!document.querySelector('script[src="/assets/js/payhub-bridge.js"]')) {
-                    loadBridgeThen();
-                } else {
-                    startPolling();
-                }
-                return;
-            }
-
-            var sdk = document.createElement('script');
-            sdk.src = 'https://merchant.payhub.com.ng/inline.js';
-            sdk.onload = function () { loadBridgeThen(); };
-            sdk.onerror = function () { reject(new Error('Could not load PayHub checkout script.')); };
-            document.head.appendChild(sdk);
+        // --- Build overlay ---
+        var overlay = document.createElement('div');
+        overlay.id = 'payhub-checkout-overlay';
+        Object.assign(overlay.style, {
+            position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+            backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+            zIndex: '999999', display: 'flex', alignItems: 'center', justifyContent: 'center'
         });
 
-        payhubSdk.catch(function () { payhubSdk = null; });
-        return payhubSdk;
+        var container = document.createElement('div');
+        Object.assign(container.style, {
+            width: '100%', maxWidth: '450px', height: '600px',
+            backgroundColor: '#fff', borderRadius: '24px', overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', position: 'relative'
+        });
+
+        var closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '\u00d7';
+        Object.assign(closeBtn.style, {
+            position: 'absolute', top: '12px', right: '14px',
+            width: '32px', height: '32px', borderRadius: '50%', border: 'none',
+            backgroundColor: '#f1f5f9', color: '#64748b', fontSize: '22px',
+            cursor: 'pointer', zIndex: '10', lineHeight: '1'
+        });
+
+        var iframe = document.createElement('iframe');
+        iframe.src = checkoutUrl;
+        Object.assign(iframe.style, { width: '100%', height: '100%', border: 'none' });
+        iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
+
+        function destroy() {
+            window.removeEventListener('message', onMessage, false);
+            if (overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+        }
+
+        closeBtn.addEventListener('click', function () {
+            destroy();
+            if (opts.onClose) { opts.onClose(); }
+        });
+
+        // Listen for payment success postMessage from PayHub's checkout.php.
+        // checkout.php (embed mode, line 164-167) fires:
+        //   window.parent.postMessage({ type: 'payhub_success', data: { reference, status } }, origin)
+        function onMessage(event) {
+            if (event.origin !== PAYHUB_ORIGIN) { return; }
+            if (!event.data || event.data.type !== 'payhub_success') { return; }
+            destroy();
+            if (opts.callbackUrl) { window.location.href = opts.callbackUrl; }
+        }
+        window.addEventListener('message', onMessage, false);
+
+        container.appendChild(closeBtn);
+        container.appendChild(iframe);
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
     }
 
     document.addEventListener('click', function (event) {
@@ -176,61 +190,46 @@
         event.preventDefault();
 
         var invoiceId = button.getAttribute('data-invoice-id');
-        var slug = button.getAttribute('data-gateway-slug');
-        var label = 'Pay with ' + (button.getAttribute('data-gateway-name') || 'PayHub');
-        var idle = function (text) { button.disabled = false; button.textContent = text || label; };
+        var slug      = button.getAttribute('data-gateway-slug');
+        var label     = 'Pay with ' + (button.getAttribute('data-gateway-name') || 'PayHub');
+        var idle      = function (text) { button.disabled = false; button.textContent = text || label; };
 
         button.disabled = true;
-        button.textContent = 'Starting…';
+        button.textContent = 'Starting\u2026';
 
         var body = new FormData();
         body.append('_token', button.getAttribute('data-token') || '');
 
-        Promise.all([
-            fetch('/client/invoices/' + encodeURIComponent(invoiceId) + '/pay/' + encodeURIComponent(slug) + '/init', {
-                method: 'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                body: body,
-            }).then(function (r) { return r.json(); }),
-            loadPayhubSdk(),
-        ])
-        .then(function (results) {
-            var data = results[0];
-            var PayhubPop = results[1];
-
+        fetch('/client/invoices/' + encodeURIComponent(invoiceId) + '/pay/' + encodeURIComponent(slug) + '/init', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: body,
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
             if (!data || !data.success) {
-                // An invoice that is already settled is not an error — send the
-                // client to the page that says so.
                 if (data && data.redirectUrl) { window.location.href = data.redirectUrl; return; }
                 idle();
                 window.alert((data && data.message) || 'Could not start the payment. Please try again.');
                 return;
             }
 
-            PayhubPop.setup({
-                key: data.publicKey,
-                email: data.email,
-                // PayHub's inline checkout takes the amount in the MINOR unit
-                // (kobo) — its documented example multiplies by 100. This is the
-                // opposite of PayHub's /transaction/initialize endpoint, which
-                // takes Naira and is what the redirect flow posts, so the server
-                // sends major units and only this popup call scales them.
-                amount: Math.round(data.amount * 100),
-                ref: data.reference,
-                onClose: function () { idle(); },
-                callback: function () {
-                    // Hand off to server-side verification; the popup's word is
-                    // not what marks the invoice paid.
-                    button.textContent = 'Confirming…';
-                    window.location.href = data.callbackUrl;
-                },
-            }).openIframe();
+            openPayhubCheckout({
+                ref:         data.reference,
+                // checkout.php expects the amount in MAJOR units (NGN), same as
+                // /api/transaction/initialize — NOT multiplied by 100.
+                amount:      data.amount,
+                email:       data.email,
+                callbackUrl: data.callbackUrl,
+                onClose:     function () { idle(); },
+            });
         })
         .catch(function (err) {
             idle();
             window.alert((err && err.message) || 'Could not start the payment. Please try again.');
         });
     });
+
 
     // Server admin add/edit form (provisioning/server-form.php): the
     // module-slug select shows/hides the API-username field and relabels
