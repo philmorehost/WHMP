@@ -101,68 +101,72 @@
 
     // PayHub inline checkout: pay without leaving the invoice page.
     //
-    // The button carries no payment details. Clicking it asks the server to
-    // issue them, and the server decides the reference and the amount from the
-    // invoice itself — so nothing here can choose what to charge. The popup's
-    // own success callback is likewise not trusted as proof of payment: it only
-    // sends the browser to the server's verification endpoint, which confirms
-    // the transaction with PayHub before anything is recorded.
+    // ROOT CAUSE OF PREVIOUS FAILURES: PayHub's inline.js declares
+    //   const PayhubPop = { ... }
+    // which is a script-scoped const, NOT window.PayhubPop. Checking
+    // window.PayhubPop always returned undefined regardless of load state.
+    //
+    // CSP-SAFE FIX: After loading inline.js, we load /assets/js/payhub-bridge.js
+    // (a 'self'-hosted script) which contains: window.PayhubPop = PayhubPop;
+    // This bridges the const into a window property without needing unsafe-inline.
     var payhubSdk = null;
 
     function loadPayhubSdk() {
         if (payhubSdk) { return payhubSdk; }
 
         payhubSdk = new Promise(function (resolve, reject) {
+            // Already bridged from a previous successful load
             if (window.PayhubPop) { resolve(window.PayhubPop); return; }
 
-            // Check if the script is already in the DOM to avoid loading it twice
-            // (which would cause a "PayhubPop already declared" error).
-            var existing = document.querySelector('script[src="https://merchant.payhub.com.ng/inline.js"]');
-            if (existing) {
-                // The script is in the DOM but hasn't finished loading yet (or loaded
-                // but PayhubPop isn't ready). Wait a moment for it to settle.
-                var checkInterval = setInterval(function () {
+            function startPolling() {
+                var tries = 0;
+                var poll = setInterval(function () {
+                    tries++;
                     if (window.PayhubPop) {
-                        clearInterval(checkInterval);
+                        clearInterval(poll);
                         resolve(window.PayhubPop);
+                        return;
+                    }
+                    if (tries >= 150) { // 15 s timeout
+                        clearInterval(poll);
+                        reject(new Error('PayHub checkout took too long to load.'));
                     }
                 }, 100);
-                // Fail after 15 seconds of waiting.
-                setTimeout(function () {
-                    clearInterval(checkInterval);
-                    if (!window.PayhubPop) { reject(new Error('PayHub checkout took too long to load.')); }
-                }, 15000);
+            }
+
+            function loadBridgeThen() {
+                // payhub-bridge.js contains: window.PayhubPop = PayhubPop;
+                // It must load AFTER inline.js so the const is already declared.
+                // It is hosted on 'self' so it is permitted by CSP script-src.
+                var bridge = document.createElement('script');
+                bridge.src = '/assets/js/payhub-bridge.js';
+                bridge.onload = startPolling;
+                bridge.onerror = function () {
+                    reject(new Error('Could not load PayHub bridge script.'));
+                };
+                document.head.appendChild(bridge);
+            }
+
+            // Avoid adding inline.js twice
+            var existing = document.querySelector('script[src="https://merchant.payhub.com.ng/inline.js"]');
+            if (existing) {
+                // inline.js already in DOM — bridge it if not already done
+                if (!document.querySelector('script[src="/assets/js/payhub-bridge.js"]')) {
+                    loadBridgeThen();
+                } else {
+                    startPolling();
+                }
                 return;
             }
 
-            var script = document.createElement('script');
-            script.src = 'https://merchant.payhub.com.ng/inline.js';
-            script.onload = function () {
-                // PayhubPop is usually ready synchronously on onload, but
-                // occasionally the SDK sets it a tick later — poll briefly.
-                if (window.PayhubPop) { resolve(window.PayhubPop); return; }
-                var postLoadCheck = setInterval(function () {
-                    if (window.PayhubPop) {
-                        clearInterval(postLoadCheck);
-                        resolve(window.PayhubPop);
-                    }
-                }, 100);
-                setTimeout(function () {
-                    clearInterval(postLoadCheck);
-                    if (!window.PayhubPop) {
-                        reject(new Error('PayHub checkout loaded but did not initialise.'));
-                    }
-                }, 5000);
-            };
-            script.onerror = function () { reject(new Error('Could not reach PayHub checkout.')); };
-            document.head.appendChild(script);
+            var sdk = document.createElement('script');
+            sdk.src = 'https://merchant.payhub.com.ng/inline.js';
+            sdk.onload = function () { loadBridgeThen(); };
+            sdk.onerror = function () { reject(new Error('Could not load PayHub checkout script.')); };
+            document.head.appendChild(sdk);
         });
 
-        // Let a failed load be retried on the next click rather than caching
-        // the rejection forever (a dropped connection should not disable the
-        // button for the rest of the session).
         payhubSdk.catch(function () { payhubSdk = null; });
-
         return payhubSdk;
     }
 

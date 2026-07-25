@@ -172,16 +172,31 @@ $companyDept ??= 'Payments Dept.';
                                 <?php endif; ?>
                             </div>
                             <?php
-                            // PayHub uses the same server-side redirect flow as Paystack/Flutterwave.
-                            // The inline popup SDK (merchant.payhub.com.ng/inline.js) was removed
-                            // because window.PayhubPop is not reliably exposed by that CDN script,
-                            // causing a consistent "took too long to load" timeout for users.
-                            // The redirect flow in PayhubGateway::capture() works correctly.
+                            // PayHub MUST use the inline iframe popup — the redirect flow does NOT
+                            // support a callback_url. PayHub's checkout.php always redirects to
+                            // its own verify.php (never back to WHMP) regardless of what we POST.
+                            // The inline.js SDK embeds checkout.php in an iframe and uses
+                            // postMessage to deliver the result back to this page, which then
+                            // sends the browser to /pay/payhub/callback for server-side verify.
+                            // The app.js bridge script assigns window.PayhubPop = PayhubPop after
+                            // inline.js loads, fixing the 'const' scoping issue that caused
+                            // the previous "took too long to load" timeouts.
+                            $useInline = $gateway['slug'] === 'payhub' && $hasKeys && !empty($config['public_key']);
                             ?>
-                            <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
-                                <?= csrf_field() ?>
-                                <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                            </form>
+                            <?php if ($useInline): ?>
+                                <button class="cv-btn" type="button"
+                                        data-payhub-pay
+                                        data-invoice-id="<?= (int) $invoice['id'] ?>"
+                                        data-gateway-slug="<?= e($gateway['slug']) ?>"
+                                        data-gateway-name="<?= e($gateway['name']) ?>"
+                                        data-token="<?= e(csrf_token()) ?>"
+                                        style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                            <?php else: ?>
+                                <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
+                                    <?= csrf_field() ?>
+                                    <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                 <?php endforeach; ?>
