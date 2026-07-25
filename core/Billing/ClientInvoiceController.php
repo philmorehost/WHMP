@@ -126,12 +126,45 @@ final class ClientInvoiceController
 
         $balance = $this->credit->balance((int) $client['id']);
         $currency = $this->currency->resolveForClient($client);
+        $limits = $this->depositLimits($currency);
 
         return $this->page('billing.client-add-funds', [
             'creditBalance' => $balance,
             'currency' => $currency,
+            'minDeposit' => $limits['min'],
+            'maxDeposit' => $limits['max'],
             'error' => $request->query('error'),
         ]);
+    }
+
+    /**
+     * The configured deposit bounds expressed in the currency the client is
+     * actually typing into the form.
+     *
+     * The settings are stored in the base currency, like every other stored
+     * amount (see CurrencyService), but the figure a client enters is in their
+     * own currency — so the bounds have to be converted before they can be
+     * compared against it or shown next to the input. A maximum of 0 means
+     * "no upper limit".
+     *
+     * @param array<string, mixed> $currency
+     * @return array{min: float, max: float}
+     */
+    private function depositLimits(array $currency): array
+    {
+        $rate = (float) ($currency['exchange_rate'] ?? 1.0);
+
+        if ($rate <= 0) {
+            $rate = 1.0;
+        }
+
+        $min = (float) $this->settings->get('billing.min_deposit', '10.00');
+        $max = (float) $this->settings->get('billing.max_deposit', '10000.00');
+
+        return [
+            'min' => round($min * $rate, 2),
+            'max' => $max > 0 ? round($max * $rate, 2) : 0.0,
+        ];
     }
 
     public function addFundsSubmit(Request $request): Response
@@ -143,14 +176,24 @@ final class ClientInvoiceController
         }
 
         $amount = (float) $request->input('amount', 0);
-        if ($amount < 10.00 || $amount > 10000.00) {
-            return Response::redirect('/client/wallet/add-funds?error=' . urlencode('Amount must be between 10.00 and 10,000.00.'));
+        $currency = $this->currency->resolveForClient($client);
+        $limits = $this->depositLimits($currency);
+        $symbol = (string) ($currency['symbol'] ?? '');
+
+        // Compared in the client's own currency, because that is the unit the
+        // figure was typed in — the configured bounds have already been
+        // converted from base for exactly this reason.
+        if ($amount < $limits['min'] || ($limits['max'] > 0 && $amount > $limits['max'])) {
+            $message = $limits['max'] > 0
+                ? sprintf('Amount must be between %s%s and %s%s.', $symbol, number_format($limits['min'], 2), $symbol, number_format($limits['max'], 2))
+                : sprintf('Amount must be at least %s%s.', $symbol, number_format($limits['min'], 2));
+
+            return Response::redirect('/client/wallet/add-funds?error=' . urlencode($message));
         }
 
         $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
-        $currency = $this->currency->resolveForClient($client);
         $currencyLock = $this->currency->lockColumns($currency);
 
         // $amount is what the client typed, i.e. in the currency they are being

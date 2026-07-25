@@ -67,6 +67,18 @@
                 <label class="cv-label">Minimum Credit Balance / Deposit ($)</label>
                 <input class="cv-input" type="number" step="0.01" min="0" name="min_credit_balance" value="<?= e($minCreditBalance) ?>">
             </div>
+
+            <div class="cv-field" style="margin-top:var(--cv-space-3);">
+                <label class="cv-label">Minimum Wallet Deposit ($)</label>
+                <input class="cv-input" type="number" step="0.01" min="0" name="min_deposit" value="<?= e($minDeposit) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Smallest amount a client may add to their wallet.</span>
+            </div>
+
+            <div class="cv-field" style="margin-top:var(--cv-space-3);">
+                <label class="cv-label">Maximum Wallet Deposit ($)</label>
+                <input class="cv-input" type="number" step="0.01" min="0" name="max_deposit" value="<?= e($maxDeposit) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Largest amount a client may add in one deposit. Enter <strong>0</strong> for no upper limit. Like every stored amount these are in the base currency, and are converted to each client&rsquo;s own currency on the deposit form.</span>
+            </div>
         </div>
 
         <!-- Checkout & System Mode Card -->

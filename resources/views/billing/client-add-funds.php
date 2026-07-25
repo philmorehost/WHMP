@@ -1,6 +1,8 @@
 <?php
 /** @var float $creditBalance */
 /** @var array<string, mixed> $currency */
+/** @var float $minDeposit */
+/** @var float $maxDeposit */
 /** @var string|null $error */
 // The wallet balance is a STORED amount, so it is held in the base currency
 // (see CurrencyService) and has to be converted up for display.
@@ -36,9 +38,15 @@ $typedMoney = static fn (float $amount): string => $currency['symbol'] . number_
             <label class="cv-label">Amount to Deposit (<?= e($currency['code']) ?>)</label>
             <div style="position:relative;">
                 <span style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:var(--cv-text-secondary);font-weight:600;"><?= e($currency['symbol']) ?></span>
-                <input class="cv-input" type="number" step="0.01" min="10.00" max="10000.00" name="amount" placeholder="100.00" style="padding-left:2rem;width:100%;font-size:var(--cv-text-md);" required>
+                <input class="cv-input" type="number" step="0.01" min="<?= e(number_format($minDeposit, 2, '.', '')) ?>"<?= $maxDeposit > 0 ? ' max="' . e(number_format($maxDeposit, 2, '.', '')) . '"' : '' ?> name="amount" placeholder="<?= e(number_format($minDeposit, 2, '.', '')) ?>" style="padding-left:2rem;width:100%;font-size:var(--cv-text-md);" required>
             </div>
-            <p style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">Minimum deposit is <?= $typedMoney(10.00) ?>, maximum is <?= $typedMoney(10000.00) ?>.</p>
+            <p style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
+                <?php if ($maxDeposit > 0): ?>
+                    Minimum deposit is <?= $typedMoney($minDeposit) ?>, maximum is <?= $typedMoney($maxDeposit) ?>.
+                <?php else: ?>
+                    Minimum deposit is <?= $typedMoney($minDeposit) ?>.
+                <?php endif; ?>
+            </p>
         </div>
 
         <button class="cv-btn" type="submit" style="width:100%;padding:var(--cv-space-3);font-size:var(--cv-text-md);font-weight:700;">Generate Deposit Invoice</button>

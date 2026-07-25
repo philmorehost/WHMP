@@ -35,6 +35,8 @@ final class GeneralSettingsController
             'allowCheckoutNotes' => $this->settings->get('checkout.allow_notes', '1') === '1',
             'maintenanceMode' => $this->settings->get('system.maintenance_mode', '0') === '1',
             'minCreditBalance' => $this->settings->get('billing.min_credit_balance', '0.00'),
+            'minDeposit' => $this->settings->get('billing.min_deposit', '10.00'),
+            'maxDeposit' => $this->settings->get('billing.max_deposit', '10000.00'),
             'minAffiliatePayout' => $this->settings->get('affiliates.min_payout', '50.00'),
             'ticketRatingEnabled' => $this->settings->get('support.ticket_rating_enabled', '1') === '1',
             'randomCpanelUsernames' => $this->settings->get('cpanel.random_usernames', '1') === '1',
@@ -69,6 +71,19 @@ final class GeneralSettingsController
         $this->settings->set('checkout.allow_notes', $request->input('allow_checkout_notes') ? '1' : '0');
         $this->settings->set('system.maintenance_mode', $request->input('maintenance_mode') ? '1' : '0');
         $this->settings->set('billing.min_credit_balance', (string) max(0.0, (float) $request->input('min_credit_balance', 0.0)));
+
+        // Deposit bounds, in base currency like every other stored amount.
+        // The maximum is floored at the minimum so a typo cannot save a range
+        // that rejects every possible deposit; 0 means "no upper limit".
+        $minDeposit = max(0.0, (float) $request->input('min_deposit', 10.0));
+        $maxDeposit = (float) $request->input('max_deposit', 10000.0);
+
+        if ($maxDeposit > 0 && $maxDeposit < $minDeposit) {
+            $maxDeposit = $minDeposit;
+        }
+
+        $this->settings->set('billing.min_deposit', (string) $minDeposit);
+        $this->settings->set('billing.max_deposit', (string) max(0.0, $maxDeposit));
         $this->settings->set('affiliates.min_payout', (string) max(0.0, (float) $request->input('min_affiliate_payout', 50.0)));
         $this->settings->set('support.ticket_rating_enabled', $request->input('ticket_rating_enabled') ? '1' : '0');
         $this->settings->set('cpanel.random_usernames', $request->input('random_cpanel_usernames') ? '1' : '0');
