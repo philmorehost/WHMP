@@ -71,6 +71,10 @@ final class ClientInvoiceController
             'gateways' => $this->gateways->allEnabled(),
             'creditBalance' => $this->credit->balance((int) $client['id']),
             'currency' => $this->currency->resolveLocked($currencyId),
+            // The client's own currency (not the invoice's locked currency) is needed
+            // to display the wallet balance correctly — the two differ when the invoice
+            // was created in a non-default currency but the client's preference is NGN.
+            'clientCurrency' => $this->currency->resolveForClient($client),
             'paymentStatus' => $request->query('payment'),
             'companyName' => (string) ($this->settings->get('company.name') ?? 'Your Company'),
             'companyEmail' => (string) ($this->settings->get('company.email') ?? 'billing@example.com'),

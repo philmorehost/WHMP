@@ -127,19 +127,32 @@
                         resolve(window.PayhubPop);
                     }
                 }, 100);
-                // Fail after 5 seconds of waiting.
+                // Fail after 15 seconds of waiting.
                 setTimeout(function () {
                     clearInterval(checkInterval);
                     if (!window.PayhubPop) { reject(new Error('PayHub checkout took too long to load.')); }
-                }, 5000);
+                }, 15000);
                 return;
             }
 
             var script = document.createElement('script');
             script.src = 'https://merchant.payhub.com.ng/inline.js';
             script.onload = function () {
-                if (window.PayhubPop) { resolve(window.PayhubPop); }
-                else { reject(new Error('PayHub checkout loaded but did not initialise.')); }
+                // PayhubPop is usually ready synchronously on onload, but
+                // occasionally the SDK sets it a tick later — poll briefly.
+                if (window.PayhubPop) { resolve(window.PayhubPop); return; }
+                var postLoadCheck = setInterval(function () {
+                    if (window.PayhubPop) {
+                        clearInterval(postLoadCheck);
+                        resolve(window.PayhubPop);
+                    }
+                }, 100);
+                setTimeout(function () {
+                    clearInterval(postLoadCheck);
+                    if (!window.PayhubPop) {
+                        reject(new Error('PayHub checkout loaded but did not initialise.'));
+                    }
+                }, 5000);
             };
             script.onerror = function () { reject(new Error('Could not reach PayHub checkout.')); };
             document.head.appendChild(script);
