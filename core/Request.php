@@ -48,6 +48,13 @@ class Request
 
         $uri = $server['REQUEST_URI'] ?? '/';
         $path = parse_url($uri, PHP_URL_PATH) ?: '/';
+
+        // Support old WHMCS routing via ?rp= query parameter (for migration from WHMCS)
+        // If ?rp=/path is present, use that as the actual path for routing
+        if (!empty($query['rp']) && is_string($query['rp'])) {
+            $path = $query['rp'];
+        }
+
         $this->path = '/' . trim($path, '/');
     }
 
