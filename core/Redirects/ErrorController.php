@@ -30,43 +30,24 @@ final class ErrorController
         if ($rpParam !== null) {
             $requestedPath = trim((string) $rpParam, '/');
             // Try redirecting the rp parameter value
-            try {
-                if ($this->redirects->shouldRedirect($requestedPath)) {
-                    $redirect = $this->redirects->getRedirectResponse($requestedPath);
-                    if ($redirect !== null) {
-                        return Response::redirect($redirect['location'], 301);
-                    }
+            if ($this->redirects->shouldRedirect($requestedPath)) {
+                $redirect = $this->redirects->getRedirectResponse($requestedPath);
+                if ($redirect !== null) {
+                    return Response::redirect($redirect['location'], 301);
                 }
-            } catch (\Throwable) {
-                // If redirect check fails, continue to search/default behavior
             }
         }
 
         // Check if this path should be redirected (from old WHMCS)
-        try {
-            if ($this->redirects->shouldRedirect($requestedPath)) {
-                $redirect = $this->redirects->getRedirectResponse($requestedPath);
-                if ($redirect !== null) {
-                    return Response::redirect($redirect['location'], $redirect['status']);
-                }
+        if ($this->redirects->shouldRedirect($requestedPath)) {
+            $redirect = $this->redirects->getRedirectResponse($requestedPath);
+            if ($redirect !== null) {
+                return Response::redirect($redirect['location'], $redirect['status']);
             }
-        } catch (\Throwable) {
-            // If redirect check fails, continue to search/default behavior
         }
 
-        // Search for relevant results (with error handling for database failures)
-        $searchResults = ['products' => [], 'articles' => [], 'suggestions' => [], 'keywords' => []];
-        try {
-            $searchResults = $this->search->searchByPath($requestedPath);
-        } catch (\Throwable) {
-            // If search fails (e.g., database unavailable), show default suggestions
-            $searchResults['suggestions'] = [
-                ['title' => 'Browse Products', 'url' => '/store', 'icon' => '🛍️'],
-                ['title' => 'View Your Services', 'url' => '/client/services', 'icon' => '⚙️'],
-                ['title' => 'Knowledge Base', 'url' => '/knowledgebase', 'icon' => '📚'],
-                ['title' => 'Support Tickets', 'url' => '/client/support/tickets', 'icon' => '🎫'],
-            ];
-        }
+        // Search for relevant results
+        $searchResults = $this->search->searchByPath($requestedPath);
 
         $content = $this->view->render('error.404', [
             'requestedPath' => $requestedPath,
