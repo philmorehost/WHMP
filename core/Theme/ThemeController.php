@@ -36,6 +36,7 @@ final class ThemeController
 
         $brandName = trim((string) $request->input('brand_name', ''));
         $logoUrl = trim((string) $request->input('logo_url', ''));
+        $faviconUrl = trim((string) $request->input('favicon_url', ''));
         $primaryColor = trim((string) $request->input('primary_color', ''));
         $termsUrl = trim((string) $request->input('terms_url', ''));
 
@@ -47,7 +48,36 @@ final class ThemeController
             return $this->render(['theme' => $this->theme->get(), 'error' => 'Terms of Service URL must be a full URL like https://yourdomain.com/terms.', 'saved' => false]);
         }
 
-        $this->theme->save($brandName, $logoUrl !== '' ? $logoUrl : null, $primaryColor, $termsUrl !== '' ? $termsUrl : null);
+        // Handle uploaded favicon file if provided
+        $file = $request->file('favicon_file');
+        if ($file !== null && ($file['error'] ?? UPLOAD_ERR_OK) === UPLOAD_ERR_OK) {
+            $ext = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+            $allowed = ['ico', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
+
+            if (!in_array($ext, $allowed, true)) {
+                return $this->render(['theme' => $this->theme->get(), 'error' => 'Invalid favicon file type. Allowed formats: .ico, .png, .jpg, .svg, .webp', 'saved' => false]);
+            }
+
+            $uploadsDir = dirname(__DIR__, 2) . '/public/uploads';
+            if (!is_dir($uploadsDir)) {
+                @mkdir($uploadsDir, 0755, true);
+            }
+
+            $filename = 'favicon_' . time() . '.' . $ext;
+            $destination = $uploadsDir . '/' . $filename;
+
+            if (move_uploaded_file((string) $file['tmp_name'], $destination)) {
+                $faviconUrl = '/uploads/' . $filename;
+            }
+        }
+
+        $this->theme->save(
+            $brandName,
+            $logoUrl !== '' ? $logoUrl : null,
+            $primaryColor,
+            $termsUrl !== '' ? $termsUrl : null,
+            $faviconUrl !== '' ? $faviconUrl : null
+        );
 
         return $this->render(['theme' => $this->theme->get(), 'error' => null, 'saved' => true]);
     }

@@ -21,7 +21,7 @@
 <?php endif; ?>
 
 <div class="cv-card">
-    <form method="post" action="/admin/theme"><?= csrf_field() ?>
+    <form method="post" action="/admin/theme" enctype="multipart/form-data"><?= csrf_field() ?>
         <div class="cv-field">
             <label class="cv-label">Brand Name</label>
             <input class="cv-input" name="brand_name" value="<?= e($theme['brandName']) ?>" required>
@@ -29,6 +29,20 @@
         <div class="cv-field">
             <label class="cv-label">Logo URL (optional)</label>
             <input class="cv-input" type="url" name="logo_url" value="<?= e((string) ($theme['logoUrl'] ?? '')) ?>" placeholder="https://example.com/logo.png">
+        </div>
+        <div class="cv-field">
+            <label class="cv-label">Favicon Upload / URL</label>
+            <?php if (!empty($theme['faviconUrl'])): ?>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                    <img src="<?= e($theme['faviconUrl']) ?>" alt="Favicon preview" style="width:24px;height:24px;object-fit:contain;border:1px solid var(--cv-border-default);border-radius:4px;padding:2px;background:#fff;">
+                    <span style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Current: <?= e($theme['faviconUrl']) ?></span>
+                </div>
+            <?php endif; ?>
+            <input class="cv-input" type="file" name="favicon_file" accept=".ico,.png,.jpg,.jpeg,.gif,.svg,.webp" style="margin-bottom:8px;">
+            <input class="cv-input" type="text" name="favicon_url" value="<?= e((string) ($theme['faviconUrl'] ?? '')) ?>" placeholder="Or enter direct URL (e.g. /uploads/favicon.png or https://example.com/favicon.ico)">
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-1);">
+                Upload an icon file (.ico, .png, .jpg, .svg) or provide a direct image URL to customize the browser tab icon.
+            </p>
         </div>
         <div class="cv-field">
             <label class="cv-label">Primary Color</label>
