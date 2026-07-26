@@ -60,7 +60,7 @@ final class ClientAuthController
             return Response::redirect('/client/login');
         }
 
-        if (!empty($client['security_pin'])) {
+        if (!empty($client['security_pin_hash'])) {
             return Response::redirect('/client/dashboard');
         }
 

@@ -1473,7 +1473,7 @@ class Kernel
             /** @var \CodeVault\Clients\ClientAuthGuard $clientGuard */
             $clientGuard = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class);
             $currentClient = $clientGuard->currentClient();
-            if ($currentClient !== null && empty($currentClient['security_pin'])) {
+            if ($currentClient !== null && empty($currentClient['security_pin_hash'])) {
                 return SecurityHeaders::apply(Response::redirect('/client/set-pin'));
             }
         }
