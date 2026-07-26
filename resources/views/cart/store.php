@@ -1,6 +1,8 @@
 <?php
 /** @var array<int, array<string, mixed>> $groups */
+/** @var array<string, mixed> $currency */
 /** @var CodeVault\Localization\Translation $t */
+$money = static fn (float $amount): string => ($currency['symbol'] ?? '$') . number_format(($amount > 1000 && (float) ($currency['exchange_rate'] ?? 1) > 50 && ($amount * (float) ($currency['exchange_rate'] ?? 1) > 5000000)) ? $amount : ($amount * (float) ($currency['exchange_rate'] ?? 1)), 2);
 ?>
 <style>
 /* ====== Store Page Styles ====== */
@@ -196,6 +198,40 @@
     gap: 12px;
     align-items: center;
     justify-content: space-between;
+}
+.product-card__price-section {
+    margin-bottom: 16px;
+    text-align: center;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--cv-border-default);
+}
+.product-card__price-label {
+    color: var(--cv-text-secondary);
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 6px;
+}
+.product-card__price-amount {
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: var(--cv-color-brand-500);
+    line-height: 1;
+}
+.product-card__price-cycle {
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--cv-text-secondary);
+    margin-left: 6px;
+    display: inline-block;
+}
+.product-card__price-info {
+    font-size: .75rem;
+    color: var(--cv-text-secondary);
+    margin-top: 6px;
 }
 .product-card__cta {
     background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -401,7 +437,26 @@
                                         <?php endforeach; ?>
                                     </ul>
                                 </div>
-                                <div class="product-card__footer">
+                                <div class="product-card__footer" style="flex-direction: column; align-items: stretch;">
+                                    <?php if (!empty($product['pricing']) && (float) $product['starting_price'] > 0): ?>
+                                        <div style="margin-bottom: 12px; text-align: center;">
+                                            <div style="color: var(--cv-text-secondary); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; margin-bottom: 4px;">Starting at</div>
+                                            <div style="font-size: 1.5rem; font-weight: 800; color: var(--cv-color-brand-500);">
+                                                <?= $money((float) $product['starting_price']) ?>
+                                                <span style="font-size: .85rem; font-weight: 600; color: var(--cv-text-secondary);">/month</span>
+                                            </div>
+                                            <div style="font-size: .8rem; color: var(--cv-text-secondary); margin-top: 4px;">
+                                                <?php
+                                                    $cycleCount = count($product['pricing']);
+                                                    echo $cycleCount > 1 ? $cycleCount . ' billing cycles available' : '1 billing cycle';
+                                                ?>
+                                            </div>
+                                        </div>
+                                    <?php else: ?>
+                                        <div style="margin-bottom: 12px; text-align: center; color: var(--cv-text-secondary); font-size: .9rem;">
+                                            Contact us for pricing
+                                        </div>
+                                    <?php endif; ?>
                                     <a href="/store/<?= (int) $product['id'] ?>" class="product-card__cta">
                                         Select Plan →
                                     </a>

@@ -59,6 +59,19 @@ final class CheckoutController
 
             foreach ($groups as &$group) {
                 $group['products'] = $productsByGroup[(int) $group['id']] ?? [];
+
+                // Load pricing for each product
+                foreach ($group['products'] as &$product) {
+                    $product['pricing'] = $this->pricing->forProduct((int) $product['id']);
+                    // Calculate and store the starting price (cheapest plan)
+                    if ($product['pricing'] !== []) {
+                        $prices = array_map(static fn (array $row) => (float) $row['price'], $product['pricing']);
+                        $product['starting_price'] = min($prices);
+                    } else {
+                        $product['starting_price'] = 0.0;
+                    }
+                }
+                unset($product);
             }
             unset($group);
 
