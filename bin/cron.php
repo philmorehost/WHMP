@@ -18,6 +18,8 @@ use CodeVault\Billing\QuoteExpiryJob;
 use CodeVault\Billing\RecurringBillingJob;
 use CodeVault\Billing\RecurringBillingService;
 use CodeVault\Billing\RenewalReminderJob;
+use CodeVault\Cron\CronActivityReportJob;
+use CodeVault\Cron\CronActivityService;
 use CodeVault\Cron\CronScheduler;
 use CodeVault\Domains\DomainRenewalBillingJob;
 use CodeVault\Domains\DomainSyncJob;
@@ -59,6 +61,11 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));
     $scheduler->register($kernel->container->make(DataPruningJob::class));
     $scheduler->register($kernel->container->make(QuoteExpiryJob::class));
+    $scheduler->register(new CronActivityReportJob(
+        $kernel->container->make(CronActivityService::class),
+        $kernel->container->make(\CodeVault\Mail\EmailDispatcher::class),
+        $kernel->container->make(\CodeVault\Settings\SettingsRepository::class)
+    ));
 }
 
 $results = $scheduler->run($hooks);
