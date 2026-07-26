@@ -21,9 +21,9 @@
 <?php endif; ?>
 
 <?php if (empty($client['security_pin'])): ?>
-    <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);background:#fffbeb;border:1px solid #fef3c7;">
-        <div style="color:#b45309;font-size:var(--cv-text-sm);">
-            <strong>⚠️ Security Action Recommended:</strong> You have not set a Security PIN yet. Setting a Security PIN ensures you can quickly self-recover your account if you ever get locked out. Scroll down to set your PIN.
+    <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);background:<?= isset($_GET['pin_required']) ? '#fef2f2' : '#fffbeb' ?>;border:1px solid <?= isset($_GET['pin_required']) ? '#fecaca' : '#fef3c7' ?>;">
+        <div style="color:<?= isset($_GET['pin_required']) ? '#991b1b' : '#b45309' ?>;font-size:var(--cv-text-sm);">
+            <strong><?= isset($_GET['pin_required']) ? '🔒 Security PIN Required:' : '⚠️ Security Action Recommended:' ?></strong> You must set a Security PIN before continuing to use your account. Setting a Security PIN ensures you can self-recover if your account gets locked out. Scroll down to the <strong>Change Security PIN</strong> section below.
         </div>
     </div>
 <?php endif; ?>
