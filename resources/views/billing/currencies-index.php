@@ -202,29 +202,27 @@
         </div>
     </div>
 </div>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
 
-    <h3>Add Currency</h3>
-    <form method="post" action="/admin/currencies" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
-        <div class="cv-field" style="margin-bottom:0;">
-            <label class="cv-label">Code</label>
-            <input class="cv-input" name="code" placeholder="EUR" maxlength="3" style="width:5rem;" required>
-        </div>
-        <div class="cv-field" style="margin-bottom:0;">
-            <label class="cv-label">Symbol</label>
-            <input class="cv-input" name="symbol" placeholder="€" style="width:4rem;" required>
-        </div>
-        <div class="cv-field" style="margin-bottom:0;">
-            <label class="cv-label">Exchange Rate (vs. base)</label>
-            <input class="cv-input" type="number" step="0.0001" name="exchange_rate" placeholder="0.92" style="width:7rem;" required>
-        </div>
-        <button class="cv-btn" type="submit">Add</button>
-    </form>
-    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-2);">
-        Exchange rates are set manually here — there's no live FX feed wired up, so keep these current by hand.
-    </p>
+<div class="admin-cur-card">
+    <h2 class="admin-cur-card__title">➕ Add Currency</h2>
+    <div class="admin-cur-card__body">
+        <form method="post" action="/admin/currencies" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Code</label>
+                <input class="cv-input" name="code" placeholder="EUR" maxlength="3" style="width:5rem;" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Symbol</label>
+                <input class="cv-input" name="symbol" placeholder="€" style="width:4rem;" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Exchange Rate (vs. base)</label>
+                <input class="cv-input" type="number" step="0.0001" name="exchange_rate" placeholder="0.92" style="width:7rem;" required>
+            </div>
+            <button class="cv-btn" type="submit">Add</button>
+        </form>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-2);">
+            Exchange rates are set manually here — there's no live FX feed wired up, so keep these current by hand.
+        </p>
+    </div>
 </div>
