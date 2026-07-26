@@ -1,8 +1,6 @@
 <?php
 /** @var array<int, array<string, mixed>> $groups */
-/** @var array<string, mixed> $currency */
 /** @var CodeVault\Localization\Translation $t */
-$money = static fn (float $amount): string => ($currency['symbol'] ?? '$') . number_format(($amount > 1000 && (float) ($currency['exchange_rate'] ?? 1) > 50 && ($amount * (float) ($currency['exchange_rate'] ?? 1) > 5000000)) ? $amount : ($amount * (float) ($currency['exchange_rate'] ?? 1)), 2);
 ?>
 <style>
 /* ====== Store Page Styles ====== */
@@ -394,6 +392,17 @@ $money = static fn (float $amount): string => ($currency['symbol'] ?? '$') . num
                                 </div>
                                 <div class="product-card__body">
                                     <p class="product-card__description"><?= e((string) ($product['description'] ?? '')) ?></p>
+                                    
+                                    <div style="margin: 16px 0; padding: 14px; background: var(--cv-bg-surface-sunken); border-radius: 10px; border: 1px solid var(--cv-border-default); text-align: center;">
+                                        <div style="font-size: .8rem; color: var(--cv-text-secondary); text-transform: uppercase; font-weight: 700; letter-spacing: .05em;">Starting at</div>
+                                        <div style="font-family: 'Hanken Grotesk', sans-serif; font-size: 1.65rem; font-weight: 900; color: var(--cv-color-brand-500); margin: 2px 0;">
+                                            <?= e($currency['symbol'] ?? '$') ?><?= number_format((float) ($product['starting_price'] ?? 0), 2) ?>
+                                        </div>
+                                        <div style="font-size: .8rem; color: var(--cv-text-secondary); font-weight: 600;">
+                                            <?= e(ucfirst(str_replace('_', ' ', (string) ($product['starting_cycle'] ?? 'monthly')))) ?>
+                                        </div>
+                                    </div>
+
                                     <ul class="product-card__features">
                                         <?php foreach ($features as $feat): ?>
                                             <li class="product-card__feature">

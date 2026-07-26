@@ -53,12 +53,26 @@ final class CheckoutController
 
     public function store(Request $request): Response
     {
-        $groups = $this->cache->remember('store:index', 60, function () {
+        $groups = $this->cache->remember('store:index_v2', 60, function () {
             $groups = $this->groups->all();
             $productsByGroup = $this->products->allGroupedByGroup();
+            $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
 
             foreach ($groups as &$group) {
-                $group['products'] = $productsByGroup[(int) $group['id']] ?? [];
+                $prods = $productsByGroup[(int) $group['id']] ?? [];
+                foreach ($prods as &$prod) {
+                    $pricingRows = $db->select("SELECT price, billing_cycle FROM product_pricing WHERE product_id = ? ORDER BY price ASC", [(int) $prod['id']]);
+                    if ($pricingRows !== []) {
+                        $monthlyRow = array_values(array_filter($pricingRows, fn($r) => $r['billing_cycle'] === 'monthly'))[0] ?? $pricingRows[0];
+                        $prod['starting_price'] = (float) $monthlyRow['price'];
+                        $prod['starting_cycle'] = (string) $monthlyRow['billing_cycle'];
+                    } else {
+                        $prod['starting_price'] = 0.00;
+                        $prod['starting_cycle'] = 'monthly';
+                    }
+                }
+                unset($prod);
+                $group['products'] = $prods;
             }
             unset($group);
 
