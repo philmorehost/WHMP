@@ -25,19 +25,6 @@ final class ErrorController
     {
         $requestedPath = $request->path();
 
-        // Check for WHMCS ?rp= query parameter (old URL format: index.php?rp=/store/cheap-dedicated-servers)
-        $rpParam = $request->query('rp');
-        if ($rpParam !== null) {
-            $requestedPath = trim((string) $rpParam, '/');
-            // Try redirecting the rp parameter value
-            if ($this->redirects->shouldRedirect($requestedPath)) {
-                $redirect = $this->redirects->getRedirectResponse($requestedPath);
-                if ($redirect !== null) {
-                    return Response::redirect($redirect['location'], 301);
-                }
-            }
-        }
-
         // Check if this path should be redirected (from old WHMCS)
         if ($this->redirects->shouldRedirect($requestedPath)) {
             $redirect = $this->redirects->getRedirectResponse($requestedPath);
