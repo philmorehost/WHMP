@@ -26,10 +26,11 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <title><?php
         $pageTitle = trim((string) ($title ?? ''));
         $brand = e($theme['brandName'] ?? 'WHMP');
-        if ($pageTitle === '' || $pageTitle === $brand) {
+        $pageTitle = str_replace(['CodeVault — ', 'CodeVault - ', 'CodeVault '], '', $pageTitle);
+        if ($pageTitle === '' || strcasecmp($pageTitle, $brand) === 0) {
             echo $brand;
         } else {
-            echo e($pageTitle) . ' - ' . $brand;
+            echo e($pageTitle) . ' — ' . $brand;
         }
     ?></title>
     <?php if (!empty($theme['faviconUrl'])): ?>

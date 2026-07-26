@@ -77,10 +77,10 @@ $router->get('/', function (Request $request, array $params, Container $containe
     ]);
 
     return Response::html($view->render('layouts.client', [
-        'title' => 'CodeVault — Web Hosting & Domains',
+        'title' => 'Web Hosting & Domains',
         'content' => $content,
         'canonicalUrl' => $seo->canonicalUrl('/'),
-        'metaDescription' => 'CodeVault provides reliable web hosting, domain registration, and support for your business.',
+        'metaDescription' => 'Reliable web hosting, domain registration, and support for your business.',
         'jsonLd' => [$seo->organization()],
     ]));
 });
