@@ -18,6 +18,12 @@
     <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);">
         <div class="cv-field-success"><?= e($success) ?></div>
     </div>
+<?php if (empty($client['security_pin'])): ?>
+    <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);background:#fffbeb;border:1px solid #fef3c7;">
+        <div style="color:#b45309;font-size:var(--cv-text-sm);">
+            <strong>⚠️ Security Action Recommended:</strong> You have not set a Security PIN yet. Setting a Security PIN ensures you can quickly self-recover your account if you ever get locked out. Scroll down to set your PIN.
+        </div>
+    </div>
 <?php endif; ?>
 
 <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);">

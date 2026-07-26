@@ -11,7 +11,7 @@ $resetSuccess ??= false;
     <?php endif; ?>
 
     <?php if ($error): ?>
-        <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
+        <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= str_contains($error, '<a ') ? $error : e($error) ?></div>
     <?php endif; ?>
 
     <form method="post" action="/client/login"><?= csrf_field() ?>
