@@ -1073,10 +1073,10 @@ class Kernel
 
         $this->container->singleton(\CodeVault\Redirects\PageSearchService::class, function (Container $c) {
             return new \CodeVault\Redirects\PageSearchService(
-                $c->make(ProductRepository::class),
-                $c->make(ProductGroupRepository::class),
-                $c->make(KbArticleRepository::class),
-                $c->make(DomainRepository::class)
+                $c->make(\CodeVault\Catalog\ProductRepository::class),
+                $c->make(\CodeVault\Catalog\ProductGroupRepository::class),
+                $c->make(\CodeVault\Knowledgebase\KbArticleRepository::class),
+                $c->make(\CodeVault\Domains\DomainRepository::class)
             );
         });
 

@@ -6,7 +6,7 @@ namespace CodeVault\Redirects;
 
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Catalog\ProductGroupRepository;
-use CodeVault\Support\KnowledgebaseRepository;
+use CodeVault\Knowledgebase\KbArticleRepository;
 use CodeVault\Domains\DomainRepository;
 
 /**
@@ -19,7 +19,7 @@ final class PageSearchService
     public function __construct(
         private readonly ProductRepository $products,
         private readonly ProductGroupRepository $groups,
-        private readonly KnowledgebaseRepository $knowledgebase,
+        private readonly KbArticleRepository $articles,
         private readonly DomainRepository $domains
     ) {
     }
@@ -98,26 +98,30 @@ final class PageSearchService
             return [];
         }
 
-        $searchTerm = '%' . implode('%', $keywords) . '%';
-
         $products = [];
         foreach ($keywords as $keyword) {
-            $term = '%' . $keyword . '%';
-            $found = $this->products->all([
-                'search' => $term,
-                'status' => 'active',
-                'limit' => 3,
-            ]) ?? [];
+            // Get all products and filter by name/description
+            $allProducts = $this->products->all();
+            $keyword_lower = strtolower($keyword);
 
-            foreach ($found as $product) {
-                $key = (int) $product['id'];
-                if (!isset($products[$key])) {
-                    $products[$key] = [
-                        'id' => $product['id'],
-                        'name' => $product['name'],
-                        'url' => '/store/' . $product['id'],
-                        'type' => $product['type'] ?? 'general',
-                    ];
+            foreach ($allProducts as $product) {
+                if ($product['status'] !== 'active') {
+                    continue;
+                }
+
+                $name_match = stripos((string) $product['name'], $keyword) !== false;
+                $desc_match = stripos((string) ($product['description'] ?? ''), $keyword) !== false;
+
+                if ($name_match || $desc_match) {
+                    $key = (int) $product['id'];
+                    if (!isset($products[$key])) {
+                        $products[$key] = [
+                            'id' => $product['id'],
+                            'name' => $product['name'],
+                            'url' => '/store/' . $product['id'],
+                            'type' => $product['type'] ?? 'general',
+                        ];
+                    }
                 }
             }
         }
@@ -138,8 +142,7 @@ final class PageSearchService
 
         $articles = [];
         foreach ($keywords as $keyword) {
-            $term = '%' . $keyword . '%';
-            $found = $this->knowledgebase->search($term, 3) ?? [];
+            $found = $this->articles->search($keyword) ?? [];
 
             foreach ($found as $article) {
                 $key = (int) $article['id'];
