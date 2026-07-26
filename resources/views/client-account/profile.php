@@ -18,6 +18,8 @@
     <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);">
         <div class="cv-field-success"><?= e($success) ?></div>
     </div>
+<?php endif; ?>
+
 <?php if (empty($client['security_pin'])): ?>
     <div class="cv-card" style="max-width:40rem;margin:0 auto var(--cv-space-4);background:#fffbeb;border:1px solid #fef3c7;">
         <div style="color:#b45309;font-size:var(--cv-text-sm);">
