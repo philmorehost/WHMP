@@ -50,8 +50,44 @@ final class ClientAuthController
         return $this->page('client-auth.login', [
             'error' => null,
             'resetSuccess' => $request->query('reset') === 'success',
-            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
         ]);
+    }
+
+    public function setPinForm(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        if (!empty($client['security_pin'])) {
+            return Response::redirect('/client/dashboard');
+        }
+
+        return $this->page('client-auth.set-pin', ['error' => null]);
+    }
+
+    public function setPin(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $pin = trim((string) $request->input('security_pin', ''));
+        $confirmPin = trim((string) $request->input('confirm_security_pin', ''));
+
+        if (strlen($pin) < 4) {
+            return $this->page('client-auth.set-pin', ['error' => 'Security PIN must be at least 4 characters long.']);
+        }
+
+        if ($pin !== $confirmPin) {
+            return $this->page('client-auth.set-pin', ['error' => 'Security PINs do not match. Please try again.']);
+        }
+
+        $this->clients->updateSecurityPin((int) $client['id'], $pin);
+
+        return Response::redirect('/client/dashboard');
     }
 
     public function login(Request $request): Response

@@ -28,6 +28,8 @@ $router->get('/client/login/2fa', [ClientAuthController::class, 'twoFactorForm']
 $router->post('/client/login/2fa', [ClientAuthController::class, 'verifyTwoFactor']);
 $router->get('/client/recover-pin', [ClientAuthController::class, 'recoverPinForm']);
 $router->post('/client/recover-pin', [ClientAuthController::class, 'recoverPin']);
+$router->get('/client/set-pin', [ClientAuthController::class, 'setPinForm']);
+$router->post('/client/set-pin', [ClientAuthController::class, 'setPin']);
 $router->get('/client/register', [ClientAuthController::class, 'registerForm']);
 $router->post('/client/register', [ClientAuthController::class, 'register']);
 $router->post('/client/logout', [ClientAuthController::class, 'logout']);

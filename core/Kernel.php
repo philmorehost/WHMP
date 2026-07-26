@@ -1469,14 +1469,12 @@ class Kernel
 
         // Force existing clients without a Security PIN to set one before accessing the client portal
         $path = $request->path();
-        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin')) {
+        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin')) {
             /** @var \CodeVault\Clients\ClientAuthGuard $clientGuard */
             $clientGuard = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class);
             $currentClient = $clientGuard->currentClient();
             if ($currentClient !== null && empty($currentClient['security_pin'])) {
-                if ($path !== '/client/account' && $path !== '/client/account/security-pin') {
-                    return SecurityHeaders::apply(Response::redirect('/client/account?pin_required=1'));
-                }
+                return SecurityHeaders::apply(Response::redirect('/client/set-pin'));
             }
         }
 
