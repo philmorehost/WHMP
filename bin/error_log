@@ -1,0 +1,600 @@
+[23-Jul-2026 22:35:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 22:40:04 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 22:45:04 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 22:50:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 22:55:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:00:06 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:05:11 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:10:04 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:15:04 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:20:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:25:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:30:06 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:35:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:40:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:45:08 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:50:06 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[23-Jul-2026 23:55:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[24-Jul-2026 00:00:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[24-Jul-2026 00:05:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[24-Jul-2026 00:10:06 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[24-Jul-2026 00:15:06 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[24-Jul-2026 00:20:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1044] Access denied for user 'pmhost_whmpbill'@'localhost' to database 'pmhost_whmpbill' in /home/pmhost/client.philmorehost.com/core/Database.php:34
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(34): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(46): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(59): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(998): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1006): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(655): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 34
+[24-Jul-2026 08:45:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 08:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 08:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:05:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:15:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:20:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:25:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:35:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:40:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:50:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 09:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:05:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:40:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 10:50:05 UTC] Database connection failed: host=localhost, port=3306, database=pmhost_whmpbill, user=pmhost_whmpbill
+[24-Jul-2026 10:50:05 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] No such file or directory in /home/pmhost/client.philmorehost.com/core/Database.php:35
+Stack trace:
+#0 /home/pmhost/client.philmorehost.com/core/Database.php(35): PDO->__construct('mysql:host=loca...', 'pmhost_whmpbill', Object(SensitiveParameterValue), Array)
+#1 /home/pmhost/client.philmorehost.com/core/Database.php(52): CodeVault\Database->connection()
+#2 /home/pmhost/client.philmorehost.com/core/Database.php(65): CodeVault\Database->statement('SELECT `value` ...', Array)
+#3 /home/pmhost/client.philmorehost.com/core/Settings/SettingsRepository.php(24): CodeVault\Database->selectOne('SELECT `value` ...', Array)
+#4 /home/pmhost/client.philmorehost.com/core/Ai/AiSettings.php(40): CodeVault\Settings\SettingsRepository->get('ai.api_key')
+#5 /home/pmhost/client.philmorehost.com/core/Kernel.php(1031): CodeVault\Ai\AiSettings->apiKey()
+#6 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#7 /home/pmhost/client.philmorehost.com/core/Kernel.php(1039): CodeVault\Container->make('CodeVault\\Ai\\Ai...')
+#8 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#9 /home/pmhost/client.philmorehost.com/core/Kernel.php(679): CodeVault\Container->make('CodeVault\\Fraud...')
+#10 /home/pmhost/client.philmorehost.com/core/Container.php(59): CodeVault\Kernel->CodeVault\{closure}(Object(CodeVault\Container), Array)
+#11 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Modul...')
+#12 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#13 /home/pmhost/client.philmorehost.com/core/Container.php(118): CodeVault\Container->make('CodeVault\\Billi...')
+#14 /home/pmhost/client.philmorehost.com/core/Container.php(68): CodeVault\Container->build('CodeVault\\Billi...', Array)
+#15 /home/pmhost/client.philmorehost.com/bin/cron.php(49): CodeVault\Container->make('CodeVault\\Billi...')
+#16 {main}
+  thrown in /home/pmhost/client.philmorehost.com/core/Database.php on line 35
+[24-Jul-2026 10:55:03 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:00:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:05:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:20:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:25:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:40:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:45:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 11:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:05:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:20:08 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:30:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:40:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 12:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:05:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:10:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:35:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:40:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:50:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 13:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:05:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:25:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:30:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:40:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:45:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 14:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:05:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:30:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:35:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:40:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:50:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 15:55:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:00:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:05:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:10:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:15:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:40:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 16:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:00:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:05:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:10:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:30:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:40:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:50:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 17:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:00:06 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:05:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:20:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:25:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:40:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 18:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:05:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:15:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:20:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:25:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:30:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:35:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:40:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:45:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:50:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 19:55:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 20:00:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 20:05:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 20:10:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 20:15:05 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
+[24-Jul-2026 20:20:04 UTC] PHP Fatal error:  Class CodeVault\Billing\CancellationCronJob cannot extend interface CodeVault\Cron\CronJob in /home/pmhost/client.philmorehost.com/core/Billing/CancellationCronJob.php on line 9
