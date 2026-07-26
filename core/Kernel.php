@@ -1066,6 +1066,20 @@ class Kernel
             $this->container->make(FraudService::class)->evaluate((int) $orderId);
         });
 
+        // Redirect and error handling services
+        $this->container->singleton(\CodeVault\Redirects\RedirectService::class, function (Container $c) {
+            return new \CodeVault\Redirects\RedirectService($c->make(Database::class));
+        });
+
+        $this->container->singleton(\CodeVault\Redirects\PageSearchService::class, function (Container $c) {
+            return new \CodeVault\Redirects\PageSearchService(
+                $c->make(ProductRepository::class),
+                $c->make(ProductGroupRepository::class),
+                $c->make(KbArticleRepository::class),
+                $c->make(DomainRepository::class)
+            );
+        });
+
         $this->registerNotificationListeners();
     }
 

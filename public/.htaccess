@@ -1,9 +1,106 @@
-RewriteEngine On
+# WHMP Redirect and Rewrite Rules for WHMCS Migration
+# 301 Permanent redirects from old WHMCS to new WHMP
 
-# Serve real files/directories (assets) directly
-RewriteCond %{REQUEST_FILENAME} -f [OR]
-RewriteCond %{REQUEST_FILENAME} -d
-RewriteRule ^ - [L]
+<IfModule mod_rewrite.c>
+    RewriteEngine On
 
-# Everything else goes through the front controller
-RewriteRule ^ index.php [L]
+    # --- DOMAIN REDIRECT ---
+    # Redirect old clients.philmorehost.com to client.philmorehost.com with 301
+    RewriteCond %{HTTP_HOST} ^clients\.philmorehost\.com$ [NC]
+    RewriteRule ^(.*)$ https://client.philmorehost.com/$1 [R=301,L]
+
+    # --- SECURITY & BASE ---
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # --- WHMCS FILE REDIRECTS WITH 301 ---
+    # These are permanent redirects for old WHMCS scripts
+
+    # clientarea.php variations
+    RewriteRule ^clientarea\.php\?action=emails$ /client/account/profile [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=details$ /client/account/profile [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=security$ /client/account/security [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=contacts$ /client/account/profile [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=services$ /client/services [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=productdetails$ /client/services [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=domains$ /client/domains [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=domaindetails$ /client/domains [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=supporttickets$ /client/support/tickets [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=invoices$ /client/invoices [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=viewinvoice$ /client/invoices [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=quotes$ /client/quotes [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=affiliates$ /client/affiliates [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=profile$ /client/account/profile [R=301,L,QSA]
+    RewriteRule ^clientarea\.php\?action=changepassword$ /client/account/security [R=301,L,QSA]
+    RewriteRule ^clientarea\.php$ /client/dashboard [R=301,L]
+
+    # Support tickets
+    RewriteRule ^supporttickets\.php$ /client/support/tickets [R=301,L,QSA]
+
+    # Knowledge base and FAQ
+    RewriteRule ^knowledgebase\.php$ /knowledgebase [R=301,L,QSA]
+    RewriteRule ^faq\.php$ /knowledgebase [R=301,L,QSA]
+
+    # Cart and checkout
+    RewriteRule ^cart\.php\?a=view$ /store [R=301,L]
+    RewriteRule ^cart\.php\?a=checkout$ /cart [R=301,L]
+    RewriteRule ^cart\.php$ /store [R=301,L,QSA]
+    RewriteRule ^checkout\.php$ /cart [R=301,L,QSA]
+
+    # Downloads
+    RewriteRule ^downloads\.php$ /downloads [R=301,L,QSA]
+
+    # Announcements
+    RewriteRule ^announcements\.php$ / [R=301,L,QSA]
+
+    # --- CATCH-ALL REDIRECT ---
+    # Any .php file that doesn't exist gets redirected to WHMP error handler
+    # This allows the AI search to handle unknown WHMCS pages
+    RewriteCond %{REQUEST_FILENAME}\.php -f
+    RewriteRule ^(.*)\.php$ /index.php [L]
+
+    # --- DEFAULT REWRITE ---
+    # Route all non-existent files/directories to index.php
+    RewriteRule ^(.*)$ /index.php [L]
+</IfModule>
+
+# --- SECURITY HEADERS ---
+<IfModule mod_headers.c>
+    # HSTS: Enforce HTTPS
+    Header set Strict-Transport-Security "max-age=31536000; includeSubDomains" env=HTTPS
+
+    # Prevent clickjacking
+    Header set X-Frame-Options "SAMEORIGIN"
+
+    # Prevent MIME type sniffing
+    Header set X-Content-Type-Options "nosniff"
+
+    # Enable XSS protection in older browsers
+    Header set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# --- GZIP COMPRESSION ---
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+# --- CACHING ---
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # Cache static assets for 1 year
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/webp "access plus 1 year"
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType font/truetype "access plus 1 year"
+    ExpiresByType font/opentype "access plus 1 year"
+
+    # Don't cache HTML
+    ExpiresByType text/html "access plus 0 seconds"
+</IfModule>

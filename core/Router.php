@@ -84,10 +84,23 @@ class Router
         }
 
         if ($allowedMethods !== []) {
-            return Response::html('405 Method Not Allowed', 405);
+            // Use custom error handler if available, otherwise fallback
+            try {
+                $errorController = $this->container->make(\CodeVault\Redirects\ErrorController::class);
+                return $errorController->methodNotAllowed($request);
+            } catch (\Throwable) {
+                return Response::html('405 Method Not Allowed', 405);
+            }
         }
 
-        return Response::html('404 Not Found', 404);
+        // Use custom 404 error handler for smart redirects and search
+        try {
+            $errorController = $this->container->make(\CodeVault\Redirects\ErrorController::class);
+            return $errorController->notFound($request);
+        } catch (\Throwable) {
+            // Fallback plain 404 if error controller fails
+            return Response::html('404 Not Found', 404);
+        }
     }
 
     /**
