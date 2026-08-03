@@ -104,6 +104,17 @@ final class PromotionServiceTest extends DatabaseTestCase
         $this->assertFalse($this->service->validate('CAPPED', 10.0)['valid']);
     }
 
+    public function test_a_code_on_a_zero_subtotal_cart_is_rejected_with_an_explanation_instead_of_silently_discounting_nothing(): void
+    {
+        $this->promotions->save(['code' => 'SAVE10', 'type' => 'percentage', 'value' => 10]);
+
+        $result = $this->service->validate('SAVE10', 0.0);
+
+        $this->assertFalse($result['valid']);
+        $this->assertSame(0.0, $result['discount']);
+        $this->assertStringContainsString('domain-only', $result['message']);
+    }
+
     public function test_save_upserts_by_code_without_duplicating(): void
     {
         $this->promotions->save(['code' => 'DUPE', 'type' => 'percentage', 'value' => 10]);

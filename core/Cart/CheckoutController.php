@@ -171,18 +171,32 @@ final class CheckoutController
 
             if ($domainOption === 'existing') {
                 $fullDomain = $domainName;
+            } elseif (!str_contains($domainName, '.')) {
+                $fullDomain = $domainName . $domainTld;
             } else {
-                // Strip anything from the first dot onward before appending the
-                // selected extension. The field is meant for just the name
-                // ("yourbusiness"), but a client primed by the standalone domain
-                // search page often types the full domain anyway
-                // ("example.com") — without this, that became
-                // "example.com.com" (or whatever TLD happened to be selected),
-                // silently different from the domain the live availability
-                // check on this same page had actually confirmed.
+                // The name field is meant for just the name ("yourbusiness"),
+                // paired with a separate extension dropdown. A client primed
+                // by the standalone domain search page often types the full
+                // domain anyway ("example.com") with the matching extension
+                // already selected — that's a harmless slip, so it's still
+                // silently corrected here exactly as before.
+                //
+                // Anything else with a dot — a typed extension that doesn't
+                // match what's selected, or a second label like
+                // "sub.example.com" — used to also get silently truncated
+                // down to just "sub" + whatever extension happened to be
+                // selected, registering something the client never actually
+                // typed. That's now rejected with an explanation instead of
+                // guessed at.
                 $dotPos = strpos($domainName, '.');
-                $nameOnly = $dotPos !== false ? substr($domainName, 0, $dotPos) : $domainName;
-                $fullDomain = $nameOnly . $domainTld;
+                $nameOnly = substr($domainName, 0, $dotPos);
+                $typedSuffix = substr($domainName, $dotPos);
+
+                if ($typedSuffix === $domainTld) {
+                    $fullDomain = $nameOnly . $domainTld;
+                } else {
+                    return Response::redirect("/store/{$productId}?error=" . urlencode('Enter just the domain name (letters, numbers, and hyphens only) in the name field — not a subdomain like "sub.example" and not the extension. Pick the extension from the dropdown next to it.'));
+                }
             }
 
             if ($domainOption === 'register' && $fullDomain !== '' && str_contains($fullDomain, '.')) {

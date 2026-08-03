@@ -27,6 +27,18 @@ use CodeVault\View;
  */
 final class DomainRegistrationController
 {
+    /**
+     * A domain search/registration/transfer only ever accepts ONE label —
+     * a subdomain like "blog.example.com" or "shop.example.com.ng" isn't a
+     * registrable domain, it's a DNS record inside a domain someone already
+     * owns. Hyphens are fine ("my-brand.com"); a second dot is always a
+     * subdomain attempt, not a valid name.
+     */
+    private const SUBDOMAIN_GUIDE_MESSAGE = 'Only a single domain name can be registered — not a subdomain. '
+        . 'Use letters, numbers, and hyphens for the name (e.g. "my-brand.com"), not another dot: '
+        . '"blog.my-brand.com" or "shop.my-brand.com.ng" can\'t be registered here — register '
+        . '"my-brand.com" (or "my-brand.com.ng") itself, then add "blog"/"shop" as a subdomain from its DNS settings.';
+
     public function __construct(
         private readonly ClientAuthGuard $guard,
         private readonly View $view,
@@ -162,7 +174,25 @@ final class DomainRegistrationController
         return array_slice(array_unique($variations), 0, 8);
     }
 
-    /** Lightweight JSON endpoint backing the live-availability check on any domain-name field (require_domain product page, domain spinner). */
+    /**
+     * Lightweight JSON endpoint backing the live-availability check on any
+     * domain-name field (require_domain product page, domain spinner, and
+     * the standalone search page — which fires one of these per candidate
+     * row, all in parallel from the browser).
+     *
+     * PHP's default (and Redis-backed) session handlers hold an exclusive
+     * lock on the session for the life of the request — so "all in
+     * parallel" from the browser's side was quietly becoming serial on the
+     * server: every one of these requests shares the same session cookie,
+     * so the second request couldn't even START until the first one's slow
+     * registrar call finished and released the lock, and so on down the
+     * line. With a dozen-plus TLDs and each registrar call taking up to the
+     * client's 15s timeout, that queued up into minutes — long past what a
+     * browser tab or the user waits for, which is exactly the "sometimes it
+     * just never finishes" symptom. All session reads happen up front now,
+     * then the session is closed before the slow registrar call, so this
+     * request stops blocking every other one running alongside it.
+     */
     public function checkAvailabilityAjax(Request $request): Response
     {
         $domain = $this->normalize((string) $request->query('domain', ''));
@@ -171,20 +201,40 @@ final class DomainRegistrationController
             return Response::json(['checked' => false, 'available' => false, 'message' => 'Enter a valid domain name.']);
         }
 
-        [$name, $tld] = $this->split($domain);
+        $matched = $this->splitAgainstConfiguredTlds($domain);
+
+        if ($matched === null) {
+            [, $tld] = $this->split($domain);
+
+            return Response::json(['checked' => false, 'available' => false, 'message' => "\"{$tld}\" isn't offered here."]);
+        }
+
+        [$name, $tld] = $matched;
+
+        if (!$this->isValidDomainLabel($name)) {
+            return Response::json(['checked' => false, 'available' => false, 'message' => self::SUBDOMAIN_GUIDE_MESSAGE]);
+        }
+
         $pricingRow = $this->domainPricing->findByTld($tld);
 
         if ($pricingRow === null) {
             return Response::json(['checked' => false, 'available' => false, 'message' => "\"{$tld}\" isn't offered here."]);
         }
 
-        $check = $this->domainService->checkAvailability($domain, (string) $pricingRow['registrar_slug']);
-
         $client = $this->guard->currentClient();
         $container = \CodeVault\Support\App::container();
         $currencySelection = $container->make(\CodeVault\Billing\CurrencySelection::class);
         $currencyService = $container->make(\CodeVault\Billing\CurrencyService::class);
         $currency = $currencyService->resolveEffective($client, $currencySelection->get());
+
+        // Everything above this line is the only part of this request that
+        // touches the session — release the lock before the slow, external
+        // registrar call so sibling requests aren't stuck waiting on it.
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        $check = $this->domainService->checkAvailability($domain, (string) $pricingRow['registrar_slug']);
 
         $price = (float) $pricingRow['register_price'];
         $transferPrice = (float) $pricingRow['transfer_price'];
@@ -216,7 +266,24 @@ final class DomainRegistrationController
             return Response::redirect('/domains/register?error=' . urlencode('Enter a valid domain name.'));
         }
 
-        [$name, $tld] = $this->split($domain);
+        $matched = $this->splitAgainstConfiguredTlds($domain);
+
+        if ($matched === null) {
+            [, $tld] = $this->split($domain);
+
+            return Response::redirect('/domains/register?error=' . urlencode("\"{$tld}\" isn't offered here."));
+        }
+
+        [$name, $tld] = $matched;
+
+        // Re-validated here too, not just at search() display time — the
+        // domain string reaching this action is form input, not something
+        // this controller generated itself, so it can't be trusted to
+        // still be the single-label name a search result actually offered.
+        if (!$this->isValidDomainLabel($name)) {
+            return Response::redirect('/domains/register?error=' . urlencode(self::SUBDOMAIN_GUIDE_MESSAGE));
+        }
+
         $pricingRow = $this->domainPricing->findByTld($tld);
 
         if ($pricingRow === null) {
@@ -268,7 +335,26 @@ final class DomainRegistrationController
         $query = $this->normalize($query);
 
         if (str_contains($query, '.')) {
-            [$name, $tld] = $this->split($query);
+            $matched = $this->splitAgainstConfiguredTlds($query);
+
+            if ($matched === null) {
+                // No configured TLD matches the end of what was typed at
+                // all — fall back to "everything after the first dot" just
+                // to show *something* concrete in the "not offered" message.
+                [$name, $tld] = $this->split($query);
+
+                return [['tld' => $tld, 'domain' => $name . $tld, 'price' => 0.0, 'offered' => false, 'message' => "\"{$tld}\" isn't offered here."]];
+            }
+
+            [$name, $tld] = $matched;
+
+            if (!$this->isValidDomainLabel($name)) {
+                return [['tld' => $tld, 'domain' => $query, 'price' => 0.0, 'offered' => false, 'message' => self::SUBDOMAIN_GUIDE_MESSAGE]];
+            }
+
+            // $tld came straight out of domainPricing->all() inside
+            // splitAgainstConfiguredTlds(), so this should always find a
+            // row — re-checked anyway in case it was deleted in between.
             $pricingRow = $this->domainPricing->findByTld($tld);
 
             if ($pricingRow === null) {
@@ -276,6 +362,10 @@ final class DomainRegistrationController
             }
 
             return [$this->candidate($name, $pricingRow)];
+        }
+
+        if (!$this->isValidDomainLabel($query)) {
+            return [['tld' => '', 'domain' => $query, 'price' => 0.0, 'offered' => false, 'message' => self::SUBDOMAIN_GUIDE_MESSAGE]];
         }
 
         // No TLD typed — list the name against every configured TLD, WHMCS-style.
@@ -338,6 +428,45 @@ final class DomainRegistrationController
         return [substr($domain, 0, $firstDot), '.' . substr($domain, $firstDot + 1)];
     }
 
+    /**
+     * Splits a domain against the LONGEST configured TLD that matches its
+     * end — not just "everything after the first dot" (see split() above)
+     * — so a compound TLD like ".com.ng" is treated as one unit instead of
+     * "ng" being mistaken for the TLD and "com" left stuck in the name.
+     * This is what makes subdomain detection actually work: "sub.example
+     * .com.ng" needs to resolve to name "sub.example" against tld
+     * ".com.ng" (and get rejected for the dot still in the name) — not
+     * silently become name "sub" against a bogus ".example.com.ng" TLD
+     * that was never configured in the first place.
+     *
+     * @return array{0: string, 1: string}|null [name, .tld], or null if no
+     *     configured TLD matches the end of the string at all.
+     */
+    private function splitAgainstConfiguredTlds(string $domain): ?array
+    {
+        $tlds = array_column($this->domainPricing->all(), 'tld');
+        usort($tlds, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        foreach ($tlds as $tld) {
+            if (strlen($domain) > strlen($tld) && str_ends_with($domain, $tld)) {
+                return [substr($domain, 0, -strlen($tld)), $tld];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The name portion of a domain, once its TLD is stripped, must be a
+     * single DNS label — letters, digits, and hyphens only, no further dot.
+     * Anything else is either a subdomain attempt ("blog.example") or a
+     * character a domain name can't contain.
+     */
+    private function isValidDomainLabel(string $name): bool
+    {
+        return $name !== '' && preg_match('/^[a-z0-9-]+$/', $name) === 1;
+    }
+
     public function transferForm(Request $request): Response
     {
         // Public — see searchForm().
@@ -365,7 +494,20 @@ final class DomainRegistrationController
             return Response::redirect('/domains/transfer?domain=' . urlencode($domain) . '&error=' . urlencode('EPP/Auth Code is required for transfers.'));
         }
 
-        [$name, $tld] = $this->split($domain);
+        $matched = $this->splitAgainstConfiguredTlds($domain);
+
+        if ($matched === null) {
+            [, $tld] = $this->split($domain);
+
+            return Response::redirect('/domains/transfer?domain=' . urlencode($domain) . '&error=' . urlencode("\"{$tld}\" isn't offered here."));
+        }
+
+        [$name, $tld] = $matched;
+
+        if (!$this->isValidDomainLabel($name)) {
+            return Response::redirect('/domains/transfer?domain=' . urlencode($domain) . '&error=' . urlencode(self::SUBDOMAIN_GUIDE_MESSAGE));
+        }
+
         $pricingRow = $this->domainPricing->findByTld($tld);
 
         if ($pricingRow === null) {

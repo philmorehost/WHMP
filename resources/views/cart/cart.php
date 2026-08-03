@@ -573,7 +573,17 @@
                                     <?php endif; ?>
                                 </div>
                                 <div class="cart-item__price">
-                                    <p class="cart-item__amount"><?= $money((float) $line['line_total']) ?></p>
+                                    <?php
+                                    // line_total never includes domain_price (a domain-only
+                                    // line rides on a hidden $0 carrier product — see
+                                    // DomainRegistrationController's class docblock), so
+                                    // showing line_total alone here read as "$0.00" with the
+                                    // real $17.00 charge only visible in the "+ ... / Year"
+                                    // note below — easy to misread as free. The headline now
+                                    // shows what this line actually costs.
+                                    $lineDisplayTotal = (float) $line['line_total'] + (float) ($line['domain_price'] ?? 0.0);
+                                    ?>
+                                    <p class="cart-item__amount"><?= $money($lineDisplayTotal) ?></p>
                                     <form method="post" action="/cart/remove/<?= (int) $line['index'] ?>"><?= csrf_field() ?>
                                         <button type="submit" class="cart-item__remove">Remove</button>
                                     </form>

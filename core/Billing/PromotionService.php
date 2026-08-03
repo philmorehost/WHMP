@@ -48,6 +48,15 @@ final class PromotionService
             return ['valid' => false, 'message' => 'This promo code has reached its redemption limit.', 'discount' => 0.0, 'promotion' => null];
         }
 
+        // $subtotal is the product subtotal only (see calculateDiscount()'s
+        // docblock) — a cart holding nothing but a domain registration has a
+        // $0 subtotal, so without this check a code would silently "apply"
+        // with a $0.00 discount and no explanation, reading as if the code
+        // had simply done nothing (the reported "dormant" behaviour).
+        if ($subtotal <= 0.0) {
+            return ['valid' => false, 'message' => 'This promo code applies to product purchases and can\'t be used on a domain-only order.', 'discount' => 0.0, 'promotion' => null];
+        }
+
         if ($subtotal < (float) $promotion['min_order_amount']) {
             $minAmount = number_format((float) $promotion['min_order_amount'], 2);
 
