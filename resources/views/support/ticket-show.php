@@ -12,7 +12,19 @@
 /** @var int|null $mergeConfirmTargetId set when a merge needs cross-client confirmation */
 /** @var int|null $mergedFromId set on the surviving ticket right after a merge lands here */
 /** @var bool $mergeCrossClientNotice */
+/** @var array<string, mixed>|null $mergeConfirmTargetTicket */
+/** @var array<string, mixed>|null $mergedFromTicket */
+/** @var int|null $mergeTargetPrefill a ticket id to preselect in the merge picker (from the index page's "Merge Selected") */
 $id = (int) $ticket['id'];
+
+// "Full Name (email)" when the ticket has a client account, otherwise just
+// the raw reporter email — used anywhere an admin needs to positively
+// identify whose ticket they're about to merge into/from.
+$identityLabel = static function (array $t): string {
+    $name = trim((string) ($t['client_first_name'] ?? '') . ' ' . (string) ($t['client_last_name'] ?? ''));
+
+    return $name !== '' ? "{$name} ({$t['email']})" : ((string) $t['email'] . ' — no client account');
+};
 ?>
 <style>
 /* Admin Ticket Detail Styles */
@@ -296,9 +308,14 @@ $id = (int) $ticket['id'];
 
 <?php if ($mergeConfirmTargetId !== null): ?>
     <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);">
-        ⚠️ Ticket #<?= $mergeConfirmTargetId ?> belongs to a <strong>different client</strong> than this ticket.
-        Merging across clients is unusual — double-check the ticket number before continuing.
-        <form method="post" action="/admin/tickets/<?= $id ?>/merge" style="margin-top:10px;">
+        ⚠️ Ticket #<?= $mergeConfirmTargetId ?> belongs to a <strong>different client</strong> than this ticket. Double-check before continuing:
+        <ul style="margin:8px 0;">
+            <li>This ticket (#<?= $id ?>): <strong><?= e($identityLabel($ticket)) ?></strong></li>
+            <li>Target ticket (#<?= $mergeConfirmTargetId ?>): <strong><?= $mergeConfirmTargetTicket !== null ? e($identityLabel($mergeConfirmTargetTicket)) : 'not found' ?></strong>
+                <?php if ($mergeConfirmTargetTicket !== null): ?> — "<?= e((string) $mergeConfirmTargetTicket['subject']) ?>"<?php endif; ?>
+            </li>
+        </ul>
+        <form method="post" action="/admin/tickets/<?= $id ?>/merge">
             <?= csrf_field() ?>
             <input type="hidden" name="target_ticket_id" value="<?= $mergeConfirmTargetId ?>">
             <input type="hidden" name="confirm_cross_client" value="1">
@@ -310,9 +327,9 @@ $id = (int) $ticket['id'];
 
 <?php if ($mergedFromId !== null): ?>
     <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
-        Ticket #<?= $mergedFromId ?> was merged into this ticket. Its replies and attachments now appear below.
+        Ticket #<?= $mergedFromId ?><?= $mergedFromTicket !== null ? ' (' . e($identityLabel($mergedFromTicket)) . ')' : '' ?> was merged into this ticket. Its replies and attachments now appear below.
         <?php if ($mergeCrossClientNotice): ?>
-            <br>⚠️ <strong>Note:</strong> ticket #<?= $mergedFromId ?> belonged to a different client — verify this merge was intentional.
+            <br>⚠️ <strong>Note:</strong> ticket #<?= $mergedFromId ?> belonged to a different client than this one — verify this merge was intentional.
         <?php endif; ?>
     </div>
 <?php endif; ?>
@@ -329,7 +346,14 @@ $id = (int) $ticket['id'];
         <div class="admin-ticket-hero__meta">
             <div class="admin-ticket-hero__meta-item">
                 <span class="admin-ticket-hero__meta-label">📧 From</span>
-                <span class="admin-ticket-hero__meta-value"><?= e($ticket['email']) ?></span>
+                <span class="admin-ticket-hero__meta-value">
+                    <?php $clientName = trim((string) ($ticket['client_first_name'] ?? '') . ' ' . (string) ($ticket['client_last_name'] ?? '')); ?>
+                    <?php if ($clientName !== ''): ?>
+                        <?= e($clientName) ?> (<?= e($ticket['email']) ?>)
+                    <?php else: ?>
+                        <?= e($ticket['email']) ?> <span style="color:rgba(255,255,255,.5);">(no client account)</span>
+                    <?php endif; ?>
+                </span>
             </div>
             <div class="admin-ticket-hero__meta-item">
                 <span class="admin-ticket-hero__meta-label">📁 Department</span>
@@ -396,19 +420,32 @@ $id = (int) $ticket['id'];
             </form>
         <?php endif; ?>
 
-        <form method="post" action="/admin/tickets/<?= $id ?>/merge" style="display:flex;gap:12px;align-items:flex-end;margin-top:16px;flex-wrap:wrap;"
+        <form method="post" action="/admin/tickets/<?= $id ?>/merge" class="admin-ticket-action-group" style="align-items:flex-end;margin-top:16px;"
               data-confirm="Merge ticket #<?= $id ?> into the selected ticket? Its replies and attachments move over, and it's closed — this can't be undone."><?= csrf_field() ?>
+            <?php
+            // The "Merge Selected" shortcut on the tickets list can prefill
+            // a target that isn't one of this client's own tickets (that's
+            // exactly the cross-client case the confirm step exists for) —
+            // when that happens, fall back to the plain number field instead
+            // of a dropdown that would have nowhere to put the prefilled id.
+            $prefillInSameClientList = $mergeTargetPrefill !== null
+                && in_array($mergeTargetPrefill, array_map(static fn (array $t): int => (int) $t['id'], $sameClientTickets), true);
+            $useDropdown = $sameClientTickets !== [] && ($mergeTargetPrefill === null || $prefillInSameClientList);
+            ?>
             <div style="min-width:220px;">
                 <label style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Merge Into Ticket #</label>
-                <?php if ($sameClientTickets !== []): ?>
-                    <select name="target_ticket_id" style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:rgba(255,255,255,.1); color:white;">
+                <?php if ($useDropdown): ?>
+                    <select name="target_ticket_id" style="width:100%;">
                         <option value="">— Choose a ticket —</option>
                         <?php foreach ($sameClientTickets as $other): ?>
-                            <option value="<?= (int) $other['id'] ?>">#<?= (int) $other['id'] ?> — <?= e($other['subject']) ?></option>
+                            <option value="<?= (int) $other['id'] ?>" <?= $mergeTargetPrefill === (int) $other['id'] ? 'selected' : '' ?>>#<?= (int) $other['id'] ?> — <?= e($other['subject']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 <?php else: ?>
-                    <input type="number" min="1" name="target_ticket_id" placeholder="e.g. 42" style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:rgba(255,255,255,.1); color:white;">
+                    <input type="number" min="1" name="target_ticket_id" placeholder="e.g. 42" value="<?= $mergeTargetPrefill !== null ? (int) $mergeTargetPrefill : '' ?>" style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:rgba(255,255,255,.1); color:white;">
+                    <?php if ($mergeTargetPrefill !== null): ?>
+                        <p style="font-size:.75rem;color:rgba(255,255,255,.6);margin:4px 0 0;">Prefilled from your selection on the ticket list — not one of this client's own tickets, so double-check before merging.</p>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
             <button class="admin-ticket-btn admin-ticket-btn--secondary" type="submit">🔀 Merge Ticket</button>

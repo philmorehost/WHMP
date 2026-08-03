@@ -178,11 +178,20 @@ final class TicketController
             return Response::redirect('/admin/tickets/' . (int) $ticket['merged_into_id']);
         }
 
+        $mergeConfirmTargetId = $request->query('merge_confirm_target') !== null ? (int) $request->query('merge_confirm_target') : null;
+        $mergedFromId = $request->query('merged_from') !== null ? (int) $request->query('merged_from') : null;
+
         return $this->render('support.ticket-show', $this->ticketShowData($ticket, null, null, [
             'mergeError' => $request->query('merge_error'),
-            'mergeConfirmTargetId' => $request->query('merge_confirm_target') !== null ? (int) $request->query('merge_confirm_target') : null,
-            'mergedFromId' => $request->query('merged_from') !== null ? (int) $request->query('merged_from') : null,
+            'mergeConfirmTargetId' => $mergeConfirmTargetId,
+            // Fetched here (not just the id) so the confirm banner can show
+            // whose ticket the admin is about to merge into — the whole
+            // point of asking for confirmation in the first place.
+            'mergeConfirmTargetTicket' => $mergeConfirmTargetId !== null ? $this->tickets->find($mergeConfirmTargetId) : null,
+            'mergedFromId' => $mergedFromId,
+            'mergedFromTicket' => $mergedFromId !== null ? $this->tickets->find($mergedFromId) : null,
             'mergeCrossClientNotice' => $request->query('merge_cross_client') === '1',
+            'mergeTargetPrefill' => $request->query('merge_target_prefill') !== null ? (int) $request->query('merge_target_prefill') : null,
         ]));
     }
 
@@ -312,8 +321,11 @@ final class TicketController
             'aiError' => $aiError,
             'mergeError' => null,
             'mergeConfirmTargetId' => null,
+            'mergeConfirmTargetTicket' => null,
             'mergedFromId' => null,
+            'mergedFromTicket' => null,
             'mergeCrossClientNotice' => false,
+            'mergeTargetPrefill' => null,
         ], $extra);
     }
 

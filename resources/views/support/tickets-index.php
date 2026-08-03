@@ -3,6 +3,16 @@
 /** @var array<int, array<string, mixed>> $departments */
 /** @var string $statusFilter */
 /** @var mixed $departmentFilter */
+
+// "Full Name" when the ticket has a client account, otherwise the raw
+// reporter email — shown in its own column so an admin picking two rows to
+// merge can see at a glance whether they actually belong to the same
+// client, without opening each ticket first.
+$ticketClientLabel = static function (array $t): string {
+    $name = trim((string) ($t['client_first_name'] ?? '') . ' ' . (string) ($t['client_last_name'] ?? ''));
+
+    return $name !== '' ? $name : (string) $t['email'];
+};
 ?>
 <style>
 /* Admin Tickets Page Styles */
@@ -385,6 +395,7 @@
             // its own endpoint, so one form drives two actions without a second
             // set of checkboxes.
             ?>
+            <button type="button" class="cv-btn cv-btn--secondary" data-merge-selected-for="[data-ticket-checkbox]" style="display:none;" title="Merge the two selected tickets — the lower ticket # is kept, the other is merged into it">🔀 Merge Selected</button>
             <button type="submit" class="cv-btn cv-btn--secondary" data-bulk-delete-for="[data-ticket-checkbox]"
                     formaction="/admin/tickets/bulk-close"
                     data-confirm="Close the selected ticket(s)? Tickets already closed are skipped."
@@ -397,6 +408,7 @@
                     <tr>
                         <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-ticket-checkbox]" aria-label="Select all tickets" style="cursor:pointer;"></th>
                         <th>Ticket ID</th>
+                        <th>Client</th>
                         <th>Subject</th>
                         <th>Department</th>
                         <th>Priority</th>
@@ -411,6 +423,7 @@
                     <tr>
                         <td><input type="checkbox" name="ticket_ids[]" value="<?= (int) $ticket['id'] ?>" data-ticket-checkbox data-select-all-item="[data-ticket-checkbox]" aria-label="Select ticket <?= (int) $ticket['id'] ?>" style="cursor:pointer;"></td>
                         <td><strong>#<?= (int) $ticket['id'] ?></strong></td>
+                        <td><?= e($ticketClientLabel($ticket)) ?></td>
                         <td><?= e($ticket['subject']) ?></td>
                         <td><?= e($ticket['department_name']) ?></td>
                         <td>

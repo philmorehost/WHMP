@@ -2147,6 +2147,7 @@
                 checkboxes[i].checked = target.checked;
             }
             updateBulkDeleteButtonVisibility(selector);
+            updateMergeSelectedButtonVisibility(selector);
         }
         if (target.matches('[data-select-all-item]')) {
             var group = target.getAttribute('data-select-all-item');
@@ -2163,6 +2164,7 @@
                 selectAll.checked = allChecked;
             }
             updateBulkDeleteButtonVisibility(group);
+            updateMergeSelectedButtonVisibility(group);
         }
     });
 
@@ -2180,6 +2182,61 @@
             deleteBtns[j].style.display = anyChecked ? 'inline-block' : 'none';
         }
     }
+
+    // Support tickets list (support/tickets-index.php): "Merge Selected"
+    // only makes sense for exactly two tickets (a merge is always one
+    // source into one target), unlike Close/Delete which apply to any
+    // number — so it gets its own visibility rule rather than reusing
+    // data-bulk-delete-for's "any checked" one.
+    function updateMergeSelectedButtonVisibility(selector) {
+        var checkboxes = document.querySelectorAll(selector);
+        var checkedCount = 0;
+        for (var i = 0; i < checkboxes.length; i++) {
+            if (checkboxes[i].checked) {
+                checkedCount++;
+            }
+        }
+        var mergeBtns = document.querySelectorAll('[data-merge-selected-for="' + selector + '"]');
+        for (var j = 0; j < mergeBtns.length; j++) {
+            mergeBtns[j].style.display = checkedCount === 2 ? 'inline-block' : 'none';
+        }
+    }
+
+    // Clicking "Merge Selected" doesn't submit a form — it jumps to the
+    // SOURCE ticket's own page (the one that's about to be merged away),
+    // with its merge form's target field prefilled — the merge form always
+    // posts "merge THIS ticket into target_ticket_id", so landing on the
+    // source's page is what makes the prefilled submit actually merge the
+    // two the way this button describes. The lower ticket id is treated as
+    // the survivor and the higher as the one being merged away — a
+    // deterministic rule since checkbox clicks don't carry a reliable
+    // "which one first" order.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('[data-merge-selected-for]') : null;
+        if (!btn) {
+            return;
+        }
+
+        event.preventDefault();
+
+        var selector = btn.getAttribute('data-merge-selected-for');
+        var checkboxes = document.querySelectorAll(selector);
+        var ids = [];
+        for (var i = 0; i < checkboxes.length; i++) {
+            if (checkboxes[i].checked) {
+                ids.push(parseInt(checkboxes[i].value, 10));
+            }
+        }
+
+        if (ids.length !== 2) {
+            return;
+        }
+
+        var survivor = Math.min(ids[0], ids[1]);
+        var mergeAway = Math.max(ids[0], ids[1]);
+
+        window.location.href = '/admin/tickets/' + mergeAway + '?merge_target_prefill=' + survivor;
+    });
 
     // Admin: Show hostname hint for specific server modules
     document.addEventListener('change', function(event) {

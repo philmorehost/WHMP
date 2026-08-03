@@ -19,9 +19,10 @@ final class TicketRepository
     {
         return $this->db->selectOne(
             <<<'SQL'
-            SELECT t.*, d.name AS department_name
+            SELECT t.*, d.name AS department_name, c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
             FROM tickets t
             JOIN departments d ON d.id = t.department_id
+            LEFT JOIN clients c ON c.id = t.client_id
             WHERE t.id = ?
             SQL,
             [$id]
@@ -33,9 +34,10 @@ final class TicketRepository
     {
         return $this->db->select(
             <<<'SQL'
-            SELECT t.*, d.name AS department_name
+            SELECT t.*, d.name AS department_name, c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
             FROM tickets t
             JOIN departments d ON d.id = t.department_id
+            LEFT JOIN clients c ON c.id = t.client_id
             WHERE t.client_id = ?
             ORDER BY t.id DESC
             SQL,
@@ -71,10 +73,11 @@ final class TicketRepository
 
         return $this->db->select(
             <<<SQL
-            SELECT t.*, d.name AS department_name, a.display_name AS assigned_admin_name
+            SELECT t.*, d.name AS department_name, a.display_name AS assigned_admin_name, c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
             FROM tickets t
             JOIN departments d ON d.id = t.department_id
             LEFT JOIN admins a ON a.id = t.assigned_admin_id
+            LEFT JOIN clients c ON c.id = t.client_id
             {$whereSql}
             ORDER BY 
               CASE t.status
@@ -125,10 +128,11 @@ final class TicketRepository
 
         $data = $this->db->select(
             <<<SQL
-            SELECT t.*, d.name AS department_name, a.display_name AS assigned_admin_name
+            SELECT t.*, d.name AS department_name, a.display_name AS assigned_admin_name, c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
             FROM tickets t
             JOIN departments d ON d.id = t.department_id
             LEFT JOIN admins a ON a.id = t.assigned_admin_id
+            LEFT JOIN clients c ON c.id = t.client_id
             {$whereSql}
             ORDER BY 
               CASE t.status
