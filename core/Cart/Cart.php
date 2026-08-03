@@ -16,6 +16,16 @@ final class Cart
     private const SESSION_KEY = 'cart_items';
     private const PROMO_SESSION_KEY = 'cart_promo_code';
 
+    /**
+     * A promo code (typed or applied from a banner) also gets a same-value
+     * cookie, so it keeps applying for the rest of the day even if the PHP
+     * session resets in between — e.g. a visitor who applies a banner code,
+     * then registers/logs in, shouldn't have to retype it because signup
+     * happened to start a fresh session.
+     */
+    private const PROMO_COOKIE_KEY = 'cv_promo_code';
+    private const PROMO_COOKIE_TTL_SECONDS = 86400;
+
     public function __construct(
         private readonly SessionManager $session
     ) {
@@ -55,7 +65,7 @@ final class Cart
     public function clear(): void
     {
         $this->session->remove(self::SESSION_KEY);
-        $this->session->remove(self::PROMO_SESSION_KEY);
+        $this->clearPromoCode();
     }
 
     public function count(): int
@@ -63,19 +73,54 @@ final class Cart
         return count($this->items());
     }
 
-    /** A promo code the shopper has typed in — kept separate from cart_items so removing/re-adding lines doesn't clear it. */
+    /**
+     * A promo code the shopper has typed in or applied from a banner — kept
+     * separate from cart_items so removing/re-adding lines doesn't clear it.
+     * Falls back to the day-long cookie (see PROMO_COOKIE_KEY) and writes it
+     * back into the session, so the rest of the app only ever needs to read
+     * the session going forward this request.
+     */
     public function promoCode(): ?string
     {
-        return $this->session->get(self::PROMO_SESSION_KEY);
+        $code = $this->session->get(self::PROMO_SESSION_KEY);
+
+        if ($code !== null) {
+            return $code;
+        }
+
+        $cookieCode = $_COOKIE[self::PROMO_COOKIE_KEY] ?? null;
+
+        if (!is_string($cookieCode) || trim($cookieCode) === '') {
+            return null;
+        }
+
+        $normalized = strtoupper(trim($cookieCode));
+        $this->session->set(self::PROMO_SESSION_KEY, $normalized);
+
+        return $normalized;
     }
 
     public function setPromoCode(string $code): void
     {
-        $this->session->set(self::PROMO_SESSION_KEY, strtoupper(trim($code)));
+        $normalized = strtoupper(trim($code));
+        $this->session->set(self::PROMO_SESSION_KEY, $normalized);
+
+        if (!headers_sent()) {
+            setcookie(self::PROMO_COOKIE_KEY, $normalized, [
+                'expires' => time() + self::PROMO_COOKIE_TTL_SECONDS,
+                'path' => '/',
+                'samesite' => 'Lax',
+            ]);
+        }
     }
 
     public function clearPromoCode(): void
     {
         $this->session->remove(self::PROMO_SESSION_KEY);
+        unset($_COOKIE[self::PROMO_COOKIE_KEY]);
+
+        if (!headers_sent()) {
+            setcookie(self::PROMO_COOKIE_KEY, '', ['expires' => time() - 3600, 'path' => '/']);
+        }
     }
 }

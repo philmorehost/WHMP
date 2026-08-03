@@ -3,9 +3,13 @@
 declare(strict_types=1);
 
 use CodeVault\Clients\ClientController;
+use CodeVault\Clients\ClientEmailValidationController;
 use CodeVault\Clients\ClientGroupController;
 
 /** @var CodeVault\Router $router */
+
+$router->get('/admin/email-validation', [ClientEmailValidationController::class, 'index']);
+$router->post('/admin/email-validation/scan', [ClientEmailValidationController::class, 'scan']);
 
 $router->get('/admin/client-groups', [ClientGroupController::class, 'index']);
 $router->post('/admin/client-groups', [ClientGroupController::class, 'store']);

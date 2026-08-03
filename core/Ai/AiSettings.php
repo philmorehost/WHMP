@@ -27,6 +27,9 @@ final class AiSettings
         'kb' => 'AI knowledgebase answers',
         'domain_suggestions' => 'AI domain-name suggestions',
         'onboarding' => 'Client onboarding copilot',
+        'marketing_copilot' => 'Marketing campaign copilot (write / refine)',
+        'promo_banner_copilot' => 'Promo banner copy generator',
+        'kb_copilot' => 'Knowledgebase article/category writer + diagram generator',
     ];
 
     public function __construct(

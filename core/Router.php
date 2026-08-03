@@ -84,21 +84,41 @@ class Router
         }
 
         if ($allowedMethods !== []) {
-            // Use custom error handler if available, otherwise fallback
-            try {
-                $errorController = $this->container->make(\CodeVault\Redirects\ErrorController::class);
-                return $errorController->methodNotAllowed($request);
-            } catch (\Throwable) {
-                return Response::html('405 Method Not Allowed', 405);
-            }
+            return Response::html('405 Method Not Allowed', 405);
         }
 
-        // Use custom 404 error handler for smart redirects and search
+        return self::notFound($this->container, $request->path());
+    }
+
+    /**
+     * The branded 404 page, with the store's categories pulled in live so a
+     * visitor who mistypes a URL lands somewhere useful instead of on bare
+     * text. Static so controllers can return the same page for a record that
+     * doesn't exist (an unknown product id) rather than hand-rolling their own.
+     *
+     * Everything here is best-effort: if the view is missing, or the database
+     * is the very reason the request failed, we fall back to plain text. An
+     * error page that throws its own error would replace a clean 404 with a
+     * 500 and bury the real problem.
+     */
+    public static function notFound(Container $container, string $requestedPath = ''): Response
+    {
         try {
-            $errorController = $this->container->make(\CodeVault\Redirects\ErrorController::class);
-            return $errorController->notFound($request);
+            $categories = [];
+
+            try {
+                $categories = $container->make(\CodeVault\Catalog\ProductGroupRepository::class)->all();
+            } catch (\Throwable) {
+                // Catalog unreachable — render the page without category links.
+            }
+
+            $html = $container->make(View::class)->render('errors.404', [
+                'categories' => $categories,
+                'requestedPath' => $requestedPath,
+            ]);
+
+            return Response::html($html, 404);
         } catch (\Throwable) {
-            // Fallback plain 404 if error controller fails
             return Response::html('404 Not Found', 404);
         }
     }

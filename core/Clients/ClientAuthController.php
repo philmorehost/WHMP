@@ -21,6 +21,7 @@ use Throwable;
 final class ClientAuthController
 {
     private const PENDING_2FA_SESSION_KEY = 'pending_2fa_client_id';
+    private const PENDING_REGISTRATION_SESSION_KEY = 'pending_client_registration';
     private const RESET_ACCOUNT_TYPE = 'client';
 
     public function __construct(
@@ -37,7 +38,8 @@ final class ClientAuthController
         private readonly EmailDispatcher $mail,
         private readonly Config $config,
         private readonly SecurityQuestionModuleService $securityQuestions,
-        private readonly \CodeVault\Settings\SettingsRepository $settings
+        private readonly \CodeVault\Settings\SettingsRepository $settings,
+        private readonly ClientRegistrationOtpRepository $registrationOtps
     ) {
     }
 
@@ -225,14 +227,108 @@ final class ClientAuthController
             return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
 
-        $result = $this->auth->register($email, $password, $firstName, $lastName, $request->ip(), $country, $vatNumber, $phone, $address1, $city, $postcode, $securityPin);
+        if (strlen($password) < 8) {
+            return $this->page('client-auth.register', ['error' => 'Password must be at least 8 characters.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+        }
+
+        if ($this->clients->findByEmail($email) !== null) {
+            return $this->page('client-auth.register', ['error' => 'An account with that email already exists.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+        }
+
+        $pending = compact('email', 'password', 'firstName', 'lastName', 'refCode', 'country', 'vatNumber', 'phone', 'address1', 'city', 'postcode', 'securityPin');
+
+        // Google already proved this person controls the email address they
+        // signed up with — an OTP round-trip to the same inbox verifies
+        // nothing further. Plain email/password signup is the only path
+        // where nobody has confirmed the address is real and reachable, so
+        // that's the only one gated behind a code.
+        if ($googleUser) {
+            return $this->finishRegistration($pending, $request->ip());
+        }
+
+        $this->session->set(self::PENDING_REGISTRATION_SESSION_KEY, $pending);
+        $this->sendRegistrationOtp($email, $firstName);
+
+        return Response::redirect('/client/register/verify');
+    }
+
+    public function registerVerifyForm(Request $request): Response
+    {
+        $pending = $this->session->get(self::PENDING_REGISTRATION_SESSION_KEY);
+
+        if ($pending === null) {
+            return Response::redirect('/client/register');
+        }
+
+        return $this->page('client-auth.register-verify', [
+            'email' => $pending['email'],
+            'error' => null,
+            'resent' => $request->query('resent') === '1',
+        ]);
+    }
+
+    public function registerVerify(Request $request): Response
+    {
+        $pending = $this->session->get(self::PENDING_REGISTRATION_SESSION_KEY);
+
+        if ($pending === null) {
+            return Response::redirect('/client/register');
+        }
+
+        $code = trim((string) $request->input('code', ''));
+
+        if ($code === '' || !$this->registrationOtps->verify($pending['email'], $code)) {
+            return $this->page('client-auth.register-verify', [
+                'email' => $pending['email'],
+                'error' => 'That code is incorrect or has expired. Please try again or request a new one.',
+                'resent' => false,
+            ]);
+        }
+
+        return $this->finishRegistration($pending, $request->ip());
+    }
+
+    public function registerResendOtp(Request $request): Response
+    {
+        $pending = $this->session->get(self::PENDING_REGISTRATION_SESSION_KEY);
+
+        if ($pending === null) {
+            return Response::redirect('/client/register');
+        }
+
+        $this->sendRegistrationOtp($pending['email'], $pending['firstName']);
+
+        return Response::redirect('/client/register/verify?resent=1');
+    }
+
+    /** @param array<string, mixed> $pending */
+    private function finishRegistration(array $pending, string $ip): Response
+    {
+        $googleUser = $this->session->get('google_user');
+
+        $result = $this->auth->register(
+            $pending['email'],
+            $pending['password'],
+            $pending['firstName'],
+            $pending['lastName'],
+            $ip,
+            $pending['country'],
+            $pending['vatNumber'],
+            $pending['phone'],
+            $pending['address1'],
+            $pending['city'],
+            $pending['postcode'],
+            $pending['securityPin']
+        );
 
         if (!$result['success']) {
-            return $this->page('client-auth.register', ['error' => $result['error'], 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => $result['error'], 'refCode' => $pending['refCode'], 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
 
         $this->session->remove('google_user');
-        $this->affiliateService->registerReferral($refCode, (int) $result['client']['id']);
+        $this->session->remove(self::PENDING_REGISTRATION_SESSION_KEY);
+        $this->registrationOtps->invalidate($pending['email']);
+        $this->affiliateService->registerReferral($pending['refCode'], (int) $result['client']['id']);
         $this->guard->login($result['client']);
 
         if (!empty($this->session->get('cart_items', []))) {
@@ -240,6 +336,18 @@ final class ClientAuthController
         }
 
         return Response::redirect('/client/dashboard');
+    }
+
+    private function sendRegistrationOtp(string $email, string $firstName): void
+    {
+        $code = $this->registrationOtps->issue($email);
+
+        $this->mail->sendTemplate('client_registration_otp', $email, [
+            'first_name' => $firstName !== '' ? $firstName : 'there',
+            'code' => $code,
+            'expiry_minutes' => (string) ClientRegistrationOtpRepository::EXPIRY_MINUTES,
+            'company_name' => brand_name(),
+        ]);
     }
 
     public function logout(Request $request): Response
@@ -307,7 +415,7 @@ final class ClientAuthController
                 $this->mail->sendTemplate('client_password_reset', $client['email'], [
                     'first_name' => $client['first_name'],
                     'reset_url' => $resetUrl,
-                    'company_name' => (string) $this->config->env('APP_NAME', 'CodeVault'),
+                    'company_name' => brand_name(),
                 ], (int) $client['id']);
             } catch (Throwable) {
                 // Template missing/misconfigured shouldn't leak via the response.

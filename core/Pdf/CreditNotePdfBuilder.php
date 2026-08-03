@@ -30,7 +30,14 @@ final class CreditNotePdfBuilder
         $pdf = new PdfDocument();
         $rate = (float) $creditNote['currency_rate'];
         $currencyId = $creditNote['currency_id'] !== null ? (int) $creditNote['currency_id'] : null;
-        $money = fn (float $amount): string => $this->currency->formatLocked($amount, $currencyId, $rate);
+
+        // Same rule as InvoicePdfBuilder: with no locked currency, fall back to
+        // the client's own rather than the system default. formatLocked() would
+        // print the default symbol, so a naira credit note downloaded as a PDF
+        // read as dollars — on a document the client keeps and may hand to an
+        // accountant.
+        $clientCurrency = $client === [] ? null : $this->currency->resolveForClient($client);
+        $money = fn (float $amount): string => $this->currency->formatDocument($amount, $currencyId, $rate, $clientCurrency);
 
         $y = 800.0;
 

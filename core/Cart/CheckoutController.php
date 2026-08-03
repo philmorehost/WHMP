@@ -16,6 +16,7 @@ use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Domains\DomainPricingRepository;
+use CodeVault\Domains\DomainService;
 use CodeVault\Domains\DomainSettings;
 use CodeVault\Localization\LanguageRepository;
 use CodeVault\Localization\LanguageSelection;
@@ -47,7 +48,8 @@ final class CheckoutController
         private readonly LocalizationService $localization,
         private readonly LanguageSelection $languageSelection,
         private readonly DomainSettings $domainSettings,
-        private readonly DomainPricingRepository $domainPricing
+        private readonly DomainPricingRepository $domainPricing,
+        private readonly DomainService $domainService
     ) {
     }
 
@@ -100,7 +102,7 @@ final class CheckoutController
         $product = $this->products->find((int) $params['id']);
 
         if ($product === null || $product['status'] !== 'active') {
-            return Response::html('404 Not Found', 404);
+            return \CodeVault\Router::notFound(\CodeVault\Support\App::container(), $request->path());
         }
 
         $productOptionGroups = $this->optionGroups->forProduct((int) $product['id']);
@@ -128,6 +130,7 @@ final class CheckoutController
             'customFields' => $customFields,
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
             'domainTlds' => array_column($this->domainPricing->all(), 'tld'),
+            'error' => $request->query('error'),
         ], [
             'title' => "{$product['name']}",
             'canonicalUrl' => $url,
@@ -163,14 +166,45 @@ final class CheckoutController
         $domainOptions = null;
         $domainOption = (string) $request->input('domain_option');
         if ($domainOption !== '') {
-            $domainName = trim((string) $request->input('domain_name', ''));
-            $domainTld = trim((string) $request->input('domain_tld', ''));
-            
-            $fullDomain = $domainName;
-            if ($domainOption !== 'existing' && $domainTld !== '' && !str_ends_with(strtolower($domainName), strtolower($domainTld))) {
-                $fullDomain .= $domainTld;
+            $domainName = strtolower(trim((string) $request->input('domain_name', '')));
+            $domainTld = strtolower(trim((string) $request->input('domain_tld', '')));
+
+            if ($domainOption === 'existing') {
+                $fullDomain = $domainName;
+            } else {
+                // Strip anything from the first dot onward before appending the
+                // selected extension. The field is meant for just the name
+                // ("yourbusiness"), but a client primed by the standalone domain
+                // search page often types the full domain anyway
+                // ("example.com") — without this, that became
+                // "example.com.com" (or whatever TLD happened to be selected),
+                // silently different from the domain the live availability
+                // check on this same page had actually confirmed.
+                $dotPos = strpos($domainName, '.');
+                $nameOnly = $dotPos !== false ? substr($domainName, 0, $dotPos) : $domainName;
+                $fullDomain = $nameOnly . $domainTld;
             }
-            
+
+            if ($domainOption === 'register' && $fullDomain !== '' && str_contains($fullDomain, '.')) {
+                $tld = '.' . substr($fullDomain, strpos($fullDomain, '.') + 1);
+                $pricingRow = $this->domainPricing->findByTld($tld);
+
+                if ($pricingRow === null) {
+                    return Response::redirect("/store/{$productId}?error=" . urlencode("\"{$tld}\" isn't offered here."));
+                }
+
+                // Re-check server-side — the client's earlier live-availability
+                // check on this page is just UI state and could be stale
+                // (someone else registered it) or tampered with, same
+                // reasoning as the standalone domain search page's own
+                // addToCart() (DomainRegistrationController).
+                $check = $this->domainService->checkAvailability($fullDomain, (string) $pricingRow['registrar_slug']);
+
+                if (!$check['success'] || !$check['available']) {
+                    return Response::redirect("/store/{$productId}?error=" . urlencode('That domain is no longer available.'));
+                }
+            }
+
             $domainOptions = [
                 'option' => $domainOption,
                 'name' => $fullDomain,
@@ -298,6 +332,18 @@ final class CheckoutController
         $language = $this->localization->resolveEffective($client, $this->languageSelection->get());
         $t = $this->localization->translationFor($language);
         $data['t'] = $t;
+
+        // One money formatter for every storefront view, delegating to
+        // CurrencyService::format(). Stored prices are authoritative in the
+        // base currency and converted only for display, so each view must
+        // apply the selected currency's rate — printing the selected
+        // symbol against an unconverted base amount reads as a wildly
+        // wrong price, and hand-rolled per-view conversions had drifted
+        // apart. Views get $money and never touch exchange_rate directly.
+        if (isset($data['currency']) && is_array($data['currency'])) {
+            $currency = $data['currency'];
+            $data['money'] = fn (float $baseAmount): string => $this->currency->format($baseAmount, $currency);
+        }
 
         $content = $this->view->render($template, $data);
 

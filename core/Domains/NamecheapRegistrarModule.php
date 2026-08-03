@@ -355,10 +355,41 @@ final class NamecheapRegistrarModule implements RegistrarModule
         }
 
         $result = $decoded['xml']->CommandResponse->DomainGetInfoResult ?? null;
-        $status = $result !== null ? (string) ($result['Status'] ?? '') : null;
+        $rawStatus = $result !== null ? (string) ($result['Status'] ?? '') : '';
         $expiry = $result !== null ? (string) ($result->DomainDetails->ExpiredDate ?? '') : null;
 
-        return ['success' => true, 'status' => $status, 'expiryDate' => $expiry !== '' ? $expiry : null];
+        $response = ['success' => true, 'expiryDate' => $expiry !== '' ? $expiry : null];
+
+        $mappedStatus = $this->mapStatus($rawStatus);
+
+        if ($mappedStatus !== null) {
+            $response['status'] = $mappedStatus;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Namecheap's documented Status attribute on DomainGetInfoResult only
+     * ever carries "Ok" for a domain that exists and isn't in a registry
+     * hold state — it is not a rich lifecycle indicator the way
+     * ConnectReseller's Status field is, and expiry is tracked separately
+     * via ExpiredDate above, not through this value. This used to pass
+     * whatever Namecheap returned straight into the local `domains.status`
+     * ENUM column completely unmapped — "Ok" is not one of that column's
+     * allowed values, so every sync of a Namecheap domain either failed the
+     * UPDATE outright (strict SQL mode) or wrote a value that silently
+     * didn't match anything meaningful (non-strict mode), while any other
+     * unrecognised value carried the same risk. Returns null — caller omits
+     * 'status' and leaves the domain's existing local status untouched —
+     * for anything not confidently mapped, including empty/missing.
+     */
+    private function mapStatus(string $registryStatus): ?string
+    {
+        return match (strtolower(trim($registryStatus))) {
+            'ok' => 'active',
+            default => null,
+        };
     }
 
     /** @param array<string, mixed> $registrar */

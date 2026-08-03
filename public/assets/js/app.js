@@ -514,6 +514,19 @@
         }
 
         Object.keys(fields).forEach(function (name) {
+            // An array value means a checkbox group (name="foo[]") rather
+            // than a single input — check the ones whose value is listed,
+            // uncheck the rest. Added for promo banners' target-pages picker;
+            // existing single-value callers are unaffected since none of
+            // them pass an array.
+            if (Array.isArray(fields[name])) {
+                var group = form.querySelectorAll('[name="' + name + '[]"]');
+                group.forEach(function (cb) {
+                    cb.checked = fields[name].indexOf(cb.value) !== -1;
+                });
+                return;
+            }
+
             var input = form.querySelector('[name="' + name + '"]');
             if (!input) {
                 return;
@@ -701,6 +714,757 @@
         }
     });
 
+    // Domain search results (domains/register.php) — the page renders the
+    // TLD/price list immediately with no live registrar call in the request
+    // path; each row's real availability is then fetched here, one request
+    // per domain, all in parallel (the browser runs several at once rather
+    // than the server checking them one after another), so results fill in
+    // as each check resolves instead of the whole page waiting on all of
+    // them.
+    document.querySelectorAll('[data-domain-check]').forEach(function (row) {
+        var domain = row.getAttribute('data-domain-check');
+        var statusEl = row.querySelector('.dr-result-status');
+        var actionEl = row.querySelector('.dr-result-action');
+
+        fetch('/domains/availability?domain=' + encodeURIComponent(domain), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!statusEl) {
+                return;
+            }
+
+            if (!data.checked) {
+                statusEl.innerText = data.message || 'Could not check availability.';
+                return;
+            }
+
+            if (data.available) {
+                statusEl.style.cssText = 'font-size:var(--cv-text-sm);color:#10b981;font-weight:700;margin-top:0.3rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;';
+                statusEl.innerHTML = '<span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#10b981;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(16,185,129,0.3);">&#10004; AVAILABLE</span> <span style="font-size:1rem;color:var(--cv-text-primary);">'
+                    + (data.formatted_price || ('$' + Number(data.price).toFixed(2))) + '/yr</span>';
+
+                if (actionEl) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'cv-btn';
+                    btn.setAttribute('data-domain-register-trigger', domain);
+                    btn.innerText = 'Add to Cart';
+                    actionEl.innerHTML = '';
+                    actionEl.appendChild(btn);
+                }
+            } else {
+                statusEl.style.cssText = 'font-size:var(--cv-text-sm);color:#ef4444;font-weight:700;margin-top:0.3rem;';
+                statusEl.innerHTML = '<span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#ef4444;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(239,68,68,0.3);display:inline-block;">&#10008; ALREADY TAKEN</span>';
+            }
+        })
+        .catch(function () {
+            if (statusEl) {
+                statusEl.innerText = 'Could not check availability right now.';
+            }
+        });
+    });
+
+    // Marketing campaign AI copilot: "Help me write" drafts from a brief,
+    // "Refine" rewrites whatever is already in the form. Both only fill the
+    // subject/body inputs — nothing is saved or sent, so the admin always gets
+    // the last word on what goes out.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('[data-copilot-action]') : null;
+        if (!btn) {
+            return;
+        }
+
+        var panel = btn.closest('[data-campaign-copilot]');
+        var form = btn.closest('form');
+        if (!panel || !form) {
+            return;
+        }
+
+        var mode = btn.getAttribute('data-copilot-action');
+        var status = panel.querySelector('[data-copilot-status]');
+        var briefEl = panel.querySelector('[data-copilot-brief]');
+        var subjectEl = form.querySelector('[data-campaign-subject]');
+        var bodyEl = form.querySelector('[data-campaign-body]');
+        var buttons = panel.querySelectorAll('[data-copilot-action]');
+
+        var setBusy = function (busy) {
+            for (var i = 0; i < buttons.length; i++) {
+                buttons[i].disabled = busy;
+            }
+        };
+
+        var say = function (msg, isError) {
+            if (status) {
+                status.textContent = msg;
+                status.style.color = isError ? 'var(--cv-color-danger-600, #b42318)' : 'var(--cv-text-secondary)';
+            }
+        };
+
+        var payload = new FormData();
+        payload.set('mode', mode);
+        payload.set('brief', briefEl ? briefEl.value : '');
+        payload.set('subject', subjectEl ? subjectEl.value : '');
+        payload.set('body', bodyEl ? bodyEl.value : '');
+
+        // The endpoint is CSRF-checked like every other POST, so send the
+        // token the form already carries.
+        var token = form.querySelector('input[name="_token"]');
+        if (token) {
+            payload.set('_token', token.value);
+        }
+
+        setBusy(true);
+        say(mode === 'refine' ? 'Refining…' : 'Writing…', false);
+
+        fetch('/admin/campaigns/copilot', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: payload
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.success) {
+                say((data && data.message) || 'The copilot could not produce a draft.', true);
+                return;
+            }
+
+            if (subjectEl && data.subject) {
+                subjectEl.value = data.subject;
+            }
+            if (bodyEl && data.body) {
+                bodyEl.value = data.body;
+            }
+
+            say('Draft ready — review and edit before saving.', false);
+        })
+        .catch(function () {
+            say('Network error contacting the copilot.', true);
+        })
+        .then(function () {
+            setBusy(false);
+        });
+    });
+
+    // Promo banner AI copilot: drafts eyebrow/headline/subtext/CTA copy from
+    // the coupon code + discount already typed into the form. Same
+    // fetch-and-fill shape as the campaign copilot above — text only, the
+    // admin still picks the visual template separately.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('[data-promo-copilot-action]') : null;
+        if (!btn) {
+            return;
+        }
+
+        var panel = btn.closest('[data-promo-copilot]');
+        var form = btn.closest('form');
+        if (!panel || !form) {
+            return;
+        }
+
+        var status = panel.querySelector('[data-promo-copilot-status]');
+        var couponEl = form.querySelector('[data-promo-copilot-coupon]');
+        var discountEl = panel.querySelector('[data-promo-copilot-discount]');
+        var briefEl = panel.querySelector('[data-promo-copilot-brief]');
+        var eyebrowEl = form.querySelector('[data-promo-eyebrow]');
+        var headlineEl = form.querySelector('[data-promo-headline]');
+        var subtextEl = form.querySelector('[data-promo-subtext]');
+        var ctaEl = form.querySelector('[data-promo-cta]');
+
+        var say = function (msg, isError) {
+            if (status) {
+                status.textContent = msg;
+                status.style.color = isError ? 'var(--cv-color-danger-600, #b42318)' : 'var(--cv-text-secondary)';
+            }
+        };
+
+        var payload = new FormData();
+        payload.set('coupon_code', couponEl ? couponEl.value : '');
+        payload.set('discount_description', discountEl ? discountEl.value : '');
+        payload.set('brief', briefEl ? briefEl.value : '');
+
+        var token = form.querySelector('input[name="_token"]');
+        if (token) {
+            payload.set('_token', token.value);
+        }
+
+        btn.disabled = true;
+        say('Writing…', false);
+
+        fetch('/admin/promo-banners/copilot', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: payload
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.success) {
+                say((data && data.message) || 'The copilot could not produce a draft.', true);
+                return;
+            }
+
+            if (eyebrowEl && data.eyebrow_text) { eyebrowEl.value = data.eyebrow_text; }
+            if (headlineEl && data.headline) { headlineEl.value = data.headline; }
+            if (subtextEl && data.subtext) { subtextEl.value = data.subtext; }
+            if (ctaEl && data.cta_text) { ctaEl.value = data.cta_text; }
+
+            say('Draft ready — review and edit before saving.', false);
+        })
+        .catch(function () {
+            say('Network error contacting the copilot.', true);
+        })
+        .then(function () {
+            btn.disabled = false;
+        });
+    });
+
+    // Knowledgebase article AI copilot: "Write Draft" / "Refine Current Text"
+    // fill the title/body fields — nothing is saved until the real form is
+    // submitted, same as the campaign and promo-banner copilots above.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('[data-kb-copilot-action]') : null;
+        if (!btn) {
+            return;
+        }
+
+        var panel = btn.closest('[data-kb-copilot]');
+        var form = document.getElementById('kb-article-form');
+        if (!panel || !form) {
+            return;
+        }
+
+        var mode = btn.getAttribute('data-kb-copilot-action');
+        var status = panel.querySelector('[data-kb-copilot-status]');
+        var briefEl = panel.querySelector('[data-kb-copilot-brief]');
+        var titleEl = form.querySelector('[data-kb-title]');
+        var bodyEl = form.querySelector('[data-kb-body]');
+        var buttons = panel.querySelectorAll('[data-kb-copilot-action]');
+
+        var setBusy = function (busy) {
+            for (var i = 0; i < buttons.length; i++) {
+                buttons[i].disabled = busy;
+            }
+        };
+
+        var say = function (msg, isError) {
+            if (status) {
+                status.textContent = msg;
+                status.style.color = isError ? 'var(--cv-color-danger-600, #b42318)' : 'var(--cv-text-secondary)';
+            }
+        };
+
+        var payload = new FormData();
+        payload.set('mode', mode);
+        payload.set('brief', briefEl ? briefEl.value : '');
+        payload.set('title', titleEl ? titleEl.value : '');
+        payload.set('body', bodyEl ? bodyEl.value : '');
+
+        var token = form.querySelector('input[name="_token"]');
+        if (token) {
+            payload.set('_token', token.value);
+        }
+
+        setBusy(true);
+        say(mode === 'refine' ? 'Refining…' : 'Writing…', false);
+
+        fetch('/admin/kb/articles/copilot', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: payload
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.success) {
+                say((data && data.message) || 'The copilot could not produce a draft.', true);
+                return;
+            }
+
+            if (titleEl && data.title) { titleEl.value = data.title; }
+            if (bodyEl && data.body) { bodyEl.value = data.body; }
+
+            say('Draft ready — review and edit before saving.', false);
+        })
+        .catch(function () {
+            say('Network error contacting the copilot.', true);
+        })
+        .then(function () {
+            setBusy(false);
+        });
+    });
+
+    // Knowledgebase category AI copilot: fills the name/description fields
+    // on the add-category form (or the inline edit form once data-edit-trigger
+    // has swapped it into edit mode) from a short brief.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('[data-kb-category-copilot-action]') : null;
+        if (!btn) {
+            return;
+        }
+
+        var panel = btn.closest('[data-kb-category-copilot]');
+        var form = document.getElementById('kb-category-form');
+        if (!panel || !form) {
+            return;
+        }
+
+        var status = panel.querySelector('[data-kb-category-copilot-status]');
+        var briefEl = panel.querySelector('[data-kb-category-copilot-brief]');
+        var nameEl = form.querySelector('[data-kb-category-name]');
+        var descEl = form.querySelector('[data-kb-category-description]');
+
+        var say = function (msg, isError) {
+            if (status) {
+                status.textContent = msg;
+                status.style.color = isError ? 'var(--cv-color-danger-600, #b42318)' : 'var(--cv-text-secondary)';
+            }
+        };
+
+        var payload = new FormData();
+        payload.set('brief', briefEl ? briefEl.value : '');
+
+        var token = form.querySelector('input[name="_token"]');
+        if (token) {
+            payload.set('_token', token.value);
+        }
+
+        btn.disabled = true;
+        say('Writing…', false);
+
+        fetch('/admin/kb/categories/copilot', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: payload
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.success) {
+                say((data && data.message) || 'The copilot could not produce a draft.', true);
+                return;
+            }
+
+            if (nameEl && data.name) { nameEl.value = data.name; }
+            if (descEl && data.description) { descEl.value = data.description; }
+
+            say('Draft ready — review and edit before saving.', false);
+        })
+        .catch(function () {
+            say('Network error contacting the copilot.', true);
+        })
+        .then(function () {
+            btn.disabled = false;
+        });
+    });
+
+    // Manual invoice builder (billing/invoice-create.php): add/remove line
+    // items and keep a running total. Delegated because rows are added after
+    // load, and in this file rather than inline because the CSP blocks
+    // inline <script>.
+    function recalcInvoiceTotal() {
+        var amounts = document.querySelectorAll('[data-invoice-items] input[name="item_amount[]"]');
+        var total = 0;
+
+        for (var i = 0; i < amounts.length; i++) {
+            var value = parseFloat(amounts[i].value);
+            if (!isNaN(value)) {
+                total += value;
+            }
+        }
+
+        var out = document.querySelector('[data-invoice-total]');
+        if (out) {
+            out.textContent = total.toFixed(2);
+        }
+    }
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest) {
+            return;
+        }
+
+        if (event.target.closest('[data-add-invoice-item]')) {
+            var list = document.querySelector('[data-invoice-items]');
+            var template = list ? list.querySelector('[data-invoice-item-row]') : null;
+            if (!list || !template) {
+                return;
+            }
+
+            var row = template.cloneNode(true);
+            var inputs = row.querySelectorAll('input');
+            for (var i = 0; i < inputs.length; i++) {
+                inputs[i].value = '';
+            }
+            list.appendChild(row);
+            return;
+        }
+
+        var remove = event.target.closest('[data-remove-invoice-item]');
+        if (remove) {
+            var rows = document.querySelectorAll('[data-invoice-item-row]');
+            // Keep one row so the form can never end up with nothing to type in.
+            if (rows.length > 1) {
+                remove.closest('[data-invoice-item-row]').remove();
+            } else {
+                var lastInputs = rows[0].querySelectorAll('input');
+                for (var j = 0; j < lastInputs.length; j++) {
+                    lastInputs[j].value = '';
+                }
+            }
+            recalcInvoiceTotal();
+        }
+    });
+
+    document.addEventListener('input', function (event) {
+        if (event.target.matches('[data-invoice-items] input[name="item_amount[]"]')) {
+            recalcInvoiceTotal();
+        }
+    });
+
+    // Admin order builder (billing/order-create.php): same clone-template
+    // add/remove pattern as the invoice line items above, but for
+    // product_id[]/billing_cycle[]/quantity[] rows instead — kept separate
+    // since the field names and row shape differ.
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest) {
+            return;
+        }
+
+        if (event.target.closest('[data-add-order-item]')) {
+            var list = document.querySelector('[data-order-items]');
+            var template = list ? list.querySelector('[data-order-item-row]') : null;
+            if (!list || !template) {
+                return;
+            }
+
+            var row = template.cloneNode(true);
+            var selects = row.querySelectorAll('select');
+            for (var i = 0; i < selects.length; i++) {
+                selects[i].selectedIndex = 0;
+            }
+            var inputs = row.querySelectorAll('input');
+            for (var j = 0; j < inputs.length; j++) {
+                inputs[j].value = inputs[j].type === 'number' ? '1' : '';
+            }
+            list.appendChild(row);
+            return;
+        }
+
+        var removeOrderItem = event.target.closest('[data-remove-order-item]');
+        if (removeOrderItem) {
+            var orderRows = document.querySelectorAll('[data-order-item-row]');
+            if (orderRows.length > 1) {
+                removeOrderItem.closest('[data-order-item-row]').remove();
+            } else {
+                var lastSelects = orderRows[0].querySelectorAll('select');
+                for (var k = 0; k < lastSelects.length; k++) {
+                    lastSelects[k].selectedIndex = 0;
+                }
+                var lastInputs = orderRows[0].querySelectorAll('input');
+                for (var m = 0; m < lastInputs.length; m++) {
+                    lastInputs[m].value = lastInputs[m].type === 'number' ? '1' : '';
+                }
+            }
+        }
+    });
+
+    // Copy-to-clipboard for any [data-copy-target="#selector"] button — used by
+    // the Ask AI answer panel, where the whole point is pasting the text into a
+    // client email.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('[data-copy-target]') : null;
+        if (!btn) {
+            return;
+        }
+
+        var source = document.querySelector(btn.getAttribute('data-copy-target'));
+        if (!source) {
+            return;
+        }
+
+        var text = source.innerText;
+        var original = btn.textContent;
+        var done = function () {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = original; }, 1500);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, done); });
+        } else {
+            fallbackCopy(text, done);
+        }
+    });
+
+    // navigator.clipboard needs a secure context; plain-HTTP installs fall back.
+    function fallbackCopy(text, done) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'absolute';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            done();
+        } catch (e) {
+            /* clipboard unavailable — leave the button label alone */
+        }
+        document.body.removeChild(ta);
+    }
+
+    // ---- Domain pricing admin page (domains/pricing-index.php) -------------
+    // All of this previously lived in an inline <script> on that page, which
+    // the CSP (script-src 'self', no 'unsafe-inline') blocked outright — the
+    // "Bulk Add Multiple TLDs" and "Import from WHMCS" buttons did nothing at
+    // all as a result. Behaviour has to live in this file to run.
+    function toggleSection(selector) {
+        var section = document.querySelector(selector);
+        if (section) {
+            section.style.display = section.style.display === 'none' || section.style.display === '' ? 'block' : 'none';
+        }
+    }
+
+    document.addEventListener('click', function (event) {
+        var el = event.target.closest ? event.target : null;
+        if (!el) {
+            return;
+        }
+
+        if (el.closest('#toggle-bulk-form')) {
+            toggleSection('#bulk-form-section');
+            return;
+        }
+
+        if (el.closest('#toggle-whmcs-form')) {
+            toggleSection('#whmcs-form-section');
+            return;
+        }
+
+        var hider = el.closest('[data-toggle-hide]');
+        if (hider) {
+            var target = document.querySelector(hider.getAttribute('data-toggle-hide'));
+            if (target) {
+                target.style.display = 'none';
+            }
+        }
+    });
+
+    // Bulk TLD editor: the checkboxes live inside the table but submit with the
+    // bulk form via form="tld-bulk-update-form", so this only has to manage
+    // visibility, the running count and select-all.
+    function syncTldBulkForm() {
+        var form = document.querySelector('[data-tld-bulk-form]');
+        if (!form) {
+            return;
+        }
+
+        var checked = document.querySelectorAll('[data-tld-checkbox]:checked');
+        var counter = form.querySelector('[data-tld-selected-count]');
+
+        form.hidden = checked.length === 0;
+
+        if (counter) {
+            counter.textContent = String(checked.length);
+        }
+    }
+
+    document.addEventListener('change', function (event) {
+        if (event.target.matches('[data-tld-select-all]')) {
+            var boxes = document.querySelectorAll('[data-tld-checkbox]');
+            for (var i = 0; i < boxes.length; i++) {
+                // Skip rows the table search has hidden, so "select all" means
+                // "all the rows I can actually see".
+                var row = boxes[i].closest('tr');
+                if (row && row.hidden) {
+                    continue;
+                }
+                boxes[i].checked = event.target.checked;
+            }
+            syncTldBulkForm();
+            return;
+        }
+
+        if (event.target.matches('[data-tld-checkbox]')) {
+            syncTldBulkForm();
+        }
+    });
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('[data-tld-bulk-clear]')) {
+            return;
+        }
+
+        var boxes = document.querySelectorAll('[data-tld-checkbox], [data-tld-select-all]');
+        for (var i = 0; i < boxes.length; i++) {
+            boxes[i].checked = false;
+        }
+        syncTldBulkForm();
+    });
+
+    // WHMCS extension import: fetch the TLD list from the configured WHMCS
+    // database, let the admin tick the ones they want, then push them through
+    // the same bulk-add endpoint the manual form uses.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest ? event.target.closest('#fetch-whmcs-extensions') : null;
+        if (!btn) {
+            return;
+        }
+
+        var loading = document.getElementById('whmcs-extensions-loading');
+        var list = document.getElementById('whmcs-extensions-list');
+        var error = document.getElementById('whmcs-error');
+        var importBtn = document.getElementById('import-whmcs-btn');
+
+        btn.disabled = true;
+        if (loading) { loading.style.display = 'block'; }
+        if (list) { list.style.display = 'none'; }
+        if (error) { error.style.display = 'none'; }
+
+        fetch('/admin/domain-pricing/fetch-whmcs', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.success) {
+                if (error) {
+                    error.textContent = data.message || 'Failed to fetch extensions';
+                    error.style.display = 'block';
+                }
+                return;
+            }
+
+            if (!data.extensions || data.extensions.length === 0) {
+                if (error) {
+                    error.textContent = 'No domain extensions found in WHMCS database';
+                    error.style.display = 'block';
+                }
+                return;
+            }
+
+            if (!list) {
+                return;
+            }
+
+            list.innerHTML = '';
+
+            // Built with DOM APIs rather than innerHTML string concatenation:
+            // the extension names come from an external database, so this
+            // avoids handing them to the HTML parser.
+            data.extensions.forEach(function (ext) {
+                var label = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;gap:var(--cv-space-1);padding:var(--cv-space-1);cursor:pointer;border-bottom:1px solid var(--cv-border-default);';
+
+                var cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'whmcs-extension-check';
+                cb.value = ext;
+
+                var span = document.createElement('span');
+                span.textContent = ext;
+
+                label.appendChild(cb);
+                label.appendChild(span);
+                list.appendChild(label);
+            });
+
+            list.style.display = 'block';
+            if (importBtn) { importBtn.disabled = false; }
+        })
+        .catch(function (err) {
+            if (error) {
+                error.textContent = 'Network error: ' + err.message;
+                error.style.display = 'block';
+            }
+        })
+        .then(function () {
+            btn.disabled = false;
+            if (loading) { loading.style.display = 'none'; }
+        });
+    });
+
+    // Enable the import button only once something is ticked.
+    document.addEventListener('change', function (event) {
+        if (!event.target.matches('.whmcs-extension-check')) {
+            return;
+        }
+        var importBtn = document.getElementById('import-whmcs-btn');
+        if (importBtn) {
+            importBtn.disabled = !document.querySelector('.whmcs-extension-check:checked');
+        }
+    });
+
+    document.addEventListener('submit', function (event) {
+        if (!event.target.matches('#whmcs-import-form')) {
+            return;
+        }
+
+        event.preventDefault();
+
+        var selected = Array.prototype.slice
+            .call(document.querySelectorAll('.whmcs-extension-check:checked'))
+            .map(function (cb) { return cb.value; });
+
+        if (selected.length === 0) {
+            window.alert('Please select at least one extension');
+            return;
+        }
+
+        var form = new FormData(event.target);
+        form.set('tld_list', selected.join('\n'));
+
+        var importBtn = document.getElementById('import-whmcs-btn');
+        if (importBtn) {
+            importBtn.disabled = true;
+            importBtn.textContent = '⏳ Importing...';
+        }
+
+        fetch('/admin/domain-pricing/bulk', { method: 'POST', body: form })
+            .then(function () { window.location.href = '/admin/domain-pricing'; })
+            .catch(function (err) {
+                window.alert('Error: ' + err.message);
+                if (importBtn) {
+                    importBtn.disabled = false;
+                    importBtn.textContent = '✓ Import Selected Extensions';
+                }
+            });
+    });
+
+    // "View Product Details" accordion on the product page. Delegated rather
+    // than bound on DOMContentLoaded because the page's CSP (script-src 'self',
+    // no 'unsafe-inline') blocks inline <script>, so this behaviour has to live
+    // in this file to run at all.
+    //
+    // maxHeight is animated from an explicit pixel value, so it's measured at
+    // open time — the description can be any length, and measuring on load
+    // would read 0 for content that is still hidden.
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest ? event.target.closest('[data-accordion-trigger]') : null;
+        if (!trigger) {
+            return;
+        }
+
+        event.preventDefault();
+
+        var root = trigger.closest('[data-details-accordion]') || document;
+        var content = root.querySelector('[data-accordion-content]');
+        var icon = trigger.querySelector('[data-accordion-icon]');
+
+        if (!content) {
+            return;
+        }
+
+        var isOpen = content.style.maxHeight && content.style.maxHeight !== '0px';
+
+        content.style.maxHeight = isOpen ? '0px' : content.scrollHeight + 'px';
+        trigger.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+
+        if (icon) {
+            icon.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
+        }
+    });
+
     // require_domain product page (cart/product.php) — the domain_option
     // radios (register/transfer/existing) swap the domain-name input
     // between "name + TLD dropdown" and "full domain" shapes. Rebuilt from
@@ -712,6 +1476,18 @@
             return;
         }
 
+        // billing/order-create.php adds a 4th "No domain" choice (value "")
+        // ahead of register/transfer/existing, for the (optional-here) case
+        // where the admin's order has no domain at all. product.php's
+        // require_domain page never has an empty domain_option, so this
+        // branch is dead there and safe to add.
+        if (option === '') {
+            wrapper.style.display = 'none';
+            wrapper.innerHTML = '';
+            return;
+        }
+        wrapper.style.display = 'block';
+
         var tldOptions = wrapper.getAttribute('data-tld-options');
         var tlds = [];
         try {
@@ -720,21 +1496,25 @@
             tlds = [];
         }
 
+        // This replaces the wrapper's DOM wholesale, so the markup below must
+        // mirror resources/views/cart/product.php exactly — anything styled
+        // only server-side would disappear the first time an option changes.
         if (option === 'existing') {
-            wrapper.innerHTML = '<div style="display:flex; gap:var(--cv-space-2); align-items:center;">'
-                + '<span style="font-weight:600; color:var(--cv-text-secondary);">www.</span>'
-                + '<input class="cv-input" type="text" name="domain_name" placeholder="example.com" required style="flex:1;">'
+            wrapper.innerHTML = '<div class="domain-field">'
+                + '<span class="domain-field__prefix">www.</span>'
+                + '<input class="domain-field__input" type="text" name="domain_name" placeholder="yourbusiness.com" required>'
                 + '</div>';
             return;
         }
 
         var optionsHtml = tlds.map(function (tld) { return '<option value="' + tld + '">' + tld + '</option>'; }).join('');
-        wrapper.innerHTML = '<div style="display:flex; gap:var(--cv-space-2); align-items:center;">'
-            + '<span style="font-weight:600; color:var(--cv-text-secondary);">www.</span>'
-            + '<input class="cv-input" type="text" name="domain_name" placeholder="example" required style="flex:1;" data-domain-availability-input>'
-            + '<select class="cv-select" name="domain_tld" style="width:100px;" data-domain-availability-tld>' + optionsHtml + '</select>'
+        wrapper.innerHTML = '<div class="domain-field">'
+            + '<span class="domain-field__prefix">www.</span>'
+            + '<input class="domain-field__input" type="text" name="domain_name" placeholder="yourbusiness" required data-domain-availability-input>'
+            + '<span class="domain-field__divider" aria-hidden="true"></span>'
+            + '<select class="domain-field__tld" name="domain_tld" aria-label="Domain extension" data-domain-availability-tld>' + optionsHtml + '</select>'
             + '</div>'
-            + '<div data-domain-availability-result style="font-size:var(--cv-text-xs);margin-top:var(--cv-space-1);"></div>';
+            + '<div class="domain-result" data-domain-availability-result></div>';
     }
 
     document.addEventListener('change', function (event) {
@@ -757,7 +1537,15 @@
             return;
         }
 
-        var domain = input.value.trim().toLowerCase() + tldSelect.value;
+        // Strip anything from the first dot onward before appending the
+        // selected TLD — mirrors CheckoutController::addToCart()'s
+        // server-side rule exactly, so a client who types the full domain
+        // ("example.com") here sees availability checked for the same
+        // domain that actually gets added to the cart, not "example.com.com".
+        var rawName = input.value.trim().toLowerCase();
+        var firstDot = rawName.indexOf('.');
+        var nameOnly = firstDot !== -1 ? rawName.substring(0, firstDot) : rawName;
+        var domain = nameOnly + tldSelect.value;
         resultEl.textContent = 'Checking availability...';
         resultEl.style.color = 'var(--cv-text-secondary)';
 
@@ -839,6 +1627,108 @@
 
         var checkboxes = document.querySelectorAll(master.getAttribute('data-select-all'));
         checkboxes.forEach(function (cb) { cb.checked = master.checked; });
+    });
+
+    // Tab switcher. A container marked [data-tabs] holds buttons carrying
+    // data-tab-target="<panel id>"; the panel selector comes from the
+    // container's data-tab-panels.
+    //
+    // Replaces onclick="switchTab(event, 'dns')" on the client domain page.
+    // The function was defined and the panels existed — the inline handler
+    // attribute was simply never invoked, because a nonce authorises a
+    // <script> block but not inline event handlers, and script-src has no
+    // 'unsafe-inline'. So Nameservers, DNS Records and Advanced looked
+    // unimplemented when they were only unreachable.
+    document.addEventListener('click', function (event) {
+        var tab = event.target.closest('[data-tab-target]');
+        if (!tab) {
+            return;
+        }
+
+        var container = tab.closest('[data-tabs]');
+        if (!container) {
+            return;
+        }
+
+        event.preventDefault();
+
+        var panelSelector = container.getAttribute('data-tab-panels') || '.domain-tab-content';
+        var panels = document.querySelectorAll(panelSelector);
+        for (var i = 0; i < panels.length; i++) {
+            panels[i].classList.remove('active');
+        }
+
+        var tabs = container.querySelectorAll('[data-tab-target]');
+        for (var j = 0; j < tabs.length; j++) {
+            tabs[j].classList.remove('active');
+        }
+
+        var target = document.getElementById(tab.getAttribute('data-tab-target'));
+        if (target) {
+            target.classList.add('active');
+        }
+        tab.classList.add('active');
+    });
+
+    // Copy-to-clipboard for a value rendered elsewhere on the page, e.g. the
+    // domain EPP code. Also previously an inline onclick.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-copy-from]');
+        if (!btn) {
+            return;
+        }
+
+        var source = document.getElementById(btn.getAttribute('data-copy-from'));
+        if (!source || !navigator.clipboard) {
+            return;
+        }
+
+        navigator.clipboard.writeText(source.textContent.trim()).then(function () {
+            var original = btn.textContent;
+            btn.textContent = '✓ Copied!';
+            setTimeout(function () { btn.textContent = original; }, 2000);
+        }).catch(function () {
+            window.alert('Could not copy to clipboard — select the text and copy it manually.');
+        });
+    });
+
+    // Guard for a bulk-action submit button: refuse to submit with nothing
+    // ticked, optionally require a companion <select> to have a value, and
+    // optionally confirm with the count.
+    //
+    // These were inline onclick="return validate…()" handlers. The nonce on a
+    // <script> block does NOT extend to inline event-handler attributes, and
+    // script-src carries no 'unsafe-inline', so CSP silently blocked every one
+    // of them — the select-all box did nothing and, worse, "Delete Selected"
+    // submitted with no confirmation at all.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-require-checked]');
+        if (!btn) {
+            return;
+        }
+
+        var checked = document.querySelectorAll(btn.getAttribute('data-require-checked') + ':checked');
+
+        if (checked.length === 0) {
+            event.preventDefault();
+            window.alert(btn.getAttribute('data-require-checked-message') || 'Please select at least one item.');
+            return;
+        }
+
+        var valueSelector = btn.getAttribute('data-require-value');
+        if (valueSelector) {
+            var field = document.querySelector(valueSelector);
+            if (field && !field.value) {
+                event.preventDefault();
+                window.alert(btn.getAttribute('data-require-value-message') || 'Please choose a value first.');
+                return;
+            }
+        }
+
+        var confirmMessage = btn.getAttribute('data-confirm-count');
+        if (confirmMessage && !window.confirm(confirmMessage.replace('{count}', checked.length))) {
+            event.preventDefault();
+        }
     });
 
     // WHMCS migrator live progress (import/whmcs.php) — was an inline
@@ -1077,10 +1967,14 @@
     });
 
     // Domain Spinner (domains/register.php) — asks /domains/spin for name
-    // variations of whatever's typed in the search box, checked against
-    // whichever TLDs an admin enabled for the spinner, and renders the
-    // available ones with the same "Register" trigger the main search
-    // results use (see the domain-registration-page block above).
+    // variations of whatever's typed in the search box against whichever
+    // TLDs an admin enabled for the spinner. /domains/spin returns those
+    // combinations unchecked (it used to check each one live, sequentially,
+    // before responding — up to 15 registrar round-trips on one request,
+    // which is why this box could sit on "Spinning..." for a long time); the
+    // real availability check for each candidate happens here instead, one
+    // fetch per candidate, all in parallel, and only the available ones get
+    // rendered, with the same "Register" trigger the main search results use.
     document.addEventListener('click', function (event) {
         var trigger = event.target.closest('[data-domain-spin-trigger]');
         if (!trigger) {
@@ -1101,35 +1995,90 @@
         var originalLabel = trigger.innerText;
         trigger.disabled = true;
         trigger.innerText = 'Spinning...';
-        resultsEl.innerHTML = '';
+        resultsEl.innerHTML = '<div style="padding:var(--cv-space-3);text-align:center;color:var(--cv-text-secondary);">Loading suggestions...</div>';
+
+        function restoreTrigger() {
+            trigger.disabled = false;
+            trigger.innerText = originalLabel;
+        }
+
+        function noSuggestions(message) {
+            resultsEl.innerHTML = '<p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">' + message + '</p>';
+        }
+
+        function renderAvailable(available) {
+            resultsEl.innerHTML = '';
+
+            available.forEach(function (c) {
+                var card = document.createElement('div');
+                card.className = 'cv-card';
+                card.style.cssText = 'margin-bottom:var(--cv-space-3);display:flex;justify-content:space-between;align-items:center;';
+
+                var left = document.createElement('div');
+                var title = document.createElement('strong');
+                title.style.cssText = 'font-size:1.1rem;color:var(--cv-text-primary);';
+                title.innerText = c.domain;
+
+                var statusRow = document.createElement('div');
+                statusRow.style.cssText = 'font-size:var(--cv-text-sm);color:#10b981;font-weight:700;margin-top:0.3rem;display:flex;align-items:center;gap:0.5rem;';
+                statusRow.innerHTML = '<span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#10b981;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(16,185,129,0.3);">&#10004; AVAILABLE</span>';
+
+                var priceSpan = document.createElement('span');
+                priceSpan.style.cssText = 'font-size:1rem;color:var(--cv-text-primary);';
+                priceSpan.innerText = (c.avail.formatted_price || ('$' + Number(c.avail.price).toFixed(2))) + '/yr';
+                statusRow.appendChild(priceSpan);
+
+                left.appendChild(title);
+                left.appendChild(statusRow);
+
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'cv-btn';
+                btn.setAttribute('data-domain-register-trigger', c.domain);
+                btn.innerText = 'Register';
+
+                card.appendChild(left);
+                card.appendChild(btn);
+                resultsEl.appendChild(card);
+            });
+        }
 
         fetch('/domains/spin?name=' + encodeURIComponent(name), {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
         })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-            var suggestions = data.suggestions || [];
+            var candidates = data.candidates || [];
 
-            if (suggestions.length === 0) {
-                resultsEl.innerHTML = '<p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">'
-                    + (data.message || 'No available suggestions found — try a different name.') + '</p>';
+            if (candidates.length === 0) {
+                noSuggestions(data.message || 'No available suggestions found — try a different name.');
+                restoreTrigger();
                 return;
             }
 
-            resultsEl.innerHTML = suggestions.map(function (s) {
-                return '<div class="cv-card" style="margin-bottom:var(--cv-space-3);display:flex;justify-content:space-between;align-items:center;">'
-                    + '<div><strong style="font-size:1.1rem;color:var(--cv-text-primary);">' + s.domain + '</strong>'
-                    + '<div style="font-size:var(--cv-text-sm);color:#10b981;font-weight:700;margin-top:0.3rem;display:flex;align-items:center;gap:0.5rem;"><span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#10b981;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(16,185,129,0.3);">✔ AVAILABLE</span> <span style="font-size:1rem;color:var(--cv-text-primary);">$' + Number(s.price).toFixed(2) + '/yr</span></div></div>'
-                    + '<button type="button" class="cv-btn" data-domain-register-trigger="' + s.domain + '">Register</button>'
-                    + '</div>';
-            }).join('');
+            Promise.all(candidates.map(function (c) {
+                return fetch('/domains/availability?domain=' + encodeURIComponent(c.domain), {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                })
+                .then(function (r) { return r.json(); })
+                .then(function (avail) { return { domain: c.domain, avail: avail }; })
+                .catch(function () { return null; });
+            }))
+            .then(function (checked) {
+                var available = checked.filter(function (c) { return c && c.avail && c.avail.checked && c.avail.available; });
+
+                if (available.length === 0) {
+                    noSuggestions('No available suggestions found — try a different name.');
+                    return;
+                }
+
+                renderAvailable(available);
+            })
+            .finally(restoreTrigger);
         })
         .catch(function () {
-            resultsEl.innerHTML = '<p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Could not fetch suggestions right now.</p>';
-        })
-        .finally(function () {
-            trigger.disabled = false;
-            trigger.innerText = originalLabel;
+            noSuggestions('Could not fetch suggestions right now.');
+            restoreTrigger();
         });
     });
 
@@ -1392,9 +2341,11 @@
             var val = event.target.value;
             var groupField = document.getElementById('target-group-field');
             var individualField = document.getElementById('target-individual-field');
+            var externalField = document.getElementById('target-external-field');
 
             if (groupField) groupField.style.display = (val === 'group') ? 'block' : 'none';
             if (individualField) individualField.style.display = (val === 'individual') ? 'block' : 'none';
+            if (externalField) externalField.style.display = (val === 'external') ? 'block' : 'none';
         } else if (event.target.id === 'select-all-clients') {
             var isChecked = event.target.checked;
             var checkboxes = document.querySelectorAll('.client-checkbox');
@@ -1413,6 +2364,34 @@
                 selectAll.checked = (total > 0 && checkedCount === total);
             }
         }
+    });
+
+    // Client notification compose form (notifications/client-notifications-index.php)
+    // — target type switcher (Individual vs Selected vs All) and a client-side
+    // filter over the "Selected Clients" checkbox list, same shape as the
+    // campaign target switcher above but a distinct id so the two never collide.
+    document.addEventListener('change', function(event) {
+        if (event.target.id === 'client-notification-target-type') {
+            var val = event.target.value;
+            var individualField = document.getElementById('notif-target-individual-field');
+            var selectedField = document.getElementById('notif-target-selected-field');
+
+            if (individualField) individualField.style.display = (val === 'individual') ? 'block' : 'none';
+            if (selectedField) selectedField.style.display = (val === 'selected') ? 'block' : 'none';
+        }
+    });
+
+    document.addEventListener('input', function(event) {
+        if (!event.target.matches('[data-notif-client-filter]')) {
+            return;
+        }
+
+        var needle = event.target.value.trim().toLowerCase();
+        document.querySelectorAll('[data-notif-client-row]').forEach(function(row) {
+            var label = row.querySelector('[data-notif-client-label]');
+            var text = label ? label.textContent.toLowerCase() : '';
+            row.style.display = (needle === '' || text.indexOf(needle) !== -1) ? 'block' : 'none';
+        });
     });
 
     // Admin clients live search (debounced auto-search as user types)
@@ -1435,4 +2414,39 @@
             }, 500);
         });
     }
+
+    // Promo banner popup (partials/promo-banner.php) — shown once per browser
+    // per day per banner. Rendered hidden server-side so it never flashes
+    // before this runs; the dismiss cookie is checked here rather than
+    // server-side because "seen it today" is a purely client-side fact,
+    // same reasoning as the dark-mode flag using localStorage instead of a
+    // round trip.
+    var promoBanner = document.querySelector('[data-promo-banner]');
+    if (promoBanner) {
+        var promoBannerId = promoBanner.getAttribute('data-promo-banner-id');
+        var dismissCookieName = 'cv_promo_banner_dismissed_' + promoBannerId;
+        var alreadyDismissed = document.cookie.indexOf(dismissCookieName + '=1') !== -1;
+
+        if (!alreadyDismissed) {
+            setTimeout(function() {
+                promoBanner.hidden = false;
+            }, 900);
+        }
+    }
+
+    document.addEventListener('click', function(event) {
+        var dismissTrigger = event.target.closest('[data-promo-banner-dismiss]');
+        if (!dismissTrigger) {
+            return;
+        }
+
+        var banner = dismissTrigger.closest('[data-promo-banner]');
+        if (!banner) {
+            return;
+        }
+
+        banner.hidden = true;
+        var bannerId = banner.getAttribute('data-promo-banner-id');
+        document.cookie = 'cv_promo_banner_dismissed_' + bannerId + '=1; max-age=86400; path=/; samesite=lax';
+    });
 })();

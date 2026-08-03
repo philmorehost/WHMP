@@ -31,6 +31,9 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
 {
     private const BASE_URL = 'https://my.interserver.net/apiv2';
 
+    /** @var array<string, int> hostname => InterServer vps_id, per request */
+    private array $vpsIdCache = [];
+
     public function __construct(
         private readonly HttpClient $http
     ) {
@@ -116,6 +119,171 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
     public function terminate(array $params): array
     {
         return $this->lifecycleAction($params, 'DELETE', '/vps/{id}');
+    }
+
+    /**
+     * Power state. All three are side-effecting GETs (InterServer's own
+     * design, not a mistake here) returning `{text, queueId}` — the action
+     * is queued on the hypervisor, so a 200 means "accepted", not "done".
+     * `restart` is a real endpoint and is what the docs recommend over
+     * stop-then-start, since it preserves boot context and lets the
+     * hypervisor sequence it atomically.
+     *
+     * A 409 "VPS is not active" comes back for cancelled/suspended
+     * services; that message is surfaced verbatim rather than flattened
+     * into a generic failure.
+     */
+    public function power(array $params, string $action): array
+    {
+        $path = match ($action) {
+            'start' => '/vps/{id}/start',
+            'stop' => '/vps/{id}/stop',
+            'restart' => '/vps/{id}/restart',
+            default => null,
+        };
+
+        if ($path === null) {
+            return ['success' => false, 'message' => "Unsupported power action \"{$action}\"."];
+        }
+
+        $message = match ($action) {
+            'start' => 'Power on has been queued — allow up to 30 seconds.',
+            'stop' => 'Power off has been queued — allow up to 30 seconds.',
+            default => 'Reboot has been queued — allow up to 2 minutes.',
+        };
+
+        return $this->lifecycleAction($params, 'GET', $path, $message);
+    }
+
+    /**
+     * getVpsBackup — queues an on-demand snapshot. Backups are disabled
+     * server-side on HyperV/OpenVZ/Virtuozzo (400 "Backups are disabled for
+     * this type") and capped at 4 per VPS, both of which come back as real
+     * API errors this surfaces rather than pre-guessing.
+     */
+    public function createBackup(array $params): array
+    {
+        return $this->lifecycleAction($params, 'GET', '/vps/{id}/backup', 'Snapshot queued — allow a few minutes for it to complete.');
+    }
+
+    /**
+     * getVpsBackups. Each row's `name` is the canonical identifier (there is
+     * no integer id); a restore is keyed by the composite
+     * `<type>:<service>:<name>`, which is precomputed here as `ref` so
+     * callers never have to assemble it themselves.
+     *
+     * @return array{success: bool, message: string, backups: array<int, array<string, mixed>>}
+     */
+    public function listBackups(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'backups' => []];
+        }
+
+        $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/backups", null));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'], 'backups' => []];
+        }
+
+        $rows = $decoded['data'];
+        $backups = [];
+
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            if (!is_array($row) || ($row['name'] ?? '') === '') {
+                continue;
+            }
+
+            $type = (string) ($row['type'] ?? '');
+            $service = (string) ($row['service'] ?? $vpsId);
+            $name = (string) $row['name'];
+
+            $backups[] = [
+                'name' => $name,
+                'type' => $type,
+                'sizeBytes' => isset($row['size']) ? (int) $row['size'] : null,
+                'ref' => "{$type}:{$service}:{$name}",
+            ];
+        }
+
+        return ['success' => true, 'message' => '', 'backups' => $backups];
+    }
+
+    /**
+     * getVpsSlices — current allocation plus the range and prorated cost of
+     * changing it. A "slice" bundles RAM/disk/CPU and is InterServer's unit
+     * of vertical scaling; `min_slices` is the current count (downgrades go
+     * below it, upgrades above) and `max_slices` is capped by host capacity.
+     *
+     * @return array{success: bool, message: string, slices: array<string, mixed>}
+     */
+    public function sliceOptions(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'slices' => []];
+        }
+
+        $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/slices", null));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'], 'slices' => []];
+        }
+
+        $data = is_array($decoded['data']) ? $decoded['data'] : [];
+
+        return [
+            'success' => true,
+            'message' => '',
+            'slices' => [
+                'current' => isset($data['vps_slices']) ? (int) $data['vps_slices'] : null,
+                'min' => isset($data['min_slices']) ? (int) $data['min_slices'] : null,
+                'max' => isset($data['max_slices']) ? (int) $data['max_slices'] : null,
+                'sliceCost' => isset($data['slice_cost']) ? (float) $data['slice_cost'] : null,
+                'proratedSliceCost' => isset($data['prorated_slice_cost']) ? (float) $data['prorated_slice_cost'] : null,
+                'sliceRamGb' => isset($data['slice_ram']) ? (int) $data['slice_ram'] : null,
+                'sliceHdGb' => isset($data['slice_hd']) ? (int) $data['slice_hd'] : null,
+            ],
+        ];
+    }
+
+    /**
+     * getVpsInfo — the real service record, used so the client page can show
+     * this VPS's actual `vps_status` instead of a static "Running" badge.
+     *
+     * @return array{success: bool, message: string, info: array<string, mixed>}
+     */
+    public function info(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'info' => []];
+        }
+
+        $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}", null));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'], 'info' => []];
+        }
+
+        $data = is_array($decoded['data']) ? $decoded['data'] : [];
+
+        return [
+            'success' => true,
+            'message' => '',
+            'info' => [
+                'status' => (string) ($data['vps_status'] ?? ''),
+                'hostname' => (string) ($data['vps_hostname'] ?? ''),
+                'ip' => (string) ($data['vps_ip'] ?? ''),
+                'os' => (string) ($data['vps_os'] ?? ''),
+                'slices' => isset($data['vps_slices']) ? (int) $data['vps_slices'] : null,
+                'plan' => (string) ($data['services_name'] ?? ''),
+            ],
+        ];
     }
 
     public function changePassword(array $params): array
@@ -229,6 +397,61 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         return $this->toResult($response, 'Connected — API key is valid.');
     }
 
+    /**
+     * getVpsReinstallOs — step 1 of the reinstall flow. Returns only the
+     * templates this VPS's backing hypervisor can actually run, filtered
+     * server-side by platform and by `template_available=1` for non-admin
+     * callers. The `template_file` of a chosen row (e.g.
+     * `centos-7-x86_64.qcow2`) is the canonical id `reinstall()` accepts —
+     * there is no fixed list of OS slugs to hardcode against, which is why
+     * the client-facing picker must be populated from here.
+     *
+     * @return array{success: bool, message: string, templates: array<int, array<string, mixed>>}
+     */
+    public function osTemplates(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'templates' => []];
+        }
+
+        $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/reinstall_os", null));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'], 'templates' => []];
+        }
+
+        $templates = [];
+
+        foreach ((array) ($decoded['data']['templates'] ?? []) as $row) {
+            if (!is_array($row) || ($row['template_file'] ?? '') === '') {
+                continue;
+            }
+
+            $templates[] = [
+                'file' => (string) $row['template_file'],
+                'name' => trim((string) ($row['template_name'] ?? '') . ' ' . (string) ($row['template_version'] ?? '')),
+            ];
+        }
+
+        return ['success' => true, 'message' => '', 'templates' => $templates];
+    }
+
+    /**
+     * postVpsReinstallOs. Two corrections against what this method sent
+     * before: the path is `/vps/{id}/reinstall_os` (plain `/reinstall` is
+     * not a route — it 404'd), and the body is `{template, localPassword}`
+     * where `template` is a `template_file` from `osTemplates()`, not a bare
+     * `osVersion` slug like "ubuntu24".
+     *
+     * `localPassword` is the MyAdmin *account* password, re-checked by
+     * InterServer on every call because this wipes the disk with no
+     * rollback. WHMP stores only `api_username`/`api_token` for a server, so
+     * there is nothing to send — this reports that plainly rather than
+     * firing a destructive call that would be rejected anyway. The
+     * client-facing reinstall flow routes through a support ticket instead.
+     */
     public function reinstall(array $params): array
     {
         $vpsId = $this->resolveVpsId($params);
@@ -237,15 +460,40 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
             return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
         }
 
-        $osVersion = (string) ($params['osVersion'] ?? 'ubuntu24');
+        $template = trim((string) ($params['template'] ?? ''));
+        $localPassword = (string) ($params['localPassword'] ?? '');
 
-        $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reinstall", [
-            'osVersion' => $osVersion,
-        ]);
+        if ($template === '') {
+            return ['success' => false, 'message' => 'An OS template is required — choose one from the templates this VPS supports.'];
+        }
+
+        if ($localPassword === '') {
+            return [
+                'success' => false,
+                'message' => 'InterServer requires the MyAdmin account password to reinstall a VPS, which is not stored on this server record. Submit the reinstall as a support request instead.',
+            ];
+        }
+
+        $body = ['template' => $template, 'localPassword' => $localPassword];
+
+        if (($params['password'] ?? '') !== '') {
+            $body['password'] = (string) $params['password'];
+        }
+
+        $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reinstall_os", $body);
 
         return $this->toResult($response, 'VPS OS reinstallation has been queued.');
     }
 
+    /**
+     * postVpsReverseDns takes a bulk map — `{ips: {"<ip>": "<hostname>"}}`.
+     * This method used to send a flat `{rdns: "<hostname>"}` instead, which
+     * named no IP at all. InterServer applies only the keys that match an IP
+     * the VPS actually owns and ignores everything else, so that body
+     * updated nothing while still returning 200 — the client saw "Reverse
+     * DNS updated successfully" and the PTR never changed. Callers pass an
+     * `ips` map; a single `ip` + `rdns` pair is accepted as shorthand.
+     */
     public function setReverseDns(array $params): array
     {
         $vpsId = $this->resolveVpsId($params);
@@ -254,17 +502,56 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
             return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
         }
 
-        $rdns = (string) $params['rdns'];
+        $ips = $params['ips'] ?? null;
 
-        $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reverse_dns", [
-            'rdns' => $rdns,
-        ]);
+        if (!is_array($ips) || $ips === []) {
+            $ip = trim((string) ($params['ip'] ?? ''));
+            $rdns = trim((string) ($params['rdns'] ?? ''));
+
+            if ($ip === '' || $rdns === '') {
+                return ['success' => false, 'message' => 'Both an IP address and a hostname are required to set reverse DNS.'];
+            }
+
+            $ips = [$ip => $rdns];
+        }
+
+        $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reverse_dns", ['ips' => $ips]);
 
         return $this->toResult($response, 'Reverse DNS updated successfully.');
     }
 
+    /**
+     * getVpsReverseDns — current PTR for every IP on the VPS, read live via
+     * DNS rather than cached. Response shape is `{ips: {"<ip>": "<ptr>"}}`,
+     * with an empty string for IPs that have no PTR set.
+     *
+     * @return array{success: bool, message: string, ips: array<string, string>}
+     */
+    public function reverseDnsEntries(array $params): array
+    {
+        $vpsId = $this->resolveVpsId($params);
+
+        if ($vpsId === null) {
+            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'ips' => []];
+        }
+
+        $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/reverse_dns", null));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'], 'ips' => []];
+        }
+
+        $ips = [];
+
+        foreach ((array) ($decoded['data']['ips'] ?? []) as $ip => $ptr) {
+            $ips[(string) $ip] = (string) $ptr;
+        }
+
+        return ['success' => true, 'message' => '', 'ips' => $ips];
+    }
+
     /** @param array<string, mixed> $params */
-    private function lifecycleAction(array $params, string $method, string $pathTemplate): array
+    private function lifecycleAction(array $params, string $method, string $pathTemplate, string $successMessage = 'OK'): array
     {
         $vpsId = $this->resolveVpsId($params);
 
@@ -275,7 +562,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $path = str_replace('{id}', (string) $vpsId, $pathTemplate);
         $response = $this->call($params['server'], $method, $path, $method === 'DELETE' || $method === 'GET' ? null : []);
 
-        return $this->toResult($response);
+        return $this->toResult($response, $successMessage);
     }
 
     /**
@@ -287,20 +574,36 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
     private function resolveVpsId(array $params): ?int
     {
         $hostname = (string) $params['username'];
-        $response = $this->call($params['server'], 'GET', '/vps', null);
-        $decoded = $this->decode($response);
 
-        if (!$decoded['success'] || !is_array($decoded['data'])) {
-            return null;
+        // Memoized for the life of the request. Every lifecycle call pays a
+        // `/vps` list to translate hostname -> numeric id, so rendering a
+        // service page that reads status, bandwidth and reverse DNS used to
+        // cost three identical list calls on top of the three real ones.
+        // The module is a container singleton, so this cache lives exactly
+        // as long as the request does.
+        if (array_key_exists($hostname, $this->vpsIdCache)) {
+            return $this->vpsIdCache[$hostname];
         }
 
-        foreach ($decoded['data'] as $row) {
-            if (is_array($row) && (string) ($row['vps_hostname'] ?? '') === $hostname) {
-                return (int) $row['vps_id'];
+        $decoded = $this->decode($this->call($params['server'], 'GET', '/vps', null));
+        $resolved = null;
+
+        if ($decoded['success'] && is_array($decoded['data'])) {
+            foreach ($decoded['data'] as $row) {
+                if (is_array($row) && (string) ($row['vps_hostname'] ?? '') === $hostname) {
+                    $resolved = (int) $row['vps_id'];
+                    break;
+                }
             }
         }
 
-        return null;
+        // Only a successful lookup is cached — a transient API failure must
+        // not pin this VPS to "not found" for the rest of the request.
+        if ($resolved !== null) {
+            $this->vpsIdCache[$hostname] = $resolved;
+        }
+
+        return $resolved;
     }
 
     /**

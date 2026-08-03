@@ -462,14 +462,32 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             $expiryDate = date('Y-m-d', strtotime((string) $data['expirydate']));
         }
 
-        return [
+        $result = [
             'success' => $decoded['success'],
-            'status' => $mappedStatus,
             'expiryDate' => $expiryDate,
         ];
+
+        if ($mappedStatus !== null) {
+            $result['status'] = $mappedStatus;
+        }
+
+        return $result;
     }
 
-    private function mapStatus(string $status): string
+    /**
+     * Returns null — not a guessed status — for anything not on the
+     * recognised list, including an empty/missing value. This used to
+     * default to 'active', which is worse than it sounds: DomainSyncJob
+     * runs daily against every locally-active domain and writes back
+     * whatever this returns on any mismatch, so an unrecognised or momentarily
+     * empty ResellerClub response would silently mark a domain "active" even
+     * if it were actually expired, suspended, or deleted at the registrar —
+     * masking exactly the states an admin most needs to see. A null here
+     * means sync() above omits 'status' entirely, so the caller leaves the
+     * domain's existing local status untouched instead of overwriting it
+     * with an unconfident guess in either direction.
+     */
+    private function mapStatus(string $status): ?string
     {
         return match (strtolower(trim($status))) {
             'active' => 'active',
@@ -477,7 +495,7 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             'deleted', 'cancelled' => 'cancelled',
             'expired' => 'expired',
             'transferredaway', 'transferred_away' => 'transferred_away',
-            default => 'active',
+            default => null,
         };
     }
 

@@ -50,6 +50,35 @@ final class DepartmentRepository
         );
     }
 
+    /** How many tickets sit in this department — checked before any delete. */
+    public function ticketCount(int $id): int
+    {
+        $row = $this->db->selectOne('SELECT COUNT(*) AS c FROM tickets WHERE department_id = ?', [$id]);
+
+        return (int) ($row['c'] ?? 0);
+    }
+
+    /**
+     * Moves every ticket from one department to another.
+     *
+     * Lets a department be retired without destroying its ticket history —
+     * tickets.department_id is NOT NULL with a RESTRICT foreign key, so they
+     * have to land somewhere before the row can go.
+     *
+     * @return int tickets moved
+     */
+    public function reassignTickets(int $fromId, int $toId): int
+    {
+        if ($fromId === $toId) {
+            return 0;
+        }
+
+        return $this->db->update(
+            'UPDATE tickets SET department_id = ?, updated_at = ? WHERE department_id = ?',
+            [$toId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $fromId]
+        );
+    }
+
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM departments WHERE id = ?', [$id]);

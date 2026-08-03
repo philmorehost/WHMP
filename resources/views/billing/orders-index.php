@@ -255,6 +255,7 @@
         </a>
         <h1 class="admin-orders-hero__title">📦 Orders</h1>
     </div>
+    <a href="/admin/orders/create" class="cv-btn cv-btn--primary" style="white-space:nowrap;">＋ Create Order</a>
 </div>
 
 <!-- Status Tabs -->

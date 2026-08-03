@@ -306,6 +306,26 @@ final class DomainRepository
         $this->db->delete('DELETE FROM domains WHERE id = ?', [$id]);
     }
 
+    /**
+     * Domains whose raw expiry_date has already passed — candidates for
+     * DomainPruningJob. Deliberately broad: grace/redemption are per-TLD (from
+     * domain_pricing), so the job applies each domain's own exact window on
+     * top of this, the same two-step "coarse fetch, then precise per-row
+     * check" shape ServiceTerminationJob uses for termination grace.
+     *
+     * transferred_away is excluded — that domain left to another registrar,
+     * it isn't sitting unredeemed.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function expiredSince(string $cutoffDate): array
+    {
+        return $this->db->select(
+            "SELECT * FROM domains WHERE expiry_date IS NOT NULL AND expiry_date < ? AND status != 'transferred_away'",
+            [$cutoffDate]
+        );
+    }
+
     /** @param array<int, int> $ids */
     public function bulkDelete(array $ids): int
     {

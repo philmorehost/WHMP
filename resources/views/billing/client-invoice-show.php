@@ -9,9 +9,15 @@
 /** @var string $companyName */
 /** @var string $companyEmail */
 /** @var string $companyDept */
-// Stored amounts are authoritative in the BASE currency (see CurrencyService);
-// the invoice's locked rate converts them for display only.
-$invoiceRate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
+// The invoice's locked rate converts its stored amounts for display only. A
+// NULL currency_id means the invoice is denominated in the base currency and
+// is therefore stored as-is — both lockColumns() and denominateFor() write 1.0
+// for that case, so any other value is corrupt data, not a conversion. Must
+// match CurrencyService::formatLocked() and the figure PaymentCallbackController
+// charges, or this page and the gateway disagree about what is owed.
+$invoiceRate = $invoice['currency_id'] !== null && (float) $invoice['currency_rate'] > 0
+    ? (float) $invoice['currency_rate']
+    : 1.0;
 $money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $invoiceRate, 2), 2);
 
 // creditBalance is stored directly in the client's primary/operating currency units
@@ -62,7 +68,8 @@ $companyDept ??= 'Payments Dept.';
                     <span style="font-size:1.5rem; font-weight:900; color:#6b7280; text-transform:uppercase; letter-spacing:0.05em; display:block;">CANCELLED</span>
                 <?php else: ?>
                     <span style="font-size:1.5rem; font-weight:900; color:#ef4444; text-transform:uppercase; letter-spacing:0.05em; display:block;">UNPAID</span>
-                    <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="margin-top:6px;" onsubmit="return confirm('Are you sure you want to cancel this unpaid invoice?');">
+                    <?php // data-confirm, not onsubmit="return confirm(...)": app.js confirms via a delegated listener, and CSP blocks inline handlers. ?>
+                    <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="margin-top:6px;" data-confirm="Cancel this unpaid invoice? This cannot be undone.">
                         <?= csrf_field() ?>
                         <button type="submit" class="cv-btn" style="background:#dc2626; color:#fff; font-size:var(--cv-text-xs); padding:3px 8px; border-radius:4px; border:none; cursor:pointer;">Cancel Invoice</button>
                     </form>

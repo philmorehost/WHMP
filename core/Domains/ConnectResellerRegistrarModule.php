@@ -174,23 +174,28 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
 
     public function renew(array $params): array
     {
-        // Unlike register()/transfer(), renew() doesn't create a customer
-        // on demand — a domain being renewed must already have gone through
-        // registration (or a transfer) on this registrar, so a missing
-        // customer ID here means the domain was never actually synced with
-        // ConnectReseller through this app, which is worth surfacing
-        // explicitly rather than guessing at a blank "Id".
-        $registrarClientId = $params['registrarClientId'] ?? null;
+        // renew() resolves the customer the same way register()/transfer() do.
+        //
+        // It used to hard-fail whenever no local `registrar_client_id` was
+        // known, on the reasoning that a renewable domain must already have
+        // been registered through this app. That is not true of a domain
+        // imported from another system, or one registered before this
+        // integration existed — the domain is live at ConnectReseller, the
+        // customer exists there, only the local link is missing. Those renewals
+        // were unrecoverable: "Missing ConnectReseller customer ID". Resolving
+        // by email finds that customer and the renewal proceeds.
+        $registrar = $params['registrar'];
+        $customer = $this->ensureCustomerId($registrar, $params['client'] ?? [], $params['registrarClientId'] ?? null);
 
-        if ($registrarClientId === null || $registrarClientId === '') {
-            return ['success' => false, 'message' => 'Missing ConnectReseller customer ID — this domain was never registered/transferred through this integration.'];
+        if (!$customer['success']) {
+            return ['success' => false, 'message' => "Could not resolve a ConnectReseller customer record: {$customer['message']}"];
         }
 
-        $response = $this->call($params['registrar'], 'RenewalOrder', [
+        $response = $this->call($registrar, 'RenewalOrder', [
             'OrderType' => '2',
             'Websitename' => $params['domain'],
             'Duration' => (string) ($params['years'] ?? 1),
-            'Id' => $registrarClientId,
+            'Id' => $customer['id'],
         ]);
         $decoded = $this->decode($response);
 
@@ -198,11 +203,19 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => $decoded['message']];
         }
 
-        return [
+        $result = [
             'success' => true,
             'message' => 'Domain renewed.',
             'expiryDate' => $this->parseDate($decoded['data']['expiryDate'] ?? null) ?? date('Y-m-d', strtotime('+' . ($params['years'] ?? 1) . ' years')),
         ];
+
+        // Report a newly-learned ID back so the client row gets linked and the
+        // next renewal skips the lookup entirely.
+        if ($customer['created']) {
+            $result['registrarClientId'] = $customer['id'];
+        }
+
+        return $result;
     }
 
     public function getNameservers(array $params): array
@@ -337,19 +350,74 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
 
     public function getContactInfo(array $params): array
     {
+        $registrar = $params['registrar'];
         $registrarContactId = $params['registrarContactId'] ?? null;
+
+        // Same defect renew() had: an imported domain has a real registrant
+        // contact at ConnectReseller but no local `registrar_contact_id`, and
+        // this reported "No contact on file yet" — which is not just unhelpful
+        // but wrong. Resolve it from the registrar instead.
+        //
+        // Deliberately lookup-only (never ensureCustomerId): reading contact
+        // info must not create a customer record as a side effect.
+        if ($registrarContactId === null || $registrarContactId === '') {
+            $registrarContactId = $this->lookupContactId(
+                $registrar,
+                $params['registrarClientId'] ?? null,
+                trim((string) (($params['client'] ?? [])['email'] ?? ''))
+            );
+        }
 
         if ($registrarContactId === null || $registrarContactId === '') {
             return ['success' => false, 'contacts' => [], 'message' => 'No contact on file yet — save contact info once to create one.'];
         }
 
-        $decoded = $this->decode($this->call($params['registrar'], 'ViewRegistrant', ['RegistrantContactId' => $registrarContactId]));
+        $decoded = $this->decode($this->call($registrar, 'ViewRegistrant', ['RegistrantContactId' => $registrarContactId]));
 
         if (!$decoded['success']) {
             return ['success' => false, 'contacts' => [], 'message' => $decoded['message']];
         }
 
-        return ['success' => true, 'contacts' => $decoded['data']];
+        // Reported back so the domain row gets linked and the next read skips
+        // both lookups.
+        return ['success' => true, 'contacts' => $decoded['data'], 'registrarContactId' => (string) $registrarContactId];
+    }
+
+    /**
+     * Finds an existing registrant contact for a client, without creating
+     * anything. Returns NULL whenever the contact cannot be identified — a
+     * normal outcome, not an error.
+     *
+     * @param array<string, mixed> $registrar
+     */
+    private function lookupContactId(array $registrar, ?string $registrarClientId, string $email): ?string
+    {
+        if ($email === '') {
+            return null;
+        }
+
+        $clientId = ($registrarClientId !== null && $registrarClientId !== '')
+            ? $registrarClientId
+            : $this->lookupCustomerIdByEmail($registrar, $email);
+
+        if ($clientId === null) {
+            return null;
+        }
+
+        try {
+            $list = $this->decode($this->call($registrar, 'registrantsearchlist', [
+                'clientId' => $clientId,
+                'page' => 1,
+                'maxIndex' => 1,
+                'searchQuery' => $email,
+            ]));
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $id = $list['success'] ? ($list['data']['records'][0]['registrantContactId'] ?? null) : null;
+
+        return ($id !== null && (string) $id !== '') ? (string) $id : null;
     }
 
     public function saveContactInfo(array $params): array
@@ -429,10 +497,21 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
     }
 
     /**
-     * Resolves (or lazily creates) the ConnectReseller customer record
-     * every domain/contact action is scoped under. AddClient's response
-     * never returns the ID it just created (same quirk as domainorder), so
-     * a successful create is followed by a ViewClient lookup by email.
+     * Resolves (looking up first, creating only if needed) the ConnectReseller
+     * customer record every domain/contact action is scoped under.
+     *
+     * Order matters. This used to jump straight to AddClient whenever no local
+     * `registrar_client_id` was known, which fails for a client that already
+     * exists at ConnectReseller but was never linked here — an imported domain,
+     * or one registered before this integration was wired up. AddClient rejects
+     * the duplicate, and the whole action fails with no way to recover, which
+     * is what made renewing an imported domain impossible. Looking the customer
+     * up by email first links the existing record instead, and also stops a
+     * second customer being created for a client we simply hadn't linked yet.
+     *
+     * `created` means "this ID was not the one passed in, so persist it
+     * locally" — true for a lookup hit as much as for a fresh create, since
+     * either way the caller now knows something it didn't before.
      *
      * @param array<string, mixed> $registrar
      * @param array<string, mixed> $client
@@ -447,7 +526,13 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         $email = trim((string) ($client['email'] ?? ''));
 
         if ($email === '') {
-            return ['success' => false, 'id' => null, 'created' => false, 'message' => 'Client has no email on file — cannot create a ConnectReseller customer record.'];
+            return ['success' => false, 'id' => null, 'created' => false, 'message' => 'Client has no email on file — cannot resolve a ConnectReseller customer record.'];
+        }
+
+        $existing = $this->lookupCustomerIdByEmail($registrar, $email);
+
+        if ($existing !== null) {
+            return ['success' => true, 'id' => $existing, 'created' => true, 'message' => 'OK'];
         }
 
         $name = trim(trim((string) ($client['first_name'] ?? '')) . ' ' . trim((string) ($client['last_name'] ?? '')));
@@ -468,16 +553,51 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         ], static fn ($v) => $v !== null)));
 
         if (!$addResult['success']) {
+            // A create can still lose a race, or be rejected because the
+            // customer exists under details our lookup didn't match. One more
+            // lookup distinguishes "already there" from a genuine failure.
+            $afterFailure = $this->lookupCustomerIdByEmail($registrar, $email);
+
+            if ($afterFailure !== null) {
+                return ['success' => true, 'id' => $afterFailure, 'created' => true, 'message' => 'OK'];
+            }
+
             return ['success' => false, 'id' => null, 'created' => false, 'message' => $addResult['message']];
         }
 
-        $viewResult = $this->decode($this->call($registrar, 'ViewClient', ['UserName' => $email]));
+        // AddClient's response never returns the ID it just created (same
+        // quirk as domainorder), so a successful create needs a lookup too.
+        $createdId = $this->lookupCustomerIdByEmail($registrar, $email);
 
-        if (!$viewResult['success'] || !isset($viewResult['data']['clientId'])) {
+        if ($createdId === null) {
             return ['success' => false, 'id' => null, 'created' => true, 'message' => 'Customer record was created but its ID could not be retrieved.'];
         }
 
-        return ['success' => true, 'id' => (string) $viewResult['data']['clientId'], 'created' => true, 'message' => 'OK'];
+        return ['success' => true, 'id' => $createdId, 'created' => true, 'message' => 'OK'];
+    }
+
+    /**
+     * ViewClient by email, returning the customer ID or NULL when the
+     * registrar has no such customer. A failed lookup is a normal answer here
+     * ("not found"), never an error to propagate.
+     *
+     * @param array<string, mixed> $registrar
+     */
+    private function lookupCustomerIdByEmail(array $registrar, string $email): ?string
+    {
+        try {
+            $result = $this->decode($this->call($registrar, 'ViewClient', ['UserName' => $email]));
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (!$result['success']) {
+            return null;
+        }
+
+        $id = $result['data']['clientId'] ?? null;
+
+        return ($id !== null && (string) $id !== '') ? (string) $id : null;
     }
 
     public function getRegistrarLock(array $params): array
@@ -712,11 +832,23 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => $decoded['message']];
         }
 
-        return [
+        $result = [
             'success' => true,
-            'status' => $this->mapStatus((string) ($decoded['data']['Status'] ?? '')),
             'expiryDate' => $this->parseDate($decoded['data']['expirationDate'] ?? null),
         ];
+
+        // Only set 'status' when the mapping is confident — see mapStatus()'s
+        // docblock for why an unrecognised value must NOT fall back to a
+        // guessed status here. DomainService::sync() only writes a new status
+        // when the key is present, so omitting it leaves the domain's current
+        // local status untouched instead of overwriting it with a guess.
+        $mappedStatus = $this->mapStatus((string) ($decoded['data']['Status'] ?? ''));
+
+        if ($mappedStatus !== null) {
+            $result['status'] = $mappedStatus;
+        }
+
+        return $result;
     }
 
     /**
@@ -725,8 +857,22 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
      * `domains.status` ENUM (pending/active/expired/cancelled/
      * transferred_away/grace/redemption) — this is a best-effort mapping,
      * not a documented equivalence.
+     *
+     * Returns null — not a guessed status — for anything not on that
+     * documented list, including an empty/missing Status field. This used to
+     * default to 'pending', which meant a single unrecognised or momentarily
+     * empty response from ConnectReseller silently downgraded whatever
+     * domain it was checking: DomainSyncJob runs daily against every
+     * locally-active domain and writes back whatever this returns on any
+     * mismatch, so "pending" as a default meant one bad/unexpected response
+     * was enough to flip a genuinely active domain, and — since the same
+     * unrecognised value tends to recur on the next admin fix-then-resync
+     * cycle — it kept flipping back. That's the repeated-reversion bug
+     * reported. A null return means sync() above omits 'status' entirely,
+     * so the caller leaves the existing local status alone rather than
+     * overwriting it with a guess.
      */
-    private function mapStatus(string $registryStatus): string
+    private function mapStatus(string $registryStatus): ?string
     {
         return match (strtolower(trim($registryStatus))) {
             'active' => 'active',
@@ -734,7 +880,7 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             'pending delete restorable' => 'grace',
             'deleted' => 'cancelled',
             'suspended' => 'cancelled',
-            default => 'pending',
+            default => null,
         };
     }
 

@@ -1,12 +1,15 @@
 <?php
 /** @var float $creditBalance */
 /** @var array<string, mixed> $currency */
+/** @var float $currencyRate */
 /** @var float $minDeposit */
 /** @var float $maxDeposit */
 /** @var string|null $error */
 // The wallet balance is a STORED amount, so it is held in the base currency
-// (see CurrencyService) and has to be converted up for display.
-$rate = (float) ($currency['exchange_rate'] ?? 1.0) > 0 ? (float) $currency['exchange_rate'] : 1.0;
+// (see CurrencyService) and has to be converted up for display. The rate comes
+// from CurrencyService::rateFor() via the controller — it is 1.0 for the base
+// currency whatever that row's exchange_rate column happens to say.
+$rate = (float) ($currencyRate ?? 1.0) > 0 ? (float) $currencyRate : 1.0;
 $money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $rate, 2), 2);
 
 // The deposit limits are different: they are compared against the figure the

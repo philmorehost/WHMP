@@ -19,8 +19,10 @@ use CodeVault\Billing\RecurringBillingJob;
 use CodeVault\Billing\RecurringBillingService;
 use CodeVault\Billing\RenewalReminderJob;
 use CodeVault\Cron\CronActivityReportJob;
-use CodeVault\Cron\CronActivityService;
+use CodeVault\Cron\CronRunRepository;
+use CodeVault\Cron\CronStateRepository;
 use CodeVault\Cron\CronScheduler;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Domains\DomainRenewalBillingJob;
 use CodeVault\Domains\DomainSyncJob;
 use CodeVault\Gdpr\DataPruningJob;
@@ -32,6 +34,12 @@ use CodeVault\Support\MailPipingJob;
 use CodeVault\Support\TicketAutoCloseJob;
 use CodeVault\Support\TicketEscalationJob;
 use CodeVault\Billing\CancellationCronJob;
+use CodeVault\Billing\OverdueSuspensionJob;
+use CodeVault\Marketing\CampaignDispatchJob;
+use CodeVault\Billing\ServiceTerminationJob;
+use CodeVault\Billing\ServicePruningJob;
+use CodeVault\Domains\DomainPruningJob;
+use CodeVault\Billing\StaleInvoiceCancellationJob;
 
 $kernel = new Kernel(dirname(__DIR__));
 
@@ -61,11 +69,40 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));
     $scheduler->register($kernel->container->make(DataPruningJob::class));
     $scheduler->register($kernel->container->make(QuoteExpiryJob::class));
-    $scheduler->register(new CronActivityReportJob(
-        $kernel->container->make(CronActivityService::class),
-        $kernel->container->make(\CodeVault\Mail\EmailDispatcher::class),
-        $kernel->container->make(\CodeVault\Settings\SettingsRepository::class)
-    ));
+
+    // Service lifecycle. Suspension runs before termination so a service
+    // that becomes due for both in the same tick is suspended first, and
+    // both are hourly so a one-day server grace reclaims at the top of the
+    // hour rather than waiting for the next daily sweep.
+    $scheduler->register($kernel->container->make(OverdueSuspensionJob::class));
+    $scheduler->register($kernel->container->make(ServiceTerminationJob::class));
+    $scheduler->register($kernel->container->make(StaleInvoiceCancellationJob::class));
+
+    // Runs daily, well after termination has had a chance to act — deletes
+    // services/domains that have been dead long enough that nothing will
+    // ever reference them again. Both off by default.
+    $scheduler->register($kernel->container->make(ServicePruningJob::class));
+    $scheduler->register($kernel->container->make(DomainPruningJob::class));
+
+    // Drains queued campaign emails a few per minute so a large campaign
+    // never floods the mail host in one burst.
+    $scheduler->register($kernel->container->make(CampaignDispatchJob::class));
+
+    // Registered last so its 24h window already includes everything the jobs
+    // above just recorded on this tick.
+    $scheduler->register($kernel->container->make(CronActivityReportJob::class));
+
+    // Reporting sink + the admin's configured daily automation time. Both are
+    // attached here rather than injected, so the scheduler still works on a
+    // system whose schema/settings aren't ready yet.
+    $scheduler->recordRunsTo($kernel->container->make(CronRunRepository::class));
+    // Durable last-run state. Without this the scheduler relies on a JSON
+    // file whose write was never checked — on a host with an unwritable
+    // storage/ directory every job re-ran on every tick.
+    $scheduler->persistStateTo($kernel->container->make(CronStateRepository::class));
+    $scheduler->useDailyRunTime(static function () use ($kernel): ?string {
+        return $kernel->container->make(SettingsRepository::class)->get('automation.daily_run_time', '00:05');
+    });
 }
 
 $results = $scheduler->run($hooks);

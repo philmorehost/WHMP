@@ -2,6 +2,7 @@
 /** @var array<int, array<string, mixed>> $pricingList */
 /** @var array<int, array<string, mixed>> $registrars */
 /** @var string|null $error */
+/** @var int $spinnerEnabledCount */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Domain TLD Pricing</h1>
@@ -113,7 +114,7 @@
             </div>
             <div class="bulk-span4" style="grid-column:span 4;display:flex;gap:var(--cv-space-2);flex-wrap:wrap;">
                 <button class="cv-btn" type="submit">✓ Add All TLDs</button>
-                <button type="button" class="cv-btn cv-btn--secondary" onclick="document.getElementById('bulk-form-section').style.display='none';">Cancel</button>
+                <button type="button" class="cv-btn cv-btn--secondary" data-toggle-hide="#bulk-form-section">Cancel</button>
             </div>
         </form>
     </div>
@@ -173,7 +174,7 @@
             </div>
             <div style="grid-column:span 4;display:flex;gap:var(--cv-space-2);flex-wrap:wrap;margin-top:var(--cv-space-2);">
                 <button class="cv-btn" type="submit" id="import-whmcs-btn" disabled>✓ Import Selected Extensions</button>
-                <button type="button" class="cv-btn cv-btn--secondary" onclick="document.getElementById('whmcs-form-section').style.display='none';">Cancel</button>
+                <button type="button" class="cv-btn cv-btn--secondary" data-toggle-hide="#whmcs-form-section">Cancel</button>
             </div>
         </form>
     </div>
@@ -287,14 +288,149 @@
     </form>
 </div>
 
+<?php if (($bulkUpdated ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $bulkUpdated ?> TLD<?= (int) $bulkUpdated === 1 ? '' : 's' ?> updated.
+    </div>
+<?php endif; ?>
+
+<?php if (($reordered ?? false)): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        Display order saved.
+    </div>
+<?php endif; ?>
+
+<?php
+// "Spinner" is a separate, deliberate opt-in per TLD (default off — migration
+// 0106) from having the TLD priced and listed here. That means an install can
+// have every TLD below fully priced and still send zero suggestions from the
+// storefront's "Suggested Alternatives" search, because nobody separately
+// flipped this flag — which looks exactly like a broken feature from the
+// client side, with nothing on the storefront pointing back to this page as
+// the cause. Surfaced here, where the setting actually lives, with a one-click
+// fix rather than sending the admin hunting through the per-row edit form or
+// the bulk-select-then-choose-Enable-then-Apply flow further down the page.
+?>
+<?php if ($spinnerEnabledCount === 0 && $pricingList !== []): ?>
+    <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:var(--cv-space-3) var(--cv-space-4);margin-bottom:var(--cv-space-3);display:flex;justify-content:space-between;align-items:center;gap:var(--cv-space-3);flex-wrap:wrap;">
+        <div>
+            <strong style="color:var(--cv-text-primary);">The Domain Spinner is off for every TLD.</strong>
+            <p style="margin:4px 0 0;color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                Clients searching for a taken domain on the storefront get no "Suggested Alternatives" until at least
+                one TLD below is spinner-enabled — pricing a TLD here does not enable it on its own.
+            </p>
+        </div>
+        <form method="post" action="/admin/domain-pricing/bulk-update" style="flex-shrink:0;">
+            <?= csrf_field() ?>
+            <?php foreach ($pricingList as $price): ?>
+                <input type="hidden" name="ids[]" value="<?= (int) $price['id'] ?>">
+            <?php endforeach; ?>
+            <input type="hidden" name="spinner_enabled" value="1">
+            <button type="submit" class="cv-btn cv-btn--primary" style="white-space:nowrap;">Enable Spinner for All <?= count($pricingList) ?> TLDs</button>
+        </form>
+    </div>
+<?php endif; ?>
+
 <div class="cv-card">
     <div class="cv-datatable__toolbar">
         <h2 class="cv-card__title" style="margin:0;">TLD Pricing Table</h2>
         <?= $view->partial('partials.table-search', ['target' => '#tld-pricing-table', 'placeholder' => 'Search TLDs...']) ?>
     </div>
+
+    <?php
+    // Display order for the TLD tabs/lists a client sees. Each row's number
+    // input lives inside the table body (a <form> can't wrap <tbody> rows
+    // without breaking table markup) and points at this one via
+    // form="tld-reorder-form" — same cross-referencing technique the
+    // bulk-select checkboxes below already use.
+    ?>
+    <form method="post" action="/admin/domain-pricing/reorder" id="tld-reorder-form" style="margin-bottom:var(--cv-space-2);display:flex;justify-content:flex-end;">
+        <?= csrf_field() ?>
+        <button type="submit" class="cv-btn cv-btn--secondary">💾 Save Display Order</button>
+    </form>
+
+    <?php
+    // Bulk editor. Every field means "leave unchanged" when blank, so an admin
+    // can repoint 40 TLDs at a new registrar without disturbing their prices.
+    // The row checkboxes live inside the table but belong to this form via
+    // form="tld-bulk-update-form" — a <form> can't wrap <tbody> rows without
+    // breaking table markup.
+    ?>
+    <form method="post" action="/admin/domain-pricing/bulk-update" id="tld-bulk-update-form"
+          data-tld-bulk-form hidden
+          style="border:1px solid var(--cv-border-default);border-radius:10px;padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);background:var(--cv-bg-surface-sunken);">
+        <?= csrf_field() ?>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--cv-space-2);flex-wrap:wrap;margin-bottom:var(--cv-space-2);">
+            <strong><span data-tld-selected-count>0</span> TLD(s) selected — edit together</strong>
+            <span style="font-size:.8rem;color:var(--cv-text-secondary);">Leave a field blank to keep its current value.</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--cv-space-2);align-items:end;">
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Category</span>
+                <input class="cv-input" type="text" name="category" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Registrar</span>
+                <select class="cv-select" name="registrar_slug">
+                    <option value="">Unchanged</option>
+                    <?php foreach ($registrars as $registrar): ?>
+                        <option value="<?= e($registrar['slug']) ?>"><?= e($registrar['name'] ?? $registrar['slug']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Register Price</span>
+                <input class="cv-input" type="number" step="0.01" min="0" name="register_price" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Transfer Price</span>
+                <input class="cv-input" type="number" step="0.01" min="0" name="transfer_price" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Renewal Price</span>
+                <input class="cv-input" type="number" step="0.01" min="0" name="renew_price" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Grace Period (Days)</span>
+                <input class="cv-input" type="number" min="0" name="grace_period_days" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Redemption Period (Days)</span>
+                <input class="cv-input" type="number" min="0" name="redemption_period_days" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Redemption Fee</span>
+                <input class="cv-input" type="number" step="0.01" min="0" name="redemption_fee" placeholder="Unchanged">
+            </label>
+
+            <label style="display:block;">
+                <span style="font-size:.8rem;color:var(--cv-text-secondary);">Spinner</span>
+                <select class="cv-select" name="spinner_enabled">
+                    <option value="">Unchanged</option>
+                    <option value="1">Enable</option>
+                    <option value="0">Disable</option>
+                </select>
+            </label>
+
+            <div style="display:flex;gap:var(--cv-space-2);">
+                <button type="submit" class="cv-btn cv-btn--primary">Apply to selected</button>
+                <button type="button" class="cv-btn cv-btn--secondary" data-tld-bulk-clear>Clear</button>
+            </div>
+        </div>
+    </form>
     <table class="cv-table" id="tld-pricing-table">
         <thead>
             <tr>
+                <th style="width:36px;"><input type="checkbox" data-tld-select-all aria-label="Select all TLDs" style="cursor:pointer;"></th>
+                <th style="width:70px;">Order</th>
                 <th>TLD</th>
                 <th>Category</th>
                 <th>Registrar</th>
@@ -308,6 +444,8 @@
         <tbody>
             <?php foreach ($pricingList as $price): ?>
                 <tr>
+                    <td><input type="checkbox" name="ids[]" form="tld-bulk-update-form" value="<?= (int) $price['id'] ?>" data-tld-checkbox aria-label="Select <?= e($price['tld']) ?>" style="cursor:pointer;"></td>
+                    <td><input type="number" class="cv-input" form="tld-reorder-form" name="sort_order[<?= (int) $price['id'] ?>]" value="<?= (int) ($price['sort_order'] ?? 0) ?>" style="width:64px;padding:4px 6px;" aria-label="Display order for <?= e($price['tld']) ?>"></td>
                     <td><strong><?= e($price['tld']) ?></strong></td>
                     <td><span class="cv-badge cv-badge--neutral"><?= e($price['category'] ?? 'Popular') ?></span></td>
                     <td><span class="cv-badge cv-badge--neutral"><?= e($price['registrar_slug']) ?></span></td>
@@ -351,110 +489,19 @@
             <?php endforeach; ?>
             <?php if ($pricingList === []): ?>
                 <tr>
-                    <td colspan="8" style="text-align:center;color:var(--cv-text-secondary);padding:var(--cv-space-4);">No domain TLD pricing configured yet.</td>
+                    <td colspan="10" style="text-align:center;color:var(--cv-text-secondary);padding:var(--cv-space-4);">No domain TLD pricing configured yet.</td>
                 </tr>
             <?php endif; ?>
         </tbody>
     </table>
 </div>
 
-<script>
-document.getElementById('toggle-bulk-form').addEventListener('click', function() {
-    var section = document.getElementById('bulk-form-section');
-    section.style.display = section.style.display === 'none' ? 'block' : 'none';
-});
+<?php
+// All behaviour for this page lives in public/assets/js/app.js behind
+// delegated data-attribute listeners. SecurityHeaders sends script-src
+// 'self' with no 'unsafe-inline', so an inline <script> (or an onclick=
+// attribute) here is silently blocked by the browser and the buttons simply
+// do nothing -- which is exactly why the bulk-add and WHMCS-import buttons
+// were dead.
+?>
 
-document.getElementById('toggle-whmcs-form').addEventListener('click', function() {
-    var section = document.getElementById('whmcs-form-section');
-    section.style.display = section.style.display === 'none' ? 'block' : 'none';
-});
-
-document.getElementById('fetch-whmcs-extensions').addEventListener('click', function() {
-    var btn = this;
-    var loading = document.getElementById('whmcs-extensions-loading');
-    var list = document.getElementById('whmcs-extensions-list');
-    var error = document.getElementById('whmcs-error');
-    var importBtn = document.getElementById('import-whmcs-btn');
-
-    btn.disabled = true;
-    loading.style.display = 'block';
-    list.style.display = 'none';
-    error.style.display = 'none';
-
-    fetch('/admin/domain-pricing/fetch-whmcs', {
-        method: 'POST',
-        headers: {'X-Requested-With': 'XMLHttpRequest'},
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (!data.success) {
-            error.textContent = data.message || 'Failed to fetch extensions';
-            error.style.display = 'block';
-            return;
-        }
-
-        if (!data.extensions || data.extensions.length === 0) {
-            error.textContent = 'No domain extensions found in WHMCS database';
-            error.style.display = 'block';
-            return;
-        }
-
-        list.innerHTML = data.extensions.map((ext, idx) => {
-            return '<label style="display:flex;align-items:center;gap:var(--cv-space-1);padding:var(--cv-space-1);cursor:pointer;border-bottom:1px solid var(--cv-border-default);">' +
-                '<input type="checkbox" class="whmcs-extension-check" value="' + ext + '" data-index="' + idx + '">' +
-                '<span>' + ext + '</span>' +
-            '</label>';
-        }).join('');
-
-        list.style.display = 'block';
-        importBtn.disabled = false;
-
-        document.querySelectorAll('.whmcs-extension-check').forEach(cb => {
-            cb.addEventListener('change', function() {
-                importBtn.disabled = !document.querySelector('.whmcs-extension-check:checked');
-            });
-        });
-    })
-    .catch(err => {
-        error.textContent = 'Network error: ' + err.message;
-        error.style.display = 'block';
-    })
-    .finally(() => {
-        btn.disabled = false;
-        loading.style.display = 'none';
-    });
-});
-
-document.getElementById('whmcs-import-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    var selected = Array.from(document.querySelectorAll('.whmcs-extension-check:checked'))
-        .map(cb => cb.value);
-
-    if (selected.length === 0) {
-        alert('Please select at least one extension');
-        return;
-    }
-
-    var form = new FormData(this);
-    form.set('tld_list', selected.join('\n'));
-
-    var importBtn = document.getElementById('import-whmcs-btn');
-    importBtn.disabled = true;
-    importBtn.textContent = '⏳ Importing...';
-
-    fetch('/admin/domain-pricing/bulk', {
-        method: 'POST',
-        body: form,
-    })
-    .then(r => r.text())
-    .then(() => {
-        window.location.href = '/admin/domain-pricing';
-    })
-    .catch(err => {
-        alert('Error: ' + err.message);
-        importBtn.disabled = false;
-        importBtn.textContent = '✓ Import Selected Extensions';
-    });
-});
-</script>

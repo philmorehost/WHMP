@@ -57,6 +57,7 @@ final class HookPoints
     public const AFTER_MODULE_SUSPEND = 'AfterModuleSuspend';
     public const AFTER_MODULE_UNSUSPEND = 'AfterModuleUnsuspend';
     public const AFTER_MODULE_TERMINATE = 'AfterModuleTerminate';
+    public const AFTER_MODULE_CHANGE_DOMAIN = 'AfterModuleChangeDomain';
     public const SERVICE_STATUS_CHANGED = 'ServiceStatusChanged';
 
     // --- Domains ---------------------------------------------------------
@@ -70,6 +71,7 @@ final class HookPoints
     public const TICKET_REPLY = 'TicketReply';
     public const TICKET_CLOSE = 'TicketClose';
     public const TICKET_ESCALATED = 'TicketEscalated';
+    public const TICKET_MERGED = 'TicketMerged';
 
     // --- Cron / system -----------------------------------------------------
     public const DAILY_CRON_JOB = 'DailyCronJob';

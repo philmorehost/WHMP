@@ -25,7 +25,8 @@ final class AutoChargeService
         private readonly TransactionRepository $transactions,
         private readonly PaymentService $payments,
         private readonly ModuleManager $modules,
-        private readonly Database $db
+        private readonly Database $db,
+        private readonly CurrencyService $currency
     ) {
     }
 
@@ -100,24 +101,21 @@ final class AutoChargeService
     {
         $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
 
-        $invoiceCurrId = $invoice['currency_id'] ?? null;
-        $invoiceCurr = $invoiceCurrId !== null
-            ? $this->db->selectOne('SELECT code, exchange_rate FROM currencies WHERE id = ?', [$invoiceCurrId])
-            : null;
-        $invoiceCode = $invoiceCurr !== null ? (string) $invoiceCurr['code'] : 'USD';
-        $invoiceRate = $invoiceCurr !== null ? (float) $invoiceCurr['exchange_rate'] : 1.0000;
+        // A NULL currency_id means "the base currency" — the convention
+        // lockColumns()/denominateFor() write. Reading it as a hardcoded 'USD'
+        // (as this did) made an NGN-denominated invoice on an NGN-default
+        // install look like a cross-currency charge, so it was multiplied by
+        // NGN's own live rate: ₦7,501.50 auto-charged as ₦11,177,235. Same
+        // defect prepareCharge() carried; both now resolve the code the same
+        // way and let crossConvert() no-op when the codes match.
+        $invoiceCurrencyId = ($invoice['currency_id'] ?? null) !== null ? (int) $invoice['currency_id'] : null;
+        $invoiceRate = (float) ($invoice['currency_rate'] ?? 1.0);
+        $invoiceCode = $this->currency->codeFor($invoiceCurrencyId);
 
-        if ($invoiceCode === $gatewayCurrency) {
-            return $remaining;
-        }
+        // Charge what the invoice shows the client, exactly as the interactive
+        // flow does (PaymentCallbackController::prepareCharge).
+        $shownAmount = round($remaining * ($invoiceCurrencyId !== null && $invoiceRate > 0 ? $invoiceRate : 1.0), 2);
 
-        $gatewayCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE code = ?', [$gatewayCurrency]);
-        $gatewayRate = $gatewayCurr !== null ? (float) $gatewayCurr['exchange_rate'] : 1.0000;
-
-        if ($invoiceRate <= 0.0) {
-            $invoiceRate = 1.0000;
-        }
-
-        return round($remaining * ($gatewayRate / $invoiceRate), 2);
+        return $this->currency->crossConvert($shownAmount, $invoiceCode, $gatewayCurrency);
     }
 }

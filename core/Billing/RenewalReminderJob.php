@@ -6,6 +6,7 @@ namespace CodeVault\Billing;
 
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Cron\CronJob;
+use CodeVault\Cron\ReportsCronStats;
 use CodeVault\Mail\EmailDispatcher;
 
 /**
@@ -16,8 +17,11 @@ use CodeVault\Mail\EmailDispatcher;
  * dueForReminder() only returns rows with renewal_reminded_at IS NULL;
  * advanceNextDueDate() clears it again once the cycle rolls over).
  */
-final class RenewalReminderJob implements CronJob
+final class RenewalReminderJob implements CronJob, ReportsCronStats
 {
+    /** @var array<string, int> counters for the daily activity report */
+    private array $stats = [];
+
     public const DEFAULT_DAYS_AHEAD = 7;
 
     public function __construct(
@@ -38,8 +42,16 @@ final class RenewalReminderJob implements CronJob
         return 1440;
     }
 
+    /** @return array<string, int> */
+    public function stats(): array
+    {
+        return $this->stats;
+    }
+
     public function handle(): void
     {
+        $this->stats = ['renewal_reminders' => 0];
+
         foreach ($this->services->dueForReminder(self::DEFAULT_DAYS_AHEAD) as $service) {
             $client = $this->clients->find((int) $service['client_id']);
 
@@ -47,19 +59,29 @@ final class RenewalReminderJob implements CronJob
                 continue;
             }
 
+            // services.amount is already denominated in the client's own
+            // currency (checkout locks it via denominateFor(), not
+            // lockColumns() — see CheckoutService::buildOrder()) and has no
+            // per-row exchange rate to convert it back through. format()
+            // multiplies by today's LIVE rate on top of that, which is a
+            // double-conversion — the actual renewal invoice this reminder
+            // is about gets raised at the raw services.amount figure
+            // (RecurringBillingService also denominates), so a converted
+            // reminder quotes a different number than the invoice that
+            // follows it. Same bug, same fix, as the client dashboard's
+            // services widget and the client/admin service detail pages.
             $clientCurrency = $this->currency->resolveForClient($client);
-            $symbol = (string) $clientCurrency['symbol'];
-            $rate = (float) ($clientCurrency['exchange_rate'] ?? 1.0000);
 
             $this->mail->sendTemplate('service_renewal_reminder', $client['email'], [
                 'first_name' => $client['first_name'],
                 'product_name' => $service['product_name'],
                 'due_date' => $service['next_due_date'],
-                'amount' => $symbol . number_format((float) $service['amount'] * $rate, 2),
-                'company_name' => 'CodeVault',
+                'amount' => ($clientCurrency['symbol'] ?? '$') . number_format((float) $service['amount'], 2),
+                'company_name' => brand_name(),
             ], (int) $client['id']);
 
             $this->services->stampReminded((int) $service['id']);
+            $this->stats['renewal_reminders']++;
         }
     }
 }

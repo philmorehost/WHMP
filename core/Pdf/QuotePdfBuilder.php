@@ -30,7 +30,12 @@ final class QuotePdfBuilder
         $pdf = new PdfDocument();
         $rate = (float) $quote['currency_rate'];
         $currencyId = $quote['currency_id'] !== null ? (int) $quote['currency_id'] : null;
-        $money = fn (float $amount): string => $this->currency->formatLocked($amount, $currencyId, $rate);
+
+        // Same rule as InvoicePdfBuilder: with no locked currency, fall back to
+        // the client's own rather than the system default, so a naira quote
+        // isn't priced in dollars on the copy the client is asked to accept.
+        $clientCurrency = $client === [] ? null : $this->currency->resolveForClient($client);
+        $money = fn (float $amount): string => $this->currency->formatDocument($amount, $currencyId, $rate, $clientCurrency);
 
         $y = 800.0;
 

@@ -261,7 +261,7 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $this->assertFalse($result['success']);
     }
 
-    public function test_reinstall_queues_reinstallation(): void
+    public function test_reinstall_posts_template_to_reinstall_os_path(): void
     {
         $this->http->respondWith(200, json_encode([
             '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
@@ -272,15 +272,45 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $result = $this->module->reinstall([
             'username' => 'cv900',
             'server' => $this->server,
-            'osVersion' => 'ubuntu24'
+            'template' => 'centos-7-x86_64.qcow2',
+            'localPassword' => 'myadmin-secret',
         ]);
 
         $this->assertTrue($result['success']);
-        $this->assertSame('https://my.interserver.net/apiv2/vps/12/reinstall', $this->http->lastRequest()['url']);
+        // `/vps/{id}/reinstall` is not a route on InterServer — it 404s. The
+        // documented path is `/reinstall_os`, keyed by a `template_file`.
+        $this->assertSame('https://my.interserver.net/apiv2/vps/12/reinstall_os', $this->http->lastRequest()['url']);
         $this->assertSame('POST', $this->http->lastRequest()['method']);
+        $this->assertSame(
+            ['template' => 'centos-7-x86_64.qcow2', 'localPassword' => 'myadmin-secret'],
+            json_decode($this->http->lastRequest()['body'], true)
+        );
     }
 
-    public function test_set_reverse_dns(): void
+    /**
+     * Reinstall is destructive and InterServer re-checks the MyAdmin account
+     * password on every call. WHMP has no column for it, so the module must
+     * refuse locally rather than fire a call that gets rejected anyway.
+     */
+    public function test_reinstall_without_local_password_makes_no_destructive_call(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
+        ]));
+
+        $result = $this->module->reinstall([
+            'username' => 'cv900',
+            'server' => $this->server,
+            'template' => 'centos-7-x86_64.qcow2',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('support request', $result['message']);
+        // Only the hostname->id lookup should have happened, never the POST.
+        $this->assertSame('GET', $this->http->lastRequest()['method']);
+    }
+
+    public function test_set_reverse_dns_sends_ip_keyed_map(): void
     {
         $this->http->respondWith(200, json_encode([
             '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
@@ -291,11 +321,108 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $result = $this->module->setReverseDns([
             'username' => 'cv900',
             'server' => $this->server,
-            'rdns' => 'ptr.example.com'
+            'ip' => '10.0.0.7',
+            'rdns' => 'ptr.example.com',
         ]);
 
         $this->assertTrue($result['success']);
         $this->assertSame('https://my.interserver.net/apiv2/vps/12/reverse_dns', $this->http->lastRequest()['url']);
         $this->assertSame('POST', $this->http->lastRequest()['method']);
+        // A flat {rdns: "..."} body names no IP, so InterServer applied
+        // nothing and still returned 200 — the bug this pins shut.
+        $this->assertSame(
+            ['ips' => ['10.0.0.7' => 'ptr.example.com']],
+            json_decode($this->http->lastRequest()['body'], true)
+        );
+    }
+
+    public function test_set_reverse_dns_requires_an_ip(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
+        ]));
+
+        $result = $this->module->setReverseDns([
+            'username' => 'cv900',
+            'server' => $this->server,
+            'rdns' => 'ptr.example.com',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('GET', $this->http->lastRequest()['method']);
+    }
+
+    public function test_power_restart_calls_documented_restart_endpoint(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
+            'text' => 'Action has been sent to the server.',
+            'queueId' => 991,
+        ]));
+
+        $result = $this->module->power(['username' => 'cv900', 'server' => $this->server], 'restart');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/12/restart', $this->http->lastRequest()['url']);
+        $this->assertSame('GET', $this->http->lastRequest()['method']);
+    }
+
+    public function test_power_rejects_unknown_action_without_calling_the_api(): void
+    {
+        $result = $this->module->power(['username' => 'cv900', 'server' => $this->server], 'obliterate');
+
+        $this->assertFalse($result['success']);
+        $this->assertSame([], $this->http->requests);
+    }
+
+    public function test_create_backup_calls_backup_endpoint(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            '0' => ['vps_id' => '12', 'vps_hostname' => 'cv900'],
+            'text' => 'Action has been sent to the server.',
+            'queueId' => 55,
+        ]));
+
+        $result = $this->module->createBackup(['username' => 'cv900', 'server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/12/backup', $this->http->lastRequest()['url']);
+    }
+
+    /** A restore is keyed by the composite `<type>:<service>:<name>`, not the bare filename. */
+    public function test_list_backups_builds_composite_restore_reference(): void
+    {
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => json_encode(['0' => ['vps_id' => '12', 'vps_hostname' => 'cv900']])],
+            ['status' => 200, 'body' => json_encode([
+                ['name' => 'vps-12-2026-05-12.tar.gz', 'type' => 'minio', 'service' => 12, 'size' => 2048],
+            ])],
+        ]);
+
+        $result = $this->module->listBackups(['username' => 'cv900', 'server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('minio:12:vps-12-2026-05-12.tar.gz', $result['backups'][0]['ref']);
+        $this->assertSame(2048, $result['backups'][0]['sizeBytes']);
+    }
+
+    public function test_info_reports_real_vps_status(): void
+    {
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => json_encode(['0' => ['vps_id' => '12', 'vps_hostname' => 'cv900']])],
+            ['status' => 200, 'body' => json_encode([
+                'vps_id' => 12,
+                'vps_hostname' => 'cv900',
+                'vps_ip' => '10.0.0.7',
+                'vps_status' => 'suspended',
+                'services_name' => 'KVM',
+            ])],
+        ]);
+
+        $result = $this->module->info(['username' => 'cv900', 'server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('suspended', $result['info']['status']);
+        $this->assertSame('10.0.0.7', $result['info']['ip']);
     }
 }

@@ -336,11 +336,12 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
     </div>
 
     <!-- Tabs Navigation -->
-    <div class="domain-tabs">
-        <button class="domain-tab active" onclick="switchTab(event, 'overview')">📋 Overview</button>
-        <button class="domain-tab" onclick="switchTab(event, 'nameservers')">🔗 Nameservers</button>
-        <button class="domain-tab" onclick="switchTab(event, 'dns')">🔍 DNS Records</button>
-        <button class="domain-tab" onclick="switchTab(event, 'advanced')">⚙️ Advanced</button>
+    <?php // Delegated tab handler lives in app.js — inline onclick is blocked by this app's CSP. ?>
+    <div class="domain-tabs" data-tabs data-tab-panels=".domain-tab-content">
+        <button type="button" class="domain-tab active" data-tab-target="overview">📋 Overview</button>
+        <button type="button" class="domain-tab" data-tab-target="nameservers">🔗 Nameservers</button>
+        <button type="button" class="domain-tab" data-tab-target="dns">🔍 DNS Records</button>
+        <button type="button" class="domain-tab" data-tab-target="advanced">⚙️ Advanced</button>
     </div>
 
     <!-- TAB 1: OVERVIEW -->
@@ -398,7 +399,7 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
                 <div class="epp-code-display">
                     <span class="epp-code-display__label">Your EPP / Auth Code</span>
                     <p class="epp-code-display__code" id="epp-code"><?= e($eppCode) ?></p>
-                    <button class="epp-code-display__copy" onclick="copyToClipboard('epp-code')">📋 Copy Code</button>
+                    <button type="button" class="epp-code-display__copy" data-copy-from="epp-code">📋 Copy Code</button>
                 </div>
             <?php elseif (!empty($eppError)): ?>
                 <div class="alert-error"><?= e($eppError) ?></div>
@@ -453,9 +454,9 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
                                     <td><strong><?= e($rec['name']) ?></strong></td>
                                     <td style="word-break: break-all;"><?= e($rec['content']) ?></td>
                                     <td style="text-align: center;">
-                                        <form method="post" action="/client/domains/<?= $id ?>/dns/<?= (int)$rec['id'] ?>/delete" style="display: inline;">
+                                        <form method="post" action="/client/domains/<?= $id ?>/dns/<?= (int)$rec['id'] ?>/delete" style="display: inline;" data-confirm="Delete this DNS record?">
                                             <?= csrf_field() ?>
-                                            <button type="submit" class="record-delete-btn" onclick="return confirm('Delete this DNS record?')">Delete</button>
+                                            <button type="submit" class="record-delete-btn">Delete</button>
                                         </form>
                                     </td>
                                 </tr>
@@ -523,9 +524,9 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
                                     <td><strong><?= e($cns['hostname']) ?></strong></td>
                                     <td><?= e($cns['ip_address']) ?></td>
                                     <td style="text-align: center;">
-                                        <form method="post" action="/client/domains/<?= $id ?>/child-ns/<?= (int)$cns['id'] ?>/delete" style="display: inline;">
+                                        <form method="post" action="/client/domains/<?= $id ?>/child-ns/<?= (int)$cns['id'] ?>/delete" style="display: inline;" data-confirm="Delete this private nameserver?">
                                             <?= csrf_field() ?>
-                                            <button type="submit" class="record-delete-btn" onclick="return confirm('Delete this private nameserver?')">Delete</button>
+                                            <button type="submit" class="record-delete-btn">Delete</button>
                                         </form>
                                     </td>
                                 </tr>
@@ -555,38 +556,10 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
     </div>
 </div>
 
-<script>
-    function switchTab(event, tabName) {
-        event.preventDefault();
-
-        // Hide all tab contents
-        document.querySelectorAll('.domain-tab-content').forEach(content => {
-            content.classList.remove('active');
-        });
-
-        // Remove active class from all tabs
-        document.querySelectorAll('.domain-tab').forEach(tab => {
-            tab.classList.remove('active');
-        });
-
-        // Show the selected tab content
-        document.getElementById(tabName).classList.add('active');
-        event.target.classList.add('active');
-    }
-
-    function copyToClipboard(elementId) {
-        const element = document.getElementById(elementId);
-        const text = element.textContent;
-
-        navigator.clipboard.writeText(text).then(() => {
-            const btn = event.target;
-            const originalText = btn.textContent;
-            btn.textContent = '✓ Copied!';
-            setTimeout(() => {
-                btn.textContent = originalText;
-            }, 2000);
-        }).catch(() => {
-            alert('Failed to copy to clipboard');
-        });
-    }
-</script>
+<?php
+// The tab switcher and the EPP copy-to-clipboard used to be defined here and
+// called from onclick="..." attributes. Both now live in app.js behind
+// delegated [data-tab-target] / [data-copy-from] listeners, because CSP blocks
+// inline event handlers — which is why Nameservers, DNS Records and Advanced
+// appeared unimplemented when the code for them was here all along.
+?>

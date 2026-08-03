@@ -319,6 +319,22 @@
 </div>
 
 <!-- Status Tabs -->
+<?php if (($closedCount ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $closedCount ?> ticket(s) closed.
+        <?php if ((int) ($closeSkipped ?? 0) > 0): ?>
+            <?= (int) $closeSkipped ?> skipped — already closed.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
+<?php if (($deletedCount ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $deletedCount ?> ticket(s) deleted<?php if ((int) ($deletedFiles ?? 0) > 0): ?>,
+        along with <?= (int) $deletedFiles ?> uploaded file(s)<?php endif; ?>.
+    </div>
+<?php endif; ?>
+
 <div class="admin-status-tabs">
     <a href="/admin/tickets" class="admin-status-tab <?= $statusFilter === '' ? 'active' : '' ?>">
         All (<?= count($tickets) ?>)
@@ -355,10 +371,31 @@
             </p>
         </div>
     <?php else: ?>
+        <?php
+        // Checkboxes live inside the table but belong to this form; a <form>
+        // can't wrap <tbody> rows without breaking the table markup.
+        // data-select-all-trigger / -item are the attribute names app.js
+        // actually listens for.
+        ?>
+        <form method="post" action="/admin/tickets/bulk-delete" id="bulk-delete-tickets-form"
+              data-confirm="Permanently delete the selected ticket(s)? Their replies and uploaded files are deleted too. This cannot be undone."><?= csrf_field() ?>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:var(--cv-space-2);">
+            <?php
+            // Both buttons submit the same selection; formaction routes each to
+            // its own endpoint, so one form drives two actions without a second
+            // set of checkboxes.
+            ?>
+            <button type="submit" class="cv-btn cv-btn--secondary" data-bulk-delete-for="[data-ticket-checkbox]"
+                    formaction="/admin/tickets/bulk-close"
+                    data-confirm="Close the selected ticket(s)? Tickets already closed are skipped."
+                    style="display:none;">✓ Close Selected</button>
+            <button type="submit" class="cv-btn cv-btn--danger" data-bulk-delete-for="[data-ticket-checkbox]" style="display:none;">🗑️ Delete Selected</button>
+        </div>
         <div class="admin-table-wrapper">
             <table class="admin-table" id="tickets-table">
                 <thead>
                     <tr>
+                        <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-ticket-checkbox]" aria-label="Select all tickets" style="cursor:pointer;"></th>
                         <th>Ticket ID</th>
                         <th>Subject</th>
                         <th>Department</th>
@@ -372,6 +409,7 @@
                 <tbody>
                 <?php foreach ($tickets as $ticket): ?>
                     <tr>
+                        <td><input type="checkbox" name="ticket_ids[]" value="<?= (int) $ticket['id'] ?>" data-ticket-checkbox data-select-all-item="[data-ticket-checkbox]" aria-label="Select ticket <?= (int) $ticket['id'] ?>" style="cursor:pointer;"></td>
                         <td><strong>#<?= (int) $ticket['id'] ?></strong></td>
                         <td><?= e($ticket['subject']) ?></td>
                         <td><?= e($ticket['department_name']) ?></td>
@@ -394,6 +432,9 @@
                             <?php else: ?>
                                 <span class="admin-badge admin-badge--closed">Closed</span>
                             <?php endif; ?>
+                            <?php if (!empty($ticket['merged_into_id'])): ?>
+                                <span class="admin-badge admin-badge--closed" title="Merged into ticket #<?= (int) $ticket['merged_into_id'] ?>">↪ #<?= (int) $ticket['merged_into_id'] ?></span>
+                            <?php endif; ?>
                         </td>
                         <td><?= e((string) ($ticket['assigned_admin_name'] ?? '—')) ?></td>
                         <td style="font-size: .85rem; color: var(--cv-text-secondary);"><?= e((string) ($ticket['last_reply_at'] ?? '-')) ?></td>
@@ -405,6 +446,7 @@
                 </tbody>
             </table>
         </div>
+        </form>
 
         <!-- Pagination -->
         <?php if (isset($pagination) && $pagination['total'] > 20): ?>

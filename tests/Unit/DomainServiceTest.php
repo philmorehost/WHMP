@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Tests\Unit;
 
+use CodeVault\Activity\ActivityLogger;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database\Migrator;
 use CodeVault\Domains\DomainRepository;
@@ -42,7 +43,7 @@ final class DomainServiceTest extends DatabaseTestCase
         $modules->register(RegistrarModule::class, 'local', $localModule);
 
         $clients = new ClientRepository($this->db);
-        $this->service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients);
+        $this->service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients, $this->db, new ActivityLogger($this->db));
 
         $this->clientId = $clients->create([
             'email' => 'domainowner@example.test',
@@ -116,6 +117,54 @@ final class DomainServiceTest extends DatabaseTestCase
         $domain = $this->domains->find($domainId);
         $this->assertGreaterThan($beforeExpiry, $domain['expiry_date']);
         $this->assertSame($domain['expiry_date'], $domain['next_due_date']);
+    }
+
+    /**
+     * The grace/redemption check reads domain_pricing directly. It crashed in
+     * production — "Call to a member function selectOne() on null" — because
+     * DomainService had no Database dependency, taking down the whole
+     * mark-invoice-paid request via the DOMAIN_RENEWED hook.
+     */
+    public function test_renew_consults_tld_pricing_for_a_domain_with_a_matching_pricing_row(): void
+    {
+        $domainId = $this->createPendingDomain('renewpriced.com');
+        $this->service->register($domainId, 1);
+
+        $result = $this->service->renew($domainId, 1);
+
+        $this->assertTrue($result['success'], $result['message'] ?? '');
+    }
+
+    public function test_renew_is_refused_once_grace_and_redemption_periods_have_both_elapsed(): void
+    {
+        $domainId = $this->createPendingDomain('longexpired.com');
+        $this->service->register($domainId, 1);
+
+        // .com seeds grace 30 + redemption 30; put expiry well past both.
+        $this->db->update(
+            'UPDATE domains SET expiry_date = ? WHERE id = ?',
+            [(new DateTimeImmutable('-200 days'))->format('Y-m-d'), $domainId]
+        );
+
+        $result = $this->service->renew($domainId, 1);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Redemption Period', $result['message']);
+    }
+
+    public function test_renew_is_still_allowed_inside_the_grace_period(): void
+    {
+        $domainId = $this->createPendingDomain('justexpired.com');
+        $this->service->register($domainId, 1);
+
+        $this->db->update(
+            'UPDATE domains SET expiry_date = ? WHERE id = ?',
+            [(new DateTimeImmutable('-10 days'))->format('Y-m-d'), $domainId]
+        );
+
+        $result = $this->service->renew($domainId, 1);
+
+        $this->assertTrue($result['success'], $result['message'] ?? '');
     }
 
     public function test_set_lock_updates_local_state_only_on_module_success(): void
@@ -209,7 +258,7 @@ final class DomainServiceTest extends DatabaseTestCase
         });
         $modules = new ModuleManager($hooks);
         $modules->register(RegistrarModule::class, 'local', new LocalRegistrarModule($this->localStorageDir));
-        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, new ClientRepository($this->db));
+        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, new ClientRepository($this->db), $this->db, new ActivityLogger($this->db));
 
         $domainId = $this->createPendingDomain('hooktest.test');
         $service->register($domainId, 1);
@@ -225,7 +274,7 @@ final class DomainServiceTest extends DatabaseTestCase
         $fake = new FakeRegistrarModule();
         $modules->register(RegistrarModule::class, 'fake', $fake);
         $clients = new ClientRepository($this->db);
-        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients);
+        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients, $this->db, new ActivityLogger($this->db));
 
         return [$service, $fake];
     }

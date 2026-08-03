@@ -136,6 +136,59 @@ final class CurrencyServiceTest extends DatabaseTestCase
         $this->assertSame(0, (int) $usd['is_default']);
     }
 
+    public function test_promoting_a_currency_to_default_resets_its_exchange_rate_to_one(): void
+    {
+        // The live scenario: NGN exists at 1490 per USD, then becomes the
+        // system's base currency. Leaving its rate at 1490 makes every
+        // "convert from base" multiplication inflate an already-NGN amount.
+        $ngnId = $this->currencies->create('NGN', '₦', 1490.0000);
+        $this->currencies->setDefault($ngnId);
+
+        $this->assertSame(1.0, (float) $this->currencies->default()['exchange_rate']);
+    }
+
+    public function test_the_default_currencys_rate_cannot_be_edited_away_from_one(): void
+    {
+        $usd = $this->currencies->findByCode('USD');
+
+        $this->currencies->update((int) $usd['id'], 'USD', '$', 1490.0000);
+
+        $this->assertSame(1.0, (float) $this->currencies->findByCode('USD')['exchange_rate']);
+    }
+
+    public function test_rate_for_pins_the_base_currency_at_one_however_the_row_reads(): void
+    {
+        // Bypasses the repository guards to reproduce data written before
+        // them — the state a live install is already in.
+        $usd = $this->currencies->findByCode('USD');
+        $this->db->update('UPDATE currencies SET exchange_rate = 1490 WHERE id = ?', [$usd['id']]);
+
+        $this->assertSame(1.0, $this->service->rateFor($this->currencies->findByCode('USD')));
+        $this->assertSame(1.0, $this->service->rateForCode('USD'));
+        $this->assertSame('$7,501.50', $this->service->format(7501.50, $this->currencies->findByCode('USD')));
+    }
+
+    public function test_cross_convert_is_a_no_op_between_identical_currencies(): void
+    {
+        $this->currencies->create('NGN', '₦', 1490.0000);
+
+        $this->assertSame(7501.50, $this->service->crossConvert(7501.50, 'NGN', 'NGN'));
+    }
+
+    public function test_cross_convert_uses_the_ratio_of_the_two_rates(): void
+    {
+        $this->currencies->create('EUR', '€', 0.9200);
+        $this->currencies->create('GBP', '£', 0.7900);
+
+        // 92 EUR is 100 USD is 79 GBP.
+        $this->assertSame(79.00, $this->service->crossConvert(92.00, 'EUR', 'GBP'));
+    }
+
+    public function test_code_for_null_currency_id_is_the_base_currency(): void
+    {
+        $this->assertSame('USD', $this->service->codeFor(null));
+    }
+
     public function test_delete_refuses_to_remove_the_default_currency(): void
     {
         $usd = $this->currencies->findByCode('USD');

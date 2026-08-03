@@ -17,13 +17,15 @@ final class DomainPricingRepository
     /** @return array<int, array<string, mixed>> */
     public function all(): array
     {
-        return $this->db->select('SELECT * FROM domain_pricing ORDER BY tld ASC');
+        return $this->db->select('SELECT * FROM domain_pricing ORDER BY sort_order ASC, tld ASC');
     }
 
     /**
      * Every TLD grouped by its category, for the tabbed browse-by-category
      * UI on the public register page. Preserves category insertion order
-     * (Popular first is the natural default) and TLD order within a group.
+     * (Popular first is the natural default) and the admin-set sort_order
+     * within a group (falling back to alphabetical for any TLD that hasn't
+     * been explicitly ordered).
      *
      * @return array<string, array<int, array<string, mixed>>>
      */
@@ -31,7 +33,7 @@ final class DomainPricingRepository
     {
         $grouped = [];
 
-        foreach ($this->db->select('SELECT * FROM domain_pricing ORDER BY category ASC, tld ASC') as $row) {
+        foreach ($this->db->select('SELECT * FROM domain_pricing ORDER BY category ASC, sort_order ASC, tld ASC') as $row) {
             $category = trim((string) ($row['category'] ?? '')) ?: 'Other';
             $grouped[$category][] = $row;
         }
@@ -104,8 +106,73 @@ final class DomainPricingRepository
         return $this->db->select('SELECT * FROM domain_pricing WHERE spinner_enabled = 1 ORDER BY tld ASC');
     }
 
+    /**
+     * Applies the same set of changes to many TLDs at once.
+     *
+     * Deliberately a *partial* update: only the columns present in $fields are
+     * written, so an admin can repoint 40 TLDs at a new registrar without
+     * touching their individual prices. save() can't express that — it upserts
+     * a whole row, so anything omitted would be reset to a default.
+     *
+     * @param array<int, int> $ids
+     * @param array<string, mixed> $fields subset of the editable columns
+     * @return int rows updated
+     */
+    public function bulkUpdate(array $ids, array $fields): int
+    {
+        // Whitelist: the column list is interpolated into SQL, so it can never
+        // come from request keys directly.
+        $allowed = ['category', 'registrar_slug', 'register_price', 'transfer_price', 'renew_price', 'spinner_enabled', 'grace_period_days', 'redemption_period_days', 'redemption_fee'];
+
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+        $sets = [];
+        $bindings = [];
+
+        foreach ($allowed as $column) {
+            if (!array_key_exists($column, $fields)) {
+                continue;
+            }
+
+            $sets[] = "{$column} = ?";
+            $bindings[] = $fields[$column];
+        }
+
+        if ($ids === [] || $sets === []) {
+            return 0;
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $bindings = array_merge($bindings, $ids);
+
+        return $this->db->update(
+            'UPDATE domain_pricing SET ' . implode(', ', $sets) . " WHERE id IN ({$placeholders})",
+            $bindings
+        );
+    }
+
     public function delete(int $id): void
     {
         $this->db->update('DELETE FROM domain_pricing WHERE id = ?', [$id]);
+    }
+
+    /**
+     * Applies a new sort_order to many TLDs at once, from the admin's
+     * per-row "Order" numbers on the pricing table.
+     *
+     * @param array<int, int> $sortOrders TLD id => new sort_order
+     * @return int rows updated
+     */
+    public function reorder(array $sortOrders): int
+    {
+        $updated = 0;
+
+        foreach ($sortOrders as $id => $order) {
+            $updated += $this->db->update(
+                'UPDATE domain_pricing SET sort_order = ? WHERE id = ?',
+                [max(0, (int) $order), (int) $id]
+            );
+        }
+
+        return $updated;
     }
 }

@@ -160,7 +160,7 @@ $action = $isEdit ? "/admin/products/{$product['id']}" : '/admin/products';
             </table>
         </div>
 
-        <script>
+        <script nonce="<?= csp_nonce() ?>">
         function togglePayTypeOptions() {
             var val = document.getElementById('pay_type_select').value;
             var freeContainer = document.getElementById('free_hosting_options_container');

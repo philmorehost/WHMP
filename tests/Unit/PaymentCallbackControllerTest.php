@@ -69,7 +69,8 @@ final class PaymentCallbackControllerTest extends DatabaseTestCase
             $modules,
             $config,
             $this->db,
-            new \CodeVault\Billing\PaymentMethodRepository($this->db)
+            new \CodeVault\Billing\PaymentMethodRepository($this->db),
+            new CurrencyService(new CurrencyRepository($this->db))
         );
 
         $this->clientId = $clients->create([
@@ -219,6 +220,39 @@ final class PaymentCallbackControllerTest extends DatabaseTestCase
 
         $allTransactions = $this->transactions->forInvoice($this->invoiceId);
         $this->assertCount(1, $allTransactions, 'a duplicate webhook delivery must not create a second transaction');
+    }
+
+    /**
+     * The reported production defect: on an install whose base currency is
+     * NGN, a ₦7,501.50 invoice was initialised at Paystack as ₦11,177,235 —
+     * the invoice total multiplied by NGN's own leftover 1490 exchange rate.
+     * The gateway must be asked for exactly the figure the invoice shows.
+     */
+    public function test_charge_amount_is_not_inflated_by_the_base_currencys_own_exchange_rate(): void
+    {
+        $currencies = new CurrencyRepository($this->db);
+        $ngnId = $currencies->create('NGN', '₦', 1490.0000);
+        $currencies->setDefault($ngnId);
+
+        // Reproduce the legacy row the repository guards now prevent: base
+        // currency still carrying the rate it had before being promoted.
+        $this->db->update('UPDATE currencies SET exchange_rate = 1490 WHERE id = ?', [$ngnId]);
+
+        $this->db->update('UPDATE invoices SET total = ?, subtotal = ?, currency_id = NULL, currency_rate = 1 WHERE id = ?', [7501.50, 7501.50, $this->invoiceId]);
+        $this->db->update(
+            'UPDATE payment_gateways SET config = ? WHERE slug = ?',
+            [json_encode(['secret_key' => 'sk_test_123', 'gateway_currency' => 'NGN']), 'paystack']
+        );
+
+        $this->http->respondWith(200, json_encode([
+            'status' => true,
+            'data' => ['authorization_url' => 'https://checkout.paystack.com/xyz', 'reference' => 'r'],
+        ]));
+
+        $this->controller->initiate($this->request(), ['id' => (string) $this->invoiceId, 'gateway' => 'paystack']);
+
+        $body = json_decode((string) $this->http->lastRequest()['body'], true);
+        $this->assertSame(750150, $body['amount'], 'Paystack takes kobo: ₦7,501.50 is 750150, not 1117723500');
     }
 
     private function request(): Request

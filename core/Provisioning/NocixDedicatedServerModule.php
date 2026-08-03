@@ -47,7 +47,11 @@ final class NocixDedicatedServerModule implements ProvisioningModule
     {
         return [
             'name' => 'Nocix Dedicated Server',
-            'description' => 'Manages Nocix dedicated servers (reboot, disconnect/reconnect, OS reload, bandwidth) via the Nocix client API.',
+            // Lists only what this module actually implements. It used to
+            // advertise "reboot" and "OS reload", neither of which exists
+            // here — an admin picking this module from the server dropdown
+            // was told it could do two things it cannot.
+            'description' => 'Manages Nocix dedicated servers (disconnect/reconnect from the network, bandwidth graphing) via the Nocix client API.',
             'version' => '1.0.0',
             'author' => 'CodeVault',
         ];

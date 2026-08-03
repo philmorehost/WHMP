@@ -112,6 +112,23 @@ final class CpanelProvisioningModule implements ProvisioningModule
         return $this->toResult($response);
     }
 
+    /**
+     * Renames the account's primary domain via WHM's `modifyacct`. Optional
+     * (not on ProvisioningModule) since this is a cPanel-specific concept —
+     * dispatched through ProvisioningService::changeDomain()'s method_exists
+     * check, same as changePassword()/changePackage() would be if a VPS
+     * module had no equivalent.
+     */
+    public function changeDomain(array $params): array
+    {
+        $response = $this->call($params['server'], 'modifyacct', [
+            'user' => (string) $params['username'],
+            'domain' => (string) $params['domain'],
+        ]);
+
+        return $this->toResult($response);
+    }
+
     public function singleSignOn(array $params): array
     {
         $response = $this->call($params['server'], 'create_user_session', [

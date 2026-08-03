@@ -16,7 +16,8 @@ final class KbArticleController
         private readonly AuthGuard $guard,
         private readonly View $view,
         private readonly KbArticleRepository $articles,
-        private readonly KbCategoryRepository $categories
+        private readonly KbCategoryRepository $categories,
+        private readonly KbImageRepository $images
     ) {
     }
 
@@ -80,7 +81,11 @@ final class KbArticleController
         return $this->render('knowledgebase.article-form', [
             'article' => $article,
             'categories' => $this->categories->all(),
+            'images' => $this->images->forArticle((int) $article['id']),
             'error' => null,
+            'imgUploaded' => $request->query('img_uploaded') !== null,
+            'imgDeleted' => $request->query('img_deleted') !== null,
+            'imgError' => $request->query('img_error') !== null ? (string) $request->query('img_error') : null,
         ]);
     }
 

@@ -51,6 +51,10 @@ final class ClientInvoiceController
             'pagination' => $pagination,
             'invoices' => $pagination['data'],
             'statusFilter' => $statusFilter ?? '',
+            'currencyService' => $this->currency,
+            // Used for invoices that never locked a currency, so they render
+            // in this client's own currency rather than the system default.
+            'clientCurrency' => $this->currency->resolveForClient($client),
         ]);
     }
 
@@ -103,7 +107,14 @@ final class ClientInvoiceController
             'transactions' => $this->transactions->forInvoice((int) $invoice['id']),
             'gateways' => $this->gateways->allEnabled(),
             'creditBalance' => $this->credit->balance((int) $client['id']),
-            'currency' => $this->currency->resolveLocked($currencyId),
+            // An invoice that locked a currency displays in it. One that never
+            // locked (imported, or created before locking existed) is shown in
+            // the client's own currency — resolveLocked() would fall back to
+            // the system default and print "$" against a naira amount.
+            // currency_rate is 1.0 on those rows, so nothing is converted.
+            'currency' => $currencyId !== null
+                ? $this->currency->resolveLocked($currencyId)
+                : $this->currency->resolveForClient($client),
             // The client's own currency (not the invoice's locked currency) is needed
             // to display the wallet balance correctly — the two differ when the invoice
             // was created in a non-default currency but the client's preference is NGN.
@@ -185,6 +196,10 @@ final class ClientInvoiceController
         return $this->page('billing.client-add-funds', [
             'creditBalance' => $balance,
             'currency' => $currency,
+            // Resolved here rather than read off $currency in the template, so
+            // the view cannot pick up a base currency whose row still carries a
+            // rate above 1 and render the wallet balance multiplied by it.
+            'currencyRate' => $this->currency->rateFor($currency),
             'minDeposit' => $limits['min'],
             'maxDeposit' => $limits['max'],
             'error' => $request->query('error'),
@@ -206,11 +221,9 @@ final class ClientInvoiceController
      */
     private function depositLimits(array $currency): array
     {
-        $rate = (float) ($currency['exchange_rate'] ?? 1.0);
-
-        if ($rate <= 0) {
-            $rate = 1.0;
-        }
+        // rateFor(), not the raw column: the base currency converts at 1.0
+        // however its own row happens to read.
+        $rate = $this->currency->rateFor($currency);
 
         $min = (float) $this->settings->get('billing.min_deposit', '10.00');
         $max = (float) $this->settings->get('billing.max_deposit', '10000.00');
@@ -248,26 +261,32 @@ final class ClientInvoiceController
         $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
-        $currencyLock = $this->currency->lockColumns($currency);
 
-        // $amount is what the client typed, i.e. in the currency they are being
-        // shown (e.g. NGN). Every stored monetary amount is authoritative in the
-        // BASE currency (see CurrencyService) and is converted back up for
-        // display via the locked rate — so divide by that same locked rate here.
-        // Storing the typed figure directly would make a ₦100 top-up render as
-        // ₦100 × rate on every screen that formats it.
-        $lockedRate = (float) $currencyLock['currency_rate'] > 0 ? (float) $currencyLock['currency_rate'] : 1.0;
-        $baseAmount = round($amount / $lockedRate, 2);
+        // $amount is what the client typed while looking at bounds already
+        // converted into their own currency (see depositLimits()) — it is a
+        // figure denominated in that currency, not a base-currency amount
+        // that needs converting. denominateFor() records which currency it's
+        // in and locks rate at 1.0, the same shape AdminInvoiceController's
+        // manual-invoice screen uses for exactly the same reason (see its own
+        // comment): lockColumns() here would divide the typed figure down by
+        // the live rate, and a second view that re-multiplies by that same
+        // locked rate to display it would round-trip lossily back toward the
+        // original number instead of showing it exactly, while any view that
+        // (correctly, per the base-currency convention) does NOT re-multiply
+        // would show the divided-down figure — the ₦10.00 / ₦14,900.00
+        // mismatch this replaces.
+        $currencyLock = $this->currency->denominateFor($client);
+        $depositAmount = round($amount, 2);
 
         $invoiceId = (int) $db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $client['id'],
                 'unpaid',
-                $baseAmount,
+                $depositAmount,
                 0.00,
                 0.00,
-                $baseAmount,
+                $depositAmount,
                 $currencyLock['currency_id'],
                 $currencyLock['currency_rate'],
                 $today,
@@ -278,7 +297,7 @@ final class ClientInvoiceController
 
         $db->insert(
             'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
-            [$invoiceId, "Deposit / Add Funds to Wallet", $baseAmount]
+            [$invoiceId, "Deposit / Add Funds to Wallet", $depositAmount]
         );
 
         return Response::redirect("/client/invoices/{$invoiceId}");

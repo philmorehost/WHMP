@@ -7,7 +7,8 @@
 /** @var CodeVault\Localization\Translation $t */
 /** @var array<int, string> $defaultNameservers */
 /** @var array<int, string> $domainTlds */
-$money = static fn (float $amount): string => ($currency['symbol'] ?? '$') . number_format(($amount > 1000 && (float) ($currency['exchange_rate'] ?? 1) > 50 && ($amount * (float) ($currency['exchange_rate'] ?? 1) > 5000000)) ? $amount : ($amount * (float) ($currency['exchange_rate'] ?? 1)), 2);
+/** @var callable(float): string $money supplied by CheckoutController::page() */
+/** @var string|null $error */
 $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
 ?>
 <style>
@@ -131,6 +132,146 @@ $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
     font-weight: 500;
 }
 
+/* ---- Modern domain picker ---------------------------------------------
+   The choice rows become selectable cards, and the name + TLD controls
+   become one continuous field instead of three separate boxes with a raw
+   OS dropdown sitting next to them — the native <select> chrome is what
+   made this card look dated.
+   NOTE: public/assets/js/app.js re-renders #domain-input-wrapper from
+   scratch whenever the option changes. The markup it emits mirrors this
+   exactly; change one and you must change the other. */
+.domain-options { gap: 10px; }
+.domain-option {
+    position: relative;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    border-width: 1.5px;
+    border-radius: 14px;
+}
+.domain-option:has(input[type="radio"]:checked) {
+    border-color: var(--cv-color-brand-500);
+    background: color-mix(in srgb, var(--cv-color-brand-500) 7%, var(--cv-bg-surface));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cv-color-brand-500) 14%, transparent);
+}
+.domain-option input[type="radio"] {
+    margin: 2px 0 0 0;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+.domain-option__icon {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    font-size: 1rem;
+    background: var(--cv-bg-surface-sunken);
+}
+.domain-option__text { flex: 1; min-width: 0; }
+.domain-option__title { display: block; font-weight: 650; font-size: .95rem; }
+.domain-option__hint {
+    display: block;
+    font-size: .8rem;
+    color: var(--cv-text-secondary);
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+/* One continuous control: prefix | name | TLD */
+.domain-field {
+    display: flex;
+    align-items: stretch;
+    border: 1.5px solid var(--cv-border-default);
+    border-radius: 12px;
+    background: var(--cv-bg-surface);
+    overflow: hidden;
+    transition: border-color .18s, box-shadow .18s;
+}
+.domain-field:focus-within {
+    border-color: var(--cv-color-brand-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cv-color-brand-500) 16%, transparent);
+}
+.domain-field__prefix {
+    display: flex;
+    align-items: center;
+    padding: 0 4px 0 14px;
+    font-size: .9rem;
+    color: var(--cv-text-secondary);
+    font-weight: 500;
+    user-select: none;
+}
+.domain-field__input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 13px 8px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--cv-text-primary);
+    margin: 0;
+}
+.domain-field__divider {
+    width: 1px;
+    background: var(--cv-border-default);
+    margin: 8px 0;
+    flex-shrink: 0;
+}
+/* appearance:none strips the OS dropdown look; the chevron is drawn by us
+   so it matches in both themes. */
+.domain-field__tld {
+    -webkit-appearance: none;
+    appearance: none;
+    border: 0;
+    outline: 0;
+    margin: 0;
+    background: transparent;
+    padding: 0 34px 0 14px;
+    font-size: .95rem;
+    font-weight: 650;
+    color: var(--cv-color-brand-500);
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 14px;
+}
+.domain-field__tld:focus-visible { box-shadow: inset 0 0 0 2px var(--cv-color-brand-500); border-radius: 8px; }
+
+.domain-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .85rem;
+    font-weight: 500;
+    margin-top: 10px;
+    min-height: 20px;
+}
+.domain-result::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+    opacity: .9;
+}
+.domain-result:empty { display: none; }
+
+@media (max-width: 560px) {
+    .domain-field { flex-wrap: wrap; }
+    .domain-field__divider { display: none; }
+    .domain-field__tld {
+        width: 100%;
+        border-top: 1px solid var(--cv-border-default);
+        padding: 11px 34px 11px 14px;
+    }
+}
+
 /* Billing Cycle Selector */
 .cycle-options {
     display: grid;
@@ -238,6 +379,20 @@ $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
     overflow: hidden;
     transition: max-height 0.25s ease-out;
 }
+.product-description p {
+    margin: 0 0 12px 0;
+}
+.product-description p:last-child {
+    margin-bottom: 0;
+}
+.product-description ul,
+.product-description ol {
+    margin: 0 0 12px 0;
+    padding-left: 1.3em;
+}
+.product-description li {
+    margin-bottom: 4px;
+}
 
 /* CTA Button */
 .cta-button {
@@ -325,6 +480,10 @@ $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
         <form method="post" action="/cart/add" id="product-order-form"><?= csrf_field() ?>
             <input type="hidden" name="product_id" value="<?= (int) $product['id'] ?>">
 
+            <?php if (!empty($error)): ?>
+                <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-4);"><?= e($error) ?></div>
+            <?php endif; ?>
+
             <!-- Domain Configuration Section -->
             <?php if (!empty($product['require_domain'])): ?>
                 <div class="form-section">
@@ -334,34 +493,35 @@ $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
                     </h2>
 
                     <div class="domain-options">
-                        <label class="domain-option">
-                            <input type="radio" name="domain_option" value="register" checked data-domain-option-toggle>
-                            <label>Register a new domain name</label>
-                        </label>
-                        <label class="domain-option">
-                            <input type="radio" name="domain_option" value="transfer" data-domain-option-toggle>
-                            <label>Transfer your domain from another registrar</label>
-                        </label>
-                        <label class="domain-option">
-                            <input type="radio" name="domain_option" value="existing" data-domain-option-toggle>
-                            <label>I will use my existing domain and update nameservers</label>
-                        </label>
+                        <?php foreach ([
+                            ['value' => 'register', 'icon' => '✨', 'title' => 'Register a new domain name', 'hint' => 'Search for an available name and register it with your order.'],
+                            ['value' => 'transfer', 'icon' => '↔️', 'title' => 'Transfer your domain', 'hint' => 'Move an existing domain here from another registrar.'],
+                            ['value' => 'existing', 'icon' => '🔗', 'title' => 'Use my existing domain', 'hint' => "Keep it where it is and point the nameservers at us."],
+                        ] as $choice): ?>
+                            <label class="domain-option">
+                                <input type="radio" name="domain_option" value="<?= e($choice['value']) ?>" <?= $choice['value'] === 'register' ? 'checked' : '' ?> data-domain-option-toggle>
+                                <span class="domain-option__icon" aria-hidden="true"><?= $choice['icon'] ?></span>
+                                <span class="domain-option__text">
+                                    <span class="domain-option__title"><?= e($choice['title']) ?></span>
+                                    <span class="domain-option__hint"><?= e($choice['hint']) ?></span>
+                                </span>
+                            </label>
+                        <?php endforeach; ?>
                     </div>
 
-                    <div id="domain-input-wrapper" style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 20px;" data-tld-options="<?= e(json_encode($domainTlds)) ?>">
-                        <label class="form-field" style="margin: 0; flex-shrink: 0;">
-                            <span>www.</span>
-                        </label>
-                        <div class="form-field" style="margin: 0; flex: 1;">
-                            <input type="text" name="domain_name" placeholder="example" required data-domain-availability-input style="margin: 0;">
+                    <div id="domain-input-wrapper" style="margin-bottom: 20px;" data-tld-options="<?= e(json_encode($domainTlds)) ?>">
+                        <div class="domain-field">
+                            <span class="domain-field__prefix">www.</span>
+                            <input class="domain-field__input" type="text" name="domain_name" placeholder="yourbusiness" required data-domain-availability-input>
+                            <span class="domain-field__divider" aria-hidden="true"></span>
+                            <select class="domain-field__tld" name="domain_tld" aria-label="Domain extension" data-domain-availability-tld>
+                                <?php foreach ($domainTlds as $tld): ?>
+                                    <option value="<?= e($tld) ?>"><?= e($tld) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
-                        <select class="form-field" name="domain_tld" style="margin: 0; width: 110px;" data-domain-availability-tld>
-                            <?php foreach ($domainTlds as $tld): ?>
-                                <option value="<?= e($tld) ?>"><?= e($tld) ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                        <div class="domain-result" data-domain-availability-result></div>
                     </div>
-                    <div data-domain-availability-result style="font-size: .85rem; margin-bottom: 16px;"></div>
 
                     <div id="nameserver-wrapper" style="display: none; transition: all 0.2s ease-in-out;">
                         <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -390,8 +550,14 @@ $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
                             <span>View Product Details</span>
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" data-accordion-icon><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                         </button>
-                        <div data-accordion-content style="color: var(--cv-text-secondary); font-size: .95rem; line-height: 1.6; white-space: pre-wrap; padding-top: 12px;">
-                            <?= e((string) $product['description']) ?>
+                        <?php
+                        // white-space:pre-wrap kept line breaks but rendered any HTML an
+                        // admin wrote as raw text, and preserved stray indentation.
+                        // FormattedText builds real paragraphs instead — so pre-wrap has
+                        // to go, or the newlines it keeps would double the spacing.
+                        ?>
+                        <div data-accordion-content class="product-description" style="color: var(--cv-text-secondary); font-size: .95rem; line-height: 1.6; padding-top: 12px;">
+                            <?= CodeVault\Support\FormattedText::toHtml((string) $product['description']) ?>
                         </div>
                     </div>
                 <?php endif; ?>
@@ -485,31 +651,11 @@ $domainTlds = $domainTlds !== [] ? $domainTlds : ['.com', '.net', '.org'];
     <?php endif; ?>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const trigger = document.querySelector('[data-accordion-trigger]');
-    const content = document.querySelector('[data-accordion-content]');
-    const icon = document.querySelector('[data-accordion-icon]');
-
-    if (trigger && content) {
-        function openAccordion() {
-            content.style.maxHeight = content.scrollHeight + 'px';
-            if (icon) icon.style.transform = 'rotate(180deg)';
-        }
-
-        function closeAccordion() {
-            content.style.maxHeight = '0';
-            if (icon) icon.style.transform = 'rotate(0deg)';
-        }
-
-        trigger.addEventListener('click', function(e) {
-            e.preventDefault();
-            if (content.style.maxHeight && content.style.maxHeight !== '0px') {
-                closeAccordion();
-            } else {
-                openAccordion();
-            }
-        });
-    }
-});
-</script>
+<?php
+// The "View Product Details" accordion is driven from public/assets/js/app.js
+// behind a [data-accordion-trigger] delegated listener, NOT from an inline
+// <script> here. SecurityHeaders sends script-src 'self' with no
+// 'unsafe-inline', so an inline block on this page is silently blocked by the
+// browser and the button does nothing at all — which is exactly what happened
+// before. Keep page behaviour in app.js.
+?>

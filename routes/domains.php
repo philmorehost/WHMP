@@ -15,6 +15,7 @@ $router->post('/admin/domains/bulk-refresh-ns', [DomainController::class, 'bulkR
 $router->post('/admin/domains/bulk-delete', [DomainController::class, 'bulkDelete']);
 $router->post('/admin/domains/bulk-status', [DomainController::class, 'bulkUpdateStatus']);
 $router->post('/admin/domains/nameservers', [DomainController::class, 'updateDefaultNameservers']);
+$router->post('/admin/domains/deletion-policy', [DomainController::class, 'updateDeletionPolicy']);
 $router->get('/admin/domains/create', [DomainController::class, 'createForm']);
 $router->post('/admin/domains', [DomainController::class, 'store']);
 $router->get('/admin/domains/{id}', [DomainController::class, 'show']);
@@ -37,6 +38,8 @@ $router->post('/admin/domains/{id}/contact', [DomainController::class, 'saveCont
 $router->get('/admin/domain-pricing', [DomainPricingController::class, 'index']);
 $router->post('/admin/domain-pricing', [DomainPricingController::class, 'store']);
 $router->post('/admin/domain-pricing/bulk', [DomainPricingController::class, 'bulkStore']);
+$router->post('/admin/domain-pricing/bulk-update', [DomainPricingController::class, 'bulkUpdate']);
+$router->post('/admin/domain-pricing/reorder', [DomainPricingController::class, 'reorder']);
 $router->post('/admin/domain-pricing/fetch-whmcs', [DomainPricingController::class, 'whmcsExtensions']);
 $router->post('/admin/domain-pricing/{id}/delete', [DomainPricingController::class, 'destroy']);
 

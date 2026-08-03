@@ -20,8 +20,72 @@ final class ReportController
         private readonly View $view,
         private readonly ReportRepository $reports,
         private readonly ReportModuleService $modules,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly \CodeVault\Billing\CurrencyService $currency
     ) {
+    }
+
+    /**
+     * Attaches the real symbol/code for each row's currency.
+     *
+     * A NULL currency_id means the base currency, resolved the same way every
+     * other screen resolves it. Every report template used to print a
+     * hardcoded "$" against these figures, which is simply wrong on an install
+     * whose base currency is anything else — ₦7,501.50 read as "$7,501.50".
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function labelCurrencies(array $rows): array
+    {
+        return array_map(function (array $row): array {
+            // Cast here rather than trusting the caller. Some rows are built in
+            // PHP with a real int, others come straight off a `SELECT i.*`
+            // where PDO hands back every column as a string — passing one of
+            // those to resolveLocked(?int) is a fatal TypeError, which is
+            // exactly what took the aged-debtors report down. '' and '0' both
+            // mean "no currency locked", i.e. the base currency.
+            $rawId = $row['currency_id'] ?? null;
+            $currencyId = ($rawId === null || $rawId === '' || (int) $rawId === 0) ? null : (int) $rawId;
+
+            $currency = $this->currency->resolveLocked($currencyId);
+
+            // Prefixed keys, not 'symbol'/'code': the affiliate rows already
+            // carry a 'code' of their own (the referral code), and PHP's array
+            // union keeps the left-hand value — so an unprefixed key would be
+            // silently dropped there and print an empty currency.
+            return $row + [
+                'currency_symbol' => (string) ($currency['symbol'] ?? '$'),
+                'currency_code' => (string) ($currency['code'] ?? ''),
+            ];
+        }, $rows);
+    }
+
+    /**
+     * Per-currency grand totals for a report's footer.
+     *
+     * Deliberately a list, not a single number: summing across currencies
+     * produces a figure that means nothing, so a multi-currency report shows
+     * one total per currency instead of one wrong one.
+     *
+     * @param array<int, array<string, mixed>> $rows already passed through labelCurrencies()
+     * @return array<int, array{currency_symbol: string, currency_code: string, amount: float}>
+     */
+    private function totalsByCurrency(array $rows, string $amountKey): array
+    {
+        $totals = [];
+
+        foreach ($rows as $row) {
+            $key = (string) ($row['currency_code'] ?? '');
+            $totals[$key] ??= [
+                'currency_symbol' => (string) $row['currency_symbol'],
+                'currency_code' => $key,
+                'amount' => 0.0,
+            ];
+            $totals[$key]['amount'] += (float) ($row[$amountKey] ?? 0);
+        }
+
+        return array_values($totals);
     }
 
     public function index(Request $request): Response
@@ -101,10 +165,15 @@ final class ReportController
 
         $year = $this->yearFromRequest($request);
 
+        $byMonth = $this->labelCurrencies($this->reports->incomeByMonth($year));
+        $byGateway = $this->labelCurrencies($this->reports->incomeByGateway($year));
+
         return $this->render('reports.income', [
             'year' => $year,
-            'byMonth' => $this->reports->incomeByMonth($year),
-            'byGateway' => $this->reports->incomeByGateway($year),
+            'byMonth' => $byMonth,
+            'byGateway' => $byGateway,
+            'monthTotals' => $this->totalsByCurrency($byMonth, 'total'),
+            'gatewayTotals' => $this->totalsByCurrency($byGateway, 'total'),
         ]);
     }
 
@@ -115,10 +184,12 @@ final class ReportController
         }
 
         $year = $this->yearFromRequest($request);
+        $byMonth = $this->labelCurrencies($this->reports->taxLiabilityByMonth($year));
 
         return $this->render('reports.tax-liability', [
             'year' => $year,
-            'byMonth' => $this->reports->taxLiabilityByMonth($year),
+            'byMonth' => $byMonth,
+            'totals' => $this->totalsByCurrency($byMonth, 'tax_amount'),
         ]);
     }
 
@@ -128,7 +199,14 @@ final class ReportController
             return $denied;
         }
 
-        return $this->render('reports.aged-debtors', ['buckets' => $this->reports->agedDebtors()]);
+        $buckets = $this->reports->agedDebtors();
+
+        foreach ($buckets as $key => $bucket) {
+            $buckets[$key]['totals'] = $this->labelCurrencies($bucket['totals']);
+            $buckets[$key]['invoices'] = $this->labelCurrencies($bucket['invoices']);
+        }
+
+        return $this->render('reports.aged-debtors', ['buckets' => $buckets]);
     }
 
     public function productBreakdown(Request $request): Response
@@ -137,7 +215,12 @@ final class ReportController
             return $denied;
         }
 
-        return $this->render('reports.product-breakdown', ['products' => $this->reports->productBreakdown()]);
+        $products = $this->labelCurrencies($this->reports->productBreakdown());
+
+        return $this->render('reports.product-breakdown', [
+            'products' => $products,
+            'totals' => $this->totalsByCurrency($products, 'revenue'),
+        ]);
     }
 
     public function affiliatePayouts(Request $request): Response
@@ -146,7 +229,9 @@ final class ReportController
             return $denied;
         }
 
-        return $this->render('reports.affiliate-payouts', ['affiliates' => $this->reports->affiliatePayouts()]);
+        return $this->render('reports.affiliate-payouts', [
+            'affiliates' => $this->labelCurrencies($this->reports->affiliatePayouts()),
+        ]);
     }
 
     private function yearFromRequest(Request $request): int

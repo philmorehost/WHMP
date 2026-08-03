@@ -43,7 +43,7 @@
     <button type="submit" style="padding:12px 24px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer;transition:all .2s;align-self:flex-start;">🚀 Submit Cancellation Request</button>
 </form>
 
-<script>
+<script nonce="<?= csp_nonce() ?>">
 document.querySelectorAll('input[name="type"]').forEach(radio => {
     radio.addEventListener('change', () => {
         document.getElementById('cancel-date-field').style.display = 

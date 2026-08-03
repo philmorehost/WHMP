@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace CodeVault\Tests\Unit;
 
 use CodeVault\Billing\AutoChargeService;
+use CodeVault\Billing\CurrencyRepository;
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\PaymentGatewayRepository;
 use CodeVault\Billing\PaymentMethodRepository;
@@ -71,7 +73,7 @@ final class AutoChargeServiceTest extends DatabaseTestCase
             [json_encode(['secret_key' => 'sk_test', 'gateway_currency' => 'USD']), 'paystack']
         );
 
-        $this->autoCharge = new AutoChargeService($this->methods, $gateways, $transactions, $payments, $modules, $this->db);
+        $this->autoCharge = new AutoChargeService($this->methods, $gateways, $transactions, $payments, $modules, $this->db, new CurrencyService(new CurrencyRepository($this->db)));
 
         $this->clientId = $clients->create([
             'email' => 'autopay@example.test',

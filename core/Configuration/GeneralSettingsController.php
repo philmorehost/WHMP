@@ -31,6 +31,21 @@ final class GeneralSettingsController
             'companyEmail' => $this->settings->get('company.email', ''),
             'companyDept' => $this->settings->get('company.billing_dept', ''),
             'lateFeePercentage' => $this->settings->get('billing.late_fee_percentage', '5.00'),
+            'lateFeeGraceDays' => $this->settings->get('billing.late_fee_grace_days', '0'),
+            'autoCancelUnpaidDays' => $this->settings->get('billing.auto_cancel_unpaid_days', '0'),
+            'timezone' => $this->settings->get('general.timezone', 'UTC'),
+            'timezones' => \DateTimeZone::listIdentifiers(),
+            'backupFrequencyHours' => $this->settings->get('backup.frequency_hours', '24'),
+            'backupKeepCount' => $this->settings->get('backup.keep_count', '7'),
+            'backupLogRetentionDays' => $this->settings->get('backup.log_retention_days', '1'),
+            'cronLogRetentionDays' => $this->settings->get('automation.run_log_retention_days', '30'),
+            'autoSuspendEnabled' => $this->settings->get('billing.auto_suspend_enabled', '0') === '1',
+            'suspensionGraceDays' => $this->settings->get('billing.suspension_grace_days', '7'),
+            'autoTerminateEnabled' => $this->settings->get('billing.auto_terminate_enabled', '0') === '1',
+            'terminationGraceDays' => $this->settings->get('billing.termination_grace_days', '60'),
+            'terminationGraceDaysServer' => $this->settings->get('billing.termination_grace_days_server', '1'),
+            'pruneTerminatedEnabled' => $this->settings->get('billing.prune_terminated_enabled', '0') === '1',
+            'pruneTerminatedDays' => $this->settings->get('billing.prune_terminated_days', '90'),
             'newOrderDueDays' => $this->settings->get('billing.new_order_due_days', '7'),
             'allowCheckoutNotes' => $this->settings->get('checkout.allow_notes', '1') === '1',
             'maintenanceMode' => $this->settings->get('system.maintenance_mode', '0') === '1',
@@ -67,6 +82,36 @@ final class GeneralSettingsController
         $this->settings->set('company.billing_dept', trim((string) $request->input('company_billing_dept', '')));
 
         $this->settings->set('billing.late_fee_percentage', (string) max(0.0, (float) $request->input('late_fee_percentage', 5.0)));
+
+        // Service lifecycle policy. Day counts are floored at 0; the two
+        // enable switches are separate from them so an admin can retune the
+        // windows while the destructive automation stays off.
+        $this->settings->set('billing.late_fee_grace_days', (string) max(0, (int) $request->input('late_fee_grace_days', 0)));
+        $this->settings->set('billing.auto_cancel_unpaid_days', (string) max(0, (int) $request->input('auto_cancel_unpaid_days', 0)));
+
+        // Floors of 1 are deliberate: 0 hours would make the backup job due on
+        // every cron tick, and 0 retained copies would delete every backup on
+        // the next successful run.
+        // Validated against PHP's own list so an invalid zone can't be stored —
+        // date_default_timezone_set() would reject it and silently leave the
+        // app on UTC, which is the confusing state this setting exists to fix.
+        $timezone = trim((string) $request->input('timezone', ''));
+
+        if ($timezone !== '' && in_array($timezone, \DateTimeZone::listIdentifiers(), true)) {
+            $this->settings->set('general.timezone', $timezone);
+        }
+
+        $this->settings->set('backup.frequency_hours', (string) max(1, (int) $request->input('backup_frequency_hours', 24)));
+        $this->settings->set('backup.keep_count', (string) max(1, (int) $request->input('backup_keep_count', 7)));
+        $this->settings->set('backup.log_retention_days', (string) max(1, (int) $request->input('backup_log_retention_days', 1)));
+        $this->settings->set('automation.run_log_retention_days', (string) max(1, (int) $request->input('cron_log_retention_days', 30)));
+        $this->settings->set('billing.auto_suspend_enabled', $request->input('auto_suspend_enabled') ? '1' : '0');
+        $this->settings->set('billing.suspension_grace_days', (string) max(0, (int) $request->input('suspension_grace_days', 7)));
+        $this->settings->set('billing.auto_terminate_enabled', $request->input('auto_terminate_enabled') ? '1' : '0');
+        $this->settings->set('billing.termination_grace_days', (string) max(0, (int) $request->input('termination_grace_days', 60)));
+        $this->settings->set('billing.termination_grace_days_server', (string) max(0, (int) $request->input('termination_grace_days_server', 1)));
+        $this->settings->set('billing.prune_terminated_enabled', $request->input('prune_terminated_enabled') ? '1' : '0');
+        $this->settings->set('billing.prune_terminated_days', (string) max(0, (int) $request->input('prune_terminated_days', 90)));
         $this->settings->set('billing.new_order_due_days', (string) max(0, (int) $request->input('new_order_due_days', 7)));
         $this->settings->set('checkout.allow_notes', $request->input('allow_checkout_notes') ? '1' : '0');
         $this->settings->set('system.maintenance_mode', $request->input('maintenance_mode') ? '1' : '0');

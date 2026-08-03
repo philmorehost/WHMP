@@ -23,7 +23,11 @@ final class OnboardingCopilotController
         . "order and pay for hosting, what happens right after payment (account provisioning), how to log into cPanel, "
         . "how to point or register a domain, upload a website, and set up email. "
         . "Keep answers short and practical. If a question is outside hosting/domains/billing, gently steer back. "
-        . "Never invent account-specific details (passwords, IPs) — tell them where in the portal to find those instead.";
+        . "Never invent account-specific details (passwords, IPs) — tell them where in the portal to find those instead. "
+        // The chat bubble shows this text verbatim, so Markdown would reach the
+        // customer as literal ** and ### clutter.
+        . "Write in plain text prose only — no Markdown or markup of any kind: no #, *, _, backticks or --- "
+        . "separators, and no bold or italic syntax. For lists, start each line with \"- \".";
 
     public function __construct(
         private readonly ClientAuthGuard $guard,
@@ -60,7 +64,12 @@ final class OnboardingCopilotController
             return Response::json(['success' => true, 'answer' => $fallback, 'message' => null]);
         }
 
-        return Response::json(['success' => true, 'answer' => $result['text'], 'message' => null]);
+        // Same cleanup as Ask AI: the bubble renders text, not Markdown.
+        return Response::json([
+            'success' => true,
+            'answer' => \CodeVault\Support\MarkdownToText::convert((string) $result['text']),
+            'message' => null,
+        ]);
     }
 
     private function getFallbackAnswer(string $question): string

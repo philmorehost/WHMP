@@ -92,6 +92,28 @@ final class ClientTicketController
             return $this->deniedOrNotFound();
         }
 
+        if ($ticket['merged_into_id'] !== null) {
+            $target = $this->tickets->find((int) $ticket['merged_into_id']);
+            $client = $this->guard->currentClient();
+
+            // The normal case: merged into another ticket of this same
+            // client's — send them straight there, same as the admin side.
+            if ($target !== null && (int) $target['client_id'] === (int) $client['id']) {
+                return Response::redirect("/client/tickets/{$target['id']}");
+            }
+
+            // A cross-client merge: the target belongs to someone else, so
+            // redirecting there would leak another client's ticket. Show
+            // this ticket's own (now-empty, closed) shell with a plain
+            // explanation instead.
+            return $this->page('support.client-ticket-show', [
+                'ticket' => $ticket,
+                'replies' => [],
+                'attachments' => [],
+                'mergedAway' => true,
+            ]);
+        }
+
         return $this->page('support.client-ticket-show', [
             'ticket' => $ticket,
             'replies' => $this->replies->forTicket((int) $ticket['id'], includePrivate: false),

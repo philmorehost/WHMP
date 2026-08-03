@@ -368,7 +368,7 @@
             <?php endforeach; ?>
         </div>
 
-        <script>
+        <script nonce="<?= csp_nonce() ?>">
             function filterDomains(filter) {
                 const cards = document.querySelectorAll('[class*="domain-card-"]');
                 const tabs = document.querySelectorAll('.domains-tab');

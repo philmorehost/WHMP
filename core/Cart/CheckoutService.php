@@ -44,12 +44,89 @@ final class CheckoutService
     }
 
     /**
+     * Converts every monetary field in a priced() result from base currency
+     * into $currency, exactly once — the point where a catalog price first
+     * becomes a real, stored charge. Everything downstream that reads the
+     * resulting services.amount/invoices.total back (renewals, proration,
+     * the dashboard) must never convert it again — those rows lock rate 1.0
+     * via denominateColumns()/denominateFor() specifically because this is
+     * the one place the real conversion already happened.
+     *
+     * @param array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float} $priced
+     * @param array<string, mixed> $currency
+     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float}
+     */
+    private function convertPriced(array $priced, array $currency): array
+    {
+        $rate = $this->currency->rateFor($currency);
+        $convert = fn (float $amount): float => $this->currency->convert($amount, $rate);
+
+        foreach ($priced['lines'] as &$line) {
+            $line['unit_price'] = $convert((float) $line['unit_price']);
+            $line['setup_fee'] = $convert((float) $line['setup_fee']);
+            $line['options_total'] = $convert((float) $line['options_total']);
+            $line['line_total'] = $convert((float) $line['line_total']);
+            $line['domain_price'] = $convert((float) ($line['domain_price'] ?? 0.0));
+
+            foreach ($line['options'] as &$option) {
+                $option['price'] = $convert((float) $option['price']);
+            }
+            unset($option);
+        }
+        unset($line);
+
+        $priced['subtotal'] = $convert((float) $priced['subtotal']);
+        $priced['setupFees'] = $convert((float) $priced['setupFees']);
+        $priced['domainTotal'] = $convert((float) ($priced['domainTotal'] ?? 0.0));
+        $priced['discount'] = $convert((float) $priced['discount']);
+        $priced['total'] = $convert((float) $priced['total']);
+
+        return $priced;
+    }
+
+    /**
      * @return array{success: bool, orderId?: int, invoiceId?: int, error?: string}
      */
     public function placeOrder(int $clientId): array
     {
-        $priced = $this->cartService->priced();
+        $client = $this->clients->find($clientId);
+        $effectiveCurrency = $this->currency->resolveEffective($client, $this->currencySelection->get());
 
+        $result = $this->executeOrder($clientId, $client, $this->cartService->priced(), $effectiveCurrency);
+
+        if ($result['success']) {
+            $this->cart->clear();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Admin-initiated order for a client, from an explicit item list rather
+     * than the session cart — there is no "browsing session" for an admin
+     * acting on someone else's behalf, so currency resolves purely from the
+     * target client's own saved preference, not any in-session override.
+     * See AdminOrderController.
+     *
+     * @param array<int, array<string, mixed>> $items same shape Cart::add() produces
+     * @return array{success: bool, orderId?: int, invoiceId?: int, error?: string}
+     */
+    public function placeOrderForClient(int $clientId, array $items, ?string $promoCode = null): array
+    {
+        $client = $this->clients->find($clientId);
+        $effectiveCurrency = $this->currency->resolveForClient($client);
+
+        return $this->executeOrder($clientId, $client, $this->cartService->priceItems($items, $promoCode), $effectiveCurrency);
+    }
+
+    /**
+     * @param array<string, mixed>|null $client
+     * @param array<string, mixed> $priced
+     * @param array<string, mixed> $effectiveCurrency
+     * @return array{success: bool, orderId?: int, invoiceId?: int, error?: string, serviceIds?: array<int, int>}
+     */
+    private function executeOrder(int $clientId, ?array $client, array $priced, array $effectiveCurrency): array
+    {
         if ($priced['lines'] === []) {
             return ['success' => false, 'error' => 'Your cart is empty.'];
         }
@@ -60,10 +137,17 @@ final class CheckoutService
             }
         }
 
-        $client = $this->clients->find($clientId);
+        // CartService::priced()/priceItems() is always base-currency — the
+        // shopping cart page converts it for display via its own
+        // $money/format() closure, but nothing before this converted the
+        // amounts that actually get stored. Converting here, once, is what
+        // makes the order/invoice match what the client saw while shopping
+        // instead of charging the raw base-currency figure under the
+        // client's currency symbol.
+        $priced = $this->convertPriced($priced, $effectiveCurrency);
+
         $tax = $this->tax->calculate($client ?? [], $priced['total']);
-        $effectiveCurrency = $this->currency->resolveEffective($client, $this->currencySelection->get());
-        $currencyLock = $this->currency->lockColumns($effectiveCurrency);
+        $currencyLock = $this->currency->denominateColumns($effectiveCurrency);
 
         try {
             $result = $this->db->transaction(function () use ($priced, $clientId, $tax, $currencyLock) {
@@ -122,8 +206,6 @@ final class CheckoutService
         $this->hooks->fire(HookPoints::ORDER_PLACED, ['orderId' => $orderId, 'clientId' => $clientId]);
         $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'clientId' => $clientId]);
 
-        $this->cart->clear();
-
         return ['success' => true, 'orderId' => $orderId, 'invoiceId' => $invoiceId, 'serviceIds' => $serviceIds];
     }
 
@@ -147,7 +229,7 @@ final class CheckoutService
                         'client_name' => $clientName,
                         'client_email' => $clientEmail,
                         'order_total' => number_format($orderTotal, 2),
-                        'company_name' => 'CodeVault',
+                        'company_name' => brand_name(),
                     ]);
                 }
             }
@@ -171,28 +253,23 @@ final class CheckoutService
         $promoCode = $priced['promoCode'] ?? null;
         $promotionId = $priced['promotionId'] ?? null;
 
-        $domainTotalAdditions = 0.0;
         $domainInvoiceItems = [];
         $orderLinesWithDomains = [];
 
-        // Pre-parse domains to calculate total addition
+        // Pre-parse domains to build the invoice line description. The price
+        // itself comes from $line['domain_price'] — already resolved (and,
+        // by the time this runs, already currency-converted) by
+        // CartService::priced() — rather than a second, independent
+        // domain_pricing lookup here that used to disagree with it.
         foreach ($priced['lines'] as $lineIndex => $line) {
             $domainName = null;
             $domainOptions = $line['domain_options'] ?? null;
             if ($domainOptions !== null && !empty($domainOptions['name'])) {
                 $domainName = $domainOptions['name'];
-                
+
                 if (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
-                    $parts = explode('.', $domainName);
-                    $tld = '.' . end($parts);
-                    
-                    $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
-                    $price = 0.00;
-                    if ($priceRow !== null) {
-                        $price = $domainOptions['option'] === 'register' ? (float) $priceRow['register_price'] : (float) $priceRow['transfer_price'];
-                    }
-                    
-                    $domainTotalAdditions += $price;
+                    $price = (float) ($line['domain_price'] ?? 0.0);
+
                     $domainInvoiceItems[] = [
                         'description' => "Domain " . ($domainOptions['option'] === 'register' ? 'Registration' : 'Transfer') . ": {$domainName} (1 Year)",
                         'amount' => $price
@@ -214,15 +291,9 @@ final class CheckoutService
             $domainName = $orderLinesWithDomains[$lineIndex];
             $domainOptions = $line['domain_options'] ?? null;
             if ($domainOptions !== null && !empty($domainOptions['name']) && in_array($domainOptions['option'], ['register', 'transfer'], true)) {
-                $parts = explode('.', $domainOptions['name']);
-                $tld = '.' . end($parts);
-                
-                $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
-                $price = 0.00;
-                if ($priceRow !== null) {
-                    $price = $domainOptions['option'] === 'register' ? (float) $priceRow['register_price'] : (float) $priceRow['transfer_price'];
-                }
-                
+                $tld = CartService::tldFromDomainName((string) $domainOptions['name']);
+                $price = (float) ($line['domain_price'] ?? 0.0);
+
                 $chosenNameservers = array_values(array_filter([
                     $domainOptions['ns1'] ?? '',
                     $domainOptions['ns2'] ?? '',
@@ -321,7 +392,11 @@ final class CheckoutService
         );
 
         foreach ($priced['lines'] as $line) {
-            $description = "{$line['product_name']} ({$line['cycle_label']}) x{$line['quantity']}";
+            $identifier = ServiceRepository::invoiceIdentifierSuffix(
+                $line['domain_options']['name'] ?? null,
+                $line['server_options']['hostname'] ?? null
+            );
+            $description = "{$line['product_name']} ({$line['cycle_label']}) x{$line['quantity']}{$identifier}";
             $this->db->insert(
                 'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
                 [$invoiceId, $description, $line['line_total']]

@@ -1,10 +1,12 @@
 <?php
 /** @var string $query */
-/** @var array<int, array{tld: string, domain: string, available: ?bool, price: ?float, checked: bool, message: string}> $results */
+/** @var array<int, array{tld: string, domain: string, price: float, offered: bool, message: string}> $results */
 /** @var string|null $error */
 /** @var array<int, string> $defaultNameservers */
 /** @var array<string, array<int, array<string, mixed>>> $categories */
 /** @var array<int, array<string, mixed>> $featured */
+/** @var array<string, mixed> $currency */
+/** @var callable(float): string $money */
 $categoryNames = array_keys($categories);
 ?>
 <style>
@@ -63,7 +65,7 @@ $categoryNames = array_keys($categories);
             <?php foreach ($featured as $f): ?>
                 <div class="dr-featured__card">
                     <div class="dr-featured__tld"><?= e($f['tld']) ?></div>
-                    <div class="dr-featured__price">$<?= number_format((float) $f['register_price'], 2) ?>/yr</div>
+                    <div class="dr-featured__price"><?= e($money((float) $f['register_price'])) ?>/yr</div>
                 </div>
             <?php endforeach; ?>
         </div>
@@ -76,26 +78,24 @@ $categoryNames = array_keys($categories);
             <?php if ($results === []): ?>
                 <p style="color:var(--cv-text-secondary);">No TLDs are configured to search against yet.</p>
             <?php endif; ?>
+            <?php
+            // Availability is checked client-side, per domain, in parallel
+            // (see the domain-search-page block in app.js) — this loop only
+            // ever renders the TLD/price list, which needs no live registrar
+            // call, so the page paints immediately instead of waiting on the
+            // slowest of however many TLDs are configured.
+            ?>
             <?php foreach ($results as $result): ?>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:.85rem 0;border-bottom:1px solid var(--cv-border-default);">
+                <div class="dr-result-row" style="display:flex;justify-content:space-between;align-items:center;padding:.85rem 0;border-bottom:1px solid var(--cv-border-default);"<?= $result['offered'] ? ' data-domain-check="' . e($result['domain']) . '"' : '' ?>>
                     <div>
                         <strong style="font-size:1.15rem;color:var(--cv-text-primary);"><?= e($result['domain']) ?></strong>
-                        <?php if (!$result['checked']): ?>
-                            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:0.25rem;"><?= e($result['message'] !== '' ? $result['message'] : 'Could not check availability.') ?></div>
-                        <?php elseif ($result['available']): ?>
-                            <div style="font-size:var(--cv-text-sm);color:#10b981;font-weight:700;margin-top:0.3rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-                                <span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#10b981;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(16,185,129,0.3);">✔ AVAILABLE</span>
-                                <span style="font-size:1rem;color:var(--cv-text-primary);">$<?= number_format((float) $result['price'], 2) ?>/yr</span>
-                            </div>
+                        <?php if (!$result['offered']): ?>
+                            <div class="dr-result-status" style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:0.25rem;"><?= e($result['message']) ?></div>
                         <?php else: ?>
-                            <div style="font-size:var(--cv-text-sm);color:#ef4444;font-weight:700;margin-top:0.3rem;">
-                                <span style="font-weight:800;font-size:0.85rem;padding:0.35rem 0.75rem;text-transform:uppercase;letter-spacing:0.05em;background:#ef4444;color:#ffffff;border-radius:6px;box-shadow:0 2px 4px rgba(239,68,68,0.3);display:inline-block;">✖ ALREADY TAKEN</span>
-                            </div>
+                            <div class="dr-result-status" style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:0.25rem;">Checking availability&hellip;</div>
                         <?php endif; ?>
                     </div>
-                    <?php if ($result['checked'] && $result['available']): ?>
-                        <button type="button" class="cv-btn" data-domain-register-trigger="<?= e($result['domain']) ?>">Add to Cart</button>
-                    <?php endif; ?>
+                    <div class="dr-result-action"></div>
                 </div>
             <?php endforeach; ?>
         </div>
@@ -110,7 +110,7 @@ $categoryNames = array_keys($categories);
         <div id="domain-spin-results" style="margin-top:var(--cv-space-3);">
             <div style="padding:var(--cv-space-3);text-align:center;color:var(--cv-text-secondary);">Loading suggestions...</div>
         </div>
-        <script>
+        <script nonce="<?= csp_nonce() ?>">
             document.addEventListener('DOMContentLoaded', function() {
                 var trigger = document.querySelector('[data-domain-spin-trigger]');
                 if (trigger) trigger.click();
@@ -142,9 +142,9 @@ $categoryNames = array_keys($categories);
                             <?php foreach ($categories[$name] as $row): ?>
                                 <tr>
                                     <td><?= e($row['tld']) ?></td>
-                                    <td>$<?= number_format((float) $row['register_price'], 2) ?><span class="dr-cycle">1 Year</span></td>
-                                    <td>$<?= number_format((float) $row['transfer_price'], 2) ?><span class="dr-cycle">1 Year</span></td>
-                                    <td>$<?= number_format((float) $row['renew_price'], 2) ?><span class="dr-cycle">1 Year</span></td>
+                                    <td><?= e($money((float) $row['register_price'])) ?><span class="dr-cycle">1 Year</span></td>
+                                    <td><?= e($money((float) $row['transfer_price'])) ?><span class="dr-cycle">1 Year</span></td>
+                                    <td><?= e($money((float) $row['renew_price'])) ?><span class="dr-cycle">1 Year</span></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>

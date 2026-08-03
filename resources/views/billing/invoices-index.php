@@ -347,8 +347,60 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
             <span>Back to Dashboard</span>
         </a>
         <h1 class="admin-hero__title">Manage Invoices</h1>
+        <a href="/admin/invoices/create" class="cv-btn cv-btn--primary" style="margin-top:var(--cv-space-2);display:inline-block;">+ Generate Invoice</a>
     </div>
 </div>
+
+<?php if (($remindedCount ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $remindedCount ?> payment reminder(s) sent.
+        <?php if ((int) ($reminderSkipped ?? 0) > 0): ?>
+            <?= (int) $reminderSkipped ?> skipped — those invoices were no longer unpaid, or the client has no email address.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
+<?php if (($zeroPaidCount ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $zeroPaidCount ?> zero-value invoice(s) marked as paid.
+    </div>
+<?php endif; ?>
+
+<?php if ((int) ($zeroValueCount ?? 0) > 0): ?>
+    <?php
+    // These can never be paid — there is nothing to charge — so they sit in
+    // the unpaid list forever. One action clears all of them, across every
+    // page, because a checkbox selection can only reach the current page.
+    ?>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--cv-space-3);flex-wrap:wrap;
+                border:1px solid var(--cv-border-default);border-left:4px solid var(--cv-color-brand-500);
+                border-radius:10px;padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);
+                background:var(--cv-bg-surface-sunken);">
+        <div>
+            <strong><?= number_format((int) $zeroValueCount) ?> unpaid invoice(s) have a zero total.</strong>
+            <div style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin-top:4px;">
+                There is nothing to collect on these, so they can never be paid off — they just inflate the
+                unpaid count. Settling them marks them paid and clears them from clients' unpaid lists.
+                No payment record is created and no renewal, commission or provisioning is triggered.
+            </div>
+        </div>
+        <form method="post" action="/admin/invoices/mark-zero-paid"
+              data-confirm="Mark all <?= number_format((int) $zeroValueCount) ?> zero-value invoice(s) as paid? This affects every page, not just this one."><?= csrf_field() ?>
+            <button type="submit" class="cv-btn cv-btn--primary" style="white-space:nowrap;">
+                Mark <?= number_format((int) $zeroValueCount) ?> as Paid
+            </button>
+        </form>
+    </div>
+<?php endif; ?>
+
+<?php if (($cancelledCount ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $cancelledCount ?> invoice(s) cancelled.
+        <?php if ((int) ($skippedCount ?? 0) > 0): ?>
+            <?= (int) $skippedCount ?> skipped because they were already paid, cancelled or refunded.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
 
 <!-- Status Filter Tabs -->
 <div class="admin-status-tabs">
@@ -408,10 +460,25 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
             </p>
         </div>
     <?php else: ?>
+        <form method="post" action="/admin/invoices/bulk-cancel" id="bulk-cancel-invoices-form"
+              data-confirm="Cancel the selected invoice(s)? Paid invoices in the selection are skipped."><?= csrf_field() ?>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:var(--cv-space-2);">
+            <?php
+            // Both buttons submit the same checkbox selection; formaction sends
+            // each to its own endpoint, so one form can drive two actions
+            // without duplicating the checkboxes.
+            ?>
+            <button type="submit" class="cv-btn cv-btn--secondary" data-bulk-delete-for="[data-invoice-checkbox]"
+                    formaction="/admin/invoices/bulk-remind"
+                    data-confirm="Email a payment reminder to the client for each selected invoice?"
+                    style="display:none;margin-right:8px;">✉️ Send Reminders</button>
+            <button type="submit" class="cv-btn cv-btn--danger" data-bulk-delete-for="[data-invoice-checkbox]" style="display:none;">Cancel Selected</button>
+        </div>
         <div class="admin-table-wrapper">
             <table class="admin-table" id="invoices-table">
                 <thead>
                     <tr>
+                        <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-invoice-checkbox]" aria-label="Select all invoices" style="cursor:pointer;"></th>
                         <th>Invoice #</th>
                         <th>Client</th>
                         <th>Total</th>
@@ -424,6 +491,11 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                 <?php foreach ($results['data'] as $invoice): ?>
                     <tr>
                         <td>
+                            <?php if ($invoice['status'] === 'unpaid'): ?>
+                                <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" data-invoice-checkbox data-select-all-item="[data-invoice-checkbox]" aria-label="Select invoice <?= (int) $invoice['id'] ?>" style="cursor:pointer;">
+                            <?php endif; ?>
+                        </td>
+                        <td>
                             <a href="/admin/invoices/<?= (int) $invoice['id'] ?>"><strong>INV-<?= (int) $invoice['id'] ?></strong></a>
                         </td>
                         <td>
@@ -434,7 +506,8 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                         </td>
                         <td>
                             <span style="font-family: 'Monaco', 'Courier New', monospace; font-weight: 700;">
-                                <?= e($invoice['currency_symbol'] ?? '$') ?><?= number_format(round((float) $invoice['total'] * (float) ($invoice['currency_rate'] ?: 1), 2), 2) ?>
+                                <?php // NULL currency_id means "stored in the base currency already" — rate 1.0, never re-converted (see CurrencyService::formatLocked). ?>
+                                <?= e($invoice['currency_symbol'] ?? '$') ?><?= number_format(round((float) $invoice['total'] * ($invoice['currency_id'] !== null ? (float) ($invoice['currency_rate'] ?: 1) : 1.0), 2), 2) ?>
                             </span>
                             <span style="font-size: .75rem; color: var(--cv-text-secondary); margin-left: 6px;">
                                 <?= e($invoice['currency_code'] ?? 'USD') ?>
@@ -458,6 +531,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                 </tbody>
             </table>
         </div>
+        </form>
 
         <!-- Pagination -->
         <div class="admin-pagination">

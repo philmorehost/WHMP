@@ -5,7 +5,7 @@
 /** @var string|null $error */
 /** @var array<string, mixed> $currency */
 /** @var CodeVault\Localization\Translation $t */
-$money = static fn (float $amount): string => ($currency['symbol'] ?? '$') . number_format(($amount > 1000 && (float) ($currency['exchange_rate'] ?? 1) > 50 && ($amount * (float) ($currency['exchange_rate'] ?? 1) > 5000000)) ? $amount : ($amount * (float) ($currency['exchange_rate'] ?? 1)), 2);
+/** @var callable(float): string $money supplied by CheckoutController::page() */
 ?>
 <style>
 /* ====== Checkout Page Styles ====== */

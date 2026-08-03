@@ -53,7 +53,7 @@ final class CreditNoteRepository
     {
         return $this->db->select(
             <<<SQL
-            SELECT cn.*, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            SELECT cn.*, cu.symbol AS currency_symbol
             FROM credit_notes cn
             JOIN clients c ON c.id = cn.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
@@ -69,7 +69,7 @@ final class CreditNoteRepository
     {
         return $this->db->select(
             <<<'SQL'
-            SELECT cn.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            SELECT cn.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol
             FROM credit_notes cn
             JOIN clients c ON c.id = cn.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))

@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace CodeVault\System;
 
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Cron\CronRunRepository;
 use CodeVault\Kernel;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
+use DateTimeImmutable;
 
 /**
  * Shows the admin the exact cron command to install (with the real absolute
@@ -42,8 +45,40 @@ final class CronInfoController
     public function __construct(
         private readonly AuthGuard $guard,
         private readonly View $view,
-        private readonly Kernel $kernel
+        private readonly Kernel $kernel,
+        private readonly SettingsRepository $settings,
+        private readonly CronRunRepository $runs
     ) {
+    }
+
+    /**
+     * Automation schedule + daily report settings. WHMCS-style: one daily run
+     * time governs every daily job, rather than a per-job schedule.
+     */
+    public function update(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $time = trim((string) $request->input('daily_run_time', ''));
+
+        // Reject anything that isn't HH:MM rather than storing a value the
+        // scheduler would silently ignore, which would look like the setting
+        // simply didn't take.
+        if (preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $time) === 1) {
+            $this->settings->set('automation.daily_run_time', $time);
+        }
+
+        $this->settings->set('automation.report_enabled', $request->input('report_enabled') !== null ? '1' : '0');
+
+        $email = trim((string) $request->input('report_email', ''));
+
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
+            $this->settings->set('automation.report_email', $email);
+        }
+
+        return Response::redirect('/admin/cron?saved=1');
     }
 
     public function index(Request $request): Response
@@ -61,12 +96,22 @@ final class CronInfoController
         // Alternative for hosts that cap cron frequency at 5 minutes.
         $everyFiveMinutes = "*/5 * * * * php \"{$cronPath}\" >> \"{$logPath}\" 2>&1";
 
+        $recentRuns = $this->runs->since((new DateTimeImmutable())->modify('-24 hours'));
+
         $content = $this->view->render('system.cron', [
             'cronPath' => $cronPath,
             'logPath' => $logPath,
             'everyMinute' => $everyMinute,
             'everyFiveMinutes' => $everyFiveMinutes,
             'jobs' => self::JOBS,
+            'dailyRunTime' => (string) ($this->settings->get('automation.daily_run_time', '00:05') ?: '00:05'),
+            'reportEnabled' => $this->settings->get('automation.report_enabled', '1') === '1',
+            'reportEmail' => (string) ($this->settings->get('automation.report_email', '') ?? ''),
+            'lastReportDate' => (string) ($this->settings->get('automation.last_report_date', '') ?? ''),
+            'recentStats' => $this->runs->sumStats($recentRuns),
+            'recentErrors' => $this->runs->errors($recentRuns),
+            'recentRunCount' => count($recentRuns),
+            'saved' => $request->query('saved') === '1',
         ]);
 
         return Response::html($this->view->render('layouts.admin', [

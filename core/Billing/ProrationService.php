@@ -46,6 +46,19 @@ final class ProrationService
             return ['success' => false, 'chargeAmount' => 0, 'creditAmount' => 0, 'error' => 'Only active services can be upgraded.'];
         }
 
+        // $newAmount arrives as a raw, unconverted product_pricing.price read
+        // (see ServiceController::upgrade(), its only caller) — the same
+        // "fresh catalog price" case CheckoutService converts at order
+        // creation. Convert it here, once, before it's written to
+        // services.amount or an invoice: everything downstream (the old
+        // service.amount this gets compared against in
+        // remainingCycleMeasure(), and createChargeInvoice()'s
+        // denominateFor()) already assumes a services.amount-shaped value is
+        // final and in the client's own currency, never re-converted.
+        $client = $this->clients->find((int) $service['client_id']);
+        $currency = $this->currency->resolveForClient($client);
+        $newAmount = $this->currency->convert($newAmount, $this->currency->rateFor($currency));
+
         $this->hooks->fire(HookPoints::UPGRADE_REQUESTED, ['serviceId' => $serviceId, 'mode' => $mode]);
 
         $result = match ($mode) {
@@ -64,6 +77,17 @@ final class ProrationService
      * Remaining days in the *current, already-paid* cycle, and that
      * cycle's total length — the shared inputs both credit-bearing modes
      * measure against.
+     *
+     * Accepted limitation: $service['amount'] carries no currency lock of
+     * its own (the services table has no currency_id/currency_rate columns
+     * — see RecurringBillingService's own docs for why that's normally
+     * fine). If the client's currency or the live FX rate changed since this
+     * service was last priced, oldValuePerDay and the newly-converted
+     * $newAmount in upgrade() are technically on different scales. This
+     * isn't new — RecurringBillingService already treats services.amount as
+     * "whatever it currently is" with no re-derivation of history — just
+     * not fully solved here either; would need a per-service currency lock
+     * to close properly.
      *
      * @return array{unusedDays: int, cycleDays: int, oldValuePerDay: float}
      */
@@ -161,16 +185,18 @@ final class ProrationService
         $tax = $this->tax->calculate($client ?? [], $amount);
         $total = $amount + $tax['amount'];
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-        $currencyLock = $this->currency->lockedColumnsFor($client);
+        $currencyLock = $this->currency->denominateFor($client);
 
         $invoiceId = (int) $this->db->insert(
             'INSERT INTO invoices (client_id, service_id, status, subtotal, tax_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [$service['client_id'], $service['id'], 'unpaid', $amount, $tax['amount'], $total, $currencyLock['currency_id'], $currencyLock['currency_rate'], $dueDate, $now, $now]
         );
 
+        $identifier = ServiceRepository::invoiceIdentifierSuffix($service['domain'] ?? null, $service['hostname'] ?? null);
+
         $this->db->insert(
             'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
-            [$invoiceId, "{$description} — {$note}", $amount]
+            [$invoiceId, "{$description} — {$note}{$identifier}", $amount]
         );
 
         if ($tax['amount'] > 0) {

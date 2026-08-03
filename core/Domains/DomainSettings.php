@@ -49,4 +49,34 @@ final class DomainSettings
             $this->settings->set(self::KEY_PREFIX . $i, $nameservers[$i - 1] ?? '');
         }
     }
+
+    public function autoDeleteExpiredEnabled(): bool
+    {
+        return $this->settings->get('domains.auto_delete_expired_enabled', '0') === '1';
+    }
+
+    /**
+     * Extra days to wait *after* a domain's grace + redemption periods (per
+     * TLD, from domain_pricing) have both elapsed before the domain row is
+     * deleted outright. Not the total time since expiry — DomainPruningJob
+     * always adds this on top of the TLD's own grace/redemption, so a low or
+     * zero value here can never delete a domain still inside its redemption
+     * window, whatever the admin sets it to.
+     */
+    public function deletionGraceDays(): int
+    {
+        $value = $this->settings->get('domains.deletion_grace_days', '30');
+
+        if ($value === null || trim($value) === '' || !is_numeric($value)) {
+            return 30;
+        }
+
+        return max(0, (int) $value);
+    }
+
+    public function saveDeletionPolicy(bool $enabled, int $days): void
+    {
+        $this->settings->set('domains.auto_delete_expired_enabled', $enabled ? '1' : '0');
+        $this->settings->set('domains.deletion_grace_days', (string) max(0, $days));
+    }
 }

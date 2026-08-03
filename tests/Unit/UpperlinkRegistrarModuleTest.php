@@ -185,4 +185,43 @@ final class UpperlinkRegistrarModuleTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertTrue($result['locked']);
     }
+
+    /**
+     * Regression coverage: sync() called $this->mapStatus() but that method
+     * didn't exist anywhere in the class — any domain with a non-empty
+     * status field threw a fatal Error the moment sync() ran. Caught by
+     * CronScheduler's per-job Throwable handler, so it didn't crash other
+     * cron jobs, but it did abort the whole DomainSyncJob run as soon as it
+     * reached the first such domain — silently skipping every other domain
+     * (any registrar) still queued behind it that day.
+     */
+    public function test_sync_no_longer_throws_on_a_domain_with_a_non_empty_status(): void
+    {
+        $this->http->respondWith(200, '{"status":"success","data":{"status":"active","expiryDate":"2028-01-01"}}');
+
+        $result = $this->module->sync(['domain' => 'example.com', 'registrar' => $this->registrar]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('active', $result['status']);
+    }
+
+    public function test_sync_never_guesses_a_status_for_an_unrecognised_registry_value(): void
+    {
+        $this->http->respondWith(200, '{"status":"success","data":{"status":"SomeStatusUpperlinkAddsLater","expiryDate":"2028-01-01"}}');
+
+        $result = $this->module->sync(['domain' => 'example.com', 'registrar' => $this->registrar]);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('status', $result, 'an unrecognised status must never fall back to a guessed value');
+    }
+
+    public function test_sync_never_guesses_a_status_when_the_status_field_is_missing(): void
+    {
+        $this->http->respondWith(200, '{"status":"success","data":{"expiryDate":"2028-01-01"}}');
+
+        $result = $this->module->sync(['domain' => 'example.com', 'registrar' => $this->registrar]);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('status', $result, 'a missing status field must not default to "active"');
+    }
 }

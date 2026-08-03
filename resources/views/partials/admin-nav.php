@@ -1,7 +1,7 @@
 <?php
 /** @var CodeVault\View $view */
 /** @var array{brandName: string, logoUrl: ?string}|null $theme */
-$theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null];
+$theme ??= ['brandName' => brand_name(), 'logoUrl' => null];
 
 // Grouped + icon-based (blueprint §2 "same design throughout", R17 redesign)
 // — replaces the earlier flat ~40-item list, which had grown unwieldy as
@@ -30,6 +30,8 @@ $groups = [
         '/admin/import/clients' => 'Import Clients',
         '/admin/import/whmcs' => 'Import from WHMCS',
         '/admin/custom-fields' => 'Custom Fields',
+        '/admin/client-notifications' => 'Client Notifications',
+        '/admin/email-validation' => 'Email Validation',
     ]],
     'Provisioning' => ['icon' => 'server', 'links' => [
         '/admin/services' => 'Services',
@@ -59,6 +61,7 @@ $groups = [
     ]],
     'Marketing' => ['icon' => 'megaphone', 'links' => [
         '/admin/campaigns' => 'Campaigns',
+        '/admin/promo-banners' => 'Promo Banners',
         '/admin/affiliates' => 'Affiliates',
         '/admin/ai-visibility' => 'AI Visibility',
         '/admin/ask-ai' => 'Ask AI',
@@ -77,6 +80,7 @@ $groups = [
         '/admin/staff' => 'Staff',
         '/admin/roles' => 'Roles',
         '/admin/email-templates' => 'Email Templates',
+        '/admin/email-log' => 'Email History',
         '/admin/languages' => 'Languages',
         '/admin/notification-endpoints' => 'Notifications',
         '/admin/theme' => 'Theme',

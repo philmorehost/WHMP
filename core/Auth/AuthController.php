@@ -198,7 +198,7 @@ final class AuthController
                 $this->mail->sendTemplate('admin_password_reset', $admin['email'], [
                     'display_name' => $admin['display_name'],
                     'reset_url' => $resetUrl,
-                    'company_name' => (string) $this->config->env('APP_NAME', 'CodeVault'),
+                    'company_name' => brand_name(),
                 ]);
             } catch (Throwable) {
                 // Template missing/misconfigured shouldn't leak via the response.

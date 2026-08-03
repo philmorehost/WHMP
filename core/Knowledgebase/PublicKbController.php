@@ -28,6 +28,7 @@ final class PublicKbController
         private readonly View $view,
         private readonly KbArticleRepository $articles,
         private readonly KbCategoryRepository $categories,
+        private readonly KbImageRepository $images,
         private readonly SeoTags $seo,
         private readonly AiProvider $ai,
         private readonly Cache $cache
@@ -98,7 +99,10 @@ final class PublicKbController
         $url = $this->seo->canonicalUrl("/kb/{$article['id']}");
         $datePublished = (new \DateTimeImmutable((string) $article['created_at']))->format(DATE_ATOM);
 
-        return $this->page('knowledgebase.public-show', ['article' => $article], [
+        return $this->page('knowledgebase.public-show', [
+            'article' => $article,
+            'images' => $this->images->forArticle((int) $article['id']),
+        ], [
             'title' => "{$article['title']} — Knowledgebase",
             'canonicalUrl' => $url,
             'metaDescription' => mb_strimwidth(strip_tags((string) $article['body']), 0, 160, '...'),

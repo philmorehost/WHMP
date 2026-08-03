@@ -476,7 +476,7 @@ $statusFilter = $statusFilter ?? '';
                         <div class="invoice-card__body">
                             <div class="invoice-card__amount">
                                 <span class="invoice-card__amount-label">Amount Due</span>
-                                <span class="invoice-card__amount-value"><?= e($invoice['currency']['symbol']) ?><?= number_format(round((float) $invoice['total'] * ((float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0), 2), 2) ?></span>
+                                <span class="invoice-card__amount-value"><?= e($currencyService->formatDocument((float) $invoice['total'], $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null, (float) ($invoice['currency_rate'] ?? 1.0), $clientCurrency)) ?></span>
                             </div>
 
                             <div class="invoice-card__info-row">
@@ -488,7 +488,7 @@ $statusFilter = $statusFilter ?? '';
                         <div class="invoice-card__footer">
                             <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="invoice-card__action">View Details</a>
                             <?php if ($invoice['status'] === 'unpaid'): ?>
-                                <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="invoice-card__action" style="background: #dc2626; flex: 0 0 auto;" onclick="return confirm('Are you sure you want to cancel Invoice #INV-<?= (int) $invoice['id'] ?>?');">Cancel</button>
+                                <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="invoice-card__action" style="background: #dc2626; flex: 0 0 auto;">Cancel</button>
                                 <label class="invoice-card__checkbox">
                                     <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 18px; height: 18px;">
                                 </label>
@@ -535,13 +535,13 @@ $statusFilter = $statusFilter ?? '';
                                 </td>
                                 <td style="padding: 14px 16px; color: var(--cv-text-secondary);"><?= e($invoice['due_date']) ?></td>
                                 <td style="padding: 14px 16px; text-align: right; font-weight: 700; font-family: monospace;">
-                                    <?= e($invoice['currency']['symbol']) ?><?= number_format(round((float) $invoice['total'] * ((float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0), 2), 2) ?>
+                                    <?= e($currencyService->formatDocument((float) $invoice['total'], $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null, (float) ($invoice['currency_rate'] ?? 1.0), $clientCurrency)) ?>
                                 </td>
                                 <td style="padding: 14px 16px; text-align: right;">
                                     <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
                                         <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="cv-btn cv-btn--secondary" style="padding: 4px 10px; font-size: 0.75rem; text-decoration: none;">View</a>
                                         <?php if ($invoice['status'] === 'unpaid'): ?>
-                                            <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="cv-btn" style="background: #dc2626; color: #fff; border: none; padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer;" onclick="return confirm('Are you sure you want to cancel Invoice #INV-<?= (int) $invoice['id'] ?>?');">Cancel</button>
+                                            <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="cv-btn" style="background: #dc2626; color: #fff; border: none; padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer;">Cancel</button>
                                         <?php endif; ?>
                                     </div>
                                 </td>
@@ -597,7 +597,7 @@ $statusFilter = $statusFilter ?? '';
                 <button class="invoices-footer__btn" type="submit" id="pay-btn" disabled>Pay Selected Invoices →</button>
             </div>
 
-            <script>
+            <script nonce="<?= csp_nonce() ?>">
                 function updatePayButton() {
                     const checkboxes = document.querySelectorAll('.inv-chk');
                     const selected = Array.from(checkboxes).filter(c => c.checked).length;
@@ -611,17 +611,32 @@ $statusFilter = $statusFilter ?? '';
         <?php endif; ?>
     <?php endif; ?>
 
-    <!-- Hidden forms for direct invoice cancellation -->
-    <?php foreach ($invoices as $invoice): ?>
-        <?php if ($invoice['status'] === 'unpaid'): ?>
-            <form id="cancel-form-<?= (int) $invoice['id'] ?>" method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel" style="display:none;">
-                <?= csrf_field() ?>
-            </form>
-        <?php endif; ?>
-    <?php endforeach; ?>
 </form>
 
-<script>
+<?php
+// Cancellation forms live OUTSIDE the mass-pay form above.
+//
+// They used to sit inside it. HTML forbids nested <form> elements, so the
+// browser's parser silently discarded these — #cancel-form-N never existed in
+// the DOM, every Cancel button's form property resolved to null, and clicking
+// one submitted nothing at all. Verified in a browser: 3 forms in the source,
+// 2 in the DOM.
+//
+// data-confirm rather than an inline onclick: app.js confirms on submit via a
+// delegated listener, and inline handlers are blocked by this app's CSP.
+?>
+<?php foreach ($invoices as $invoice): ?>
+    <?php if ($invoice['status'] === 'unpaid'): ?>
+        <form id="cancel-form-<?= (int) $invoice['id'] ?>" method="post"
+              action="/client/invoices/<?= (int) $invoice['id'] ?>/cancel"
+              data-confirm="Cancel Invoice #INV-<?= (int) $invoice['id'] ?>? This cannot be undone."
+              style="display:none;">
+            <?= csrf_field() ?>
+        </form>
+    <?php endif; ?>
+<?php endforeach; ?>
+
+<script nonce="<?= csp_nonce() ?>">
     (function () {
         const btnGrid = document.getElementById('btn-view-grid');
         const btnList = document.getElementById('btn-view-list');

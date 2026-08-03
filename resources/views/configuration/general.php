@@ -47,6 +47,129 @@
             </div>
         </div>
 
+        <!-- Localisation Card -->
+        <div class="cv-card">
+            <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Timezone</h2>
+
+            <div class="cv-field">
+                <label class="cv-label" for="timezone">Application Timezone</label>
+                <select class="cv-select" name="timezone" id="timezone">
+                    <?php foreach ($timezones as $tz): ?>
+                        <option value="<?= e($tz) ?>" <?= $tz === $timezone ? 'selected' : '' ?>><?= e($tz) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">
+                    Currently <strong><?= e(date('Y-m-d H:i')) ?></strong> (<?= e(date('T P')) ?>).
+                    This drives every date the system produces — invoice dates, the daily automation time,
+                    ticket timestamps and email dates. Set it to the timezone you actually operate in;
+                    otherwise the daily automation runs at the wrong local hour.
+                </span>
+            </div>
+        </div>
+
+        <!-- Backups Card -->
+        <div class="cv-card">
+            <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Automated Backups</h2>
+            <p style="font-size:0.8rem;color:var(--cv-text-secondary);margin-top:0;">
+                Each backup writes a full database dump plus a zip of the install, so these are large.
+                The schedule is enforced by the cron — your server cron should still run every minute.
+            </p>
+
+            <div class="cv-field">
+                <label class="cv-label">Run a Backup Every (hours)</label>
+                <input class="cv-input" type="number" min="1" name="backup_frequency_hours" value="<?= e($backupFrequencyHours) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">24 = once a day, 168 = weekly. Minimum 1 hour.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Backups to Keep</label>
+                <input class="cv-input" type="number" min="1" name="backup_keep_count" value="<?= e($backupKeepCount) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">
+                    Older backups are deleted after a successful new one — never after a failed run, so a
+                    bad backup can't destroy your good copies. Minimum 1.
+                </span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Backup Log History (days)</label>
+                <input class="cv-input" type="number" min="1" name="backup_log_retention_days" value="<?= e($backupLogRetentionDays) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">
+                    How long run history (status/timing, not the backup files themselves) is kept. Pruned on every run. Minimum 1.
+                </span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Automation Log History (days)</label>
+                <input class="cv-input" type="number" min="1" name="cron_log_retention_days" value="<?= e($cronLogRetentionDays) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">
+                    How long cron job run history is kept for the "Last 24 Hours" panel and daily report. Pruned once a day. Minimum 1.
+                </span>
+            </div>
+        </div>
+
+        <!-- Service Lifecycle Card -->
+        <div class="cv-card">
+            <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Expired Service Lifecycle</h2>
+            <p style="font-size:0.8rem;color:var(--cv-text-secondary);margin-top:0;">
+                How long an unpaid service survives after its due date. A suspended service is locked until the
+                renewal invoice is paid — paying it restores the service automatically. Both automations run hourly
+                and are <strong>off</strong> until you switch them on below.
+            </p>
+
+            <div class="cv-field">
+                <label style="display:flex;align-items:center;gap:.5rem;">
+                    <input type="checkbox" name="auto_suspend_enabled" value="1" <?= $autoSuspendEnabled ? 'checked' : '' ?>>
+                    <span>Automatically suspend unpaid services</span>
+                </label>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Disables the account on the control panel. Reversed automatically when the client pays.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Suspend After (days past due)</label>
+                <input class="cv-input" type="number" min="0" name="suspension_grace_days" value="<?= e($suspensionGraceDays) ?>" required>
+            </div>
+
+            <div class="cv-field" style="border-top:1px solid var(--cv-border-default);padding-top:var(--cv-space-3);">
+                <label style="display:flex;align-items:center;gap:.5rem;">
+                    <input type="checkbox" name="auto_terminate_enabled" value="1" <?= $autoTerminateEnabled ? 'checked' : '' ?>>
+                    <span><strong>Automatically terminate expired services</strong></span>
+                </label>
+                <span style="font-size:0.75rem;color:var(--cv-color-danger-600, #b42318);">
+                    Irreversible. Termination destroys the account and its data on the remote server. Services whose
+                    invoice is paid before the window elapses are never terminated.
+                </span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Terminate VPS &amp; Dedicated Servers After (days past due)</label>
+                <input class="cv-input" type="number" min="0" name="termination_grace_days_server" value="<?= e($terminationGraceDaysServer) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Applies to products of type VPS or Dedicated, which hold reserved capacity. Default 1 day — reclaimed at the top of the hour once the day has elapsed.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Terminate Shared Hosting &amp; Other Services After (days past due)</label>
+                <input class="cv-input" type="number" min="0" name="termination_grace_days" value="<?= e($terminationGraceDays) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Applies to shared, reseller, email and any other product type. Default 60 days.</span>
+            </div>
+
+            <div class="cv-field" style="border-top:1px solid var(--cv-border-default);padding-top:var(--cv-space-3);">
+                <label style="display:flex;align-items:center;gap:.5rem;">
+                    <input type="checkbox" name="prune_terminated_enabled" value="1" <?= $pruneTerminatedEnabled ? 'checked' : '' ?>>
+                    <span><strong>Automatically delete terminated services</strong></span>
+                </label>
+                <span style="font-size:0.75rem;color:var(--cv-color-danger-600, #b42318);">
+                    Irreversible. Removes the service record itself once it has sat terminated this long — its
+                    invoices and payment history are untouched, they simply stop showing a linked service.
+                </span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Delete Terminated Services After (days)</label>
+                <input class="cv-input" type="number" min="0" name="prune_terminated_days" value="<?= e($pruneTerminatedDays) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Runs daily. Default 90 days.</span>
+            </div>
+        </div>
+
         <!-- Billing & Invoices Card -->
         <div class="cv-card">
             <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Invoice &amp; Billing Rules</h2>
@@ -55,6 +178,23 @@
                 <label class="cv-label">Overdue Invoice Late Fee Percentage (%)</label>
                 <input class="cv-input" type="number" step="0.01" min="0" name="late_fee_percentage" value="<?= e($lateFeePercentage) ?>" required>
                 <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Markup percentage automatically added to overdue invoices (e.g. 5 = 5%).</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Late Fee Grace Period (days)</label>
+                <input class="cv-input" type="number" min="0" name="late_fee_grace_days" value="<?= e($lateFeeGraceDays) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Days after the due date before the late fee is added. 0 adds it as soon as the invoice is overdue. Overdue reminder emails are unaffected — they still go out from the due date.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Auto-Cancel Unpaid Invoices After (days past due)</label>
+                <input class="cv-input" type="number" min="0" name="auto_cancel_unpaid_days" value="<?= e($autoCancelUnpaidDays) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">
+                    Cancels unpaid invoices left this long past their due date — useful for clearing months of
+                    historical invoices that will never be paid. <strong>0 disables it.</strong>
+                    Invoices belonging to a service that is still active or suspended are never cancelled, because
+                    the suspension and termination rules rely on them to detect arrears.
+                </span>
             </div>
 
             <div class="cv-field">

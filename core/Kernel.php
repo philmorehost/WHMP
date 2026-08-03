@@ -11,6 +11,7 @@ use CodeVault\Auth\AuthManager;
 use CodeVault\Billing\ClientCreditRepository;
 use CodeVault\Billing\CreditService;
 use CodeVault\Billing\InvoiceRepository;
+use CodeVault\Billing\ServiceRenewalService;
 use CodeVault\Billing\CancellationRequestRepository;
 use CodeVault\Billing\CancellationRequestService;
 use CodeVault\Billing\CancellationCronJob;
@@ -26,6 +27,7 @@ use CodeVault\Billing\OrderRepository;
 use CodeVault\Billing\PaymentGatewayRepository;
 use CodeVault\Billing\PaymentService;
 use CodeVault\Billing\DunningJob;
+use CodeVault\Billing\ServiceLifecycleSettings;
 use CodeVault\Billing\CurrencySelection;
 use CodeVault\Localization\LanguageRepository;
 use CodeVault\Notifications\DiscordNotificationModule;
@@ -78,6 +80,7 @@ use CodeVault\Mail\Mailer;
 use CodeVault\Modules\AddonModule;
 use CodeVault\Modules\AddonModuleRepository;
 use CodeVault\Modules\AddonModuleService;
+use CodeVault\Modules\Addons\DomainChangerAddon;
 use CodeVault\Modules\Addons\SystemDiagnosticsAddon;
 use CodeVault\Modules\GatewayModule;
 use CodeVault\Modules\ModuleManager;
@@ -165,6 +168,7 @@ use CodeVault\Support\ImapMailboxClient;
 use CodeVault\Support\MailboxClient;
 use CodeVault\Support\MailPipingJob;
 use CodeVault\Support\NetworkIssueRepository;
+use CodeVault\Support\TicketAttachmentRepository;
 use CodeVault\Support\TicketAutoCloseJob;
 use CodeVault\Support\TicketEscalationJob;
 use CodeVault\Support\TicketReplyRepository;
@@ -197,6 +201,56 @@ class Kernel
         $this->container = new Container();
         $this->registerCoreBindings();
         \CodeVault\Support\App::setContainer($this->container);
+        $this->applyTimezone();
+    }
+
+    /**
+     * Puts PHP — and the database session — on the admin's timezone.
+     *
+     * Nothing set this before, so PHP used its ini default (UTC on most
+     * hosts) while the business runs on local time. Every generated date was
+     * an hour out for a UTC+1 install: the automation screen reported the
+     * wrong "server time", and a daily run time of 10:10 fired at 11:10
+     * locally.
+     *
+     * The database session is aligned to the same offset because a handful of
+     * queries use MySQL's own NOW() rather than a PHP timestamp — without
+     * that, those few rows would be written an hour apart from every other
+     * date in the system.
+     */
+    private function applyTimezone(): void
+    {
+        $timezone = 'UTC';
+
+        try {
+            $configured = trim((string) $this->container->make(Config::class)->env('APP_TIMEZONE', ''));
+
+            if ($configured === '') {
+                // Settings live in the database, which may not exist yet during
+                // install — hence the try/catch around the whole lookup.
+                $configured = trim((string) ($this->container
+                    ->make(\CodeVault\Settings\SettingsRepository::class)
+                    ->get('general.timezone', '') ?? ''));
+            }
+
+            if ($configured !== '' && in_array($configured, \DateTimeZone::listIdentifiers(), true)) {
+                $timezone = $configured;
+            }
+        } catch (\Throwable) {
+            // No config/database yet — UTC is the safe default.
+        }
+
+        date_default_timezone_set($timezone);
+
+        try {
+            // A named zone would need MySQL's tz tables loaded, which many
+            // shared hosts skip; the numeric offset always works.
+            $offset = (new \DateTimeImmutable('now', new \DateTimeZone($timezone)))->format('P');
+            $this->container->make(Database::class)->statement('SET time_zone = ?', [$offset]);
+        } catch (\Throwable) {
+            // Database unavailable, or the session variable is restricted —
+            // PHP is still on the right zone, which covers almost every date.
+        }
     }
 
     private function registerCoreBindings(): void
@@ -271,7 +325,8 @@ class Kernel
                 $c->make(BackupManager::class),
                 $c->make(BackupRunRepository::class),
                 $basePath,
-                $basePath . '/storage/backups'
+                $basePath . '/storage/backups',
+                $c->make(\CodeVault\Settings\SettingsRepository::class)
             );
         });
 
@@ -507,6 +562,7 @@ class Kernel
                 $c->make(CurrencyService::class),
                 $c->make(Database::class),
                 $c->make(SettingsRepository::class),
+                $c->make(ServiceLifecycleSettings::class),
             );
         });
 
@@ -559,6 +615,7 @@ class Kernel
                 $c->make(QueueInterface::class),
                 $c->make(\CodeVault\Settings\SettingsRepository::class),
                 $c->make(\CodeVault\Config::class),
+                $c->make(\CodeVault\Notifications\ClientNotificationRepository::class),
             );
         });
 
@@ -678,6 +735,7 @@ class Kernel
             $manager->register(FraudModule::class, 'rules', $c->make(RuleBasedFraudModule::class));
             $manager->register(FraudModule::class, 'deepseek', $c->make(DeepSeekFraudTriageModule::class));
             $manager->register(AddonModule::class, 'system-diagnostics', $c->make(SystemDiagnosticsAddon::class));
+            $manager->register(AddonModule::class, 'domain-changer', $c->make(DomainChangerAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));
             $manager->register(SecurityQuestionModule::class, 'mother-maiden-name', $c->make(MotherMaidenNameQuestion::class));
@@ -745,7 +803,11 @@ class Kernel
         ));
 
         $this->container->singleton(SystemDiagnosticsAddon::class, function (Container $c) use ($basePath) {
-            return new SystemDiagnosticsAddon($c->make(Database::class), $c->make(Config::class), $basePath);
+            return new SystemDiagnosticsAddon($c->make(Database::class), $c->make(Config::class), $basePath, $c->make(Migrator::class));
+        });
+
+        $this->container->singleton(DomainChangerAddon::class, function (Container $c) {
+            return new DomainChangerAddon($c->make(Database::class));
         });
 
         $this->container->singleton(Router::class, function (Container $c) {
@@ -821,6 +883,8 @@ class Kernel
                 $c->make(ModuleManager::class),
                 $c->make(HookDispatcher::class),
                 $c->make(ClientRepository::class),
+                $c->make(Database::class),
+                $c->make(ActivityLogger::class),
             );
         });
 
@@ -831,6 +895,7 @@ class Kernel
                 $c->make(TaxCalculator::class),
                 $c->make(Database::class),
                 $c->make(HookDispatcher::class),
+                $c->make(CurrencyService::class),
             );
         });
 
@@ -861,6 +926,37 @@ class Kernel
             }
 
             $this->container->make(DomainService::class)->renew((int) $invoice['domain_id']);
+        });
+
+        // Paying a renewal invoice is what lifts a suspension: the service
+        // rolls to its next due date and, if it was suspended for non-payment,
+        // is unsuspended on the control panel too. Without this a client who
+        // paid stayed locked out until an admin noticed, which is the whole
+        // point of "renew to continue using the service".
+        //
+        // Independent of the domain listener above so a failure in one can't
+        // swallow the other, and wrapped because a payment must never be
+        // rejected just because the reactivation step had a problem — the
+        // money is already taken by this point.
+        $hooks->register(HookPoints::INVOICE_PAID, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $invoice = $this->container->make(InvoiceRepository::class)->find((int) $invoiceId);
+
+                if ($invoice === null || ($invoice['service_id'] ?? null) === null) {
+                    return;
+                }
+
+                $this->container->make(ServiceRenewalService::class)->renewPaidService((int) $invoice['service_id']);
+            } catch (\Throwable) {
+                // Reactivation is retried by the admin or the next payment;
+                // never fail the payment itself.
+            }
         });
 
         $this->container->singleton(AffiliateRepository::class, function (Container $c) {
@@ -923,6 +1019,7 @@ class Kernel
                 $c->make(TicketRepository::class),
                 $c->make(TicketReplyRepository::class),
                 $c->make(HookDispatcher::class),
+                $c->make(TicketAttachmentRepository::class),
             );
         });
 
@@ -1064,20 +1161,6 @@ class Kernel
             }
 
             $this->container->make(FraudService::class)->evaluate((int) $orderId);
-        });
-
-        // Redirect and error handling services
-        $this->container->singleton(\CodeVault\Redirects\RedirectService::class, function (Container $c) {
-            return new \CodeVault\Redirects\RedirectService($c->make(Database::class));
-        });
-
-        $this->container->singleton(\CodeVault\Redirects\PageSearchService::class, function (Container $c) {
-            return new \CodeVault\Redirects\PageSearchService(
-                $c->make(\CodeVault\Catalog\ProductRepository::class),
-                $c->make(\CodeVault\Catalog\ProductGroupRepository::class),
-                $c->make(\CodeVault\Knowledgebase\KbArticleRepository::class),
-                $c->make(\CodeVault\Domains\DomainRepository::class)
-            );
         });
 
         $this->registerNotificationListeners();

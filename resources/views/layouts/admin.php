@@ -10,7 +10,8 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= e($title ?? "{$theme['brandName']} Admin") ?></title>
+    <?php // page_title() swaps the hardcoded product name for the admin's brand. ?>
+    <title><?= e(page_title($title ?? null, $theme['brandName'] ?? null)) ?></title>
     <?php if (!empty($theme['faviconUrl'])): ?>
         <link rel="icon" href="<?= e($theme['faviconUrl']) ?>">
     <?php endif; ?>

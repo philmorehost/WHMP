@@ -36,9 +36,28 @@ final class KbCategoryController
 
         $name = trim((string) $request->input('name', ''));
         $sortOrder = (int) $request->input('sort_order', 0);
+        $description = trim((string) $request->input('description', ''));
 
         if ($name !== '') {
-            $this->categories->create($name, $sortOrder);
+            $this->categories->create($name, $sortOrder, $description !== '' ? $description : null);
+        }
+
+        return Response::redirect('/admin/kb/categories');
+    }
+
+    public function update(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $name = trim((string) $request->input('name', ''));
+        $sortOrder = (int) $request->input('sort_order', 0);
+        $description = trim((string) $request->input('description', ''));
+
+        if ($name !== '' && $this->categories->find($id) !== null) {
+            $this->categories->update($id, $name, $sortOrder, $description !== '' ? $description : null);
         }
 
         return Response::redirect('/admin/kb/categories');

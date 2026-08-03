@@ -23,15 +23,20 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
 <html lang="<?= e($t?->code() ?? 'en') ?>" dir="<?= e($t?->dir() ?? 'ltr') ?>" data-skin="client">
 <head>
     <meta charset="utf-8">
+    <!-- Without this, a phone renders the page at a ~980px virtual viewport and
+         scales it down: every CSS media query below that width never matches,
+         so the whole client area shows its desktop layout shrunk to fit. The
+         admin and installer layouts have always carried this; the client one
+         did not. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <?php
+    // Was a str_replace list of exact "CodeVault " prefixes, which missed a
+    // bare 'CodeVault' title — the client login and register pages pass
+    // exactly that, so their tabs read "CodeVault — Brand". page_title()
+    // substitutes the brand for the product name wherever it appears.
+    ?>
     <title><?php
-        $pageTitle = trim((string) ($title ?? ''));
-        $brand = e($theme['brandName'] ?? 'WHMP');
-        $pageTitle = str_replace(['CodeVault — ', 'CodeVault - ', 'CodeVault '], '', $pageTitle);
-        if ($pageTitle === '' || strcasecmp($pageTitle, $brand) === 0) {
-            echo $brand;
-        } else {
-            echo e($pageTitle) . ' — ' . $brand;
-        }
+        echo e(page_title($title ?? null, $theme['brandName'] ?? null));
     ?></title>
     <?php if (!empty($theme['faviconUrl'])): ?>
         <link rel="icon" href="<?= e($theme['faviconUrl']) ?>">
@@ -58,6 +63,7 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
 <body data-skin="client">
+<?= $view->partial('partials.promo-banner') ?>
 <?php if (!empty($_SESSION['original_admin_id'])): ?>
     <div style="background:var(--cv-color-brand-500);color:#ffffff;padding:var(--cv-space-2) var(--cv-space-6);display:flex;justify-content:space-between;align-items:center;font-size:var(--cv-text-sm);font-weight:600;z-index:9999;position:relative;">
         <span>👤 You are logged in as a client.</span>

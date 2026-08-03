@@ -7,6 +7,7 @@ namespace CodeVault\Ai;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Support\MarkdownToText;
 use CodeVault\View;
 
 /**
@@ -17,8 +18,16 @@ use CodeVault\View;
  */
 final class AskAiController
 {
+    // Staff paste these answers straight into client emails, campaign bodies
+    // and ticket replies — none of which render Markdown — so asking for plain
+    // prose keeps "###" and "**" out of what the customer eventually reads.
+    // MarkdownToText cleans up anyway when the model reverts to habit.
     private const SYSTEM_PROMPT = 'You are a helpful assistant for the staff of a web hosting and domain '
-        . 'company\'s billing/support platform. Answer clearly and concisely.';
+        . 'company\'s billing/support platform. Answer clearly and concisely. '
+        . 'Write in plain text prose only. Do not use Markdown or any markup: no #, *, _, backticks, '
+        . 'or --- separators, and no bold or italic syntax. For lists, start each line with "- ". '
+        . 'Write headings as an ordinary line of text. Your answer is often pasted directly into an '
+        . 'email to a customer, so it must read correctly with no formatting characters visible.';
 
     public function __construct(
         private readonly AuthGuard $guard,
@@ -52,7 +61,10 @@ final class AskAiController
 
         return $this->render([
             'question' => $question,
-            'answer' => $result['success'] ? $result['text'] : null,
+            // Second line of defence: strip any Markdown the model produced in
+            // spite of the system prompt, so what's on screen is exactly what
+            // can be pasted into an email.
+            'answer' => $result['success'] ? MarkdownToText::convert((string) $result['text']) : null,
             'error' => $result['success'] ? null : $result['error'],
         ]);
     }

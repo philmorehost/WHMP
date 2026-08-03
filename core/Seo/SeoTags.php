@@ -32,7 +32,9 @@ final class SeoTags
         return [
             '@context' => 'https://schema.org',
             '@type' => 'Organization',
-            'name' => (string) $this->config->env('APP_NAME', 'CodeVault'),
+            // The admin's brand, not the platform's own name — this is the
+            // organisation name search engines index and display.
+            'name' => brand_name(),
             'url' => rtrim((string) $this->config->env('APP_URL', ''), '/'),
         ];
     }

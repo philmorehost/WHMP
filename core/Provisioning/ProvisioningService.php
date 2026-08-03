@@ -144,23 +144,28 @@ final class ProvisioningService
         return $module->singleSignOn($params);
     }
 
-    public function reinstall(int $serviceId, string $osVersion): array
+    public function reinstall(int $serviceId, string $template, string $localPassword = ''): array
     {
-        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
-
-        if ($error !== null) {
-            return ['success' => false, 'message' => $error];
-        }
-
-        if (!method_exists($module, 'reinstall')) {
-            return ['success' => false, 'message' => 'OS Reinstallation is not supported by this server module.'];
-        }
-
-        $params['osVersion'] = $osVersion;
-        return $module->reinstall($params);
+        return $this->optional($serviceId, 'reinstall', [
+            'template' => $template,
+            'localPassword' => $localPassword,
+        ], 'OS reinstallation is not supported by this server module.');
     }
 
-    public function setReverseDns(int $serviceId, string $rdns): array
+    /** @return array{success: bool, message: string, templates?: array<int, array<string, mixed>>} */
+    public function osTemplates(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'osTemplates', [], 'This server module does not publish OS templates.');
+    }
+
+    /**
+     * Renames the primary domain on the live server, then — only once the
+     * module confirms it — updates the local `services.domain` column to
+     * match. Ordered this way deliberately: a module failure must never
+     * leave the local record claiming a domain the server doesn't actually
+     * have.
+     */
+    public function changeDomain(int $serviceId, string $newDomain): array
     {
         [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
 
@@ -168,12 +173,106 @@ final class ProvisioningService
             return ['success' => false, 'message' => $error];
         }
 
-        if (!method_exists($module, 'setReverseDns')) {
-            return ['success' => false, 'message' => 'Reverse DNS configuration is not supported by this server module.'];
+        if (!method_exists($module, 'changeDomain')) {
+            return ['success' => false, 'message' => 'Changing the primary domain is not supported by this server module.'];
         }
 
-        $params['rdns'] = $rdns;
-        return $module->setReverseDns($params);
+        $result = $module->changeDomain(array_merge($params, ['domain' => $newDomain]));
+
+        if (!$result['success']) {
+            $this->recordFailure($serviceId, $result['message']);
+
+            return $result;
+        }
+
+        $this->services->updateDetails($serviceId, ['domain' => $newDomain]);
+        $this->clearFailure($serviceId);
+        $this->hooks->fire(HookPoints::AFTER_MODULE_CHANGE_DOMAIN, ['serviceId' => $serviceId, 'domain' => $newDomain]);
+
+        return $result;
+    }
+
+    public function setReverseDns(int $serviceId, string $rdns, string $ip = ''): array
+    {
+        return $this->optional($serviceId, 'setReverseDns', [
+            'rdns' => $rdns,
+            'ip' => $ip,
+        ], 'Reverse DNS configuration is not supported by this server module.');
+    }
+
+    /** @return array{success: bool, message: string, ips?: array<string, string>} */
+    public function reverseDnsEntries(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'reverseDnsEntries', [], 'Reverse DNS lookup is not supported by this server module.');
+    }
+
+    /**
+     * Power state. Unlike suspend()/unsuspend(), this deliberately does not
+     * touch the local service status: a client rebooting their own VPS is
+     * not a billing-lifecycle transition, and recording it as one would let
+     * a reboot silently mark an active service suspended.
+     */
+    public function power(int $serviceId, string $action): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        if (!method_exists($module, 'power')) {
+            return ['success' => false, 'message' => 'Power control is not supported by this server module.'];
+        }
+
+        return $module->power($params, $action);
+    }
+
+    public function createBackup(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'createBackup', [], 'Snapshots are not supported by this server module.');
+    }
+
+    /** @return array{success: bool, message: string, backups?: array<int, array<string, mixed>>} */
+    public function listBackups(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'listBackups', [], 'Snapshots are not supported by this server module.');
+    }
+
+    /** @return array{success: bool, message: string, slices?: array<string, mixed>} */
+    public function sliceOptions(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'sliceOptions', [], 'Slice scaling is not supported by this server module.');
+    }
+
+    /** @return array{success: bool, message: string, info?: array<string, mixed>} */
+    public function remoteInfo(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'info', [], 'This server module does not report live status.');
+    }
+
+    /**
+     * Invokes a method a module only optionally implements. Power control,
+     * snapshots and slice pricing are real on a hypervisor-backed VPS and
+     * meaningless on a shared-hosting panel, so `ProvisioningModule` does
+     * not mandate them — a module without one says so rather than letting
+     * the caller assume the action happened.
+     *
+     * @param array<string, mixed> $extra
+     * @return array<string, mixed>
+     */
+    private function optional(int $serviceId, string $method, array $extra, string $unsupported): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        if (!method_exists($module, $method)) {
+            return ['success' => false, 'message' => $unsupported];
+        }
+
+        return $module->{$method}(array_merge($params, $extra));
     }
 
     /** @return array<string, mixed> */

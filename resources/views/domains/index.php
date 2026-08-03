@@ -102,6 +102,34 @@
     </form>
 </div>
 
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Expired Domain Deletion</h2>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+        Real registrars delete an unredeemed domain outright once its grace and redemption periods both run out —
+        at that point it becomes registrable by anyone again, including your own clients. This does the same for
+        your local records once a domain has gone that far unrenewed. Grace and redemption periods are set per TLD
+        on the <a href="/admin/domain-pricing">Domain Pricing</a> page; the days below are an <strong>extra</strong>
+        wait on top of both, so a domain can never be deleted while it's still inside its own redemption window.
+    </p>
+    <form method="post" action="/admin/domains/deletion-policy"><?= csrf_field() ?>
+        <div class="cv-field">
+            <label style="display:flex;align-items:center;gap:.5rem;">
+                <input type="checkbox" name="auto_delete_expired_enabled" value="1" <?= $autoDeleteExpiredEnabled ? 'checked' : '' ?>>
+                <span><strong>Automatically delete expired, unredeemed domains</strong></span>
+            </label>
+            <span style="font-size:0.75rem;color:var(--cv-color-danger-600, #b42318);">
+                Irreversible. Runs daily. Off until you switch it on.
+            </span>
+        </div>
+        <div class="cv-field">
+            <label class="cv-label">Extra Days After Grace + Redemption Before Deletion</label>
+            <input class="cv-input" type="number" min="0" name="deletion_grace_days" value="<?= e((string) $deletionGraceDays) ?>" required>
+            <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Default 30. With a typical 30-day grace and 30-day redemption period, this gives roughly 90 total days from expiry, matching most registrars.</span>
+        </div>
+        <button class="cv-btn" type="submit">Save Deletion Policy</button>
+    </form>
+</div>
+
 <form method="post" action="/admin/domains/bulk-status" id="bulkSelectedDomainsForm">
     <?= csrf_field() ?>
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);background:var(--cv-bg-surface);border:1px solid var(--cv-border-color);">
@@ -118,10 +146,17 @@
                     <option value="transferred">Set Transferred</option>
                     <option value="fraud">Set Fraud</option>
                 </select>
-                <button type="submit" formaction="/admin/domains/bulk-status" class="cv-btn" onclick="return validateBulkStatus()">Update Selected Status</button>
+                <button type="submit" formaction="/admin/domains/bulk-status" class="cv-btn"
+                        data-require-checked=".domain-select-checkbox"
+                        data-require-checked-message="Please select at least one domain using the checkboxes."
+                        data-require-value="#bulkStatusSelect"
+                        data-require-value-message="Please select a status from the dropdown to apply to the selected domains.">Update Selected Status</button>
             </div>
             <div>
-                <button type="submit" formaction="/admin/domains/bulk-delete" class="cv-btn cv-btn--danger" style="background:#ef4444;color:#fff;border:none;" onclick="return validateBulkDelete()">Delete Selected Domains</button>
+                <button type="submit" formaction="/admin/domains/bulk-delete" class="cv-btn cv-btn--danger" style="background:#ef4444;color:#fff;border:none;"
+                        data-require-checked=".domain-select-checkbox"
+                        data-require-checked-message="Please select at least one domain using the checkboxes."
+                        data-confirm-count="Are you sure you want to permanently delete {count} selected domain(s)? This action cannot be undone.">Delete Selected Domains</button>
             </div>
         </div>
     </div>
@@ -133,7 +168,7 @@
         <table class="cv-table" id="domains-table">
             <thead>
                 <tr>
-                    <th style="width:38px;text-align:center;"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAllDomains(this)"></th>
+                    <th style="width:38px;text-align:center;"><input type="checkbox" id="selectAllCheckbox" data-select-all=".domain-select-checkbox" title="Select all domains"></th>
                     <th>Domain</th>
                     <th>Client</th>
                     <th>Registrar</th>
@@ -170,32 +205,10 @@
     </div>
 </form>
 
-<script>
-function toggleSelectAllDomains(master) {
-    const checkboxes = document.querySelectorAll('.domain-select-checkbox');
-    checkboxes.forEach(cb => cb.checked = master.checked);
-}
-
-function validateBulkStatus() {
-    const checked = document.querySelectorAll('.domain-select-checkbox:checked');
-    if (checked.length === 0) {
-        alert('Please select at least one domain using the checkboxes.');
-        return false;
-    }
-    const statusSelect = document.getElementById('bulkStatusSelect');
-    if (!statusSelect.value) {
-        alert('Please select a status from the dropdown to apply to the selected domains.');
-        return false;
-    }
-    return true;
-}
-
-function validateBulkDelete() {
-    const checked = document.querySelectorAll('.domain-select-checkbox:checked');
-    if (checked.length === 0) {
-        alert('Please select at least one domain using the checkboxes.');
-        return false;
-    }
-    return confirm(`Are you sure you want to permanently delete ${checked.length} selected domain(s)? This action cannot be undone.`);
-}
-</script>
+<?php
+// The select-all and bulk-action guards live in app.js behind delegated
+// [data-select-all] / [data-require-checked] listeners. They used to be
+// functions here called from onclick="…" attributes, which CSP blocked —
+// script-src carries a nonce but no 'unsafe-inline', and a nonce does not
+// apply to inline event-handler attributes.
+?>

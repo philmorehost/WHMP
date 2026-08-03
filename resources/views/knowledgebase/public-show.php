@@ -1,12 +1,17 @@
 <?php
 /** @var array<string, mixed> $article */
+/** @var array<int, array<string, mixed>> $images */
+
+use CodeVault\Knowledgebase\KbArticleRenderer;
+
 $id = (int) $article['id'];
+$images ??= [];
 ?>
 <div class="cv-card" style="max-width:44rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title"><?= e($article['title']) ?></h1>
     <p><a href="/kb">&larr; Back to Knowledgebase</a></p>
     <p style="color:var(--cv-text-secondary);"><?= e($article['category_name']) ?> &middot; <?= (int) $article['views'] ?> views</p>
-    <div style="white-space:pre-wrap;margin-top:var(--cv-space-3);"><?= e($article['body']) ?></div>
+    <div style="margin-top:var(--cv-space-3);"><?= KbArticleRenderer::render((string) $article['body'], $images, "/kb/{$id}/images") ?></div>
 </div>
 
 <div class="cv-card" style="max-width:44rem;margin:0 auto;">

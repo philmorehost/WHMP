@@ -32,4 +32,17 @@ final class TicketReplyRepository
             [$ticketId, $authorType, $authorId, $authorName, $message, $isPrivate ? 1 : 0, (new DateTimeImmutable())->format('Y-m-d H:i:s')]
         );
     }
+
+    /**
+     * Re-points every reply on $fromTicketId onto $toTicketId (ticket
+     * merge). `id` stays untouched, so the merged thread still displays in
+     * true chronological order alongside the target's own replies.
+     */
+    public function moveToTicket(int $fromTicketId, int $toTicketId): int
+    {
+        return $this->db->update(
+            'UPDATE ticket_replies SET ticket_id = ? WHERE ticket_id = ?',
+            [$toTicketId, $fromTicketId]
+        );
+    }
 }

@@ -383,7 +383,7 @@
             <?php endforeach; ?>
         </div>
 
-        <script>
+        <script nonce="<?= csp_nonce() ?>">
             function filterTickets(filter) {
                 const cards = document.querySelectorAll('[class*="ticket-filter-"]');
                 const tabs = document.querySelectorAll('.tickets-tab');

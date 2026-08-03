@@ -73,16 +73,43 @@ final class ServiceRepository
     /**
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 20): array
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, string $search = ''): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $where = $status !== null ? 'WHERE s.status = ?' : '';
-        $bindings = $status !== null ? [$status] : [];
+        $conditions = [];
+        $bindings = [];
 
-        $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM services s {$where}", $bindings)['c'] ?? 0);
+        if ($status !== null) {
+            $conditions[] = 's.status = ?';
+            $bindings[] = $status;
+        }
+
+        // Searches the whole table, not just the page currently on screen —
+        // the client-side row filter this replaces could only ever match the
+        // 20 rows already rendered, which quietly hid every other match.
+        // Domain and hostname are included so an admin can paste a customer's
+        // domain straight in, which is usually all they have to go on.
+        $search = trim($search);
+
+        if ($search !== '') {
+            $conditions[] = '(s.domain LIKE ? OR s.hostname LIKE ? OR s.product_name LIKE ? OR s.username LIKE ?'
+                . ' OR c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.company_name LIKE ?'
+                . " OR CONCAT(c.first_name, ' ', c.last_name) LIKE ?)";
+            $needle = "%{$search}%";
+            $bindings = array_merge($bindings, array_fill(0, 9, $needle));
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
+
+        // The COUNT has to join clients too, or a search on a client field
+        // would filter the rows but leave the total (and page count) wrong.
+        $total = (int) ($this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM services s JOIN clients c ON c.id = s.client_id {$where}",
+            $bindings
+        )['c'] ?? 0);
 
         $data = $this->db->select(
             <<<SQL
@@ -113,6 +140,65 @@ final class ServiceRepository
 
         return $this->db->select(
             "SELECT * FROM services WHERE status = 'active' AND next_due_date <= ?",
+            [$cutoff]
+        );
+    }
+
+    /**
+     * Services whose due date has passed by more than $graceDays and which
+     * still owe money, for the auto-suspension sweep.
+     *
+     * The unpaid check is a NOT EXISTS against invoices rather than a status
+     * flag on the service: a client who pays late is settled the moment the
+     * invoice flips to paid, and must not be suspended by a sweep that only
+     * looked at next_due_date.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function overdueForSuspension(int $graceDays): array
+    {
+        $cutoff = (new DateTimeImmutable("-{$graceDays} days"))->format('Y-m-d');
+
+        return $this->db->select(
+            "SELECT s.* FROM services s
+             WHERE s.status = 'active'
+               AND s.next_due_date < ?
+               AND EXISTS (
+                   SELECT 1 FROM invoices i
+                   WHERE i.service_id = s.id AND i.status = 'unpaid'
+               )",
+            [$cutoff]
+        );
+    }
+
+    /**
+     * Expired services eligible for termination, with the product type each
+     * one belongs to so the caller can apply the right grace window.
+     *
+     * Returns candidates past the *shortest* grace in play and lets the caller
+     * filter per type — one query instead of one per product type, and a new
+     * type can't slip through a hard-coded IN list.
+     *
+     * Only suspended/active services are returned: already-cancelled or
+     * terminated rows must never be re-terminated.
+     *
+     * @return array<int, array<string, mixed>> service rows plus product_type
+     */
+    public function expiredForTermination(int $minimumGraceDays): array
+    {
+        $cutoff = (new DateTimeImmutable("-{$minimumGraceDays} days"))->format('Y-m-d');
+
+        return $this->db->select(
+            "SELECT s.*, p.type AS product_type
+             FROM services s
+             LEFT JOIN products p ON p.id = s.product_id
+             WHERE s.status IN ('active', 'suspended')
+               AND s.next_due_date < ?
+               AND EXISTS (
+                   SELECT 1 FROM invoices i
+                   WHERE i.service_id = s.id AND i.status = 'unpaid'
+               )
+             ORDER BY s.next_due_date ASC",
             [$cutoff]
         );
     }
@@ -199,6 +285,20 @@ final class ServiceRepository
     }
 
     /** @param string|null $message null clears a previously-recorded error */
+    /**
+     * Stamps the moment this service's access details were emailed, so the
+     * admin screen can distinguish a first send from a resend.
+     */
+    public function stampDetailsSent(int $id): void
+    {
+        $this->ensureSchema();
+
+        $this->db->update(
+            'UPDATE services SET details_sent_at = ? WHERE id = ?',
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function recordProvisioningError(int $id, ?string $message): void
     {
         $this->db->update(
@@ -285,6 +385,25 @@ final class ServiceRepository
     }
 
     /**
+     * A short tag identifying which specific domain/hostname a service line
+     * is for, appended to invoice item descriptions (order, renewal, and
+     * proration invoices — see CheckoutService, RecurringBillingService,
+     * ProrationService). Without this, a client (or admin) with more than
+     * one of the same product on their account sees identical line items
+     * like "Web Hosting - Basic (Annually)" with no way to tell which
+     * invoice belongs to which of their sites.
+     */
+    public static function invoiceIdentifierSuffix(?string $domain, ?string $hostname): string
+    {
+        $parts = array_unique(array_filter(
+            [trim((string) $domain), trim((string) $hostname)],
+            static fn (string $value): bool => $value !== ''
+        ));
+
+        return $parts === [] ? '' : ' — ' . implode(', ', $parts);
+    }
+
+    /**
      * @param array<string, mixed> $fields
      */
     public function update(int $id, array $fields): void
@@ -314,32 +433,88 @@ final class ServiceRepository
         try {
             $this->db->statement('ALTER TABLE services ADD COLUMN assigned_ips TEXT NULL AFTER dedicated_ip');
         } catch (\Throwable) {}
+        // Migration 0102 adds this, but an install that predates it (or whose
+        // 0102 partially applied) would otherwise fail the moment an admin
+        // saves a password — same defensive shape as the two above.
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN password VARCHAR(255) NULL AFTER hostname');
+        } catch (\Throwable) {}
+        // Migration 0143. Same reasoning: repairs an install that has the code
+        // but not yet the column.
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN details_sent_at DATETIME NULL AFTER password');
+        } catch (\Throwable) {}
     }
 
     /**
+     * Partial update of a service's access details.
+     *
+     * **Only keys actually present in $fields are written.** A key that is
+     * absent is left untouched in the database — it is not nulled. Two things
+     * depend on that:
+     *
+     *  - The password renders masked, so a blank submission means "I didn't
+     *    touch it", not "wipe it". Nulling it would destroy the stored
+     *    password every time an admin edited an unrelated field.
+     *  - Fields the form doesn't render for this product type (a VPS has no
+     *    domain, only a hostname) must survive a save rather than be cleared
+     *    by their own absence.
+     *
+     * Passing an explicit null still clears the column, so "blank this out"
+     * stays expressible.
+     *
      * @param array<string, mixed> $fields
      */
     public function updateDetails(int $id, array $fields): void
     {
         $this->ensureSchema();
+
+        $writable = ['username', 'domain', 'hostname', 'password', 'dedicated_ip', 'assigned_ips', 'server_id'];
+        $assignments = [];
+        $bindings = [];
+
+        foreach ($writable as $column) {
+            if (!array_key_exists($column, $fields)) {
+                continue;
+            }
+
+            $assignments[] = "{$column} = ?";
+            $bindings[] = $fields[$column];
+        }
+
+        if ($assignments === []) {
+            return;
+        }
+
+        $assignments[] = 'updated_at = ?';
+        $bindings[] = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $bindings[] = $id;
+
         $this->db->update(
-            'UPDATE services SET username = ?, domain = ?, hostname = ?, dedicated_ip = ?, assigned_ips = ?, server_id = ?, updated_at = ? WHERE id = ?',
-            [
-                $fields['username'] ?? null,
-                $fields['domain'] ?? null,
-                $fields['hostname'] ?? null,
-                $fields['dedicated_ip'] ?? null,
-                $fields['assigned_ips'] ?? null,
-                $fields['server_id'] ?? null,
-                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
-                $id,
-            ]
+            'UPDATE services SET ' . implode(', ', $assignments) . ' WHERE id = ?',
+            $bindings
         );
     }
 
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM services WHERE id = ?', [$id]);
+    }
+
+    /**
+     * Services that have sat in 'terminated' status since before the cutoff —
+     * candidates for ServicePruningJob. updated_at is the "terminated at"
+     * timestamp: terminate() is a dead end for a service (nothing updates it
+     * again afterward), so the last write is reliably the termination itself.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function terminatedBefore(string $cutoff): array
+    {
+        return $this->db->select(
+            "SELECT id FROM services WHERE status = 'terminated' AND updated_at < ?",
+            [$cutoff]
+        );
     }
 
     /** @param array<int, int> $ids */

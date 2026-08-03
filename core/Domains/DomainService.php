@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace CodeVault\Domains;
 
+use CodeVault\Activity\ActivityLogger;
 use CodeVault\Clients\ClientRepository;
+use CodeVault\Database;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\RegistrarModule;
+use DateTimeImmutable;
 
 /**
  * The domain engine orchestration (blueprint §4.4): turns a domain action
@@ -24,8 +27,71 @@ final class DomainService
         private readonly RegistrarRepository $registrars,
         private readonly ModuleManager $modules,
         private readonly HookDispatcher $hooks,
-        private readonly ClientRepository $clients
+        private readonly ClientRepository $clients,
+        // renew() reads grace/redemption windows straight from domain_pricing;
+        // there is no repository for that lookup yet.
+        private readonly Database $db,
+        private readonly ActivityLogger $activity
     ) {
+    }
+
+    /**
+     * The hidden $0 "Domain Registration" carrier product a standalone
+     * domain (register/transfer, not attached to a require_domain product)
+     * rides on — the cart has no concept of a domain-only line (see
+     * migration 0103's docblock), so every such domain needs a real
+     * product_id to attach its domain_options to. Shared by every path that
+     * adds a standalone domain to an order (the public search page,
+     * AdminOrderController) so there is exactly one carrier product, not
+     * one per caller that happened to reimplement this lookup.
+     */
+    public function carrierProductId(): int
+    {
+        $carrier = $this->db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1");
+
+        if ($carrier !== null) {
+            return (int) $carrier['id'];
+        }
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $groupId = $this->db->selectOne("SELECT id FROM product_groups WHERE name = 'System' LIMIT 1")['id'] ?? null;
+
+        if ($groupId === null) {
+            $groupId = $this->db->insert(
+                'INSERT INTO product_groups (name, description, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                ['System', 'Internal carrier products — not shown in the store.', 9999, $now, $now]
+            );
+        }
+
+        $productId = $this->db->insert(
+            'INSERT INTO products (product_group_id, name, description, status, type, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [(int) $groupId, 'Domain Registration', 'Internal carrier for standalone domain registrations — not a purchasable product on its own.', 'hidden', 'other', 0, $now, $now]
+        );
+
+        $this->db->insert(
+            'INSERT INTO product_pricing (product_id, billing_cycle, setup_fee, price) VALUES (?, ?, ?, ?)',
+            [(int) $productId, 'annually', 0.00, 0.00]
+        );
+
+        // Best-effort: a logging failure must never block a client's
+        // checkout over a row that was already successfully recreated above.
+        try {
+            $this->activity->log(
+                'system',
+                null,
+                'domain.carrier_product_recreated',
+                'product',
+                (int) $productId,
+                'Recreated the "Domain Registration" carrier product — it was missing, so every standalone domain '
+                . 'registration/transfer was failing with "temporarily unavailable". If this keeps happening, '
+                . 'something is deleting it — check recent admin activity on the Products page.',
+                null
+            );
+        } catch (\Throwable) {
+        }
+
+        return (int) $productId;
     }
 
     /**
@@ -54,10 +120,25 @@ final class DomainService
             return ['success' => false, 'available' => false, 'message' => 'Availability check failed: ' . $e->getMessage(), 'expiryDate' => null];
         }
 
+        // Every module's checkAvailability() carries its own reason for a
+        // failure — the actual registrar-reported error, not a generic
+        // string — but they don't all use the same key for it. Namecheap,
+        // ResellerClub and Upperlink return it as 'status'; ConnectReseller
+        // returns it as 'message'. This used to read only 'status', so a
+        // ConnectReseller failure — of any kind, for any reason — always
+        // fell straight through to the hardcoded "Availability check
+        // failed.", discarding whatever ConnectReseller's API actually said
+        // and leaving nothing for staff to diagnose. Checking both keys
+        // means a future module drifting the same way degrades to the
+        // generic message instead of silently losing real diagnostic detail.
+        $reason = $result['status'] ?? $result['message'] ?? null;
+
         return [
             'success' => (bool) ($result['success'] ?? false),
             'available' => (bool) ($result['available'] ?? false),
-            'message' => (string) ($result['status'] ?? ($result['success'] ?? false ? 'Checked.' : 'Availability check failed.')),
+            'message' => $reason !== null
+                ? (string) $reason
+                : (($result['success'] ?? false) ? 'Checked.' : 'Availability check failed.'),
             'expiryDate' => $result['expiryDate'] ?? null,
         ];
     }
@@ -125,14 +206,27 @@ final class DomainService
             return ['success' => false, 'message' => $error];
         }
 
-        // Validate domain grace and redemption limits
+        // Validate domain grace and redemption limits.
+        //
+        // domains.tld is stored WITHOUT a leading dot (DomainRepository::create
+        // takes everything after the first dot, so "foo.com" gives "com"),
+        // while domain_pricing.tld is stored WITH one (".com"). Comparing them
+        // raw never matched, so the lookup below always came back empty and the
+        // grace/redemption limits were silently never enforced. Normalise to
+        // the dotted form domain_pricing uses.
         $tld = strtolower(trim((string) ($domain['tld'] ?? '')));
+
         if ($tld === '') {
             $parts = explode('.', strtolower(trim((string) $domain['domain_name'])));
+
             if (count($parts) > 1) {
                 array_shift($parts);
-                $tld = '.' . implode('.', $parts);
+                $tld = implode('.', $parts);
             }
+        }
+
+        if ($tld !== '' && !str_starts_with($tld, '.')) {
+            $tld = '.' . $tld;
         }
 
         if ($tld !== '' && !empty($domain['expiry_date'])) {
@@ -163,8 +257,20 @@ final class DomainService
             'domain' => $domain['domain_name'],
             'years' => $years,
             'registrar' => $config,
+            // The full client record, not just the stored ID: a registrar that
+            // has no local link yet (imported domain, or one registered before
+            // this integration) can then resolve the customer from the client's
+            // own details rather than failing the renewal outright.
+            'client' => $client ?? [],
             'registrarClientId' => $client['registrar_client_id'] ?? null,
         ]);
+
+        // Persist a customer ID the registrar resolved for us, exactly as
+        // register()/transfer() do, so the link is repaired permanently and the
+        // next renewal doesn't repeat the lookup.
+        if (isset($result['registrarClientId']) && $client !== null) {
+            $this->clients->updateRegistrarClientId((int) $client['id'], (string) $result['registrarClientId']);
+        }
 
         if (!$result['success']) {
             $this->domains->recordProvisioningError($domainId, $result['message']);
@@ -324,11 +430,24 @@ final class DomainService
             return ['success' => false, 'contacts' => [], 'message' => $error];
         }
 
-        return $module->getContactInfo([
+        $client = $this->clients->find((int) $domain['client_id']);
+
+        $result = $module->getContactInfo([
             'domain' => $domain['domain_name'],
             'registrar' => $config,
             'registrarContactId' => $domain['registrar_contact_id'] ?? null,
+            // Lets a registrar resolve the contact for a domain that has no
+            // local link yet (imported, or predating this integration) instead
+            // of reporting "no contact on file" for one that plainly exists.
+            'registrarClientId' => $client['registrar_client_id'] ?? null,
+            'client' => $client ?? [],
         ]);
+
+        if (($result['success'] ?? false) && isset($result['registrarContactId'])) {
+            $this->domains->updateContactId($domainId, (string) $result['registrarContactId']);
+        }
+
+        return $result;
     }
 
     /** @param array<string, mixed> $contact */

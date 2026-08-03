@@ -19,11 +19,13 @@ final class AddonModuleTest extends DatabaseTestCase
 {
     private AddonModuleRepository $repository;
     private string $scratchDir;
+    private Migrator $migrator;
 
     protected function setUp(): void
     {
         parent::setUp();
-        (new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations'))->run();
+        $this->migrator = new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations');
+        $this->migrator->run();
 
         $this->repository = new AddonModuleRepository($this->db);
         $this->scratchDir = sys_get_temp_dir() . '/cv_addon_test_' . uniqid();
@@ -153,7 +155,7 @@ final class AddonModuleTest extends DatabaseTestCase
         $hooks = new HookDispatcher();
         $modules = new ModuleManager($hooks);
 
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
         $modules->register(AddonModule::class, 'system-diagnostics', $addon);
 
         $service = new AddonModuleService($modules, $this->repository, $hooks);
@@ -171,7 +173,7 @@ final class AddonModuleTest extends DatabaseTestCase
 
     public function test_render_reports_live_database_connectivity_as_ok(): void
     {
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
 
         $html = $addon->render([]);
 
@@ -182,7 +184,7 @@ final class AddonModuleTest extends DatabaseTestCase
 
     public function test_render_shows_no_cron_runs_message_when_state_file_absent(): void
     {
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
 
         $html = $addon->render([]);
 
@@ -196,7 +198,7 @@ final class AddonModuleTest extends DatabaseTestCase
             json_encode(['daily-backup' => 1750000000])
         );
 
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
         $html = $addon->render([]);
 
         $this->assertStringContainsString('daily-backup', $html);
@@ -205,7 +207,7 @@ final class AddonModuleTest extends DatabaseTestCase
 
     public function test_hook_listener_records_a_cron_failure_and_render_shows_it(): void
     {
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
         $listener = $addon->hooks()[HookPoints::CRON_JOB_FINISHED];
 
         $listener(['job' => 'daily-backup', 'result' => ['ran' => false, 'error' => 'disk full']]);
@@ -217,7 +219,7 @@ final class AddonModuleTest extends DatabaseTestCase
 
     public function test_hook_listener_ignores_successful_runs(): void
     {
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
         $listener = $addon->hooks()[HookPoints::CRON_JOB_FINISHED];
 
         $listener(['job' => 'daily-backup', 'result' => ['ran' => true]]);
@@ -228,7 +230,7 @@ final class AddonModuleTest extends DatabaseTestCase
 
     public function test_failure_log_caps_at_twenty_entries(): void
     {
-        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir);
+        $addon = new SystemDiagnosticsAddon($this->db, new Config($this->scratchDir), $this->scratchDir, $this->migrator);
         $listener = $addon->hooks()[HookPoints::CRON_JOB_FINISHED];
 
         for ($i = 0; $i < 25; $i++) {

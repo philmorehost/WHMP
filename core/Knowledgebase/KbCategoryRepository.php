@@ -26,21 +26,21 @@ final class KbCategoryRepository
         return $this->db->selectOne('SELECT * FROM kb_categories WHERE id = ?', [$id]);
     }
 
-    public function create(string $name, int $sortOrder = 0): int
+    public function create(string $name, int $sortOrder = 0, ?string $description = null): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
-            'INSERT INTO kb_categories (name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?)',
-            [$name, $sortOrder, $now, $now]
+            'INSERT INTO kb_categories (name, description, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            [$name, $description, $sortOrder, $now, $now]
         );
     }
 
-    public function update(int $id, string $name, int $sortOrder): void
+    public function update(int $id, string $name, int $sortOrder, ?string $description = null): void
     {
         $this->db->update(
-            'UPDATE kb_categories SET name = ?, sort_order = ?, updated_at = ? WHERE id = ?',
-            [$name, $sortOrder, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+            'UPDATE kb_categories SET name = ?, description = ?, sort_order = ?, updated_at = ? WHERE id = ?',
+            [$name, $description, $sortOrder, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
 

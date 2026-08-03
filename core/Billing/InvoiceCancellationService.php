@@ -45,14 +45,18 @@ final class InvoiceCancellationService
         return $invoice && (bool)$invoice['is_cancelled'];
     }
 
+    // EmailDispatcher has no send() method — the raw-content entry point is
+    // sendRaw($subject, $html, $to, $clientId), a different name and argument
+    // order, so both notifications below were fatal on every call.
     private function notifyAdminOfCancellation(int $invoiceId, ?array $client): void
     {
-        $admins = $this->db->select('SELECT email FROM admins WHERE is_active = 1', []);
+        $name = $client['first_name'] ?? 'A client';
+        $admins = $this->db->select('SELECT email FROM admins', []);
         foreach ($admins as $admin) {
-            $this->mail->send(
-                (string)$admin['email'],
+            $this->mail->sendRaw(
                 "Invoice #$invoiceId Cancelled by Client",
-                "Client {$client['first_name']} has cancelled invoice #$invoiceId. This will prevent automated billing attempts."
+                htmlspecialchars("Client {$name} has cancelled invoice #$invoiceId. This will prevent automated billing attempts.", ENT_QUOTES, 'UTF-8'),
+                (string)$admin['email']
             );
         }
     }
@@ -60,10 +64,11 @@ final class InvoiceCancellationService
     private function notifyClientOfCancellation(?array $client, int $invoiceId): void
     {
         if (!$client) return;
-        $this->mail->send(
-            (string)$client['email'],
+        $this->mail->sendRaw(
             "Invoice Cancellation Confirmed",
-            "Invoice #$invoiceId has been cancelled. You will not be billed for this invoice."
+            htmlspecialchars("Invoice #$invoiceId has been cancelled. You will not be billed for this invoice.", ENT_QUOTES, 'UTF-8'),
+            (string)$client['email'],
+            isset($client['id']) ? (int)$client['id'] : null
         );
     }
 }

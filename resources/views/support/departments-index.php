@@ -167,18 +167,42 @@
     <h1 class="admin-dept-hero__title">📂 Departments</h1>
 </div>
 
+<?php if (($error ?? null) !== null && $error !== ''): ?>
+    <div style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#b91c1c;padding:14px 18px;border-radius:10px;margin-bottom:20px;font-weight:600;">
+        ⚠️ <?= e((string) $error) ?>
+    </div>
+<?php endif; ?>
+
+<?php if (($purged ?? null) !== null): ?>
+    <div style="background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);color:#047857;padding:14px 18px;border-radius:10px;margin-bottom:20px;font-weight:600;">
+        🧹 Removed <?= number_format((int) $purged) ?> ticket(s) and <?= number_format((int) ($purgedFiles ?? 0)) ?> attachment file(s).
+        <?php if ((int) ($purgeRemaining ?? 0) > 0): ?>
+            <br><span style="font-weight:500;">
+                <?= number_format((int) $purgeRemaining) ?> still match that clean-up — the batch stopped early to stay inside the server's request limit. Run it again to continue.
+            </span>
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
+<?php if (!empty($deleted)): ?>
+    <div style="background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);color:#047857;padding:14px 18px;border-radius:10px;margin-bottom:20px;font-weight:600;">
+        ✅ Department deleted<?= ($movedCount ?? 0) > 0 ? ' — ' . number_format((int) $movedCount) . ' ticket(s) moved.' : '.' ?>
+    </div>
+<?php endif; ?>
+
 <div class="admin-dept-card">
     <h2 class="admin-dept-card__title">📋 Existing Departments</h2>
     <div class="admin-dept-card__body" style="padding:0;">
         <div style="overflow-x:auto;">
             <table class="admin-dept-table">
-                <thead><tr><th>Name</th><th>Email (IMAP)</th><th style="width:150px;">Actions</th></tr></thead>
+                <thead><tr><th>Name</th><th>Email (IMAP)</th><th style="width:90px;">Tickets</th><th style="width:260px;">Actions</th></tr></thead>
                 <tbody>
                 <?php foreach ($departments as $department): ?>
                     <tr>
                         <td><strong><?= e($department['name']) ?></strong></td>
                         <td><code style="background:var(--cv-bg-surface-sunken);padding:2px 6px;border-radius:4px;font-size:.85rem;"><?= e((string) ($department['email'] ?? '-')) ?></code></td>
-                        <td style="display:flex;gap:8px;">
+                        <td><?= number_format((int) $department['ticket_count']) ?></td>
+                        <td style="display:flex;gap:8px;flex-wrap:wrap;">
                             <button type="button" class="admin-dept-btn--secondary" style="padding:6px 12px;font-size:.75rem;border-radius:6px;border:1px solid var(--cv-border-default);"
                                 data-edit-trigger
                                 data-edit-form="#department-form"
@@ -187,15 +211,53 @@
                                 data-edit-submit-label="Update"
                                 data-edit-title="Edit Department"
                                 data-edit-title-target="#department-form-title">✏️ Edit</button>
-                            <form method="post" action="/admin/departments/<?= (int) $department['id'] ?>/delete" style="margin:0;">
+                            <?php
+                            // Tickets cannot be orphaned — department_id is NOT NULL with a
+                            // RESTRICT foreign key. So a department holding tickets offers a
+                            // destination to move them to; deleting without one previously
+                            // produced a raw database fatal error.
+                            $others = array_values(array_filter(
+                                $departments,
+                                static fn (array $d): bool => (int) $d['id'] !== (int) $department['id']
+                            ));
+                            ?>
+                            <form method="post" action="/admin/departments/<?= (int) $department['id'] ?>/delete" style="margin:0;display:flex;gap:6px;align-items:center;"
+                                  data-confirm="<?= (int) $department['ticket_count'] > 0
+                                      ? 'Move ' . (int) $department['ticket_count'] . ' ticket(s) to the selected department and delete this one?'
+                                      : 'Delete this department?' ?>">
                                 <?= csrf_field() ?>
-                                <button class="admin-dept-btn--danger" style="padding:6px 12px;font-size:.75rem;border-radius:6px;" type="submit">🗑️ Delete</button>
+                                <?php if ((int) $department['ticket_count'] > 0): ?>
+                                    <?php if ($others === []): ?>
+                                        <span style="font-size:.75rem;color:var(--cv-text-secondary);">Create another department first</span>
+                                    <?php else: ?>
+                                        <select name="move_to" class="cv-select" style="padding:5px 8px;font-size:.75rem;" aria-label="Move tickets to">
+                                            <?php foreach ($others as $other): ?>
+                                                <option value="<?= (int) $other['id'] ?>">move to: <?= e($other['name']) ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <button class="admin-dept-btn--danger" style="padding:6px 12px;font-size:.75rem;border-radius:6px;" type="submit">🗑️ Delete</button>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                    <button class="admin-dept-btn--danger" style="padding:6px 12px;font-size:.75rem;border-radius:6px;" type="submit">🗑️ Delete</button>
+                                <?php endif; ?>
                             </form>
+                            <?php if ((int) $department['ticket_count'] > 0): ?>
+                                <form method="post" action="/admin/departments/<?= (int) $department['id'] ?>/empty" style="margin:0;display:flex;gap:6px;align-items:center;"
+                                      data-confirm="Permanently delete the matching tickets in &quot;<?= e($department['name']) ?>&quot;, including their replies and attachments? This cannot be undone.">
+                                    <?= csrf_field() ?>
+                                    <select name="scope" class="cv-select" style="padding:5px 8px;font-size:.75rem;" aria-label="What to clear">
+                                        <?php foreach (($purgeScopes ?? []) as $key => $label): ?>
+                                            <option value="<?= e((string) $key) ?>">clear: <?= e($label) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button class="admin-dept-btn--danger" style="padding:6px 12px;font-size:.75rem;border-radius:6px;" type="submit">🧹 Empty</button>
+                                </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($departments === []): ?>
-                    <tr><td colspan="3" style="color:var(--cv-text-secondary);text-align:center;padding:32px;">No departments yet.</td></tr>
+                    <tr><td colspan="4" style="color:var(--cv-text-secondary);text-align:center;padding:32px;">No departments yet.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>

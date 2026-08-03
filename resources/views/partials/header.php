@@ -10,7 +10,7 @@ $currencies ??= null;
 $selectedCurrency ??= null;
 $t ??= null;
 $languages ??= null;
-$theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null];
+$theme ??= ['brandName' => brand_name(), 'logoUrl' => null];
 ?>
 <?php
 $container = \CodeVault\Support\App::container();
@@ -19,13 +19,29 @@ $categories = [];
 try {
     $categories = $db->select("SELECT id, name FROM product_groups ORDER BY id ASC");
 } catch (\Throwable $e) {}
+
+// Unread notification bell — resolved here rather than threaded through
+// every controller that renders this layout, same reasoning as $categories
+// above. Only meaningful for a logged-in client; a guest browsing the
+// storefront has no notifications to show.
+$notificationsClient = null;
+$unreadNotifications = 0;
+try {
+    $notificationsClient = $container->make(\CodeVault\Clients\ClientAuthGuard::class)->currentClient();
+    if ($notificationsClient !== null) {
+        $unreadNotifications = $container->make(\CodeVault\Notifications\ClientNotificationRepository::class)->unreadCount((int) $notificationsClient['id']);
+    }
+} catch (\Throwable $e) {}
 ?>
 <header class="cv-topbar" style="position:relative;display:flex;align-items:center;justify-content:space-between;padding:var(--cv-space-4) var(--cv-space-6);border-bottom:1px solid var(--cv-border-default);">
     <a href="/client/dashboard" style="text-decoration:none; color:inherit; display:flex;align-items:center;gap:var(--cv-space-2);flex-shrink:0;font-weight:bold;">
         <?php if (!empty($theme['logoUrl'])): ?>
             <img src="<?= e($theme['logoUrl']) ?>" alt="<?= e($theme['brandName']) ?>" style="height:1.75rem;">
         <?php else: ?>
-            <?= e($title ?? $theme['brandName']) ?>
+            <?php // The masthead is the brand, not the page title — this used to
+                  // print $title, so the login page (title "CodeVault") showed the
+                  // product name where the company name belongs. ?>
+            <?= e($theme['brandName'] ?? brand_name()) ?>
         <?php endif; ?>
     </a>
 
@@ -139,6 +155,14 @@ try {
     </style>
 
     <div class="cv-topbar__actions" style="display:flex;gap:var(--cv-space-3);align-items:center;flex-shrink:0;flex-wrap:wrap;max-width:100%;">
+        <?php if ($notificationsClient !== null): ?>
+            <a href="/client/notifications" aria-label="Notifications" style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;color:var(--cv-text-primary);flex-shrink:0;">
+                <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 10.5V7a5 5 0 0 0-10 0v3.5L1.5 12.5h13L13 10.5z"/><path d="M6.3 14a1.8 1.8 0 0 0 3.4 0"/></svg>
+                <?php if ($unreadNotifications > 0): ?>
+                    <span style="position:absolute;top:-2px;right:-2px;background:#ef4444;color:#fff;border-radius:999px;font-size:.62rem;font-weight:800;padding:1px 4px;line-height:1.4;min-width:1.1rem;text-align:center;"><?= $unreadNotifications > 99 ? '99+' : $unreadNotifications ?></span>
+                <?php endif; ?>
+            </a>
+        <?php endif; ?>
         <?php if ($languages !== null && $t !== null && count($languages) > 1): ?>
             <form method="post" action="/language" style="margin:0;max-width:100%;"><?= csrf_field() ?>
                 <input type="hidden" name="redirect" value="<?= e($_SERVER['REQUEST_URI'] ?? '/store') ?>">

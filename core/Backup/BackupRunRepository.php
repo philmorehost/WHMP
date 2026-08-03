@@ -43,4 +43,16 @@ final class BackupRunRepository
             ['failed', $error, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
+
+    /**
+     * Deletes log rows older than the cutoff — these are just run history
+     * (status/timing/file path), not the backup files themselves, which
+     * BackupService::pruneOldBackups() already keeps bounded by count. With
+     * a backup running as often as hourly, this table otherwise grows
+     * forever with no way to trim it.
+     */
+    public function deleteOlderThan(string $beforeDateTime): int
+    {
+        return $this->db->delete('DELETE FROM backup_runs WHERE started_at < ?', [$beforeDateTime]);
+    }
 }

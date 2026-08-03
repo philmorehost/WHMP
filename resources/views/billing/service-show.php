@@ -4,7 +4,11 @@
 /** @var array<string, string> $cycles */
 /** @var array<string, string> $modes */
 /** @var string|null $error */
+/** @var bool $showDomainField false for VPS/dedicated, which are addressed by hostname */
 $id = (int) $service['id'];
+// Default to showing it: a caller that hasn't decided should get the full form
+// rather than silently drop a field the admin needs.
+$showDomainField ??= true;
 ?>
 <style>
 /* Admin Service Detail Styles */
@@ -274,6 +278,65 @@ $id = (int) $service['id'];
                 <button class="admin-service-btn admin-service-btn--danger" style="background:linear-gradient(135deg,rgba(239,68,68,.3),rgba(185,28,28,.25));border-color:rgba(239,68,68,.5);" type="submit">❌ Delete Service</button>
             </form>
         </div>
+
+        <?php
+        // Manual status, for products provisioned by hand. Every button above
+        // routes through a provisioning module, which is no use for a dedicated
+        // server built in the provider's own portal — Nocix has no ordering API
+        // at all. This sets the status locally and touches nothing remote.
+        $statusOptions = [
+            'pending' => 'Pending — awaiting setup',
+            'active' => 'Active — client can use it',
+            'suspended' => 'Suspended',
+            'cancelled' => 'Cancelled',
+            'terminated' => 'Terminated',
+        ];
+        ?>
+        <div style="margin-top:var(--cv-space-4);padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);">
+            <form method="post" action="/admin/services/<?= $id ?>/status" style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;"><?= csrf_field() ?>
+                <label style="font-weight:600;font-size:.9rem;">Set status manually:</label>
+                <select name="status" class="cv-select" style="width:auto;min-width:220px;">
+                    <?php foreach ($statusOptions as $value => $label): ?>
+                        <option value="<?= e($value) ?>" <?= $service['status'] === $value ? 'selected' : '' ?>><?= e($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button class="admin-service-btn admin-service-btn--primary" type="submit"
+                        data-confirm="Change this service's status? This updates WHMP only — it does not start, stop or terminate anything on the server.">💾 Apply Status</button>
+            </form>
+            <small style="color:var(--cv-text-secondary);display:block;margin-top:var(--cv-space-2);">
+                For servers you set up by hand. Marking a service <strong>Active</strong> makes it appear in the client's
+                service list. This changes WHMP's records only — no provider API is called, so nothing is created,
+                suspended or destroyed on the actual server.
+            </small>
+
+            <?php
+            // Send/resend sits right here, next to the status control, because
+            // this is where the admin is looking the moment a manually-built
+            // service goes live. It was previously only at the foot of the Edit
+            // Service Details card, far enough away to be missed.
+            //
+            // Called "Service Details" throughout, not "Server Details" — a
+            // license or a domain-bound product has login details worth
+            // sending too, and neither is a server.
+            $detailsSentAt = trim((string) ($service['details_sent_at'] ?? ''));
+            $hasBeenSent = $detailsSentAt !== '';
+            ?>
+            <div style="margin-top:var(--cv-space-3);display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
+                <form method="post" action="/admin/services/<?= $id ?>/send-details"
+                      data-confirm="<?= $hasBeenSent ? 'Re-send' : 'Send' ?> the service details — including the password — to the client?"><?= csrf_field() ?>
+                    <button class="admin-service-btn admin-service-btn--secondary" type="submit">
+                        📧 <?= $hasBeenSent ? 'Resend Service Details' : 'Email Service Details to Client' ?>
+                    </button>
+                </form>
+                <small style="color:var(--cv-text-secondary);">
+                    <?php if ($hasBeenSent): ?>
+                        Last sent <strong><?= e($detailsSentAt) ?></strong> to <?= e((string) ($service['client_email'] ?? 'the client')) ?>.
+                    <?php else: ?>
+                        Not sent yet. Sending happens automatically the first time you set this service Active.
+                    <?php endif; ?>
+                </small>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -281,18 +344,49 @@ $id = (int) $service['id'];
     <div class="admin-service-error"><?= e($error) ?></div>
 <?php endif; ?>
 
+<?php // Outcome of the "Email Service Details" action — including the useful refusal when nothing has been filled in yet. ?>
+<?php if (($_GET['status_set'] ?? '') !== ''): ?>
+    <div class="admin-service-error" style="background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.35);color:#10b981;">
+        ✅ Status set to <strong><?= e((string) $_GET['status_set']) ?></strong>. No provider API was called.
+        <?php // Say plainly whether the client was emailed, so the admin never has to guess. ?>
+        <?= match ($_GET['details'] ?? '') {
+            'sent' => ' Service details were emailed to the client.',
+            'skipped' => ' No service details emailed — fill in a username, domain, hostname or IP below, then use “Email Service Details to Client”.',
+            'failed' => ' The service-details email could not be sent — see the activity log.',
+            default => '',
+        } ?>
+    </div>
+<?php endif; ?>
+<?php if (($_GET['status_error'] ?? '') !== ''): ?>
+    <div class="admin-service-error">⚠️ <?= e((string) $_GET['status_error']) ?></div>
+<?php endif; ?>
+<?php if (($_GET['details_sent'] ?? '') !== ''): ?>
+    <div class="admin-service-error" style="background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.35);color:#10b981;">✅ Service details emailed to the client.</div>
+<?php endif; ?>
+<?php if (($_GET['details_error'] ?? '') !== ''): ?>
+    <div class="admin-service-error">⚠️ <?= e((string) $_GET['details_error']) ?></div>
+<?php endif; ?>
+
 <div class="admin-service-card">
     <h2 class="admin-service-card__title">✏️ Edit Service Details</h2>
     <div class="admin-service-card__body">
         <form method="post" action="/admin/services/<?= $id ?>/edit"><?= csrf_field() ?>
             <div class="admin-service-field">
-                <label>Username / Service ID (Remote Hostname / Numeric ID)</label>
-                <input name="username" value="<?= e((string) ($service['username'] ?? '')) ?>" placeholder="e.g. cv123 or 5001">
+                <label>Username (login the client uses)</label>
+                <input name="username" value="<?= e((string) ($service['username'] ?? '')) ?>" placeholder="e.g. cv123, root, or a remote service ID like 5001">
             </div>
             <div class="admin-service-field">
-                <label>Domain</label>
-                <input name="domain" value="<?= e((string) ($service['domain'] ?? '')) ?>" placeholder="example.com">
+                <label>Password (login the client uses)</label>
+                <input type="password" name="password" autocomplete="new-password" placeholder="<?= !empty($service['password']) ? '••••••••  (leave blank to keep the current one)' : 'e.g. the root or cPanel password' ?>">
+                <small style="color:var(--cv-text-secondary);">Stored so it can be shown to the client and included in the service-details email. Leave blank to keep the existing password unchanged.</small>
             </div>
+            <?php // A VPS or dedicated server is identified by its hostname — a domain adds nothing there, so the field is only rendered for products that actually use one (shared/reseller). ?>
+            <?php if ($showDomainField): ?>
+                <div class="admin-service-field">
+                    <label>Domain</label>
+                    <input name="domain" value="<?= e((string) ($service['domain'] ?? '')) ?>" placeholder="example.com">
+                </div>
+            <?php endif; ?>
             <div class="admin-service-field">
                 <label>Hostname</label>
                 <input name="hostname" value="<?= e((string) ($service['hostname'] ?? '')) ?>" placeholder="vps.example.com">
@@ -320,6 +414,21 @@ $id = (int) $service['id'];
             </div>
             <button class="admin-service-btn admin-service-btn--primary" type="submit">💾 Save Details</button>
         </form>
+
+        <div style="margin-top:var(--cv-space-4);padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);">
+            <?php // Second entry point to the same action, for when the admin has just edited the details above and wants to push them out without scrolling back up. ?>
+            <form method="post" action="/admin/services/<?= $id ?>/send-details"
+                  data-confirm="<?= !empty($service['details_sent_at']) ? 'Re-send' : 'Send' ?> the service details — including the password — to the client?"><?= csrf_field() ?>
+                <button class="admin-service-btn admin-service-btn--secondary" type="submit">
+                    📧 <?= !empty($service['details_sent_at']) ? 'Resend These Details to Client' : 'Email These Details to Client' ?>
+                </button>
+            </form>
+            <small style="color:var(--cv-text-secondary);display:block;margin-top:var(--cv-space-2);">
+                Sends the hostname, IPs, username and password to
+                <strong><?= e((string) ($service['client_email'] ?? 'the client')) ?></strong>.
+                Save your changes first — this sends what is currently stored.
+            </small>
+        </div>
     </div>
 </div>
 

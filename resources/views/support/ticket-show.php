@@ -7,6 +7,11 @@
 /** @var string|null $aiSuggestion */
 /** @var string|null $aiError */
 /** @var array<int, array<int, array<string, mixed>>> $attachments grouped by reply_id (0 = opening message) */
+/** @var array<int, array<string, mixed>> $sameClientTickets other open tickets from this ticket's client, for the merge picker */
+/** @var string|null $mergeError */
+/** @var int|null $mergeConfirmTargetId set when a merge needs cross-client confirmation */
+/** @var int|null $mergedFromId set on the surviving ticket right after a merge lands here */
+/** @var bool $mergeCrossClientNotice */
 $id = (int) $ticket['id'];
 ?>
 <style>
@@ -285,6 +290,33 @@ $id = (int) $ticket['id'];
 }
 </style>
 
+<?php if ($mergeError !== null && $mergeError !== ''): ?>
+    <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);"><?= e($mergeError) ?></div>
+<?php endif; ?>
+
+<?php if ($mergeConfirmTargetId !== null): ?>
+    <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);">
+        ⚠️ Ticket #<?= $mergeConfirmTargetId ?> belongs to a <strong>different client</strong> than this ticket.
+        Merging across clients is unusual — double-check the ticket number before continuing.
+        <form method="post" action="/admin/tickets/<?= $id ?>/merge" style="margin-top:10px;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="target_ticket_id" value="<?= $mergeConfirmTargetId ?>">
+            <input type="hidden" name="confirm_cross_client" value="1">
+            <button type="submit" class="cv-btn cv-btn--danger">Yes, merge into #<?= $mergeConfirmTargetId ?> anyway</button>
+            <a href="/admin/tickets/<?= $id ?>" class="cv-btn cv-btn--secondary">Cancel</a>
+        </form>
+    </div>
+<?php endif; ?>
+
+<?php if ($mergedFromId !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        Ticket #<?= $mergedFromId ?> was merged into this ticket. Its replies and attachments now appear below.
+        <?php if ($mergeCrossClientNotice): ?>
+            <br>⚠️ <strong>Note:</strong> ticket #<?= $mergedFromId ?> belonged to a different client — verify this merge was intentional.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
 <!-- Hero Section -->
 <div class="admin-ticket-hero">
     <div class="admin-ticket-hero__content">
@@ -362,6 +394,29 @@ $id = (int) $ticket['id'];
                 </div>
                 <button class="admin-ticket-btn admin-ticket-btn--secondary" type="submit">💳 Make Billable</button>
             </form>
+        <?php endif; ?>
+
+        <form method="post" action="/admin/tickets/<?= $id ?>/merge" style="display:flex;gap:12px;align-items:flex-end;margin-top:16px;flex-wrap:wrap;"
+              data-confirm="Merge ticket #<?= $id ?> into the selected ticket? Its replies and attachments move over, and it's closed — this can't be undone."><?= csrf_field() ?>
+            <div style="min-width:220px;">
+                <label style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Merge Into Ticket #</label>
+                <?php if ($sameClientTickets !== []): ?>
+                    <select name="target_ticket_id" style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:rgba(255,255,255,.1); color:white;">
+                        <option value="">— Choose a ticket —</option>
+                        <?php foreach ($sameClientTickets as $other): ?>
+                            <option value="<?= (int) $other['id'] ?>">#<?= (int) $other['id'] ?> — <?= e($other['subject']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php else: ?>
+                    <input type="number" min="1" name="target_ticket_id" placeholder="e.g. 42" style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:rgba(255,255,255,.1); color:white;">
+                <?php endif; ?>
+            </div>
+            <button class="admin-ticket-btn admin-ticket-btn--secondary" type="submit">🔀 Merge Ticket</button>
+        </form>
+        <?php if ($sameClientTickets === [] && $ticket['client_id'] !== null): ?>
+            <p style="font-size:.8rem;color:rgba(255,255,255,.6);margin-top:4px;">This client has no other open tickets — enter any ticket # to merge into a different client's ticket (you'll be asked to confirm).</p>
+        <?php elseif ($ticket['client_id'] === null): ?>
+            <p style="font-size:.8rem;color:rgba(255,255,255,.6);margin-top:4px;">This ticket has no client on file — merging into any ticket # will need cross-client confirmation.</p>
         <?php endif; ?>
     </div>
 </div>

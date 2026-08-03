@@ -69,7 +69,7 @@ final class CurrencyRepository
     {
         $this->db->update(
             'UPDATE currencies SET code = ?, symbol = ?, exchange_rate = ?, updated_at = ? WHERE id = ?',
-            [strtoupper($code), $symbol, $exchangeRate, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+            [strtoupper($code), $symbol, $this->rateToStore($id, $exchangeRate), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }
 
@@ -79,10 +79,28 @@ final class CurrencyRepository
 
         $this->db->transaction(function () use ($id, $now) {
             $this->db->update('UPDATE currencies SET is_default = 0, updated_at = ?', [$now]);
-            $this->db->update('UPDATE currencies SET is_default = 1, updated_at = ? WHERE id = ?', [$now, $id]);
+
+            // Promoting a currency to base also resets its rate to 1. Every
+            // "convert from base" multiplication in the app reads this column,
+            // so a base currency left at, say, NGN=1490 inflates prices,
+            // invoices and gateway charges by 1490x — the defect behind
+            // ₦7,501.50 being taken to Paystack as ₦11,177,235. A rate is
+            // per 1 base unit, so the base's own rate can only ever be 1.
+            $this->db->update(
+                'UPDATE currencies SET is_default = 1, exchange_rate = 1.0000, updated_at = ? WHERE id = ?',
+                [$now, $id]
+            );
 
             return null;
         });
+    }
+
+    /** The base currency's rate is 1 by definition; an edit cannot set it to anything else. */
+    private function rateToStore(int $id, float $requestedRate): float
+    {
+        $row = $this->db->selectOne('SELECT is_default FROM currencies WHERE id = ?', [$id]);
+
+        return ($row !== null && (int) $row['is_default'] === 1) ? 1.0000 : $requestedRate;
     }
 
     public function delete(int $id): bool

@@ -4,27 +4,74 @@
 /** @var string|null $error */
 /** @var string|null $message */
 /** @var bool $cpanelToolsAvailable */
+/** @var bool $domainChangerAvailable */
 /** @var array<string, mixed> $currency */
 /** @var array<string, mixed>|null $pendingCancellation */
-/** @var string|null $serverModule */
+/** @var string $kind 'shared' | 'vps' | 'dedicated' */
+/** @var array<string, mixed> $remote live values read from the server module */
+/** @var array<string, string> $reverseDns ip => current PTR */
+/** @var array<int, array<string, mixed>> $backups */
+/** @var array<int, array<string, mixed>> $osTemplates */
+/** @var array<string, mixed> $slices */
 
 $id = (int) $service['id'];
 $cpanelToolsAvailable ??= false;
-$productNameLower = strtolower((string) ($service['product_name'] ?? ''));
-$serverModuleLower = strtolower((string) ($serverModule ?? ''));
+$domainChangerAvailable ??= false;
 
-$isDedicated = str_contains($productNameLower, 'dedicated') || str_contains($serverModuleLower, 'dedicated') || str_contains($productNameLower, 'ids-') || str_contains($productNameLower, 'ds-');
-$isVps = str_contains($productNameLower, 'vps') || str_contains($serverModuleLower, 'vps') || str_contains($productNameLower, 'slice') || str_contains($productNameLower, 'virtual') || str_contains($productNameLower, 'cloud');
-if ($isDedicated) {
-    $isVps = false;
-}
-$isCpanel = $cpanelToolsAvailable || (!$isDedicated && !$isVps);
+// Which surface this service gets is decided by the controller from the
+// assigned server's module, not re-derived here from the product name. The
+// name-matching this replaced treated any product containing "cloud" as a
+// VPS, so a shared plan called "Cloud Hosting" rendered power controls.
+$kind ??= 'shared';
+$isDedicated = $kind === 'dedicated';
+$isVps = $kind === 'vps';
+$isShared = $kind === 'shared';
+
+$remote ??= [];
+$reverseDns ??= [];
+$backups ??= [];
+$osTemplates ??= [];
+$slices ??= [];
 
 $primaryIp = trim((string) ($service['dedicated_ip'] ?? $service['ip_address'] ?? ''));
+if ($primaryIp === '' && ($remote['ip'] ?? '') !== '') {
+    $primaryIp = (string) $remote['ip'];
+}
 $assignedIpsRaw = trim((string) ($service['assigned_ips'] ?? ''));
-$assignedIps = array_filter(array_map('trim', explode("\n", str_replace("\r", "", $assignedIpsRaw))));
+$assignedIps = array_values(array_filter(array_map('trim', explode("\n", str_replace("\r", "", $assignedIpsRaw)))));
 
-$formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($service['amount'] ?? 0), 2);
+// Every IP we can offer a PTR form for: whatever the module reported, plus
+// anything recorded locally. Keyed so duplicates collapse.
+$ptrTargets = $reverseDns;
+foreach (array_merge($primaryIp !== '' ? [$primaryIp] : [], $assignedIps) as $ip) {
+    $ptrTargets[$ip] ??= '';
+}
+
+// Supplied by the controller from Configuration -> Domains, never hardcoded.
+/** @var array<int, string> $nameservers */
+$nameservers ??= [];
+
+/** @var string $formattedAmount already converted+formatted by the controller (services carry no currency lock, so it must use the live rate) */
+$formattedAmount = e($formattedAmount);
+
+// Real power state from the module. There is no default: the badge used to
+// read "Running" unconditionally, including for a VPS that was stopped or
+// had been terminated upstream.
+$remoteStatus = trim((string) ($remote['status'] ?? ''));
+$remoteStatusIsUp = in_array(strtolower($remoteStatus), ['active', 'running', 'online'], true);
+
+$cpanelTabs = [
+    'email' => ['Email Accounts', '✉️'],
+    'ftp' => ['FTP Accounts', '📁'],
+    'databases' => ['MySQL Databases', '🗄️'],
+    'dns' => ['DNS Zone Editor', '🌐'],
+    'domains' => ['Domains &amp; Redirects', '🔗'],
+    'cron' => ['Cron Jobs', '⏱️'],
+    'ssh' => ['SSH Access', '🔑'],
+    'ssl' => ['SSL Certificates', '🔒'],
+    'usage' => ['Disk Usage', '📊'],
+    'logins' => ['Quick Logins', '🚀'],
+];
 ?>
 
 <style>
@@ -259,7 +306,13 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
     }
 }
 .svc-info-val {
-    color: #ffffff;
+    /* Follows the theme, because this sits inside .svc-card__body whose
+       background is var(--cv-bg-surface) — white in light mode. Hardcoding
+       #ffffff here made every value in this grid invisible on a light theme:
+       the cPanel primary domain and username, and the VPS hostname, IPs and
+       nameservers, were all white text on a white card. The fallback keeps the
+       original colour for any theme that doesn't define the token. */
+    color: var(--cv-text-primary, #ffffff);
     font-weight: 600;
 }
 .svc-ip-badge {
@@ -452,8 +505,7 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
 
                 <!-- Action Buttons Area -->
                 <div style="margin-top:24px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-                    <!-- ONLY SHOW LOG IN TO CONTROL PANEL FOR CPANEL / WEB HOSTING (NOT DEDICATED OR VPS) -->
-                    <?php if ($isCpanel && $service['status'] === 'active'): ?>
+                    <?php if ($isShared && $service['status'] === 'active'): ?>
                         <form method="post" action="/client/services/<?= $id ?>/sso" style="margin:0;">
                             <?= csrf_field() ?>
                             <button class="svc-btn svc-btn--primary" type="submit">🔑 Log In to Control Panel</button>
@@ -461,6 +513,13 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
                         <?php if ($cpanelToolsAvailable): ?>
                             <a class="svc-btn svc-btn--secondary" href="/client/services/<?= $id ?>/cpanel-tools">cPanel Tools</a>
                         <?php endif; ?>
+                    <?php endif; ?>
+
+                    <?php if ($isVps && $service['status'] === 'active'): ?>
+                        <form method="post" action="/client/services/<?= $id ?>/vnc" style="margin:0;">
+                            <?= csrf_field() ?>
+                            <button class="svc-btn svc-btn--primary" type="submit">🖥️ VNC Console</button>
+                        </form>
                     <?php endif; ?>
 
                     <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
@@ -479,6 +538,77 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
         </div>
     </div>
 
+    <?php if ($isShared): ?>
+        <!--
+            Shared hosting deliberately has no "Server Technical Information"
+            card. Primary IP, assigned IPs and nameservers describe a machine
+            the client does not control and cannot act on — on a shared plan
+            they are shared infrastructure, not the customer's. cPanel Tools
+            is the surface that matters here, so it takes that slot.
+        -->
+        <div class="svc-card">
+            <div class="svc-card__header">
+                <h2 class="svc-card__title">🛠️ cPanel Tools</h2>
+                <?php if ($cpanelToolsAvailable && $service['status'] === 'active'): ?>
+                    <a class="svc-btn svc-btn--secondary" style="padding:6px 12px;font-size:0.78rem;" href="/client/services/<?= $id ?>/cpanel-tools">Open all tools →</a>
+                <?php endif; ?>
+            </div>
+            <div class="svc-card__body">
+                <?php if (!$cpanelToolsAvailable): ?>
+                    <p style="margin:0;color:var(--cv-text-secondary);font-size:0.9rem;">
+                        Management tools become available once this account is provisioned on a cPanel server.
+                    </p>
+                <?php elseif ($service['status'] !== 'active'): ?>
+                    <p style="margin:0;color:var(--cv-text-secondary);font-size:0.9rem;">
+                        cPanel Tools are available while the service is active. This service is currently
+                        <strong><?= e((string) $service['status']) ?></strong>.
+                    </p>
+                <?php else: ?>
+                    <div class="svc-info-grid" style="grid-template-columns:160px 1fr;margin-bottom:20px;">
+                        <div class="svc-info-label">Primary Domain:</div>
+                        <div class="svc-info-val">
+                            <?= e($service['domain'] ?: $service['hostname'] ?: 'Not configured') ?>
+                            <?php if ($domainChangerAvailable): ?>
+                                <button type="button" class="svc-btn svc-btn--secondary" style="padding:2px 10px;font-size:0.72rem;margin-left:8px;"
+                                    data-toggle-target="#change-domain-form-<?= $id ?>">✏️ Change</button>
+                            <?php endif; ?>
+                        </div>
+
+                        <?php if (!empty($service['username'])): ?>
+                            <div class="svc-info-label">cPanel Username:</div>
+                            <div class="svc-info-val"><?= e((string) $service['username']) ?></div>
+                        <?php endif; ?>
+                    </div>
+
+                    <?php if ($domainChangerAvailable): ?>
+                        <div id="change-domain-form-<?= $id ?>" style="display:none;margin-bottom:20px;padding:16px;border:1px dashed var(--cv-border-default);border-radius:8px;">
+                            <form method="post" action="/client/services/<?= $id ?>/change-domain" style="margin:0;" data-confirm="Change the primary domain for this hosting account? Existing mail and site content stays on the account, but anything pointed at the old domain must be updated separately.">
+                                <?= csrf_field() ?>
+                                <label class="cv-label" for="new_domain-<?= $id ?>" style="font-size:0.8rem;">New primary domain</label>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+                                    <input class="cv-input" id="new_domain-<?= $id ?>" name="new_domain" placeholder="newdomain.com" required style="flex:1;min-width:200px;">
+                                    <button class="svc-btn svc-btn--primary" type="submit">Change Domain</button>
+                                </div>
+                                <p style="font-size:0.75rem;color:var(--cv-text-secondary);margin:8px 0 0;">
+                                    Applied instantly via the cPanel/WHM API — no support ticket needed. Point the new domain's
+                                    nameservers here first, or the account won't yet be reachable on it.
+                                </p>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+
+                    <div class="svc-actions-grid">
+                        <?php foreach ($cpanelTabs as $tabKey => [$tabLabel, $tabIcon]): ?>
+                            <a class="svc-action-card" style="text-decoration:none;color:inherit;display:block;"
+                               href="/client/services/<?= $id ?>/cpanel-tools?tab=<?= e($tabKey) ?>">
+                                <h4><?= $tabIcon ?> <?= $tabLabel ?></h4>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php else: ?>
     <!-- Server Technical Information Card -->
     <div class="svc-card">
         <div class="svc-card__header">
@@ -489,86 +619,84 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
                 <div class="svc-info-label">Hostname:</div>
                 <div class="svc-info-val"><?= e($service['domain'] ?: $service['hostname'] ?: 'Not Configured') ?></div>
 
+                <?php
+                // Never invent network details. These three blocks used to fall
+                // back to hardcoded sample values — 69.197.131.50 as the primary
+                // IP, .51-.54 as "Assigned IPs", and two literal nameserver
+                // hostnames — so a VPS with nothing recorded showed a client four
+                // IP addresses that were not theirs and did not exist. A client
+                // could reasonably have tried to configure DNS or firewall rules
+                // against them. An empty field says "not assigned"; it must never
+                // fill itself in with an example.
+                ?>
                 <div class="svc-info-label">Primary IP:</div>
                 <div class="svc-info-val">
-                    <?php if (!empty($primaryIp)): ?>
+                    <?php if ($primaryIp !== ''): ?>
                         <span class="svc-ip-badge"><?= e($primaryIp) ?></span>
                     <?php else: ?>
-                        <span style="color:var(--cv-text-secondary);">69.197.131.50 (Allocated)</span>
+                        <span style="color:var(--cv-text-secondary);">Not assigned yet</span>
                     <?php endif; ?>
                 </div>
 
-                <div class="svc-info-label">Assigned IPs:</div>
-                <div class="svc-info-val">
-                    <?php if (!empty($assignedIps)): ?>
+                <?php // Only render the row at all when there is something real to show. ?>
+                <?php if ($assignedIps !== []): ?>
+                    <div class="svc-info-label">Assigned IPs:</div>
+                    <div class="svc-info-val">
                         <?php foreach ($assignedIps as $ip): ?>
                             <span class="svc-ip-badge"><?= e($ip) ?></span>
                         <?php endforeach; ?>
-                    <?php else: ?>
-                        <span class="svc-ip-badge">69.197.131.51</span>
-                        <span class="svc-ip-badge">69.197.131.52</span>
-                        <span class="svc-ip-badge">69.197.131.53</span>
-                        <span class="svc-ip-badge">69.197.131.54</span>
-                    <?php endif; ?>
-                </div>
+                    </div>
+                <?php endif; ?>
 
-                <div class="svc-info-label">Nameservers:</div>
-                <div class="svc-info-val">
-                    <div>ns1.philmorehost.com</div>
-                    <div>ns2.philmorehost.com</div>
-                </div>
+                <?php if ($nameservers !== []): ?>
+                    <div class="svc-info-label">Nameservers:</div>
+                    <div class="svc-info-val">
+                        <?php foreach ($nameservers as $ns): ?>
+                            <div><?= e($ns) ?></div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
-    </div>
+    <?php endif; ?>
 
     <!-- Dedicated Server Management & Controls -->
     <?php if ($isDedicated): ?>
         <div class="svc-card">
             <div class="svc-card__header">
-                <h2 class="svc-card__title">🖥️ Dedicated Server Management Controls</h2>
-                <span class="svc-status-pill svc-status-pill--active" style="display:inline-flex;align-items:center;gap:6px;">
-                    <span style="width:8px;height:8px;background:#34d399;border-radius:50%;display:inline-block;"></span> Running
-                </span>
+                <h2 class="svc-card__title">🖥️ Dedicated Server Management</h2>
             </div>
             <div class="svc-card__body">
-                
-                <!-- Quick Power Actions -->
-                <div style="margin-bottom:24px;">
-                    <h4 style="margin:0 0 12px 0;font-size:0.9rem;color:var(--cv-text-secondary);text-transform:uppercase;letter-spacing:0.05em;">Server Power Operations</h4>
-                    <div class="svc-power-bar">
-                        <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="action" value="start">
-                            <button class="svc-btn svc-btn--success" type="submit">▶️ Start (Power On)</button>
-                        </form>
-
-                        <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;" data-confirm="Are you sure you want to reboot this dedicated server?">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="action" value="restart">
-                            <button class="svc-btn svc-btn--primary" type="submit">🔄 Restart (Reboot)</button>
-                        </form>
-
-                        <form method="post" action="/client/services/<?= $id ?>/power" style="margin:0;" data-confirm="Are you sure you want to power off this server?">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="action" value="stop">
-                            <button class="svc-btn svc-btn--danger" type="submit">⏹️ Stop (Power Off)</button>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- Reverse DNS (rDNS) Management Form -->
+                <?php
+                // Nocix's published API covers disconnect/reconnect, bandwidth
+                // and service listing — it documents no reverse-DNS endpoint,
+                // so a PTR change is a request an operator fulfils. Submitting
+                // this opens a real support ticket rather than calling an API
+                // that does not exist and reporting success anyway.
+                ?>
                 <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;">
-                    <h4 style="margin:0 0 8px 0;font-size:0.95rem;font-weight:700;">🌐 rDNS Management (PTR Record)</h4>
-                    <p style="font-size:0.85rem;color:var(--cv-text-secondary);margin-top:0;">Update Reverse DNS PTR mapping for your primary dedicated IP address.</p>
+                    <h4 style="margin:0 0 8px 0;font-size:0.95rem;font-weight:700;">🌐 Reverse DNS (PTR) Request</h4>
+                    <p style="font-size:0.85rem;color:var(--cv-text-secondary);margin-top:0;">
+                        Submit the PTR hostname you want for one of your IPs. This opens a support ticket and our team applies it.
+                    </p>
                     <form method="post" action="/client/services/<?= $id ?>/rdns">
                         <?= csrf_field() ?>
-                        <div style="display:flex;gap:12px;max-width:500px;align-items:center;">
-                            <input class="cv-input" name="rdns" placeholder="ptr.yourdomain.com" required style="flex:1;">
-                            <button class="svc-btn svc-btn--primary" type="submit">Update PTR</button>
+                        <div style="display:flex;gap:12px;max-width:640px;align-items:center;flex-wrap:wrap;">
+                            <?php if ($ptrTargets !== []): ?>
+                                <select class="cv-select" name="ip" required style="flex:0 0 200px;">
+                                    <option value="">Select IP…</option>
+                                    <?php foreach (array_keys($ptrTargets) as $ip): ?>
+                                        <option value="<?= e((string) $ip) ?>"><?= e((string) $ip) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            <?php else: ?>
+                                <input class="cv-input" name="ip" placeholder="IP address" required style="flex:0 0 200px;">
+                            <?php endif; ?>
+                            <input class="cv-input" name="rdns" placeholder="ptr.yourdomain.com" required style="flex:1;min-width:200px;">
+                            <button class="svc-btn svc-btn--primary" type="submit">Submit Request</button>
                         </div>
                     </form>
                 </div>
-
             </div>
         </div>
     <?php endif; ?>
@@ -578,23 +706,51 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
         <div class="svc-card">
             <div class="svc-card__header">
                 <h2 class="svc-card__title">⚡ VPS Server Management &amp; Tools</h2>
-                <span class="svc-status-pill svc-status-pill--active" style="display:inline-flex;align-items:center;gap:6px;">
-                    <span style="width:8px;height:8px;background:#34d399;border-radius:50%;display:inline-block;"></span> Running
-                </span>
+                <?php
+                // Live vps_status from the module. This badge used to be a
+                // literal "Running" with a green dot, shown even for a VPS
+                // that was stopped, suspended upstream, or unreachable.
+                ?>
+                <?php if ($remoteStatus !== ''): ?>
+                    <span class="svc-status-pill <?= $remoteStatusIsUp ? 'svc-status-pill--active' : 'svc-status-pill--neutral' ?>" style="display:inline-flex;align-items:center;gap:6px;">
+                        <span style="width:8px;height:8px;background:<?= $remoteStatusIsUp ? '#34d399' : '#cbd5e1' ?>;border-radius:50%;display:inline-block;"></span>
+                        <?= e(ucfirst($remoteStatus)) ?>
+                    </span>
+                <?php else: ?>
+                    <span class="svc-status-pill svc-status-pill--neutral">Status unavailable</span>
+                <?php endif; ?>
             </div>
             <div class="svc-card__body">
 
+                <?php
+                // Real usage only. The defaults here used to be 245760 / 2097152
+                // MB, so a server the module reported nothing for still showed
+                // "240.00 GB / 2,048 GB" — an invented figure a client would
+                // read as their actual traffic. The bar was a fixed width:12%
+                // to match, regardless of the numbers beside it.
+                $bwUsedMb = isset($usage['bandwidthUsedMb']) ? (float) $usage['bandwidthUsedMb'] : null;
+                $bwLimitMb = isset($usage['bandwidthLimitMb']) ? (float) $usage['bandwidthLimitMb'] : null;
+                $bwPercent = ($bwUsedMb !== null && $bwLimitMb !== null && $bwLimitMb > 0)
+                    ? max(0, min(100, ($bwUsedMb / $bwLimitMb) * 100))
+                    : null;
+                ?>
                 <!-- Bandwidth / Traffic Usage Meter -->
                 <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;margin-bottom:24px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                         <span style="font-weight:700;font-size:0.9rem;">📊 Bandwidth / Traffic Usage</span>
                         <span style="font-size:0.85rem;color:#60a5fa;font-weight:700;">
-                            <?= number_format((float) ($usage['bandwidthUsedMb'] ?? 245760) / 1024, 2) ?> GB / <?= number_format((float) ($usage['bandwidthLimitMb'] ?? 2097152) / 1024, 0) ?> GB (Speed: 1 Gbps)
+                            <?php if ($bwUsedMb === null): ?>
+                                <span style="color:var(--cv-text-secondary);font-weight:400;">Not reported by this server</span>
+                            <?php else: ?>
+                                <?= e(number_format($bwUsedMb / 1024, 2)) ?> GB<?php if ($bwLimitMb !== null && $bwLimitMb > 0): ?> / <?= e(number_format($bwLimitMb / 1024, 0)) ?> GB<?php endif; ?>
+                            <?php endif; ?>
                         </span>
                     </div>
-                    <div style="width:100%;height:10px;background:rgba(255,255,255,0.1);border-radius:5px;overflow:hidden;">
-                        <div style="width:12%;height:100%;background:linear-gradient(90deg, #3b82f6, #60a5fa);border-radius:5px;"></div>
-                    </div>
+                    <?php if ($bwPercent !== null): ?>
+                        <div style="width:100%;height:10px;background:rgba(255,255,255,0.1);border-radius:5px;overflow:hidden;">
+                            <div style="width:<?= e(number_format($bwPercent, 2)) ?>%;height:100%;background:linear-gradient(90deg, #3b82f6, #60a5fa);border-radius:5px;"></div>
+                        </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- VPS Action Cards Grid -->
@@ -626,26 +782,46 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
                     <!-- OS Reinstall Card -->
                     <div class="svc-action-card">
                         <h4>💿 Reinstall OS</h4>
-                        <p>Deploy a fresh Linux operating system image to your VPS.</p>
-                        <form method="post" action="/client/services/<?= $id ?>/reinstall" data-confirm="Reinstall OS? All current data will be erased!">
-                            <?= csrf_field() ?>
-                            <select class="cv-select" name="os_version" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
-                                <option value="ubuntu24">Ubuntu 24.04 LTS</option>
-                                <option value="ubuntu22">Ubuntu 22.04 LTS</option>
-                                <option value="debian12">Debian 12</option>
-                                <option value="almalinux9">AlmaLinux 9</option>
-                                <option value="centos9">CentOS Stream 9</option>
-                            </select>
-                            <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Reinstall OS</button>
-                        </form>
+                        <?php
+                        // Templates come from the hypervisor, keyed by
+                        // template_file. The hardcoded ubuntu24/debian12 list
+                        // that used to sit here was not what the API accepts
+                        // and did not reflect what this VPS can actually run.
+                        ?>
+                        <?php if ($osTemplates === []): ?>
+                            <p>Available operating systems could not be read from the server right now.</p>
+                        <?php else: ?>
+                            <p>Requests a fresh OS install. This erases all data, so our team confirms with you first.</p>
+                            <form method="post" action="/client/services/<?= $id ?>/reinstall" data-confirm="Request an OS reinstall? All current data will be erased.">
+                                <?= csrf_field() ?>
+                                <select class="cv-select" name="template" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                                    <?php foreach ($osTemplates as $template): ?>
+                                        <option value="<?= e((string) $template['file']) ?>"><?= e((string) ($template['name'] !== '' ? $template['name'] : $template['file'])) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Request Reinstall</button>
+                            </form>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Reverse DNS Card -->
                     <div class="svc-action-card">
                         <h4>🌐 Reverse DNS (rDNS)</h4>
-                        <p>Set custom PTR record for email &amp; domain verification.</p>
+                        <p>Set the PTR record for a specific IP on this VPS.</p>
                         <form method="post" action="/client/services/<?= $id ?>/rdns">
                             <?= csrf_field() ?>
+                            <?php // A PTR belongs to one IP — the old form named none, so nothing was ever updated. ?>
+                            <?php if ($ptrTargets !== []): ?>
+                                <select class="cv-select" name="ip" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                                    <?php foreach ($ptrTargets as $ip => $currentPtr): ?>
+                                        <option value="<?= e((string) $ip) ?>">
+                                            <?= e((string) $ip) ?><?= $currentPtr !== '' ? ' → ' . e((string) $currentPtr) : ' (no PTR set)' ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            <?php else: ?>
+                                <input class="cv-input" name="ip" placeholder="IP address" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                            <?php endif; ?>
                             <input class="cv-input" name="rdns" placeholder="ptr.example.com" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
                             <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Update PTR</button>
                         </form>
@@ -654,38 +830,74 @@ $formattedAmount = e($currency['symbol'] ?? '$') . number_format((float) ($servi
                     <!-- VNC Console Card -->
                     <div class="svc-action-card">
                         <h4>🖥️ Setup VNC / Console</h4>
-                        <p>Access emergency out-of-band HTML5 VNC console.</p>
+                        <p>Read out-of-band VNC console connection details for this VPS.</p>
                         <form method="post" action="/client/services/<?= $id ?>/vnc">
                             <?= csrf_field() ?>
-                            <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Launch VNC Console</button>
+                            <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Get Console Details</button>
                         </form>
                     </div>
 
                     <!-- Backup VPS Card -->
                     <div class="svc-action-card">
                         <h4>💾 Backup VPS</h4>
-                        <p>Create a full snapshot backup of your virtual server disk.</p>
+                        <p>Queue an on-demand snapshot of your virtual server disk.</p>
                         <form method="post" action="/client/services/<?= $id ?>/backup">
                             <?= csrf_field() ?>
-                            <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Create Backup</button>
+                            <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Create Snapshot</button>
                         </form>
                     </div>
 
                     <!-- Restore VPS Card -->
                     <div class="svc-action-card">
                         <h4>🔄 Restore VPS</h4>
-                        <p>Restore your VPS from a previously saved snapshot backup.</p>
-                        <form method="post" action="/client/services/<?= $id ?>/restore" data-confirm="Restore VPS from backup snapshot?">
-                            <?= csrf_field() ?>
-                            <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Restore Backup</button>
-                        </form>
+                        <?php // Restore is keyed to a specific snapshot — there is no "restore latest". ?>
+                        <?php if ($backups === []): ?>
+                            <p>No snapshots available to restore from. Create one first.</p>
+                        <?php else: ?>
+                            <p>Requests a restore from one of your snapshots. This overwrites the disk, so our team confirms first.</p>
+                            <form method="post" action="/client/services/<?= $id ?>/restore" data-confirm="Request a restore? This overwrites the current disk.">
+                                <?= csrf_field() ?>
+                                <select class="cv-select" name="backup" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                                    <?php foreach ($backups as $backup): ?>
+                                        <option value="<?= e((string) $backup['ref']) ?>">
+                                            <?= e((string) $backup['name']) ?><?php if (($backup['sizeBytes'] ?? null) !== null): ?> (<?= e(number_format($backup['sizeBytes'] / 1048576, 1)) ?> MB)<?php endif; ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Request Restore</button>
+                            </form>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Up/Downgrade VPS Slices Card -->
                     <div class="svc-action-card">
-                        <h4>⬆️ Up/Downgrade VPS Slices</h4>
-                        <p>Scale CPU cores, RAM, and SSD storage capacity instantly.</p>
-                        <a href="/client/services" class="svc-btn svc-btn--primary" style="width:100%;">Upgrade VPS Slices</a>
+                        <h4>⬆️ VPS Slices</h4>
+                        <?php
+                        // Real allocation and pricing from the module. The
+                        // button here used to link to /client/services — back
+                        // to the list page, having done nothing — under the
+                        // label "Upgrade VPS Slices".
+                        ?>
+                        <?php if (($slices['current'] ?? null) === null): ?>
+                            <p>Slice allocation could not be read from the server right now.</p>
+                        <?php else: ?>
+                            <p>
+                                Currently <strong><?= e((string) $slices['current']) ?></strong>
+                                slice<?= (int) $slices['current'] === 1 ? '' : 's' ?><?php
+                                    if (($slices['sliceRamGb'] ?? null) !== null && ($slices['sliceHdGb'] ?? null) !== null):
+                                        ?> · <?= e((string) $slices['sliceRamGb']) ?> GB RAM and <?= e((string) $slices['sliceHdGb']) ?> GB disk per slice<?php
+                                    endif;
+                                ?>.
+                                <?php if (($slices['max'] ?? null) !== null): ?>
+                                    This host supports up to <strong><?= e((string) $slices['max']) ?></strong>.
+                                <?php endif; ?>
+                                <?php if (($slices['proratedSliceCost'] ?? null) !== null): ?>
+                                    Adding one now costs <?= e($currency['symbol'] ?? '$') . number_format((float) $slices['proratedSliceCost'], 2) ?>
+                                    for the rest of this cycle.
+                                <?php endif; ?>
+                            </p>
+                            <a href="/client/tickets/create" class="svc-btn svc-btn--secondary" style="width:100%;">Contact us to rescale</a>
+                        <?php endif; ?>
                     </div>
 
                 </div>

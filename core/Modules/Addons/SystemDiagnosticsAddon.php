@@ -6,6 +6,7 @@ namespace CodeVault\Modules\Addons;
 
 use CodeVault\Config;
 use CodeVault\Database;
+use CodeVault\Database\Migrator;
 use CodeVault\Hooks\HookPoints;
 use CodeVault\Modules\AddonModule;
 use Throwable;
@@ -18,15 +19,27 @@ use Throwable;
  * whether the DB is actually reachable) into one admin-visible page, plus
  * cron activity read from CronScheduler's own state file and a small
  * failure log this addon's own hooks() listener maintains.
+ *
+ * Extended (R21) with the operational panels that came up repeatedly while
+ * building other features this cycle — server connectivity, provisioning
+ * failures, backup health, email delivery, and pending migrations — so an
+ * admin has one page to check instead of five: "did the backup run", "is
+ * this WHM server even reachable", "why did that domain change fail" and
+ * "is mail actually going out" were all previously answerable only by
+ * reading raw tables directly.
  */
 final class SystemDiagnosticsAddon implements AddonModule
 {
     private const FAILURE_LOG_MAX = 20;
 
+    /** fsockopen timeout for the opt-in server ping — a real API call can hang far longer than an admin should wait on a page load. */
+    private const SERVER_PING_TIMEOUT_SECONDS = 3;
+
     public function __construct(
         private readonly Database $db,
         private readonly Config $config,
-        private readonly string $basePath
+        private readonly string $basePath,
+        private readonly Migrator $migrator
     ) {
     }
 
@@ -34,8 +47,8 @@ final class SystemDiagnosticsAddon implements AddonModule
     {
         return [
             'name' => 'System Diagnostics',
-            'description' => 'Live health snapshot: PHP/extensions, database and Redis reachability, disk space, cron activity, and recent cron job failures.',
-            'version' => '1.0.0',
+            'description' => 'Live health snapshot: PHP/extensions, database and Redis reachability, disk space, cron activity and failures, provisioning server connectivity, services stuck on a provisioning error, backup health, email delivery, and pending migrations.',
+            'version' => '1.1.0',
             'author' => 'CodeVault',
         ];
     }
@@ -85,6 +98,13 @@ final class SystemDiagnosticsAddon implements AddonModule
         $disk = $this->diskCheck();
         $cronRuns = $this->cronRuns();
         $failures = $this->recentFailures();
+        $servers = $this->provisioningServers();
+        $checkServers = !empty($params['check_servers']);
+        $connectivity = $checkServers ? $this->checkServerConnectivity($servers) : [];
+        $provisioningErrors = $this->servicesWithProvisioningError();
+        $latestBackup = $this->latestBackup();
+        $emailHealth = $this->emailHealth();
+        $pendingMigrations = $this->migrator->pending();
 
         $rows = static function (array $entries, callable $badge): string {
             $html = '';
@@ -119,6 +139,73 @@ final class SystemDiagnosticsAddon implements AddonModule
             }
         }
 
+        $serversHtml = '';
+        if ($servers === []) {
+            $serversHtml = '<tr><td colspan="4">No provisioning servers configured yet.</td></tr>';
+        } else {
+            foreach ($servers as $server) {
+                $reachBadge = '<span class="cv-badge cv-badge--neutral">Not checked</span>';
+                if ($checkServers) {
+                    $reachBadge = $okBadge($connectivity[(int) $server['id']] ?? false);
+                }
+                $serversHtml .= '<tr><td>' . e((string) $server['name']) . '</td>'
+                    . '<td>' . e((string) $server['hostname']) . '</td>'
+                    . '<td>' . e((string) $server['module_slug']) . '</td>'
+                    . '<td>' . ((int) $server['active'] === 1 ? $okBadge(true) : $this->badgeText('inactive')) . ' ' . $reachBadge . '</td></tr>';
+            }
+        }
+
+        $checkServersLink = $checkServers
+            ? '<a class="cv-btn cv-btn--secondary" href="?">Hide connectivity results</a>'
+            : '<a class="cv-btn" href="?check_servers=1">Check Server Connectivity Now</a>';
+
+        $provisioningErrorsHtml = '';
+        if ($provisioningErrors === []) {
+            $provisioningErrorsHtml = '<tr><td colspan="4">No services currently have a provisioning error.</td></tr>';
+        } else {
+            foreach ($provisioningErrors as $svc) {
+                $provisioningErrorsHtml .= '<tr><td>#' . (int) $svc['id'] . '</td>'
+                    . '<td>' . e((string) ($svc['domain'] ?? '—')) . '</td>'
+                    . '<td>' . e((string) $svc['provisioning_error']) . '</td>'
+                    . '<td>' . e((string) $svc['updated_at']) . '</td></tr>';
+            }
+        }
+
+        $backupHtml = 'No backups have run yet.';
+        if ($latestBackup !== null) {
+            $statusBadge = match ($latestBackup['status']) {
+                'success' => $okBadge(true),
+                'failed' => $okBadge(false),
+                default => $this->badgeText((string) $latestBackup['status']),
+            };
+            $sizeLabel = $latestBackup['size_bytes'] !== null
+                ? number_format(((int) $latestBackup['size_bytes']) / 1024 / 1024, 1) . ' MB'
+                : 'unknown size';
+            $backupHtml = $statusBadge . ' ' . e((string) $latestBackup['started_at']) . ' — ' . $sizeLabel
+                . ($latestBackup['status'] === 'failed' ? ' — ' . e((string) ($latestBackup['error'] ?? '')) : '');
+        }
+
+        $emailRowsHtml = '';
+        foreach (['sent', 'failed', 'queued'] as $status) {
+            $count = (int) ($emailHealth['counts'][$status] ?? 0);
+            $emailRowsHtml .= '<tr><td>' . ucfirst($status) . ' (24h)</td><td>' . number_format($count) . '</td></tr>';
+        }
+        $emailFailuresHtml = '';
+        if ($emailHealth['recentFailures'] === []) {
+            $emailFailuresHtml = '<tr><td colspan="3">No recent email failures.</td></tr>';
+        } else {
+            foreach ($emailHealth['recentFailures'] as $fail) {
+                $emailFailuresHtml .= '<tr><td>' . e((string) $fail['to_email']) . '</td>'
+                    . '<td>' . e((string) ($fail['error'] ?? '')) . '</td>'
+                    . '<td>' . e((string) $fail['created_at']) . '</td></tr>';
+            }
+        }
+
+        $migrationsHtml = $pendingMigrations === []
+            ? $okBadge(true) . ' Schema is up to date.'
+            : $okBadge(false) . ' ' . count($pendingMigrations) . ' pending: ' . e(implode(', ', array_slice($pendingMigrations, 0, 5)))
+                . (count($pendingMigrations) > 5 ? ' …' : '');
+
         return <<<HTML
         <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
             <h3 class="cv-card__title">Environment</h3>
@@ -141,12 +228,48 @@ final class SystemDiagnosticsAddon implements AddonModule
                 <tbody>{$cronRowsHtml}</tbody>
             </table>
         </div>
-        <div class="cv-card">
+        <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
             <h3 class="cv-card__title">Recent cron failures</h3>
             <table class="cv-table">
                 <thead><tr><th>Job</th><th>Error</th><th>When</th></tr></thead>
                 <tbody>{$failuresHtml}</tbody>
             </table>
+        </div>
+        <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
+            <h3 class="cv-card__title">Provisioning servers</h3>
+            <p style="color:var(--cv-text-secondary);font-size:0.85rem;">
+                Connectivity isn't checked automatically — a real API call can take far longer than a page load
+                should wait, so it only runs when you ask for it. {$checkServersLink}
+            </p>
+            <table class="cv-table">
+                <thead><tr><th>Server</th><th>Hostname</th><th>Module</th><th>Status</th></tr></thead>
+                <tbody>{$serversHtml}</tbody>
+            </table>
+        </div>
+        <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
+            <h3 class="cv-card__title">Services with a provisioning error</h3>
+            <table class="cv-table">
+                <thead><tr><th>Service</th><th>Domain</th><th>Error</th><th>When</th></tr></thead>
+                <tbody>{$provisioningErrorsHtml}</tbody>
+            </table>
+        </div>
+        <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
+            <h3 class="cv-card__title">Backup health</h3>
+            <p style="margin:0;">{$backupHtml}</p>
+        </div>
+        <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
+            <h3 class="cv-card__title">Email delivery</h3>
+            <table class="cv-table" style="margin-bottom: var(--cv-space-3);">
+                <tbody>{$emailRowsHtml}</tbody>
+            </table>
+            <table class="cv-table">
+                <thead><tr><th>To</th><th>Error</th><th>When</th></tr></thead>
+                <tbody>{$emailFailuresHtml}</tbody>
+            </table>
+        </div>
+        <div class="cv-card">
+            <h3 class="cv-card__title">Database migrations</h3>
+            <p style="margin:0;">{$migrationsHtml}</p>
         </div>
         HTML;
     }
@@ -258,5 +381,99 @@ final class SystemDiagnosticsAddon implements AddonModule
     private function failureLogPath(): string
     {
         return $this->basePath . '/storage/cache/addon-diagnostics-failures.json';
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function provisioningServers(): array
+    {
+        try {
+            return $this->db->select('SELECT id, name, hostname, api_port, use_ssl, module_slug, active FROM servers ORDER BY name ASC');
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * A plain TCP connect, not an authenticated API call — enough to answer
+     * "is anything even listening here" without the minutes-long worst case
+     * a real WHM/API round trip could take against a genuinely dead host.
+     *
+     * @param array<int, array<string, mixed>> $servers
+     * @return array<int, bool> server id => reachable
+     */
+    private function checkServerConnectivity(array $servers): array
+    {
+        $results = [];
+
+        foreach ($servers as $server) {
+            $port = (int) ($server['api_port'] ?? 2087);
+            $host = (string) $server['hostname'];
+
+            $connection = @fsockopen($host, $port, $errno, $errstr, self::SERVER_PING_TIMEOUT_SECONDS);
+            $results[(int) $server['id']] = $connection !== false;
+
+            if ($connection !== false) {
+                fclose($connection);
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Surfaces exactly the services a support admin would otherwise only
+     * find by opening each one individually — anything a provisioning
+     * action (suspend, terminate, the Domain Name Changer addon, ...) most
+     * recently failed against a real server API.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function servicesWithProvisioningError(): array
+    {
+        try {
+            return $this->db->select(
+                "SELECT id, domain, provisioning_error, updated_at FROM services
+                 WHERE provisioning_error IS NOT NULL AND provisioning_error != ''
+                 ORDER BY updated_at DESC LIMIT 20"
+            );
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    /** @return array<string, mixed>|null */
+    private function latestBackup(): ?array
+    {
+        try {
+            return $this->db->selectOne('SELECT * FROM backup_runs ORDER BY id DESC LIMIT 1');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** @return array{counts: array<string, int>, recentFailures: array<int, array<string, mixed>>} */
+    private function emailHealth(): array
+    {
+        $counts = ['sent' => 0, 'failed' => 0, 'queued' => 0];
+
+        try {
+            $since = (new \DateTimeImmutable('-24 hours'))->format('Y-m-d H:i:s');
+            $rows = $this->db->select(
+                'SELECT status, COUNT(*) AS c FROM email_log WHERE created_at >= ? GROUP BY status',
+                [$since]
+            );
+
+            foreach ($rows as $row) {
+                $counts[(string) $row['status']] = (int) $row['c'];
+            }
+
+            $recentFailures = $this->db->select(
+                "SELECT to_email, error, created_at FROM email_log WHERE status = 'failed' ORDER BY id DESC LIMIT 10"
+            );
+        } catch (Throwable) {
+            $recentFailures = [];
+        }
+
+        return ['counts' => $counts, 'recentFailures' => $recentFailures];
     }
 }

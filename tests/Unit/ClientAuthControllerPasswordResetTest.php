@@ -13,6 +13,7 @@ use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Clients\ClientAuthController;
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Clients\ClientAuthManager;
+use CodeVault\Clients\ClientRegistrationOtpRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
@@ -41,6 +42,7 @@ use CodeVault\Security\PasswordResetTokenRepository;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
 use CodeVault\Session\SessionManager;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\App;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use CodeVault\View;
@@ -121,7 +123,9 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
             $this->resetToken,
             $mail,
             new Config(sys_get_temp_dir() . '/codevault-client-reset-noenv-' . uniqid()),
-            $this->securityQuestions
+            $this->securityQuestions,
+            new SettingsRepository($this->db),
+            new ClientRegistrationOtpRepository($this->db)
         );
     }
 
@@ -271,7 +275,9 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
             $this->resetToken,
             new EmailDispatcher(new EmailTemplateRepository($this->db), new EmailLogRepository($this->db), new SyncQueue()),
             new Config(sys_get_temp_dir() . '/codevault-client-reset-noenv-' . uniqid()),
-            $this->securityQuestions
+            $this->securityQuestions,
+            new SettingsRepository($this->db),
+            new ClientRegistrationOtpRepository($this->db)
         );
     }
 

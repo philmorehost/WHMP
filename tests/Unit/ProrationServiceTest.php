@@ -103,6 +103,26 @@ final class ProrationServiceTest extends DatabaseTestCase
         $this->assertSame($service['nextDueDate'], $updated['next_due_date'], 'none mode does not touch the schedule');
     }
 
+    public function test_upgrade_converts_the_new_products_catalog_price_into_the_clients_currency(): void
+    {
+        $currencies = new CurrencyRepository($this->db);
+        $ngnId = $currencies->create('NGN', '₦', 1490.0000);
+        $clients = new ClientRepository($this->db);
+        $clients->updateCurrency($this->clientId, $ngnId);
+
+        $service = $this->createServiceAtTenDaysRemaining(30.00);
+
+        // $newAmount here is what ServiceController::upgrade() passes in — a
+        // raw, unconverted product_pricing.price read — so 20.00 represents
+        // a $20 catalog price, not ₦20.
+        $result = $this->proration->upgrade($service['id'], $this->productId, 'New Plan', 20.00, ProrationMode::NONE);
+
+        $this->assertTrue($result['success']);
+
+        $updated = $this->services->find($service['id']);
+        $this->assertEqualsWithDelta(29800.00, (float) $updated['amount'], 0.01);
+    }
+
     public function test_full_credit_mode_credits_unused_time_and_resets_cycle(): void
     {
         $service = $this->createServiceAtTenDaysRemaining(30.00);

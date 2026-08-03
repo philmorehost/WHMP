@@ -78,19 +78,48 @@ final class CancellationRequestService
         }
     }
 
+    /**
+     * Every notification below was written against `EmailDispatcher::send($to,
+     * $subject, $body)`, which does not exist — the dispatcher's raw-content
+     * entry point is `sendRaw($subject, $html, $to, $clientId)`, a different
+     * name *and* a different argument order. The bodies are authored as plain
+     * text, so they go through nl2br(htmlspecialchars(...)) before being
+     * handed over as HTML.
+     */
+    private function sendPlainText(string $subject, string $body, string $toEmail, ?int $clientId = null): void
+    {
+        $this->mail->sendRaw(
+            $subject,
+            nl2br(htmlspecialchars($body, ENT_QUOTES, 'UTF-8')),
+            $toEmail,
+            $clientId
+        );
+    }
+
+    /** @return array<int, string> */
+    private function adminEmails(): array
+    {
+        // `admins` has no is_active column — filtering on it threw on every
+        // call, which on the termination-failure path meant the notification
+        // meant to report a failure became a second, louder failure.
+        return array_map(
+            static fn (array $row): string => (string) $row['email'],
+            $this->db->select('SELECT email FROM admins', [])
+        );
+    }
+
     private function notifyAdminsOfCancellationRequest(int $serviceId, int $requestId, string $type, string $reason): void
     {
         $service = $this->services->findById($serviceId);
         if (!$service) return;
 
-        $adminEmails = $this->db->select('SELECT email FROM admins WHERE is_active = 1', []);
         $typeLabel = $type === 'immediate' ? 'Immediate' : 'Scheduled';
-        
-        foreach ($adminEmails as $admin) {
-            $this->mail->send(
-                (string) $admin['email'],
+
+        foreach ($this->adminEmails() as $email) {
+            $this->sendPlainText(
                 'New Cancellation Request',
-                "A client has requested to cancel service: {$service['product_name']}\n\nType: {$typeLabel}\nReason: {$reason}\n\nPlease review in the admin dashboard."
+                "A client has requested to cancel service: {$service['product_name']}\n\nType: {$typeLabel}\nReason: {$reason}\n\nPlease review in the admin dashboard.",
+                $email
             );
         }
     }
@@ -100,10 +129,11 @@ final class CancellationRequestService
         $client = $this->db->selectOne('SELECT email FROM clients WHERE id = ?', [$clientId]);
         if (!$client) return;
 
-        $this->mail->send(
-            (string) $client['email'],
+        $this->sendPlainText(
             'Cancellation Request Approved',
-            'Your cancellation request has been approved. Your service will be cancelled according to your selected option.'
+            'Your cancellation request has been approved. Your service will be cancelled according to your selected option.',
+            (string) $client['email'],
+            $clientId
         );
     }
 
@@ -112,10 +142,11 @@ final class CancellationRequestService
         $client = $this->db->selectOne('SELECT email FROM clients WHERE id = ?', [$clientId]);
         if (!$client) return;
 
-        $this->mail->send(
-            (string) $client['email'],
+        $this->sendPlainText(
             'Cancellation Request Rejected',
-            "Your cancellation request has been rejected.\n\nReason: {$reason}"
+            "Your cancellation request has been rejected.\n\nReason: {$reason}",
+            (string) $client['email'],
+            $clientId
         );
     }
 
@@ -124,13 +155,11 @@ final class CancellationRequestService
         $service = $this->services->findById($serviceId);
         if (!$service) return;
 
-        $adminEmails = $this->db->select('SELECT email FROM admins WHERE is_active = 1', []);
-        
-        foreach ($adminEmails as $admin) {
-            $this->mail->send(
-                (string) $admin['email'],
+        foreach ($this->adminEmails() as $email) {
+            $this->sendPlainText(
                 'Service Termination Failed',
-                "Failed to terminate service: {$service['product_name']}\n\nError: {$errorMessage}\n\nPlease review manually in the admin dashboard."
+                "Failed to terminate service: {$service['product_name']}\n\nError: {$errorMessage}\n\nPlease review manually in the admin dashboard.",
+                $email
             );
         }
     }

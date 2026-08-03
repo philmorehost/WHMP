@@ -18,6 +18,31 @@ use CodeVault\Response;
  */
 final class SecurityHeaders
 {
+    private static ?string $nonce = null;
+
+    /**
+     * Per-request nonce for the app's own inline <script> blocks.
+     *
+     * Ten views still carried inline scripts (ticket filters, the invoice
+     * grid/list toggle, the domain spinner, mass-pay button state). With
+     * script-src 'self' and no 'unsafe-inline' the browser silently refused to
+     * run any of them, so those controls did nothing at all — the failure mode
+     * that made the product-details accordion and the TLD bulk-add buttons
+     * look unimplemented.
+     *
+     * A nonce fixes them without weakening anything: it is generated fresh per
+     * response and an injected script can't carry a value it cannot predict.
+     * That is strictly safer than 'unsafe-inline', which would re-enable every
+     * injected script — the thing this class exists to prevent.
+     *
+     * Inline event handler attributes (onclick=, onchange=) are NOT covered by
+     * a nonce under CSP; those still have to move to app.js.
+     */
+    public static function nonce(): string
+    {
+        return self::$nonce ??= base64_encode(random_bytes(16));
+    }
+
     public static function apply(Response $response): Response
     {
         return $response
@@ -34,7 +59,7 @@ final class SecurityHeaders
                 // delegated listener precisely so this stays locked down —
                 // re-adding it would silently re-enable every injected inline
                 // script across the app, which is what this class exists to stop.
-                "default-src 'self'; script-src 'self' https://merchant.payhub.com.ng; style-src 'self' 'unsafe-inline'; "
+                "default-src 'self'; script-src 'self' 'nonce-" . self::nonce() . "' https://merchant.payhub.com.ng; style-src 'self' 'unsafe-inline'; "
                 . "img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://merchant.payhub.com.ng; "
                 . "frame-src 'self' https://merchant.payhub.com.ng; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
             );

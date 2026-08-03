@@ -1,6 +1,10 @@
 <?php
 /** @var int $year */
-/** @var array<int, array{month: string, tax_amount: mixed}> $byMonth */
+/** @var array<int, array{month: string, tax_amount: float, currency_symbol: string, currency_code: string}> $byMonth */
+/** @var array<int, array{currency_symbol: string, currency_code: string, amount: float}> $totals */
+
+// Tax is owed in the currency it was collected in, so each row carries its own
+// symbol — this used to print "$" against every figure.
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Tax Liability — <?= (int) $year ?></h1>
@@ -13,22 +17,30 @@
 
 <div class="cv-card">
     <table class="cv-table">
-        <thead><tr><th>Month</th><th>Tax Collected</th></tr></thead>
+        <thead><tr><th>Month</th><th>Currency</th><th>Tax Collected</th></tr></thead>
         <tbody>
-        <?php $yearTotal = 0.0; ?>
         <?php foreach ($byMonth as $row): ?>
-            <?php $yearTotal += (float) $row['tax_amount']; ?>
             <tr>
                 <td><?= e($row['month']) ?></td>
-                <td>$<?= number_format((float) $row['tax_amount'], 2) ?></td>
+                <td><?= e($row['currency_code']) ?></td>
+                <td><?= e($row['currency_symbol'] . number_format((float) $row['tax_amount'], 2)) ?></td>
             </tr>
         <?php endforeach; ?>
         <?php if ($byMonth === []): ?>
-            <tr><td colspan="2" style="color:var(--cv-text-secondary);">No paid invoices in <?= (int) $year ?>.</td></tr>
+            <tr><td colspan="3" style="color:var(--cv-text-secondary);">No paid invoices in <?= (int) $year ?>.</td></tr>
         <?php endif; ?>
         </tbody>
-        <?php if ($byMonth !== []): ?>
-            <tfoot><tr><td><strong>Total</strong></td><td><strong>$<?= number_format($yearTotal, 2) ?></strong></td></tr></tfoot>
+        <?php if ($totals !== []): ?>
+            <tfoot>
+            <?php // One liability per currency — a tax authority is owed in its own currency, not a blended total. ?>
+            <?php foreach ($totals as $total): ?>
+                <tr>
+                    <td><strong>Total</strong></td>
+                    <td><strong><?= e($total['currency_code']) ?></strong></td>
+                    <td><strong><?= e($total['currency_symbol'] . number_format($total['amount'], 2)) ?></strong></td>
+                </tr>
+            <?php endforeach; ?>
+            </tfoot>
         <?php endif; ?>
     </table>
 </div>

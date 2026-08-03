@@ -14,6 +14,7 @@ final class PermissionRegistry
 {
     public const CLIENTS_VIEW = 'clients.view';
     public const CLIENTS_MANAGE = 'clients.manage';
+    public const CLIENT_NOTIFICATIONS_MANAGE = 'client_notifications.manage';
     public const STAFF_MANAGE = 'staff.manage';
     public const ROLES_MANAGE = 'roles.manage';
     public const SECURITY_MANAGE = 'security.manage';
@@ -49,6 +50,7 @@ final class PermissionRegistry
         return [
             self::CLIENTS_VIEW => ['label' => 'View clients', 'group' => 'Clients'],
             self::CLIENTS_MANAGE => ['label' => 'Add/edit clients', 'group' => 'Clients'],
+            self::CLIENT_NOTIFICATIONS_MANAGE => ['label' => 'Send in-app client notifications', 'group' => 'Clients'],
             self::STAFF_MANAGE => ['label' => 'Manage staff accounts', 'group' => 'Staff'],
             self::ROLES_MANAGE => ['label' => 'Manage roles & permissions', 'group' => 'Staff'],
             self::SECURITY_MANAGE => ['label' => 'Manage BruteGuard rules', 'group' => 'Security'],

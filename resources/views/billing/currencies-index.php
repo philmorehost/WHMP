@@ -170,7 +170,15 @@
                                 <input class="admin-cur-input" name="code" value="<?= e($currency['code']) ?>" maxlength="3" style="width:5rem;" required>
                         </td>
                         <td><input class="admin-cur-input" name="symbol" value="<?= e($currency['symbol']) ?>" style="width:4rem;" required></td>
-                        <td><input class="admin-cur-input" type="number" step="0.0001" name="exchange_rate" value="<?= e((string) $currency['exchange_rate']) ?>" style="width:8rem;" required></td>
+                        <td>
+                            <?php // A rate reads "units per 1 base unit", so the base currency's own rate can only be 1. The repository enforces it; the input says so rather than silently snapping back. ?>
+                            <?php if ((int) $currency['is_default'] === 1): ?>
+                                <input class="admin-cur-input" type="number" step="0.0001" name="exchange_rate" value="1.0000" style="width:8rem;background:var(--cv-bg-subtle);" readonly title="The default currency is the unit every other rate is quoted against, so its own rate is always 1.">
+                                <div style="font-size:.72rem;color:var(--cv-text-secondary);margin-top:2px;">Base currency — always 1</div>
+                            <?php else: ?>
+                                <input class="admin-cur-input" type="number" step="0.0001" name="exchange_rate" value="<?= e((string) $currency['exchange_rate']) ?>" style="width:8rem;" required>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <?php if ((int) $currency['is_default'] === 1): ?>
                                 <span class="admin-cur-badge--default">⭐ Default</span>
@@ -203,26 +211,32 @@
     </div>
 </div>
 
+<?php
+// The five lines that used to sit here (</td></tr>, an endforeach, </tbody>
+// and </table>) were leftovers from an earlier version of this page. The
+// endforeach had no matching foreach, so the whole file failed to parse and
+// /admin/currencies was a fatal error. The Add Currency form below is live
+// functionality and is kept — it just needed its own card, since the table's
+// wrappers already closed above.
+?>
 <div class="admin-cur-card">
-    <h2 class="admin-cur-card__title">➕ Add Currency</h2>
-    <div class="admin-cur-card__body">
-        <form method="post" action="/admin/currencies" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Code</label>
-                <input class="cv-input" name="code" placeholder="EUR" maxlength="3" style="width:5rem;" required>
-            </div>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Symbol</label>
-                <input class="cv-input" name="symbol" placeholder="€" style="width:4rem;" required>
-            </div>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Exchange Rate (vs. base)</label>
-                <input class="cv-input" type="number" step="0.0001" name="exchange_rate" placeholder="0.92" style="width:7rem;" required>
-            </div>
-            <button class="cv-btn" type="submit">Add</button>
-        </form>
-        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-2);">
-            Exchange rates are set manually here — there's no live FX feed wired up, so keep these current by hand.
-        </p>
-    </div>
+    <h3 class="admin-cur-card__title">➕ Add Currency</h3>
+    <form method="post" action="/admin/currencies" style="display:flex;gap:var(--cv-space-2);align-items:end;flex-wrap:wrap;"><?= csrf_field() ?>
+        <div class="cv-field" style="margin-bottom:0;">
+            <label class="cv-label">Code</label>
+            <input class="cv-input" name="code" placeholder="EUR" maxlength="3" style="width:5rem;" required>
+        </div>
+        <div class="cv-field" style="margin-bottom:0;">
+            <label class="cv-label">Symbol</label>
+            <input class="cv-input" name="symbol" placeholder="€" style="width:4rem;" required>
+        </div>
+        <div class="cv-field" style="margin-bottom:0;">
+            <label class="cv-label">Exchange Rate (vs. base)</label>
+            <input class="cv-input" type="number" step="0.0001" name="exchange_rate" placeholder="0.92" style="width:7rem;" required>
+        </div>
+        <button class="cv-btn" type="submit">Add</button>
+    </form>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-2);">
+        Exchange rates are set manually here — there's no live FX feed wired up, so keep these current by hand.
+    </p>
 </div>

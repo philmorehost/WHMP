@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Support;
 
 use CodeVault\Cron\CronJob;
+use CodeVault\Cron\ReportsCronStats;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 
@@ -15,8 +16,11 @@ use CodeVault\Hooks\HookPoints;
  * not already high-priority, so a ticket escalates once rather than
  * re-firing the hook every run while it sits unanswered.
  */
-final class TicketEscalationJob implements CronJob
+final class TicketEscalationJob implements CronJob, ReportsCronStats
 {
+    /** @var array<string, int> counters for the daily activity report */
+    private array $stats = [];
+
     public const AWAITING_REPLY_MINUTES = 240;
 
     public function __construct(
@@ -35,8 +39,16 @@ final class TicketEscalationJob implements CronJob
         return 15;
     }
 
+    /** @return array<string, int> */
+    public function stats(): array
+    {
+        return $this->stats;
+    }
+
     public function handle(): void
     {
+        $this->stats = ['tickets_escalated' => 0];
+
         foreach ($this->tickets->awaitingReplyLongerThan(self::AWAITING_REPLY_MINUTES) as $ticket) {
             if ($ticket['priority'] === 'high') {
                 continue;
@@ -44,6 +56,7 @@ final class TicketEscalationJob implements CronJob
 
             $this->tickets->setPriority((int) $ticket['id'], 'high');
             $this->hooks->fire(HookPoints::TICKET_ESCALATED, ['ticketId' => $ticket['id']]);
+            $this->stats['tickets_escalated']++;
         }
     }
 }

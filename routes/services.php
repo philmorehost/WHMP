@@ -18,18 +18,31 @@ $router->post('/admin/services/{id}/unsuspend', [ServiceController::class, 'unsu
 $router->post('/admin/services/{id}/terminate', [ServiceController::class, 'terminate']);
 $router->post('/admin/services/{id}/retry-provisioning', [ServiceController::class, 'retryProvisioning']);
 $router->post('/admin/services/{id}/edit', [ServiceController::class, 'updateDetails']);
+$router->post('/admin/services/{id}/send-details', [ServiceController::class, 'sendDetails']);
+$router->post('/admin/services/{id}/status', [ServiceController::class, 'setStatus']);
 
 $router->get('/admin/cancellations', [CancellationRequestsController::class, 'adminIndex']);
 $router->post('/admin/cancellations/{id}/approve', [CancellationRequestsController::class, 'adminApprove']);
 $router->post('/admin/cancellations/{id}/reject', [CancellationRequestsController::class, 'adminReject']);
 
 $router->post('/client/services/{id}/cancel-request', [CancellationRequestsController::class, 'clientCreate']);
-$router->post('/client/services/{id}/power', [\CodeVault\Billing\ClientServiceController::class, 'power']);
-$router->post('/client/services/{id}/vnc', [\CodeVault\Billing\ClientServiceController::class, 'vnc']);
-$router->post('/client/services/{id}/backup', [\CodeVault\Billing\ClientServiceController::class, 'backup']);
-$router->post('/client/services/{id}/restore', [\CodeVault\Billing\ClientServiceController::class, 'restore']);
-$router->post('/client/services/{id}/reinstall', [\CodeVault\Billing\ClientServiceController::class, 'reinstall']);
-$router->post('/client/services/{id}/rdns', [\CodeVault\Billing\ClientServiceController::class, 'rdns']);
+
+// The per-service management actions live in routes/client-services.php
+// alongside the rest of the client service routes. `reinstall` and `rdns`
+// used to be declared in both files.
 
 $router->post('/client/orders/{id}/cancel', [ClientCancellationController::class, 'cancelOrder']);
-$router->post('/client/invoices/{id}/cancel', [ClientCancellationController::class, 'cancelInvoice']);
+
+// NOTE: /client/invoices/{id}/cancel is deliberately NOT registered here.
+//
+// It was declared both here and in routes/invoices.php. The router returns the
+// first match and invoices.php loads first, so this one never ran — the
+// behaviour depended entirely on the order of the file list in public/index.php,
+// which is a trap waiting for whoever reorders it.
+//
+// ClientInvoiceController::cancel is the one that runs, and it is the correct
+// one: it sets status = 'cancelled', which is what dunning, auto-charge and
+// every listing read. ClientCancellationController::cancelInvoice only sets
+// is_cancelled/cancelled_at/cancellation_reason and leaves status alone, so the
+// invoice would have stayed 'unpaid' and kept being chased for payment despite
+// telling the client cancellation "will prevent automated billing attempts".

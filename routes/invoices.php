@@ -26,8 +26,17 @@ $router->get('/pay/{gateway}/callback', [PaymentCallbackController::class, 'call
 $router->post('/pay/{gateway}/webhook', [PaymentCallbackController::class, 'webhook']);
 
 $router->get('/admin/invoices', [AdminInvoiceController::class, 'index']);
+// Literal paths must precede /admin/invoices/{id}: the router returns the
+// first pattern that matches, and {id} would otherwise swallow "create".
+$router->get('/admin/invoices/create', [AdminInvoiceController::class, 'createForm']);
+$router->post('/admin/invoices/create', [AdminInvoiceController::class, 'store']);
+$router->post('/admin/invoices/bulk-cancel', [AdminInvoiceController::class, 'bulkCancel']);
+$router->post('/admin/invoices/mark-zero-paid', [AdminInvoiceController::class, 'markZeroValuePaid']);
+$router->post('/admin/invoices/bulk-remind', [AdminInvoiceController::class, 'bulkSendReminders']);
 $router->get('/admin/invoices/{id}', [AdminInvoiceController::class, 'show']);
 $router->get('/admin/invoices/{id}/pdf', [AdminInvoiceController::class, 'downloadPdf']);
 $router->post('/admin/invoices/{id}/mark-paid', [AdminInvoiceController::class, 'markPaid']);
 $router->post('/admin/invoices/{id}/cancel', [AdminInvoiceController::class, 'cancel']);
 $router->post('/admin/invoices/{id}/refund', [AdminInvoiceController::class, 'refund']);
+$router->post('/admin/invoices/{id}/send-reminder', [AdminInvoiceController::class, 'sendReminder']);
+$router->post('/admin/invoices/{id}/items', [AdminInvoiceController::class, 'updateItems']);

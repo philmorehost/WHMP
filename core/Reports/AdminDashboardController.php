@@ -47,7 +47,9 @@ final class AdminDashboardController
         private readonly ReportRepository $reports,
         private readonly SvgChartRenderer $chart,
         private readonly WidgetModuleService $widgets,
-        private readonly CancellationRequestRepository $cancellations
+        private readonly CancellationRequestRepository $cancellations,
+        private readonly \CodeVault\Billing\CurrencyService $currency,
+        private readonly \CodeVault\Billing\CurrencyRepository $currencies
     ) {
     }
 
@@ -64,6 +66,12 @@ final class AdminDashboardController
             'clientCount' => $this->clients->countAll(),
             'newClientsThisMonth' => $this->clients->countNewThisMonth(),
             'incomeThisMonth' => $this->invoices->totalPaidThisMonth(),
+            // Per-currency breakdowns so the figures are honest on a
+            // multi-currency install, plus the default currency for labelling
+            // — the template used to hardcode "$".
+            'incomeByCurrency' => $this->labelCurrencies($this->invoices->paidThisMonthByCurrency()),
+            'overdueByCurrency' => $this->labelCurrencies($this->invoices->overdueByCurrency()),
+            'defaultCurrency' => $this->currencies->default(),
             'pendingOrders' => $this->orders->countPending(),
             'pendingCancellations' => $this->cancellations->countPending(),
             'overdueInvoiceCount' => $this->invoices->countOverdue(),
@@ -84,6 +92,32 @@ final class AdminDashboardController
             'title' => 'CodeVault Admin — Dashboard',
             'content' => $content,
         ]));
+    }
+
+    /**
+     * Attaches each row's currency code and symbol.
+     *
+     * A NULL currency_id means the invoice never locked one, which resolves to
+     * the system default — the same rule the client-facing pages follow.
+     *
+     * @param array<int, array{currency_id: ?int, amount: float, invoices: int}> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function labelCurrencies(array $rows): array
+    {
+        $out = [];
+
+        foreach ($rows as $row) {
+            $currency = $this->currency->resolveLocked($row['currency_id']);
+
+            $out[] = $row + [
+                'code' => (string) ($currency['code'] ?? ''),
+                'symbol' => (string) ($currency['symbol'] ?? ''),
+                'is_default' => $row['currency_id'] === null,
+            ];
+        }
+
+        return $out;
     }
 
     /**

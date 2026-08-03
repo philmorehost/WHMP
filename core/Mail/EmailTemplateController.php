@@ -72,7 +72,13 @@ final class EmailTemplateController
             return $denied;
         }
 
-        return $this->render('email-templates.log', ['entries' => $this->log->recent(50)]);
+        $search = trim((string) $request->query('q', ''));
+        $page = max(1, (int) $request->query('page', 1));
+
+        return $this->render('email-templates.log', [
+            'results' => $this->log->history($page, 25, $search),
+            'search' => $search,
+        ]);
     }
 
     private function requirePermission(): ?Response

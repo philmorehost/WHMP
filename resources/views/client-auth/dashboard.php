@@ -462,7 +462,8 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                         <tr>
                             <td><strong>INV-<?= (int)$inv['id'] ?></strong></td>
                             <td><?= e((string)($inv['due_date'] ?? '')) ?></td>
-                            <td class="t-amt"><?= e($currencyService->formatLocked((float)$inv['total'], $inv['currency_id'] !== null ? (int)$inv['currency_id'] : null, (float)($inv['currency_rate'] ?? 1.0))) ?></td>
+                            <?php // Unlocked invoices fall back to this client's currency, not the system default. ?>
+                            <td class="t-amt"><?= e($currencyService->formatDocument((float)$inv['total'], $inv['currency_id'] !== null ? (int)$inv['currency_id'] : null, (float)($inv['currency_rate'] ?? 1.0), $currency)) ?></td>
                             <td><a class="dbd-pay" href="/client/invoices/<?= (int)$inv['id'] ?>">Pay Now</a></td>
                         </tr>
                         <?php endforeach; ?>
@@ -500,7 +501,25 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                                 <?php endif; ?>
                             </td>
                             <td><span class="dbd-badge dbd-badge--cycle"><?= e((string)$svc['billing_cycle']) ?></span></td>
-                            <td class="t-amt"><?= e($currencyService->format((float)$svc['amount'], $currency)) ?></td>
+                            <?php
+                            // services.amount is already denominated in the
+                            // client's currency and must NOT be converted again.
+                            //
+                            // format() multiplies by the currency's exchange
+                            // rate, which made this the only screen in the app
+                            // that re-converted it: the same service rendered
+                            // here as N62,095,750.00 and on its own invoice as
+                            // N41,397.17 — a factor of the NGN rate apart.
+                            //
+                            // The invoice is authoritative. RecurringBillingService
+                            // raises renewals with subtotal = services.amount and
+                            // denominateFor()'s rate of 1.0, i.e. "already in this
+                            // currency"; the admin service list, the admin service
+                            // page, the client service page and the client detail
+                            // page all render it raw with a symbol. This screen
+                            // was the sole outlier.
+                            ?>
+                            <td class="t-amt"><?= $sym ?><?= number_format((float) $svc['amount'], 2) ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>

@@ -6,6 +6,7 @@ namespace CodeVault\Domains;
 
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -25,7 +26,8 @@ final class DomainController
         private readonly ActivityLogger $activity,
         private readonly DomainPricingRepository $domainPricing,
         private readonly DomainSettings $domainSettings,
-        private readonly WhoisService $whoisService
+        private readonly WhoisService $whoisService,
+        private readonly CurrencyService $currency
     ) {
     }
 
@@ -48,6 +50,8 @@ final class DomainController
             'statusCounts' => $this->domains->countByStatus(),
             'registrarCounts' => $this->domains->countActiveByRegistrar(),
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
+            'autoDeleteExpiredEnabled' => $this->domainSettings->autoDeleteExpiredEnabled(),
+            'deletionGraceDays' => $this->domainSettings->deletionGraceDays(),
             'whoisDomain' => $whoisDomain,
             'whoisSearchResult' => $whoisSearchResult,
         ]);
@@ -60,6 +64,20 @@ final class DomainController
         }
 
         $this->domainSettings->setDefaultNameservers((array) $request->input('ns', []));
+
+        return Response::redirect('/admin/domains');
+    }
+
+    public function updateDeletionPolicy(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $this->domainSettings->saveDeletionPolicy(
+            (bool) $request->input('auto_delete_expired_enabled'),
+            (int) $request->input('deletion_grace_days', 30)
+        );
 
         return Response::redirect('/admin/domains');
     }
@@ -93,7 +111,16 @@ final class DomainController
             $tld = '.' . ltrim(substr($domainName, (int) strpos($domainName, '.') + 1), '.');
             $tldPricing = $this->domainPricing->findByTld($tld);
             if ($tldPricing !== null) {
-                $amount = (float) $tldPricing['register_price'];
+                // A fresh, never-before-charged catalog read — convert once,
+                // for the target client, same as CheckoutService does at
+                // checkout. An admin-TYPED amount (the branch this skips) is
+                // left alone, matching AdminInvoiceController's convention
+                // that a human-entered figure is already final.
+                $targetClient = $clientId > 0 ? $this->clients->find($clientId) : null;
+                $amount = $this->currency->convert(
+                    (float) $tldPricing['register_price'],
+                    $this->currency->rateFor($this->currency->resolveForClient($targetClient))
+                );
             }
         }
 

@@ -14,42 +14,11 @@ final class CancellationRequestRepository
 
     public function create(int $serviceId, int $clientId, string $type, string $reason, ?string $cancelDate = null): int
     {
-        $this->ensureSchema();
-
         return (int) $this->db->insert(
             'INSERT INTO cancellation_requests (service_id, client_id, cancellation_type, cancel_date, reason, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
             [$serviceId, $clientId, $type, $reason, $cancelDate]
         );
-    }
-
-    private function ensureSchema(): void
-    {
-        static $checked = false;
-        if ($checked) return;
-        $checked = true;
-
-        try {
-            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN client_id INT UNSIGNED NULL AFTER service_id');
-        } catch (\Throwable) {}
-        try {
-            $this->db->statement("ALTER TABLE cancellation_requests ADD COLUMN cancellation_type VARCHAR(32) NOT NULL DEFAULT 'immediate' AFTER client_id");
-        } catch (\Throwable) {}
-        try {
-            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN cancel_date DATE NULL AFTER cancellation_type');
-        } catch (\Throwable) {}
-        try {
-            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN admin_notes TEXT NULL AFTER reason');
-        } catch (\Throwable) {}
-        try {
-            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN reviewed_by INT UNSIGNED NULL AFTER status');
-        } catch (\Throwable) {}
-        try {
-            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN reviewed_at DATETIME NULL AFTER reviewed_by');
-        } catch (\Throwable) {}
-        try {
-            $this->db->statement('ALTER TABLE cancellation_requests ADD COLUMN completed_at DATETIME NULL AFTER reviewed_at');
-        } catch (\Throwable) {}
     }
 
     public function createRequest(int $serviceId, string $type, string $reason, ?int $clientId = null, ?string $cancelDate = null): int
@@ -145,13 +114,26 @@ final class CancellationRequestRepository
         );
     }
 
+    /**
+     * Approved cancellations whose scheduled date has arrived.
+     *
+     * This used to select `p.slug AS provisioning_module` over a join to
+     * `products`. Products have never had a `slug` column, so the query was a
+     * guaranteed error — it just never surfaced, because CancellationCronJob
+     * couldn't be loaded at all until its class declaration was fixed. Nor was
+     * a slug the right source: a service's provisioning module comes from its
+     * *server* (`servers.module_slug`, which is what ProvisioningService
+     * resolves against), not from its product. No caller ever read the alias,
+     * so the column and its join are gone rather than replaced — and dropping
+     * the inner join to `products` also stops due cancellations being silently
+     * skipped for services with no matching product row, such as domains.
+     */
     public function findDueCancellations(): array
     {
         return $this->db->select(
-            'SELECT cr.*, s.server_id, p.slug as provisioning_module
+            'SELECT cr.*, s.server_id
              FROM cancellation_requests cr
              JOIN services s ON cr.service_id = s.id
-             JOIN products p ON s.product_id = p.id
              WHERE cr.status = ? AND cr.cancellation_type = ? AND cr.cancel_date <= CURDATE()
              ORDER BY cr.cancel_date ASC',
             ['approved', 'due_date']

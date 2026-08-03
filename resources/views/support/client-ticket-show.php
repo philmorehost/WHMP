@@ -420,6 +420,13 @@ $id = (int) $ticket['id'];
         </div>
     </div>
 
+    <?php if (!empty($mergedAway)): ?>
+        <div class="cv-alert cv-alert--success" style="margin-bottom:24px;">
+            This ticket was merged into another one by our support team. If you were expecting a reply, please check
+            your other open tickets or contact support and reference ticket #<?= $id ?>.
+        </div>
+    <?php endif; ?>
+
     <!-- Ticket Thread -->
     <div class="ticket-thread">
         <?php foreach ($replies as $i => $reply):
@@ -505,7 +512,7 @@ $id = (int) $ticket['id'];
                 <button class="reply-section__submit" type="submit">Send Reply →</button>
             </form>
 
-            <script>
+            <script nonce="<?= csp_nonce() ?>">
                 function updateFileList() {
                     const fileInput = document.getElementById('file-input');
                     const fileList = document.getElementById('file-list');

@@ -50,4 +50,18 @@ final class TicketAttachmentRepository
 
         return $grouped;
     }
+
+    /**
+     * Re-points every attachment on $fromTicketId onto $toTicketId (ticket
+     * merge) — their reply_id already moved with the reply itself
+     * (TicketReplyRepository::moveToTicket()), but ticket_id is its own
+     * column here and is what controller ownership checks compare against.
+     */
+    public function moveToTicket(int $fromTicketId, int $toTicketId): int
+    {
+        return $this->db->update(
+            'UPDATE ticket_attachments SET ticket_id = ? WHERE ticket_id = ?',
+            [$toTicketId, $fromTicketId]
+        );
+    }
 }

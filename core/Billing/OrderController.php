@@ -9,6 +9,7 @@ use CodeVault\Auth\AuthGuard;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Provisioning\ServiceDetailsNotifier;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
@@ -30,8 +31,24 @@ final class OrderController
         private readonly ServiceRepository $services,
         private readonly ProvisioningService $provisioning,
         private readonly ActivityLogger $activity,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly ServiceDetailsNotifier $serviceDetails
     ) {
+    }
+
+    /**
+     * Whether this service's product is provisioned by hand rather than
+     * through a module — products whose autosetup is "off".
+     *
+     * @param array<string, mixed> $service
+     */
+    private function isManualSetup(array $service): bool
+    {
+        $product = \CodeVault\Support\App::container()
+            ->make(\CodeVault\Catalog\ProductRepository::class)
+            ->find((int) $service['product_id']);
+
+        return ($product['autosetup'] ?? 'payment') === 'off';
     }
 
     public function index(Request $request): Response
@@ -89,17 +106,81 @@ final class OrderController
                 continue;
             }
 
+            // Respect the product's own setup mode.
+            //
+            // "off" means the admin provisions this product by hand — the usual
+            // choice for dedicated servers and any VPS ordered outside an API.
+            // Checkout already honoured it; acceptance did not, so approving an
+            // order still fired a create() at the provider and surfaced errors
+            // like "Nocix does not support ordering dedicated servers via API"
+            // for products that were never meant to be automated.
+            //
+            // The service simply stays pending until the admin sets it live
+            // from the service page.
+            if ($this->isManualSetup($service)) {
+                $this->activity->log(
+                    'admin',
+                    (int) $this->guard->currentAdmin()['id'],
+                    'service.manual_setup_required',
+                    'service',
+                    (int) $service['id'],
+                    "Order accepted; service #{$service['id']} is set to manual setup and was not sent to a provisioning module.",
+                    $request->ip()
+                );
+
+                continue;
+            }
+
             $result = $this->provisioning->provision((int) $service['id']);
 
             if (!$result['success']) {
                 $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'service.provisioning_failed', 'service', (int) $service['id'], "Provisioning failed: {$result['message']}", $request->ip());
             }
+
+            // Tell the client how to get in. Read after provisioning, not
+            // before — a module that just created the account will have
+            // written the username/password we are about to send.
+            //
+            // Silent when there is nothing to send yet: manual provisioning
+            // fills the details in after approval, and the admin sends it from
+            // the service page then. Never fatal — a mail failure must not
+            // leave the order half-accepted.
+            try {
+                $notified = $this->serviceDetails->sendForService((int) $service['id']);
+
+                if ($notified['sent']) {
+                    $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'service.details_emailed', 'service', (int) $service['id'], $notified['reason'], $request->ip());
+                }
+            } catch (\Throwable $e) {
+                $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'service.details_email_failed', 'service', (int) $service['id'], 'Could not email service details: ' . $e->getMessage(), $request->ip());
+            }
         }
 
-        $domainRepo = \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainRepository::class);
-        $domainService = \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainService::class);
+        $container = \CodeVault\Support\App::container();
+        $domainRepo = $container->make(\CodeVault\Domains\DomainRepository::class);
+        $domainService = $container->make(\CodeVault\Domains\DomainService::class);
+        $domainPricing = $container->make(\CodeVault\Domains\DomainPricingRepository::class);
+
         foreach ($domainRepo->forOrder($id) as $domain) {
             if ($domain['status'] !== 'pending') {
+                continue;
+            }
+
+            // Same rule as services: a TLD set to manual registration is not
+            // sent to a registrar on acceptance.
+            $tldPricing = $domainPricing->findByTld((string) $domain['tld']);
+
+            if (($tldPricing['autosetup_registration'] ?? 'payment') === 'off') {
+                $this->activity->log(
+                    'admin',
+                    (int) $this->guard->currentAdmin()['id'],
+                    'domain.manual_setup_required',
+                    'domain',
+                    (int) $domain['id'],
+                    "Order accepted; domain #{$domain['id']} is set to manual registration and was not sent to a registrar.",
+                    $request->ip()
+                );
+
                 continue;
             }
 

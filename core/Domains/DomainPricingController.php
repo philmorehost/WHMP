@@ -28,16 +28,87 @@ final class DomainPricingController
             return $denied;
         }
 
+        $updated = $request->query('updated');
+        $pricingList = $this->pricing->all();
+
         $content = $this->view->render('domains.pricing-index', [
-            'pricingList' => $this->pricing->all(),
+            'pricingList' => $pricingList,
             'registrars' => $this->registrars->allEnabled(),
             'error' => null,
+            'bulkUpdated' => $updated !== null ? max(0, (int) $updated) : null,
+            'reordered' => $request->query('reordered') !== null,
+            // Drives the "nothing is spinner-enabled" banner. spinner_enabled
+            // defaults to 0 for every TLD (migration 0106) and is a deliberate
+            // per-TLD opt-in, so an install can have dozens of correctly priced
+            // TLDs — the "Browse extensions by category" list a client sees is
+            // proof of that — and still send zero suggestions from
+            // /domains/spin, because nobody ever separately turned the spinner
+            // flag on. That reads as "the domain spinner is broken" from the
+            // storefront with no obvious cause; the fix belongs here, on the
+            // page where the setting actually lives.
+            'spinnerEnabledCount' => count(array_filter($pricingList, static fn (array $p): bool => !empty($p['spinner_enabled']))),
         ]);
 
         return Response::html($this->view->render('layouts.admin', [
             'title' => 'CodeVault Admin — Domain Pricing',
             'content' => $content,
         ]));
+    }
+
+    /**
+     * Apply one set of changes to many selected TLDs.
+     *
+     * Every field is "leave blank to keep unchanged" — the admin fills in only
+     * what they want to change, so bumping renewal prices across 40 TLDs
+     * doesn't silently blank their categories or flip their registrars. A
+     * field is only included when it was actually filled in.
+     */
+    public function bulkUpdate(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = array_map('intval', (array) $request->input('ids', []));
+        $fields = [];
+
+        $category = trim((string) $request->input('category', ''));
+        if ($category !== '') {
+            $fields['category'] = $category;
+        }
+
+        $registrar = trim((string) $request->input('registrar_slug', ''));
+        if ($registrar !== '') {
+            $fields['registrar_slug'] = $registrar;
+        }
+
+        foreach (['register_price', 'transfer_price', 'renew_price', 'redemption_fee'] as $priceField) {
+            $raw = trim((string) $request->input($priceField, ''));
+
+            // '' means untouched; '0' is a legitimate price (free TLD promo),
+            // so test for an empty string rather than falsiness.
+            if ($raw !== '' && is_numeric($raw)) {
+                $fields[$priceField] = max(0.0, (float) $raw);
+            }
+        }
+
+        foreach (['grace_period_days', 'redemption_period_days'] as $daysField) {
+            $raw = trim((string) $request->input($daysField, ''));
+
+            if ($raw !== '' && is_numeric($raw)) {
+                $fields[$daysField] = max(0, (int) $raw);
+            }
+        }
+
+        // '' = leave alone, '1' = enable, '0' = disable.
+        $spinner = (string) $request->input('spinner_enabled', '');
+        if ($spinner === '1' || $spinner === '0') {
+            $fields['spinner_enabled'] = (int) $spinner;
+        }
+
+        $updated = $this->pricing->bulkUpdate($ids, $fields);
+
+        return Response::redirect('/admin/domain-pricing?updated=' . $updated);
     }
 
     public function store(Request $request): Response
@@ -194,6 +265,31 @@ final class DomainPricingController
                 'extensions' => [],
             ]);
         }
+    }
+
+    /**
+     * Saves the "Order" numbers typed into the pricing table — one number
+     * per TLD, submitted together (see the `form="tld-reorder-form"`
+     * cross-reference in the view, same technique the bulk-select checkboxes
+     * already use to live outside their own <form>).
+     */
+    public function reorder(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $sortOrders = [];
+
+        foreach ((array) $request->input('sort_order', []) as $id => $order) {
+            if (is_numeric($id) && is_numeric($order)) {
+                $sortOrders[(int) $id] = (int) $order;
+            }
+        }
+
+        $this->pricing->reorder($sortOrders);
+
+        return Response::redirect('/admin/domain-pricing?reordered=1');
     }
 
     public function destroy(Request $request, array $params): Response

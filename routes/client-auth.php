@@ -32,6 +32,9 @@ $router->get('/client/set-pin', [ClientAuthController::class, 'setPinForm']);
 $router->post('/client/set-pin', [ClientAuthController::class, 'setPin']);
 $router->get('/client/register', [ClientAuthController::class, 'registerForm']);
 $router->post('/client/register', [ClientAuthController::class, 'register']);
+$router->get('/client/register/verify', [ClientAuthController::class, 'registerVerifyForm']);
+$router->post('/client/register/verify', [ClientAuthController::class, 'registerVerify']);
+$router->post('/client/register/resend-otp', [ClientAuthController::class, 'registerResendOtp']);
 $router->post('/client/logout', [ClientAuthController::class, 'logout']);
 
 $router->get('/client/forgot-password', [ClientAuthController::class, 'forgotPasswordForm']);

@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace CodeVault\Billing;
 
 use CodeVault\Cron\CronJob;
+use CodeVault\Cron\ReportsCronStats;
 
-final class RecurringBillingJob implements CronJob
+final class RecurringBillingJob implements CronJob, ReportsCronStats
 {
+    /** @var array<string, int> counters for the daily activity report */
+    private array $stats = [];
+
     public function __construct(
         private readonly RecurringBillingService $billing
     ) {
@@ -26,8 +30,16 @@ final class RecurringBillingJob implements CronJob
         return 1440;
     }
 
+    /** @return array<string, int> */
+    public function stats(): array
+    {
+        return $this->stats;
+    }
+
     public function handle(): void
     {
-        $this->billing->generateDueInvoices();
+        // generateDueInvoices() already returns the IDs it created, so the
+        // count is free — no extra bookkeeping inside the billing service.
+        $this->stats = ['invoices_generated' => count($this->billing->generateDueInvoices())];
     }
 }

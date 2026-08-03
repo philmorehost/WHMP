@@ -295,8 +295,31 @@
     <div class="admin-stat-card">
         <div class="admin-stat-icon" style="background:linear-gradient(135deg, #f59e0b, #d97706);">💰</div>
         <span class="admin-stat-label">Income This Month</span>
-        <span class="admin-stat-value">$<?= e(number_format($incomeThisMonth, 0)) ?></span>
-        <span class="admin-stat-meta"><a href="/admin/reports">View income report →</a></span>
+        <?php
+        // Money is shown per currency. Summing across currencies would add
+        // naira to dollars, and the symbol used to be hardcoded to "$"
+        // regardless of what the install actually bills in.
+        $incomeRows = $incomeByCurrency ?? [];
+        $primaryIncome = $incomeRows[0] ?? null;
+        ?>
+        <span class="admin-stat-value">
+            <?php if ($primaryIncome === null): ?>
+                <?= e((string) ($defaultCurrency['symbol'] ?? '')) ?>0
+            <?php else: ?>
+                <?= e($primaryIncome['symbol']) ?><?= e(number_format((float) $primaryIncome['amount'], 0)) ?>
+            <?php endif; ?>
+        </span>
+        <span class="admin-stat-meta">
+            <?php if (count($incomeRows) > 1): ?>
+                <?php foreach (array_slice($incomeRows, 1) as $row): ?>
+                    <span style="display:inline-block;margin-right:8px;" title="<?= e($row['code']) ?>">
+                        + <?= e($row['symbol']) ?><?= e(number_format((float) $row['amount'], 0)) ?>
+                    </span>
+                <?php endforeach; ?>
+                ·
+            <?php endif; ?>
+            <a href="/admin/reports">View income report →</a>
+        </span>
     </div>
 
     <div class="admin-stat-card">
@@ -317,7 +340,17 @@
         <div class="admin-stat-icon" style="background:linear-gradient(135deg, #ef4444, #8b5cf6);">⏰</div>
         <span class="admin-stat-label">Overdue Invoices</span>
         <span class="admin-stat-value"><?= (int) $overdueInvoiceCount ?></span>
-        <span class="admin-stat-meta">$<?= e(number_format($overdueInvoiceTotal, 0)) ?> outstanding · <a href="/admin/invoices">View →</a></span>
+        <span class="admin-stat-meta">
+            <?php
+            $overdueRows = $overdueByCurrency ?? [];
+            $parts = [];
+            foreach ($overdueRows as $row) {
+                $parts[] = $row['symbol'] . number_format((float) $row['amount'], 0);
+            }
+            ?>
+            <?= e($parts === [] ? (string) ($defaultCurrency['symbol'] ?? '') . '0' : implode(' + ', $parts)) ?>
+            outstanding · <a href="/admin/invoices">View →</a>
+        </span>
     </div>
 
     <div class="admin-stat-card">

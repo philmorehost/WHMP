@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace CodeVault\Domains;
 
+use CodeVault\Billing\CurrencySelection;
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Cart\Cart;
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Database;
@@ -34,7 +36,10 @@ final class DomainRegistrationController
         private readonly Cart $cart,
         private readonly Database $db,
         private readonly \CodeVault\Ai\AiProvider $ai,
-        private readonly \CodeVault\Ai\AiSettings $aiSettings
+        private readonly \CodeVault\Ai\AiSettings $aiSettings,
+        private readonly \CodeVault\Activity\ActivityLogger $activity,
+        private readonly CurrencyService $currencyService,
+        private readonly CurrencySelection $currencySelection
     ) {
     }
 
@@ -44,6 +49,13 @@ final class DomainRegistrationController
         // account (the session cart works for guests; login is only required
         // at checkout, WHMCS-style).
         $query = trim((string) $request->query('domain', (string) $request->query('domain_search', '')));
+
+        // Same currency resolution as the live-availability AJAX check
+        // (checkAvailabilityAjax()) and the rest of the storefront
+        // (CheckoutController::page()) — a visitor who hasn't logged in yet
+        // still gets their session-selected currency honoured here.
+        $client = $this->guard->currentClient();
+        $currency = $this->currencyService->resolveEffective($client, $this->currencySelection->get());
 
         return $this->page('domains.register', [
             'query' => $query,
@@ -55,19 +67,28 @@ final class DomainRegistrationController
                 $this->domainPricing->findByTld('.com'),
                 $this->domainPricing->findByTld('.net'),
             ])),
+            'currency' => $currency,
+            'money' => fn (float $baseAmount): string => $this->currencyService->format($baseAmount, $currency),
         ]);
     }
 
     /**
      * Domain Spinner — given a base name, generates common
-     * prefix/suffix/hyphenation variations and checks each one's
-     * availability across whichever TLDs the admin opted into the
-     * spinner (DomainPricingRepository::spinnerEnabled(), a deliberately
-     * separate/usually-smaller list than every TLD offered for direct
-     * registration, so one spin doesn't fan out into dozens of live
-     * registrar API calls). Capped at MAX_CHECKS total availability
-     * checks for the same reason — a spin is a suggestion tool, not an
-     * exhaustive search.
+     * prefix/suffix/hyphenation variations against whichever TLDs the admin
+     * opted into the spinner (DomainPricingRepository::spinnerEnabled(), a
+     * deliberately separate/usually-smaller list than every TLD offered for
+     * direct registration). Capped at SPIN_MAX_CHECKS candidates for the same
+     * reason — a spin is a suggestion tool, not an exhaustive search.
+     *
+     * Returns the candidate name/TLD/price list unchecked — it used to check
+     * every candidate's live availability here, sequentially, before
+     * responding: up to 15 registrar API round-trips in a row on a single
+     * request, which is exactly the kind of blocking wait that made the
+     * "Suggested Alternatives" box (which auto-fires on every domains/register
+     * page load) sit on "Spinning..." for a long time. The browser now runs
+     * those same checks itself against /domains/availability, one fetch per
+     * candidate, all in parallel — the checks still happen, they just aren't
+     * serialized behind a single PHP request anymore.
      */
     private const SPIN_MAX_CHECKS = 15;
 
@@ -77,32 +98,39 @@ final class DomainRegistrationController
         $name = preg_replace('/[^a-z0-9-]/', '', $name) ?? '';
 
         if ($name === '') {
-            return Response::json(['suggestions' => []]);
+            return Response::json(['candidates' => []]);
         }
 
         $tlds = $this->domainPricing->spinnerEnabled();
 
         if ($tlds === []) {
-            return Response::json(['suggestions' => [], 'message' => 'No TLDs are enabled for the Domain Spinner yet — an admin can turn this on in Domain Pricing.']);
+            // This response reaches a real visitor's browser (this endpoint
+            // needs no auth), so it says nothing about the admin-side cause —
+            // "an admin can turn this on in Domain Pricing" told a customer to
+            // go be a site operator. The actual fix for that cause lives on
+            // the admin's own Domain Pricing page (a banner there, with a
+            // one-click "Enable Spinner for All TLDs" action, points them at
+            // it directly instead).
+            return Response::json(['candidates' => [], 'message' => 'No alternative names available right now — try a different search.']);
         }
 
-        // Rule-based variations as a reliable, zero-cost fallback. 
-        $candidates = array_values(array_unique($this->variationsOf($name)));
-        $suggestions = [];
+        // Rule-based variations as a reliable, zero-cost fallback.
+        $candidateNames = array_values(array_unique($this->variationsOf($name)));
+        $candidates = [];
         $checks = 0;
 
-        foreach ($candidates as $candidateName) {
+        foreach ($candidateNames as $candidateName) {
             foreach ($tlds as $pricingRow) {
                 if ($checks >= self::SPIN_MAX_CHECKS) {
                     break 2;
                 }
 
                 $checks++;
-                $suggestions[] = $this->checkOne($candidateName, $pricingRow);
+                $candidates[] = ['domain' => $candidateName . $pricingRow['tld'], 'price' => (float) $pricingRow['register_price']];
             }
         }
 
-        return Response::json(['suggestions' => array_values(array_filter($suggestions, static fn (array $s) => $s['checked'] && $s['available']))]);
+        return Response::json(['candidates' => $candidates]);
     }
 
 
@@ -161,8 +189,11 @@ final class DomainRegistrationController
         $price = (float) $pricingRow['register_price'];
         $transferPrice = (float) $pricingRow['transfer_price'];
 
-        $formattedPrice = $currency['symbol'] . number_format($price * (float) $currency['exchange_rate'], 2);
-        $formattedTransferPrice = $currency['symbol'] . number_format($transferPrice * (float) $currency['exchange_rate'], 2);
+        // format() applies the base-currency-is-1.0 rule; the raw exchange_rate
+        // column priced a ₦7,500 domain at ₦11,175,000 on an install whose base
+        // currency still carried its pre-promotion rate.
+        $formattedPrice = $currencyService->format($price, $currency);
+        $formattedTransferPrice = $currencyService->format($transferPrice, $currency);
 
         return Response::json([
             'checked' => $check['success'],
@@ -204,13 +235,7 @@ final class DomainRegistrationController
         $useDefaultNs = (string) $request->input('nameserver_choice', 'default') !== 'custom';
         $nameservers = $useDefaultNs ? $this->domainSettings->defaultNameservers() : $this->customNameserversFrom($request);
 
-        $carrier = $this->db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1");
-
-        if ($carrier === null) {
-            return Response::redirect('/domains/register?error=' . urlencode('Domain registration is temporarily unavailable — please contact support.'));
-        }
-
-        $this->cart->add((int) $carrier['id'], 'annually', [], 1, [
+        $this->cart->add($this->carrierProductId(), 'annually', [], 1, [
             'name' => $domain,
             'option' => 'register',
             'ns1' => $nameservers[0] ?? '',
@@ -224,7 +249,20 @@ final class DomainRegistrationController
         return Response::redirect('/cart');
     }
 
-    /** @return array<int, array{tld: string, domain: string, available: ?bool, price: ?float, checked: bool, message: string}> */
+    /**
+     * The TLD/price candidate list for a query — deliberately no live
+     * registrar call here. This used to check every candidate's availability
+     * synchronously before the search page could respond at all: a name
+     * typed with no TLD fanned out into one live API call per configured
+     * TLD, one after another, so the whole page sat blank until the slowest
+     * registrar answered. The page now renders this list immediately and the
+     * browser checks each domain's real availability itself, in parallel,
+     * against /domains/availability (see the domain-search-page block in
+     * app.js) — results fill in as each check resolves instead of the page
+     * waiting on all of them.
+     *
+     * @return array<int, array{tld: string, domain: string, price: float, offered: bool, message: string}>
+     */
     private function search(string $query): array
     {
         $query = $this->normalize($query);
@@ -234,29 +272,25 @@ final class DomainRegistrationController
             $pricingRow = $this->domainPricing->findByTld($tld);
 
             if ($pricingRow === null) {
-                return [['tld' => $tld, 'domain' => $name . $tld, 'available' => null, 'price' => null, 'checked' => false, 'message' => "\"{$tld}\" isn't offered here."]];
+                return [['tld' => $tld, 'domain' => $name . $tld, 'price' => 0.0, 'offered' => false, 'message' => "\"{$tld}\" isn't offered here."]];
             }
 
-            return [$this->checkOne($name, $pricingRow)];
+            return [$this->candidate($name, $pricingRow)];
         }
 
-        // No TLD typed — check the name against every configured TLD, WHMCS-style.
-        return array_map(fn (array $pricingRow) => $this->checkOne($query, $pricingRow), $this->domainPricing->all());
+        // No TLD typed — list the name against every configured TLD, WHMCS-style.
+        return array_map(fn (array $pricingRow) => $this->candidate($query, $pricingRow), $this->domainPricing->all());
     }
 
     /** @param array<string, mixed> $pricingRow */
-    private function checkOne(string $name, array $pricingRow): array
+    private function candidate(string $name, array $pricingRow): array
     {
-        $domain = $name . $pricingRow['tld'];
-        $check = $this->domainService->checkAvailability($domain, (string) $pricingRow['registrar_slug']);
-
         return [
             'tld' => (string) $pricingRow['tld'],
-            'domain' => $domain,
-            'available' => $check['success'] ? $check['available'] : null,
+            'domain' => $name . $pricingRow['tld'],
             'price' => (float) $pricingRow['register_price'],
-            'checked' => $check['success'],
-            'message' => $check['success'] ? '' : $check['message'],
+            'offered' => true,
+            'message' => '',
         ];
     }
 
@@ -274,6 +308,18 @@ final class DomainRegistrationController
         }
 
         return $nameservers;
+    }
+
+    /**
+     * The hidden, $0 "carrier" product every domain-only cart line rides on
+     * (see the class docblock). Moved onto DomainService — AdminOrderController
+     * needs the exact same lookup for an admin-created standalone domain
+     * order, and having two independent find-or-create implementations risks
+     * them drifting into two different carrier products.
+     */
+    private function carrierProductId(): int
+    {
+        return $this->domainService->carrierProductId();
     }
 
     private function normalize(string $query): string
@@ -329,13 +375,7 @@ final class DomainRegistrationController
         $useDefaultNs = (string) $request->input('nameserver_choice', 'default') !== 'custom';
         $nameservers = $useDefaultNs ? $this->domainSettings->defaultNameservers() : $this->customNameserversFrom($request);
 
-        $carrier = $this->db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1");
-
-        if ($carrier === null) {
-            return Response::redirect('/domains/transfer?domain=' . urlencode($domain) . '&error=' . urlencode('Domain transfer is temporarily unavailable — please contact support.'));
-        }
-
-        $this->cart->add((int) $carrier['id'], 'annually', [], 1, [
+        $this->cart->add($this->carrierProductId(), 'annually', [], 1, [
             'name' => $domain,
             'option' => 'transfer',
             'ns1' => $nameservers[0] ?? '',

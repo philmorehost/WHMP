@@ -168,6 +168,23 @@
     line-height: 1.6;
     margin: 0;
 }
+/* The description is now real markup rather than one escaped string, so its
+   paragraphs and lists need spacing — and the last one must not add a gap
+   above the feature list below it. */
+.product-card__description p {
+    margin: 0 0 10px 0;
+}
+.product-card__description p:last-child {
+    margin-bottom: 0;
+}
+.product-card__description ul,
+.product-card__description ol {
+    margin: 0 0 10px 0;
+    padding-left: 1.2em;
+}
+.product-card__description li {
+    margin-bottom: 4px;
+}
 .product-card__features {
     list-style: none;
     padding: 0;
@@ -391,12 +408,17 @@
                                     <h3 class="product-card__name"><?= e($name) ?></h3>
                                 </div>
                                 <div class="product-card__body">
-                                    <p class="product-card__description"><?= e((string) ($product['description'] ?? '')) ?></p>
+                                    <?php
+                                    // Descriptions are typed in a plain textarea, so the line
+                                    // breaks the admin used to separate points must survive into
+                                    // HTML — escaping alone collapsed them into one run-on block.
+                                    ?>
+                                    <div class="product-card__description"><?= CodeVault\Support\FormattedText::toHtml((string) ($product['description'] ?? '')) ?></div>
                                     
                                     <div style="margin: 16px 0; padding: 14px; background: var(--cv-bg-surface-sunken); border-radius: 10px; border: 1px solid var(--cv-border-default); text-align: center;">
                                         <div style="font-size: .8rem; color: var(--cv-text-secondary); text-transform: uppercase; font-weight: 700; letter-spacing: .05em;">Starting at</div>
                                         <div style="font-family: 'Hanken Grotesk', sans-serif; font-size: 1.65rem; font-weight: 900; color: var(--cv-color-brand-500); margin: 2px 0;">
-                                            <?= e($currency['symbol'] ?? '$') ?><?= number_format((float) ($product['starting_price'] ?? 0), 2) ?>
+                                            <?= e($money((float) ($product['starting_price'] ?? 0))) ?>
                                         </div>
                                         <div style="font-size: .8rem; color: var(--cv-text-secondary); font-weight: 600;">
                                             <?= e(ucfirst(str_replace('_', ' ', (string) ($product['starting_cycle'] ?? 'monthly')))) ?>

@@ -7,6 +7,8 @@
 /** @var array<int, array<string, mixed>> $invoices */
 /** @var float $creditBalance */
 /** @var array<int, array<string, mixed>> $creditLedger */
+/** @var callable(float): string $serviceMoney */
+/** @var callable(array<string, mixed>): string $invoiceMoney */
 $tabs = ['summary' => 'Summary', 'profile' => 'Profile', 'contacts' => 'Contacts', 'billing' => 'Billing', 'log' => 'Log', 'message' => 'Message'];
 $id = (int) $client['id'];
 ?>
@@ -517,7 +519,7 @@ $id = (int) $client['id'];
                         <tr>
                             <td><?= e($service['product_name']) ?></td>
                             <td><?= e($service['billing_cycle']) ?></td>
-                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $service['amount'], 2) ?></td>
+                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($serviceMoney((float) $service['amount'])) ?></td>
                             <td><?= e($service['next_due_date']) ?></td>
                             <td><span class="admin-detail-badge admin-detail-badge--active"><?= e($service['status']) ?></span></td>
                             <td><a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/services/<?= (int) $service['id'] ?>" style="padding:6px 12px; font-size:.75rem;">Edit</a></td>
@@ -542,7 +544,7 @@ $id = (int) $client['id'];
                     <?php foreach ($invoices as $invoice): ?>
                         <tr>
                             <td><a href="/admin/invoices/<?= (int) $invoice['id'] ?>">INV-<?= (int) $invoice['id'] ?></a></td>
-                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($currency['symbol'] ?? '$') ?><?= number_format((float) $invoice['total'], 2) ?></td>
+                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($invoiceMoney($invoice)) ?></td>
                             <td><?= e($invoice['due_date']) ?></td>
                             <td><span class="admin-detail-badge <?= $invoice['status'] === 'paid' ? 'admin-detail-badge--paid' : 'admin-detail-badge--unpaid' ?>"><?= e($invoice['status']) ?></span></td>
                         </tr>

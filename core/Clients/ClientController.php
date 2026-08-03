@@ -136,7 +136,7 @@ final class ClientController
             $this->mail->sendTemplate('client_welcome', $fields['email'], [
                 'first_name' => $fields['first_name'],
                 'email' => $fields['email'],
-                'company_name' => (string) $this->config->env('APP_NAME', 'CodeVault'),
+                'company_name' => brand_name(),
             ], $id);
         } catch (Throwable) {
             // Template missing/misconfigured shouldn't block client creation.
@@ -160,10 +160,30 @@ final class ClientController
         $tab = (string) $request->query('tab', 'summary');
         $billingPage = max(1, (int) $request->query('billing_page', 1));
         $billingPagination = $this->invoices->paginateForClient((int) $client['id'], $billingPage, 10);
+        $currency = $this->currencyService->resolveForClient($client);
 
         return $this->render('clients.show', [
             'client' => $client,
-            'currency' => $this->currencyService->resolveForClient($client),
+            'currency' => $currency,
+            // services.amount is written once at checkout (denominateFor() —
+            // already in the client's own currency, no per-row rate to read
+            // it back through) and never touched again, so it must be shown
+            // raw, not passed through format()'s live rate: doing so
+            // re-multiplies an already-denominated figure and was a
+            // confirmed bug elsewhere in the app (see the client dashboard's
+            // services widget) — a service invoiced correctly at ₦41,397.17
+            // rendered as ₦62,095,750.00 once someone "fixed" this exact
+            // spot the same way. Invoices DO lock a real currency_id/
+            // currency_rate per row, so their total is read through that
+            // lock via formatDocument() instead, which is the correct and
+            // different case just below.
+            'serviceMoney' => fn (float $amount): string => ($currency['symbol'] ?? '$') . number_format($amount, 2),
+            'invoiceMoney' => fn (array $invoice): string => $this->currencyService->formatDocument(
+                (float) $invoice['total'],
+                $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null,
+                (float) ($invoice['currency_rate'] ?? 1.0),
+                $currency
+            ),
             'tab' => in_array($tab, ['summary', 'profile', 'contacts', 'billing', 'log', 'message'], true) ? $tab : 'summary',
             'contacts' => $this->contacts->forClient((int) $client['id']),
             'activity' => $this->activity->forSubject('client', (int) $client['id']),

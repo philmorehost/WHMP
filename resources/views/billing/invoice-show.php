@@ -5,9 +5,15 @@
 /** @var string|null $refundSuccess */
 /** @var string|null $refundError */
 /** @var array<string, mixed> $currency */
-// Stored amounts are authoritative in the BASE currency (see CurrencyService);
-// the invoice's locked rate converts them for display only.
-$rate = (float) $invoice['currency_rate'] > 0 ? (float) $invoice['currency_rate'] : 1.0;
+// The invoice's locked rate converts its stored amounts for display only. A
+// NULL currency_id means the invoice is denominated in the base currency and
+// is therefore stored as-is — both lockColumns() and denominateFor() write 1.0
+// for that case, so any other value is corrupt data, not a conversion. Must
+// match CurrencyService::formatLocked() and the figure PaymentCallbackController
+// charges, or the page and the gateway disagree about what is owed.
+$rate = $invoice['currency_id'] !== null && (float) $invoice['currency_rate'] > 0
+    ? (float) $invoice['currency_rate']
+    : 1.0;
 $money = static fn (float $amount): string => $currency['symbol'] . number_format(round($amount * $rate, 2), 2);
 ?>
 <style>
@@ -247,6 +253,34 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
     </div>
 <?php endif; ?>
 
+<?php if (!empty($editSaved)): ?>
+    <div class="admin-invoice-message admin-invoice-message--success">
+        ✅ Invoice updated.
+    </div>
+<?php elseif (!empty($editError)): ?>
+    <div class="admin-invoice-message admin-invoice-message--error">
+        ⚠️ <?= e((string) $editError) ?>
+    </div>
+<?php endif; ?>
+
+<?php if (!empty($reminderSent)): ?>
+    <div class="admin-invoice-message admin-invoice-message--success">
+        ✅ Payment reminder emailed to the client.
+    </div>
+<?php elseif (!empty($reminderError)): ?>
+    <div class="admin-invoice-message admin-invoice-message--error">
+        ⚠️ <?php
+            // Map the service's reason codes to something an admin can act on.
+            echo e(match ((string) $reminderError) {
+                'not-unpaid' => 'This invoice is no longer unpaid, so no reminder was sent.',
+                'no-client-email' => 'That client has no email address on file.',
+                'template-missing' => 'The "invoice_overdue" email template is missing — check Configuration → Email Templates.',
+                default => 'The reminder could not be sent.',
+            });
+        ?>
+    </div>
+<?php endif; ?>
+
 <!-- Hero Section -->
 <div class="admin-invoice-hero">
     <div class="admin-invoice-hero__content">
@@ -273,6 +307,10 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
             <?php if ($invoice['status'] === 'unpaid'): ?>
                 <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/mark-paid"><?= csrf_field() ?>
                     <button class="admin-invoice-btn admin-invoice-btn--primary" type="submit">✓ Mark Paid</button>
+                </form>
+                <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/send-reminder"
+                      data-confirm="Email a payment reminder for this invoice to the client?"><?= csrf_field() ?>
+                    <button class="admin-invoice-btn admin-invoice-btn--secondary" type="submit">✉️ Send Reminder</button>
                 </form>
                 <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/cancel"><?= csrf_field() ?>
                     <button class="admin-invoice-btn admin-invoice-btn--danger" type="submit">✕ Cancel</button>
@@ -303,6 +341,55 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
         </div>
     </div>
 </div>
+
+<?php if ($invoice['status'] === 'unpaid'): ?>
+    <?php
+    // Editing is limited to unpaid invoices: a paid one has a transaction
+    // recorded against it, so changing the amount would leave the ledger
+    // disagreeing with the invoice. A credit note is the instrument for that.
+    //
+    // Amounts are entered in the currency the invoice is already denominated
+    // in — the edit never touches currency_id or currency_rate, so it can't
+    // re-apply a conversion to the new figures.
+    ?>
+    <div class="admin-invoice-card">
+        <h2 class="admin-invoice-card__title">✏️ Edit Invoice</h2>
+        <div class="admin-invoice-card__body">
+            <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/items"><?= csrf_field() ?>
+                <div data-invoice-items>
+                    <?php foreach ($items as $item): ?>
+                        <div style="display:grid;grid-template-columns:1fr 170px 40px;gap:10px;margin-bottom:10px;align-items:center;" data-invoice-item-row>
+                            <input class="cv-input" type="text" name="item_description[]" value="<?= e($item['description']) ?>" placeholder="Description">
+                            <input class="cv-input" type="number" step="0.01" name="item_amount[]" value="<?= e(number_format((float) $item['amount'], 2, '.', '')) ?>" placeholder="0.00">
+                            <button type="button" class="cv-btn cv-btn--secondary" data-remove-invoice-item title="Remove line" style="padding:6px 10px;">&times;</button>
+                        </div>
+                    <?php endforeach; ?>
+                    <div style="display:grid;grid-template-columns:1fr 170px 40px;gap:10px;margin-bottom:10px;align-items:center;" data-invoice-item-row>
+                        <input class="cv-input" type="text" name="item_description[]" placeholder="Add another charge…">
+                        <input class="cv-input" type="number" step="0.01" name="item_amount[]" placeholder="0.00">
+                        <button type="button" class="cv-btn cv-btn--secondary" data-remove-invoice-item title="Remove line" style="padding:6px 10px;">&times;</button>
+                    </div>
+                </div>
+
+                <button type="button" class="cv-btn cv-btn--secondary" data-add-invoice-item style="margin-bottom:16px;">+ Add line item</button>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;align-items:end;border-top:1px solid var(--cv-border-default);padding-top:16px;">
+                    <label style="display:block;">
+                        <span style="font-size:.8rem;color:var(--cv-text-secondary);">Due date</span>
+                        <input class="cv-input" type="date" name="due_date" value="<?= e(substr((string) $invoice['due_date'], 0, 10)) ?>">
+                    </label>
+                    <div>
+                        <button type="submit" class="cv-btn cv-btn--primary">Save Changes</button>
+                    </div>
+                    <div style="font-size:.85rem;color:var(--cv-text-secondary);">
+                        New total: <strong data-invoice-total>0.00</strong>
+                        <div style="margin-top:4px;">Tax is rescaled in proportion to the new subtotal.</div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+<?php endif; ?>
 
 <!-- Transactions Table -->
 <div class="admin-invoice-card">

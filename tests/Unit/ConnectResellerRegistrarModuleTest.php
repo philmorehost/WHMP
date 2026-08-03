@@ -90,11 +90,45 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertArrayNotHasKey('registrarClientId', $result, 'a pre-supplied customer ID should not be reported back as newly created');
     }
 
-    public function test_register_creates_a_connectreseller_customer_when_none_is_known_yet(): void
+    public function test_register_creates_a_connectreseller_customer_when_none_exists_yet(): void
     {
-        // One shared fixture answers AddClient (needs statusCode 200),
-        // ViewClient (needs data.clientId), domainorder, and ViewDomain —
-        // FakeHttpClient returns the same canned response to every call.
+        // The lookup has to MISS before a create makes sense, so this needs a
+        // per-call script rather than one canned response.
+        $found = '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"clientId":777,"creationDate":"2026-01-01","expiryDate":"2028-01-01","domainNameId":555}}';
+
+        $this->http->respondInSequence([
+            // ViewClient — no such customer yet.
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Not found","statusCode":400},"responseData":null}'],
+            // AddClient
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":null}'],
+            // ViewClient again — AddClient never returns the ID it created.
+            ['status' => 200, 'body' => $found],
+            // domainorder, then ViewDomain
+            ['status' => 200, 'body' => $found],
+            ['status' => 200, 'body' => $found],
+        ]);
+
+        $result = $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'client' => ['email' => 'buyer@example.test', 'first_name' => 'Buyer', 'last_name' => 'Person'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertCount(5, $this->http->requests, 'ViewClient (miss), AddClient, ViewClient, domainorder, ViewDomain');
+        $this->assertStringContainsString('/ViewClient?', $this->http->requests[0]['url']);
+        $this->assertStringContainsString('/AddClient?', $this->http->requests[1]['url']);
+        $this->assertStringContainsString('UserName=buyer%40example.test', $this->http->requests[1]['url']);
+        $this->assertStringContainsString('/ViewClient?', $this->http->requests[2]['url']);
+        $this->assertStringContainsString('/domainorder?', $this->http->requests[3]['url']);
+        $this->assertStringContainsString('Id=777', $this->http->requests[3]['url']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('777', $result['registrarClientId']);
+    }
+
+    public function test_register_reuses_an_existing_registrar_customer_instead_of_creating_a_duplicate(): void
+    {
         $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"clientId":777,"creationDate":"2026-01-01","expiryDate":"2028-01-01","domainNameId":555}}');
 
         $result = $this->module->register([
@@ -104,12 +138,8 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
             'registrar' => $this->registrar,
         ]);
 
-        $this->assertCount(4, $this->http->requests, 'AddClient, ViewClient, domainorder, ViewDomain');
-        $this->assertStringContainsString('/AddClient?', $this->http->requests[0]['url']);
-        $this->assertStringContainsString('UserName=buyer%40example.test', $this->http->requests[0]['url']);
-        $this->assertStringContainsString('/ViewClient?', $this->http->requests[1]['url']);
-        $this->assertStringContainsString('/domainorder?', $this->http->requests[2]['url']);
-        $this->assertStringContainsString('Id=777', $this->http->requests[2]['url']);
+        $urls = array_column($this->http->requests, 'url');
+        $this->assertSame([], array_values(array_filter($urls, static fn (string $u): bool => str_contains($u, '/AddClient?'))), 'a customer that already exists must never be re-created');
 
         $this->assertTrue($result['success']);
         $this->assertSame('777', $result['registrarClientId']);
@@ -172,13 +202,45 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertSame('2029-01-01', $result['expiryDate']);
     }
 
-    public function test_renew_fails_clearly_without_a_known_customer_id_and_makes_no_http_call(): void
+    public function test_renew_fails_clearly_when_there_is_no_email_to_resolve_a_customer_from(): void
     {
         $result = $this->module->renew(['domain' => 'renewme.com', 'years' => 1, 'registrar' => $this->registrar]);
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('never registered/transferred', $result['message']);
+        $this->assertStringContainsString('no email on file', $result['message']);
         $this->assertCount(0, $this->http->requests);
+    }
+
+    /**
+     * The production failure: a domain imported from another system renews
+     * fine at the registrar, but no `registrar_client_id` was ever stored
+     * locally. renew() used to give up with "Missing ConnectReseller customer
+     * ID"; it now resolves the existing customer by email and proceeds.
+     */
+    public function test_renew_resolves_an_unlinked_customer_by_email_instead_of_failing(): void
+    {
+        $this->http->respondInSequence([
+            // ViewClient — the customer already exists at ConnectReseller.
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"clientId":777}}'],
+            // RenewalOrder
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Renewed","statusCode":200},"responseData":{"expiryDate":"2029-01-01"}}'],
+        ]);
+
+        $result = $this->module->renew([
+            'domain' => 'imported.com',
+            'years' => 1,
+            'client' => ['email' => 'owner@example.test', 'first_name' => 'Owner', 'last_name' => 'Person'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertCount(2, $this->http->requests, 'ViewClient then RenewalOrder — no AddClient for a customer that already exists');
+        $this->assertStringContainsString('/ViewClient?', $this->http->requests[0]['url']);
+        $this->assertStringContainsString('/RenewalOrder?', $this->http->requests[1]['url']);
+        $this->assertStringContainsString('Id=777', $this->http->requests[1]['url']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('2029-01-01', $result['expiryDate']);
+        $this->assertSame('777', $result['registrarClientId'], 'the resolved ID must come back so the client row gets linked');
     }
 
     public function test_get_nameservers_parses_the_numbered_fields_from_viewdomain(): void
@@ -193,12 +255,16 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertSame(['ns1.test', 'ns2.test'], $result['nameservers']);
     }
 
-    public function test_save_nameservers_fails_without_a_registrar_domain_id_and_makes_no_http_call(): void
+    public function test_save_nameservers_fails_after_trying_to_resolve_an_unknown_domain_id(): void
     {
+        // ensureDomainId() looks the domainNameId up via ViewDomain when it
+        // isn't already known, so exactly one call is expected before giving
+        // up — not zero, as this asserted before that lookup was added.
         $result = $this->module->saveNameservers(['domain' => 'nsdomain.com', 'nameservers' => ['ns1.test'], 'registrar' => $this->registrar]);
 
         $this->assertFalse($result['success']);
-        $this->assertCount(0, $this->http->requests);
+        $this->assertCount(1, $this->http->requests);
+        $this->assertStringContainsString('/ViewDomain?', $this->http->requests[0]['url']);
     }
 
     public function test_save_nameservers_hits_updatenameserver_when_the_domain_id_is_known(): void
@@ -276,12 +342,13 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertSame('ABC123SECRET', $result['eppCode']);
     }
 
-    public function test_get_epp_code_fails_without_a_registrar_domain_id(): void
+    public function test_get_epp_code_fails_after_trying_to_resolve_an_unknown_domain_id(): void
     {
+        // Same lazy ViewDomain resolution as saveNameservers().
         $result = $this->module->getEppCode(['domain' => 'eppdomain.com', 'registrar' => $this->registrar]);
 
         $this->assertFalse($result['success']);
-        $this->assertCount(0, $this->http->requests);
+        $this->assertStringContainsString('/ViewDomain?', $this->http->requests[0]['url']);
     }
 
     public function test_sync_maps_registry_status_and_parses_expiry(): void
@@ -313,13 +380,58 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertFalse($result['success']);
     }
 
-    public function test_get_contact_info_fails_without_a_registrar_contact_id_and_makes_no_http_call(): void
+    public function test_get_contact_info_fails_without_a_contact_id_or_an_email_to_resolve_one_from(): void
     {
         $result = $this->module->getContactInfo(['domain' => 'example.com', 'registrar' => $this->registrar]);
 
         $this->assertFalse($result['success']);
         $this->assertSame([], $result['contacts']);
-        $this->assertCount(0, $this->http->requests);
+        $this->assertCount(0, $this->http->requests, 'with nothing to search on there is nothing to ask the registrar');
+    }
+
+    /**
+     * Same shape as the renew() defect: an imported domain has a real
+     * registrant contact at ConnectReseller but no local
+     * `registrar_contact_id`, and this reported "no contact on file".
+     */
+    public function test_get_contact_info_resolves_an_unlinked_contact_from_the_registrar(): void
+    {
+        $this->http->respondInSequence([
+            // registrantsearchlist — clientId already known, so no ViewClient.
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"records":[{"registrantContactId":321}]}}'],
+            // ViewRegistrant
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"Name":"Jane Doe"}}'],
+        ]);
+
+        $result = $this->module->getContactInfo([
+            'domain' => 'imported.com',
+            'registrar' => $this->registrar,
+            'registrarClientId' => '777',
+            'client' => ['email' => 'owner@example.test'],
+        ]);
+
+        $this->assertCount(2, $this->http->requests);
+        $this->assertStringContainsString('/registrantsearchlist?', $this->http->requests[0]['url']);
+        $this->assertStringContainsString('/ViewRegistrant?', $this->http->requests[1]['url']);
+        $this->assertStringContainsString('RegistrantContactId=321', $this->http->requests[1]['url']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('Jane Doe', $result['contacts']['Name']);
+        $this->assertSame('321', $result['registrarContactId'], 'the resolved ID must come back so the domain row gets linked');
+    }
+
+    public function test_get_contact_info_never_creates_a_customer_while_reading(): void
+    {
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Not found","statusCode":400},"responseData":null}');
+
+        $this->module->getContactInfo([
+            'domain' => 'imported.com',
+            'registrar' => $this->registrar,
+            'client' => ['email' => 'owner@example.test'],
+        ]);
+
+        $urls = array_column($this->http->requests, 'url');
+        $this->assertSame([], array_values(array_filter($urls, static fn (string $u): bool => str_contains($u, '/AddClient?'))), 'a read must never create a customer record');
     }
 
     public function test_get_contact_info_hits_viewregistrant_when_a_contact_id_is_known(): void
@@ -389,9 +501,60 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
             'registrar' => $this->registrar,
         ]);
 
-        $this->assertCount(4, $this->http->requests, 'AddClient, ViewClient, AddRegistrantContact, registrantsearchlist');
+        // ViewClient resolves the customer on the first call now, so no
+        // AddClient is needed — see ensureCustomerId().
+        $this->assertCount(3, $this->http->requests, 'ViewClient, AddRegistrantContact, registrantsearchlist');
         $this->assertTrue($result['success']);
         $this->assertSame('777', $result['registrarClientId']);
         $this->assertSame('321', $result['registrarContactId']);
+    }
+
+    /**
+     * Regression coverage for the "domains keep reverting to pending" bug:
+     * mapStatus() used to default any unrecognised Status value to 'pending',
+     * and DomainSyncJob runs daily against every locally-active domain,
+     * overwriting on any mismatch — so one unrecognised/empty response was
+     * enough to silently downgrade a genuinely active domain, and it kept
+     * recurring. sync() must now omit 'status' entirely rather than guess.
+     */
+    public function test_sync_maps_every_documented_status_value(): void
+    {
+        $cases = [
+            'Active' => 'active',
+            'Inactive' => 'pending',
+            'Pending Delete Restorable' => 'grace',
+            'Deleted' => 'cancelled',
+            'Suspended' => 'cancelled',
+        ];
+
+        foreach ($cases as $registryStatus => $expectedLocalStatus) {
+            $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"Status":"' . $registryStatus . '","expirationDate":"2028-01-01"}}');
+
+            $result = $this->module->sync(['domain' => 'example.com', 'registrar' => $this->registrar]);
+
+            $this->assertTrue($result['success']);
+            $this->assertSame($expectedLocalStatus, $result['status'] ?? null, "registry status \"{$registryStatus}\"");
+        }
+    }
+
+    public function test_sync_never_guesses_a_status_for_an_unrecognised_registry_value(): void
+    {
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"Status":"SomeNewStatusConnectResellerAddedLater","expirationDate":"2028-01-01"}}');
+
+        $result = $this->module->sync(['domain' => 'example.com', 'registrar' => $this->registrar]);
+
+        $this->assertTrue($result['success'], 'the sync call itself still succeeded — only the status mapping is unconfident');
+        $this->assertArrayNotHasKey('status', $result, 'an unrecognised status must never fall back to a guessed value that overwrites the domain\'s real local status');
+        $this->assertSame('2028-01-01', $result['expiryDate'], 'expiry still syncs even when status is unrecognised');
+    }
+
+    public function test_sync_never_guesses_a_status_when_the_status_field_is_missing(): void
+    {
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"expirationDate":"2028-01-01"}}');
+
+        $result = $this->module->sync(['domain' => 'example.com', 'registrar' => $this->registrar]);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('status', $result, 'a missing Status field (momentary API hiccup) must not be treated as "pending"');
     }
 }

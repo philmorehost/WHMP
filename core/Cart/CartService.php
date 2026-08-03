@@ -35,15 +35,29 @@ final class CartService
      * so a code that expires or hits its redemption cap between page loads
      * stops applying immediately instead of silently over-discounting.
      *
-     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float}
+     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float}
      */
     public function priced(): array
+    {
+        return $this->priceItems($this->cart->items(), $this->cart->promoCode());
+    }
+
+    /**
+     * Same pricing logic as priced(), against an explicit item list instead
+     * of the session cart — the seam that lets an admin price an order for a
+     * client without needing that client's own session (see
+     * AdminOrderController). $items is the exact shape Cart::add() produces.
+     *
+     * @param array<int, array{product_id: int, billing_cycle: string, quantity: int, options: array<int, int>, domain_options?: array<string, mixed>|null, server_options?: array<string, mixed>|null, custom_fields?: array<string, mixed>|null}> $items
+     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float}
+     */
+    public function priceItems(array $items, ?string $promoCode = null): array
     {
         $lines = [];
         $subtotal = 0.0;
         $setupFees = 0.0;
 
-        foreach ($this->cart->items() as $index => $item) {
+        foreach ($items as $index => $item) {
             $product = $this->products->find($item['product_id']);
 
             if ($product === null) {
@@ -79,8 +93,7 @@ final class CartService
             $domainOptions = $item['domain_options'] ?? null;
             if ($domainOptions !== null && !empty($domainOptions['name'])) {
                 if (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
-                    $parts = explode('.', $domainOptions['name']);
-                    $tld = '.' . end($parts);
+                    $tld = self::tldFromDomainName((string) $domainOptions['name']);
                     $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
                     if ($priceRow !== null) {
                         $domainPrice = $domainOptions['option'] === 'register' ? (float) $priceRow['register_price'] : (float) $priceRow['transfer_price'];
@@ -119,7 +132,6 @@ final class CartService
             $domainTotal += (float) ($line['domain_price'] ?? 0.0);
         }
 
-        $promoCode = $this->cart->promoCode();
         $discount = 0.0;
         $promotionId = null;
         $promoError = null;
@@ -146,5 +158,30 @@ final class CartService
             'promoError' => $promoError,
             'total' => max(0.0, $subtotal + $setupFees + $domainTotal - $discount),
         ];
+    }
+
+    /**
+     * The TLD portion of a domain name, in domain_pricing's dotted-suffix
+     * form (e.g. "foo.com.ng" -> ".com.ng").
+     *
+     * Everything after the FIRST label, not just the last one — domain_pricing
+     * rows for a compound TLD like ".com.ng" or ".org.ng" are stored as the
+     * whole suffix. Taking only the last dot segment (explode('.', $name);
+     * end($parts)) resolved "foo.org.ng" to ".ng" instead of ".org.ng",
+     * silently pricing every compound-TLD domain at whatever plain ".ng"
+     * costs — both in the cart total here and, since CheckoutService used the
+     * same shortcut, on the invoice actually raised at checkout. Matches the
+     * TLD-normalisation already used for domains.tld lookups in
+     * DomainService::renew() and DomainRenewalBillingService.
+     */
+    public static function tldFromDomainName(string $domainName): string
+    {
+        $parts = explode('.', strtolower(trim($domainName)));
+
+        if (count($parts) > 1) {
+            array_shift($parts);
+        }
+
+        return '.' . implode('.', $parts);
     }
 }

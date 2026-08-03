@@ -13,6 +13,7 @@ use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Clients\ClientAuthController;
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Clients\ClientAuthManager;
+use CodeVault\Clients\ClientRegistrationOtpRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
@@ -38,6 +39,7 @@ use CodeVault\Security\PasswordResetTokenRepository;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
 use CodeVault\Session\SessionManager;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\App;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use CodeVault\View;
@@ -119,7 +121,9 @@ final class ClientAuthControllerTwoFactorTest extends DatabaseTestCase
                 new ModuleManager(new HookDispatcher()),
                 new SecurityQuestionModuleRepository($this->db),
                 new ClientSecurityAnswerRepository($this->db)
-            )
+            ),
+            new SettingsRepository($this->db),
+            new ClientRegistrationOtpRepository($this->db)
         );
     }
 

@@ -524,7 +524,7 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
         $data = $decoded['data'] ?? [];
         $statusRaw = (string) ($data['status'] ?? ($data['domainstatus'] ?? ($data['status_name'] ?? '')));
-        $mappedStatus = $statusRaw !== '' ? $this->mapStatus($statusRaw) : 'active';
+        $mappedStatus = $this->mapStatus($statusRaw);
 
         $expiryDate = null;
         if (!empty($data['expiryDate'])) {
@@ -554,12 +554,48 @@ final class UpperlinkRegistrarModule implements RegistrarModule
             }
         }
 
-        return [
+        $result = [
             'success' => $decoded['success'] || !empty($nameservers),
-            'status' => $mappedStatus,
             'expiryDate' => $expiryDate,
             'nameservers' => $nameservers,
         ];
+
+        if ($mappedStatus !== null) {
+            $result['status'] = $mappedStatus;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Upperlink's response shape is unverified (see class docblock) — there
+     * is no confirmed list of status strings it actually returns, unlike
+     * ConnectReseller's documented Active/Inactive/Suspended/Pending Delete
+     * Restorable/Deleted. This previously called an undefined method
+     * (mapStatus() was referenced in sync() but never implemented), which
+     * threw a fatal Error the moment any Upperlink domain had a non-empty
+     * status — caught by CronScheduler's per-job Throwable handler, so it
+     * didn't crash other jobs, but it did abort DomainSyncJob entirely as
+     * soon as it reached that domain, silently skipping every other domain
+     * (any registrar) still queued behind it in that day's sync run.
+     *
+     * Recognises only the handful of words common across registrar APIs,
+     * case-insensitively; anything else — including empty/missing — returns
+     * null rather than guessing, so sync() above omits 'status' and the
+     * caller leaves the domain's existing local status untouched instead of
+     * overwriting it with an unconfident mapping.
+     */
+    private function mapStatus(string $registryStatus): ?string
+    {
+        return match (strtolower(trim($registryStatus))) {
+            'active', 'ok', 'success' => 'active',
+            'inactive', 'pending' => 'pending',
+            'suspended' => 'cancelled',
+            'cancelled', 'canceled', 'deleted' => 'cancelled',
+            'expired' => 'expired',
+            'transferredaway', 'transferred_away', 'transferred away' => 'transferred_away',
+            default => null,
+        };
     }
 
     /** @param array<string, mixed> $registrar */

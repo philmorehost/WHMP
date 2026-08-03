@@ -47,6 +47,9 @@ final class CartCheckoutTest extends DatabaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        new \CodeVault\Kernel(dirname(__DIR__, 2));
+        \CodeVault\Support\App::container()->instance(\CodeVault\Database::class, $this->db);
+
         (new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations'))->run();
 
         $_SESSION = [];
@@ -68,7 +71,7 @@ final class CartCheckoutTest extends DatabaseTestCase
         $this->promotions = new PromotionRepository($this->db);
         $promotionService = new PromotionService($this->promotions);
 
-        $this->cartService = new CartService($this->cart, $this->products, $pricing, $options, $optionPricing, $promotionService);
+        $this->cartService = new CartService($this->cart, $this->products, $pricing, $options, $optionPricing, $promotionService, $this->db);
         $this->checkout = new CheckoutService($this->cart, $this->cartService, $this->products, $clients, $services, $tax, $currency, $this->currencySelection, $this->promotions, $this->db, new HookDispatcher(), new DomainSettings(new SettingsRepository($this->db)));
 
         $groups = new ProductGroupRepository($this->db);
@@ -143,14 +146,23 @@ final class CartCheckoutTest extends DatabaseTestCase
         $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$result['invoiceId']]);
 
         $this->assertSame($eurId, (int) $order['currency_id']);
-        $this->assertEqualsWithDelta(0.9200, (float) $order['currency_rate'], 0.0001);
+        // CheckoutService converts the catalog price into the client's
+        // currency exactly once (CheckoutService::convertPriced(), at order
+        // creation) and then locks the resulting amount at rate 1.0 via
+        // denominateColumns() — the STORED total is already final, so
+        // nothing downstream should ever multiply it by a live FX rate
+        // again. The locked rate being 1.0 here does not mean no conversion
+        // happened; it means the conversion already happened and is baked
+        // into the amount itself. See the amount assertion below for the
+        // actual conversion check.
+        $this->assertEqualsWithDelta(1.0000, (float) $order['currency_rate'], 0.0001);
         $this->assertSame($eurId, (int) $invoice['currency_id']);
-        $this->assertEqualsWithDelta(0.9200, (float) $invoice['currency_rate'], 0.0001);
+        $this->assertEqualsWithDelta(1.0000, (float) $invoice['currency_rate'], 0.0001);
 
         // Changing the currency's live rate afterwards must not alter what was already locked.
         $currencies->update($eurId, 'EUR', '€', 0.5000);
         $unchangedOrder = $this->db->selectOne('SELECT * FROM orders WHERE id = ?', [$result['orderId']]);
-        $this->assertEqualsWithDelta(0.9200, (float) $unchangedOrder['currency_rate'], 0.0001);
+        $this->assertEqualsWithDelta(1.0000, (float) $unchangedOrder['currency_rate'], 0.0001);
     }
 
     public function test_place_order_locks_the_in_session_currency_even_when_it_differs_from_the_clients_saved_preference(): void
@@ -171,8 +183,46 @@ final class CartCheckoutTest extends DatabaseTestCase
         $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$result['invoiceId']]);
 
         $this->assertSame($gbpId, (int) $order['currency_id']);
-        $this->assertEqualsWithDelta(0.7900, (float) $order['currency_rate'], 0.0001);
+        // Locked at 1.0 because the amount was already converted once at
+        // creation — see the note in the previous test.
+        $this->assertEqualsWithDelta(1.0000, (float) $order['currency_rate'], 0.0001);
         $this->assertSame($gbpId, (int) $invoice['currency_id']);
+    }
+
+    /**
+     * The actual reported bug: a client shopping in NGN saw a correctly
+     * converted price on the cart page, but the placed order stored the
+     * raw, unconverted base-currency figure — a $9.99 plan invoiced at
+     * ₦9.99 instead of the correct ₦-equivalent at the live rate.
+     */
+    public function test_place_order_converts_the_catalog_price_into_the_clients_currency(): void
+    {
+        $currencies = new \CodeVault\Billing\CurrencyRepository($this->db);
+        $ngnId = $currencies->create('NGN', '₦', 1490.0000);
+        $clients = new ClientRepository($this->db);
+        $clients->updateCurrency($this->clientId, $ngnId);
+
+        $this->cart->add($this->productId, 'monthly', [], 1);
+        $result = $this->checkout->placeOrder($this->clientId);
+
+        $this->assertTrue($result['success']);
+
+        $order = $this->db->selectOne('SELECT * FROM orders WHERE id = ?', [$result['orderId']]);
+        $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$result['invoiceId']]);
+        $service = $this->db->selectOne('SELECT * FROM services WHERE order_id = ?', [$result['orderId']]);
+
+        // 9.99 price + 3.00 setup fee = 12.99 base, converted at 1490 -> 19,355.10
+        $this->assertEqualsWithDelta(19355.10, (float) $invoice['total'], 0.01);
+        $this->assertEqualsWithDelta(19355.10, (float) $order['total'], 0.01);
+
+        // The recurring service amount (no setup fee, that's one-time) —
+        // 9.99 * 1490 = 14,885.10 — must also be converted, since this is
+        // exactly the figure RecurringBillingService will read back
+        // unconverted (denominateFor()) on every future renewal.
+        $this->assertEqualsWithDelta(14885.10, (float) $service['amount'], 0.01);
+
+        $items = $this->db->select('SELECT * FROM order_items WHERE order_id = ?', [$result['orderId']]);
+        $this->assertEqualsWithDelta(14885.10, (float) $items[0]['unit_price'], 0.01);
     }
 
     public function test_place_order_decrements_finite_stock(): void

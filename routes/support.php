@@ -15,6 +15,9 @@ use CodeVault\Support\TicketController;
 /** @var CodeVault\Router $router */
 
 $router->get('/admin/tickets', [TicketController::class, 'index']);
+// Literal path before /admin/tickets/{id} so the parameter pattern can't claim it.
+$router->post('/admin/tickets/bulk-delete', [TicketController::class, 'bulkDelete']);
+$router->post('/admin/tickets/bulk-close', [TicketController::class, 'bulkClose']);
 $router->get('/admin/tickets/{id}', [TicketController::class, 'show']);
 $router->get('/admin/tickets/{id}/attachments/{attId}', [TicketController::class, 'attachment']);
 $router->post('/admin/tickets/{id}/reply', [TicketController::class, 'reply']);
@@ -25,11 +28,13 @@ $router->post('/admin/tickets/{id}/priority', [TicketController::class, 'setPrio
 $router->post('/admin/tickets/{id}/department', [TicketController::class, 'setDepartment']);
 $router->post('/admin/tickets/{id}/billable', [TicketController::class, 'convertToBillable']);
 $router->post('/admin/tickets/{id}/ai-suggest', [TicketController::class, 'aiSuggest']);
+$router->post('/admin/tickets/{id}/merge', [TicketController::class, 'merge']);
 
 $router->get('/admin/departments', [DepartmentController::class, 'index']);
 $router->post('/admin/departments', [DepartmentController::class, 'store']);
 $router->post('/admin/departments/{id}', [DepartmentController::class, 'update']);
 $router->post('/admin/departments/{id}/delete', [DepartmentController::class, 'destroy']);
+$router->post('/admin/departments/{id}/empty', [DepartmentController::class, 'purge']);
 
 $router->get('/admin/billable-items', [BillableItemController::class, 'index']);
 

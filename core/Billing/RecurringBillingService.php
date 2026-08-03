@@ -58,7 +58,7 @@ final class RecurringBillingService
             }
 
             $taxResult = $this->tax->calculate($client, (float) $service['amount']);
-            $invoiceId = $this->createRenewalInvoice($service, $taxResult, $this->currency->lockedColumnsFor($client));
+            $invoiceId = $this->createRenewalInvoice($service, $taxResult, $this->currency->denominateFor($client));
 
             $this->services->advanceNextDueDate(
                 (int) $service['id'],
@@ -89,9 +89,11 @@ final class RecurringBillingService
             [$service['client_id'], $service['id'], 'unpaid', $subtotal, $tax['amount'], $total, $currencyLock['currency_id'], $currencyLock['currency_rate'], $service['next_due_date'], $now, $now]
         );
 
+        $identifier = ServiceRepository::invoiceIdentifierSuffix($service['domain'] ?? null, $service['hostname'] ?? null);
+
         $this->db->insert(
             'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
-            [$invoiceId, "{$service['product_name']} ({$cycleLabel}) — Renewal", $subtotal]
+            [$invoiceId, "{$service['product_name']} ({$cycleLabel}) — Renewal{$identifier}", $subtotal]
         );
 
         if ($tax['amount'] > 0) {

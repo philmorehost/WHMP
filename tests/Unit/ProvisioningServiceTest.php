@@ -197,4 +197,90 @@ final class ProvisioningServiceTest extends DatabaseTestCase
 
         $this->assertFalse($result['success']);
     }
+
+    /**
+     * The client service page offers power, snapshot and slice controls only
+     * some modules can honour. Every one of these must report failure when
+     * the module has no such method — the bug these guard against is the
+     * controller reporting "action issued successfully" for an action no
+     * module ever performed. LocalProvisioningModule implements none of
+     * them, so it is the right stand-in for "module can't do this".
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function unsupportedActionProvider(): array
+    {
+        return [
+            'power' => ['power'],
+            'createBackup' => ['createBackup'],
+            'listBackups' => ['listBackups'],
+            'sliceOptions' => ['sliceOptions'],
+            'remoteInfo' => ['remoteInfo'],
+            'reverseDnsEntries' => ['reverseDnsEntries'],
+            'osTemplates' => ['osTemplates'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unsupportedActionProvider')]
+    public function test_actions_a_module_does_not_implement_report_failure(string $method): void
+    {
+        $serviceId = $this->provisionOntoLocalServer();
+
+        $result = $method === 'power'
+            ? $this->provisioning->power($serviceId, 'restart')
+            : $this->provisioning->{$method}($serviceId);
+
+        $this->assertFalse($result['success'], "{$method}() must not report success on a module that cannot perform it");
+        $this->assertNotSame('', trim((string) $result['message']));
+    }
+
+    public function test_power_does_not_change_the_local_service_status(): void
+    {
+        $serviceId = $this->provisionOntoLocalServer();
+        $this->assertSame('active', $this->services->find($serviceId)['status']);
+
+        $this->provisioning->power($serviceId, 'stop');
+
+        // A client rebooting or halting their own VPS is not a billing
+        // transition. Recording it as one would let a reboot mark an active
+        // service suspended.
+        $this->assertSame('active', $this->services->find($serviceId)['status']);
+    }
+
+    public function test_power_on_an_unprovisioned_service_reports_failure(): void
+    {
+        $productId = $this->createProductInGroup(null);
+        $serviceId = $this->createServiceForProduct($productId);
+
+        $result = $this->provisioning->power($serviceId, 'restart');
+
+        $this->assertFalse($result['success']);
+    }
+
+    /**
+     * Puts a service into the same state a successful provision leaves it —
+     * assigned to a server, with a username, active. Done through the
+     * repository rather than provision(), because provision() reaches for
+     * App::container() to generate a username and that container is not
+     * booted in this suite (the three pre-existing provision() tests in this
+     * file fail on it for the same reason).
+     */
+    private function provisionOntoLocalServer(): int
+    {
+        $groupId = $this->serverGroups->create('Optional-action group');
+        $serverId = $this->servers->create([
+            'server_group_id' => $groupId,
+            'name' => 'local-1',
+            'hostname' => 'local-1.test',
+            'module_slug' => 'local',
+        ]);
+
+        $productId = $this->createProductInGroup($groupId);
+        $serviceId = $this->createServiceForProduct($productId);
+
+        $this->services->assignServer($serviceId, $serverId, 'localuser');
+        $this->services->activate($serviceId);
+
+        return $serviceId;
+    }
 }

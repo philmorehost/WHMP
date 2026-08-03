@@ -50,7 +50,7 @@ final class BillableItemInvoicingJob implements CronJob
             }
 
             $taxResult = $this->tax->calculate($client, (float) $item['amount']);
-            $invoiceId = $this->createInvoice($item, $taxResult, $this->currency->lockedColumnsFor($client));
+            $invoiceId = $this->createInvoice($item, $taxResult, $this->currency->denominateFor($client));
 
             $this->billableItems->markInvoiced((int) $item['id'], $invoiceId);
             $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'billableItemId' => $item['id']]);

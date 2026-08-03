@@ -157,6 +157,42 @@ final class TicketAttachmentService
     }
 
     /**
+     * Removes uploaded files from disk.
+     *
+     * The ticket_attachments rows disappear on their own when a ticket is
+     * deleted (the foreign key cascades), but the files they point at do not —
+     * without this every deleted ticket would leave its uploads behind
+     * forever, consuming disk with no record that they exist.
+     *
+     * basename() is applied because stored_name is the only part of the path
+     * that comes from the database: it confines the unlink to the storage
+     * directory even if a row were ever crafted with traversal in the name.
+     *
+     * @param array<int, string> $storedNames
+     * @return int files actually removed
+     */
+    public function deleteFiles(array $storedNames): int
+    {
+        $removed = 0;
+
+        foreach ($storedNames as $storedName) {
+            $name = basename(trim((string) $storedName));
+
+            if ($name === '' || $name === '.' || $name === '..') {
+                continue;
+            }
+
+            $path = $this->storageDir . '/' . $name;
+
+            if (is_file($path) && @unlink($path)) {
+                $removed++;
+            }
+        }
+
+        return $removed;
+    }
+
+    /**
      * Normalizes both the single-file and multi-file ($_FILES['x[]']) shapes
      * into a flat list of {name,type,tmp_name,error,size}.
      *

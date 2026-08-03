@@ -58,7 +58,7 @@ $id = (int) $service['id'];
     </form>
 </div>
 
-<script>
+<script nonce="<?= csp_nonce() ?>">
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('cancellation-form');
     const warningBox = document.getElementById('immediate-warning');

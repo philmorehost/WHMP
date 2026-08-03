@@ -322,7 +322,20 @@ $pendingCount = 0;
 <!-- Search Toolbar -->
 <div class="admin-toolbar" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
     <div style="flex: 1; min-width: 250px;">
-        <?= $view->partial('partials.table-search', ['target' => '#services-table', 'placeholder' => 'Search by client name, email, or product...']) ?>
+        <?php // Server-side so it searches every service, not just this page. ?>
+        <form method="get" action="/admin/services" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <?php if ($statusFilter !== ''): ?>
+                <input type="hidden" name="status" value="<?= e($statusFilter) ?>">
+            <?php endif; ?>
+            <input type="search" class="cv-input" name="q" value="<?= e($search ?? '') ?>"
+                   placeholder="Search by domain, client, email, product or username..."
+                   aria-label="Search services" style="max-width:24rem;flex:1;min-width:200px;">
+            <button type="submit" class="cv-btn cv-btn--secondary" style="padding:8px 16px;font-size:.85rem;">Search</button>
+            <?php if (($search ?? '') !== ''): ?>
+                <a href="/admin/services<?= $statusFilter !== '' ? '?status=' . urlencode($statusFilter) : '' ?>"
+                   style="font-size:.85rem;color:var(--cv-text-secondary);">Clear</a>
+            <?php endif; ?>
+        </form>
     </div>
     <button type="submit" form="bulk-delete-services-form" class="cv-btn cv-btn--danger" data-bulk-delete-for="[data-service-checkbox]" data-confirm="Are you sure you want to delete the selected service(s)? This action cannot be undone." style="display:none;padding:8px 16px;font-size:0.85rem;font-weight:700;cursor:pointer;">🗑️ Delete Selected</button>
 </div>
@@ -344,9 +357,10 @@ $pendingCount = 0;
                 <table class="admin-table" id="services-table">
                     <thead>
                         <tr>
-                            <th style="width: 40px;"><input type="checkbox" data-bulk-select-all="[data-service-checkbox]" style="cursor:pointer;"></th>
+                            <th style="width: 40px;"><input type="checkbox" data-select-all-trigger="[data-service-checkbox]" style="cursor:pointer;"></th>
                             <th>Client</th>
                             <th>Product</th>
+                            <th>Domain</th>
                             <th>Cycle</th>
                             <th>Amount</th>
                             <th>Next Due</th>
@@ -357,7 +371,7 @@ $pendingCount = 0;
                     <tbody>
                     <?php foreach ($results['data'] as $service): ?>
                         <tr>
-                            <td style="padding: 16px 8px;"><input type="checkbox" name="service_ids[]" class="service-checkbox" data-service-checkbox value="<?= (int) $service['id'] ?>" style="cursor:pointer;"></td>
+                            <td style="padding: 16px 8px;"><input type="checkbox" name="service_ids[]" class="service-checkbox" data-service-checkbox data-select-all-item="[data-service-checkbox]" value="<?= (int) $service['id'] ?>" style="cursor:pointer;"></td>
                             <td>
                                 <div style="display: flex; flex-direction: column; gap: 4px;">
                                     <strong><?= e($service['first_name'] . ' ' . $service['last_name']) ?></strong>
@@ -365,6 +379,22 @@ $pendingCount = 0;
                                 </div>
                             </td>
                             <td><strong><?= e($service['product_name']) ?></strong></td>
+                            <td>
+                                <?php
+                                    // hostname is what VPS/dedicated products fill in;
+                                    // domain is what shared hosting uses. Show whichever
+                                    // this service actually has rather than a blank cell.
+                                    $serviceDomain = trim((string) ($service['domain'] ?? '')) ?: trim((string) ($service['hostname'] ?? ''));
+                                ?>
+                                <?php if ($serviceDomain !== ''): ?>
+                                    <a href="http://<?= e($serviceDomain) ?>" target="_blank" rel="noopener noreferrer"
+                                       style="font-family:'Monaco','Courier New',monospace;font-size:.85rem;word-break:break-all;">
+                                        <?= e($serviceDomain) ?>
+                                    </a>
+                                <?php else: ?>
+                                    <span style="color: var(--cv-text-secondary); font-size: .85rem;">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td><?= e($service['billing_cycle']) ?></td>
                             <td>
                                 <span style="font-family: 'Monaco', 'Courier New', monospace; font-weight: 700;">

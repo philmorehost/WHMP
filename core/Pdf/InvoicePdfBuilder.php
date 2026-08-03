@@ -30,7 +30,13 @@ final class InvoicePdfBuilder
         $pdf = new PdfDocument();
         $rate = (float) $invoice['currency_rate'];
         $currencyId = $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null;
-        $money = fn (float $amount): string => $this->currency->formatLocked($amount, $currencyId, $rate);
+
+        // An invoice with no locked currency falls back to the client's own,
+        // not the system default. This is the copy the client downloads and
+        // keeps, so printing the wrong symbol here is worse than on screen —
+        // it's a billing document they may forward to their accountant.
+        $clientCurrency = $client === [] ? null : $this->currency->resolveForClient($client);
+        $money = fn (float $amount): string => $this->currency->formatDocument($amount, $currencyId, $rate, $clientCurrency);
 
         $companyName = (string) ($this->settings->get('company.name') ?? 'Your Company');
         $companyEmail = (string) ($this->settings->get('company.email') ?? '');
