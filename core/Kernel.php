@@ -1564,9 +1564,17 @@ class Kernel
         /** @var Router $router */
         $router = $this->container->make(Router::class);
 
-        // Force existing clients without a Security PIN to set one before accessing the client portal
+        // Force existing clients without a Security PIN to set one before
+        // accessing the client portal — but not when the session is an
+        // admin's own impersonation of the client (ClientController::
+        // loginAsClient(), which stamps 'original_admin_id' server-side and
+        // only after the admin's own clients.manage permission check — a
+        // client session can never set that key itself). An admin doing
+        // "Login as Client" for support has no business choosing a
+        // recovery PIN on the client's behalf; that secret only means
+        // anything if the client themselves is the one who set it.
         $path = $request->path();
-        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin')) {
+        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin') && !$session->has('original_admin_id')) {
             /** @var \CodeVault\Clients\ClientAuthGuard $clientGuard */
             $clientGuard = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class);
             $currentClient = $clientGuard->currentClient();

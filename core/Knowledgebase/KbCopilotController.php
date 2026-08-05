@@ -41,7 +41,16 @@ final class KbCopilotController
         . "Separate distinct points or steps into their own paragraphs with a blank line between them; that blank "
         . "line is what becomes a paragraph break when this is displayed. Write steps as plain sentences "
         . "(\"First, ...\", \"Next, ...\") rather than a Markdown list. Be concrete and specific — do not invent "
-        . "prices, dates, or feature names that were not given to you.";
+        . "prices, dates, or feature names that were not given to you.\n\n"
+        . "You have never seen this company's actual product — you don't know its real page names, button "
+        . "labels, menu paths, or exact click-by-click steps, and guessing at them produces support articles "
+        . "that mislead the very customers reading them. If a \"Reference material\" section is given below, "
+        . "it describes the real screens/buttons/paths for this topic — every step, button label, page name, "
+        . "and click-path in the article must come from that material, in the order given; do not invent, "
+        . "rename, reorder, or add steps it doesn't mention. If no reference material is given, do not state a "
+        . "specific button label, menu path, or click-by-click sequence at all — describe the task and general "
+        . "concept in plain terms, and add one clear sentence noting that a staff member should confirm the "
+        . "exact click path before publishing.";
 
     private const SYSTEM_PROMPT_CATEGORY =
         "You name and describe a knowledgebase category for a web hosting and domain company's support site. "
@@ -81,6 +90,10 @@ final class KbCopilotController
         $brief = trim((string) $request->input('brief', ''));
         $title = trim((string) $request->input('title', ''));
         $body = trim((string) $request->input('body', ''));
+        // Real screen/button/menu facts about the topic, pasted in by the
+        // admin — the seam that keeps the copilot from inventing UI details
+        // it has no way of actually knowing. See SYSTEM_PROMPT_ARTICLE.
+        $referenceNotes = trim((string) $request->input('reference_notes', ''));
 
         if ($mode === 'refine' && $title === '' && $body === '') {
             return Response::json(['success' => false, 'message' => 'Write a title or body first, then Refine it.']);
@@ -91,14 +104,20 @@ final class KbCopilotController
         }
 
         $company = $this->companyName();
+        $referenceBlock = $referenceNotes !== ''
+            ? "\n\nReference material (the real steps/screens/buttons for this topic — ground every step in this, "
+                . "do not invent beyond it):\n{$referenceNotes}"
+            : '';
         $prompt = $mode === 'refine'
             ? "Company: {$company}\n\n"
                 . "Improve the article below. Keep its meaning and any specific facts, steps or settings exactly "
                 . "as they are — tighten the wording, fix grammar, and make it clearer.\n\n"
                 . ($brief !== '' ? "Extra instructions: {$brief}\n\n" : '')
                 . "Current title: {$title}\n\nCurrent body:\n{$body}"
+                . $referenceBlock
             : "Company: {$company}\n\nWrite an article about the following:\n{$brief}"
-                . ($title !== '' ? "\n\nThe admin has drafted this title, improve on it: {$title}" : '');
+                . ($title !== '' ? "\n\nThe admin has drafted this title, improve on it: {$title}" : '')
+                . $referenceBlock;
 
         $result = $this->ai->complete(self::SYSTEM_PROMPT_ARTICLE, $prompt);
 

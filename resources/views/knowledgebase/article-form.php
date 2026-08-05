@@ -38,6 +38,15 @@ $imgError ??= null;
         <label class="cv-label">Brief — what should this article cover?</label>
         <textarea class="cv-input" rows="2" data-kb-copilot-brief placeholder="e.g. how a client resets their cPanel password from the client area"></textarea>
     </div>
+    <div class="cv-field">
+        <label class="cv-label">Reference material (optional) — the real steps, page names, and button labels for this topic</label>
+        <textarea class="cv-input" rows="4" data-kb-copilot-reference placeholder="e.g. 1) Client logs in and opens My Services. 2) Clicks the service. 3) Clicks the &quot;Log In to Control Panel&quot; button (this signs them into cPanel directly, no separate cPanel password needed)."></textarea>
+        <span style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">
+            The AI has never seen this app's real screens — without this, it can only write in general terms and
+            will flag the exact click-path as unconfirmed. Paste the real steps here and every button label, page
+            name, and step in the draft will come from what you typed, not a guess.
+        </span>
+    </div>
     <div style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
         <button type="button" class="cv-btn cv-btn--secondary" data-kb-copilot-action="write">Write Draft</button>
         <button type="button" class="cv-btn cv-btn--secondary" data-kb-copilot-action="refine">Refine Current Text</button>

@@ -937,6 +937,7 @@
         var mode = btn.getAttribute('data-kb-copilot-action');
         var status = panel.querySelector('[data-kb-copilot-status]');
         var briefEl = panel.querySelector('[data-kb-copilot-brief]');
+        var referenceEl = panel.querySelector('[data-kb-copilot-reference]');
         var titleEl = form.querySelector('[data-kb-title]');
         var bodyEl = form.querySelector('[data-kb-body]');
         var buttons = panel.querySelectorAll('[data-kb-copilot-action]');
@@ -957,6 +958,7 @@
         var payload = new FormData();
         payload.set('mode', mode);
         payload.set('brief', briefEl ? briefEl.value : '');
+        payload.set('reference_notes', referenceEl ? referenceEl.value : '');
         payload.set('title', titleEl ? titleEl.value : '');
         payload.set('body', bodyEl ? bodyEl.value : '');
 
