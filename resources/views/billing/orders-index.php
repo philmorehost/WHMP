@@ -308,6 +308,7 @@
                         </td>
                         <td style="text-align:right;font-family:'Monaco','Courier New',monospace;font-weight:700;">
                             <?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $order['total'], 2) ?>
+                            <span style="font-size:.75rem;color:var(--cv-text-secondary);margin-left:6px;"><?= e($order['currency_code'] ?? 'USD') ?></span>
                         </td>
                         <td>
                             <?php if ($order['status'] === 'active'): ?>

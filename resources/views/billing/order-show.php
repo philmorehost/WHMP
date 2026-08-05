@@ -226,6 +226,10 @@
                 <span class="admin-order-hero__meta-label">🎯 Status</span>
                 <span class="admin-order-hero__meta-value"><?= e($order['status']) ?></span>
             </div>
+            <div class="admin-order-hero__meta-item">
+                <span class="admin-order-hero__meta-label">💱 Currency</span>
+                <span class="admin-order-hero__meta-value"><?= e($order['currency_code'] ?? 'USD') ?> (<?= e($order['currency_symbol'] ?? '$') ?>)</span>
+            </div>
             <?php if (($order['fraud_score'] ?? null) !== null): ?>
                 <div class="admin-order-hero__meta-item">
                     <span class="admin-order-hero__meta-label">🛡️ Fraud Score</span>
@@ -275,8 +279,8 @@
                         <td><?= e($item['product_name']) ?></td>
                         <td><?= e($item['billing_cycle']) ?></td>
                         <td style="text-align:center;"><?= (int) $item['quantity'] ?></td>
-                        <td>$<?= number_format((float) $item['setup_fee'], 2) ?></td>
-                        <td>$<?= number_format((float) $item['unit_price'], 2) ?></td>
+                        <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $item['setup_fee'], 2) ?></td>
+                        <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $item['unit_price'], 2) ?></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>

@@ -20,12 +20,18 @@ final class OrderRepository
         $where = $status !== null ? 'WHERE o.status = ?' : '';
         $bindings = $status !== null ? [$status] : [];
 
+        // Currency resolves from the order's own locked currency first
+        // (what the client was shown at checkout), then the client's saved
+        // preference, then the system default — the same fallback chain as
+        // InvoiceRepository::paginate(). Resolving purely from the client's
+        // *current* currency mis-labels a historical order once that client
+        // changes their default.
         return $this->db->select(
             <<<SQL
-            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.code AS currency_code, cu.symbol AS currency_symbol
             FROM orders o
             JOIN clients c ON c.id = o.client_id
-            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            LEFT JOIN currencies cu ON cu.id = COALESCE(o.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
             ORDER BY o.id DESC
             SQL,
@@ -38,10 +44,10 @@ final class OrderRepository
     {
         return $this->db->selectOne(
             <<<'SQL'
-            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.code AS currency_code, cu.symbol AS currency_symbol
             FROM orders o
             JOIN clients c ON c.id = o.client_id
-            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            LEFT JOIN currencies cu ON cu.id = COALESCE(o.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             WHERE o.id = ?
             SQL,
             [$id]
