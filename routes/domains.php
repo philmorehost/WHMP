@@ -20,6 +20,7 @@ $router->get('/admin/domains/create', [DomainController::class, 'createForm']);
 $router->post('/admin/domains', [DomainController::class, 'store']);
 $router->get('/admin/domains/{id}', [DomainController::class, 'show']);
 $router->post('/admin/domains/{id}/status', [DomainController::class, 'updateStatus']);
+$router->post('/admin/domains/{id}/registrar', [DomainController::class, 'updateRegistrar']);
 $router->post('/admin/domains/{id}/renew', [DomainController::class, 'renew']);
 $router->post('/admin/domains/{id}/sync', [DomainController::class, 'sync']);
 $router->get('/admin/domains/{id}/whois', [DomainController::class, 'whois']);

@@ -1,5 +1,7 @@
 <?php
 /** @var array<string, mixed> $domain */
+/** @var array<int, array<string, mixed>> $registrars */
+/** @var string|null $registrarError */
 $id = (int) $domain['id'];
 $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
 ?>
@@ -22,6 +24,31 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
         <form method="post" action="/admin/domains/<?= $id ?>/id-protection"><?= csrf_field() ?><button class="cv-btn cv-btn--secondary" type="submit"><?= $domain['id_protection_enabled'] ? 'Disable ID Protection' : 'Enable ID Protection' ?></button></form>
         <a class="cv-btn cv-btn--secondary" href="/admin/domains/<?= $id ?>/contact">Manage Contact Info</a>
     </div>
+</div>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Registrar</h2>
+    <?php if (!empty($registrarError)): ?>
+        <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($registrarError) ?></div>
+    <?php endif; ?>
+    <form method="post" action="/admin/domains/<?= $id ?>/registrar"><?= csrf_field() ?>
+        <div style="display:flex;gap:var(--cv-space-3);align-items:flex-end;flex-wrap:wrap;">
+            <div class="cv-field" style="margin:0;flex:1;min-width:240px;">
+                <label class="cv-label">Registrar</label>
+                <select class="cv-select" name="registrar_slug">
+                    <?php foreach ($registrars as $registrar): ?>
+                        <option value="<?= e($registrar['slug']) ?>" <?= $registrar['slug'] === (string) $domain['registrar_slug'] ? 'selected' : '' ?>>
+                            <?= e($registrar['name']) ?> (<?= e($registrar['slug']) ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button class="cv-btn" type="submit">Change Registrar</button>
+        </div>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-2);">
+            Re-points this domain at the selected registrar. The registrar domain ID and contact ID held from the previous registrar are cleared; refresh nameservers after switching.
+        </p>
+    </form>
 </div>
 
 <?php if (isset($whoisResult)): ?>

@@ -180,6 +180,20 @@ final class DomainRepository
         );
     }
 
+    /**
+     * Re-point a domain at a different registrar. registrar_domain_id and
+     * registrar_contact_id are opaque handles owned by the OLD registrar —
+     * they mean nothing (and could be harmful) to the new one, so they are
+     * cleared rather than carried over.
+     */
+    public function updateRegistrar(int $id, string $registrarSlug): void
+    {
+        $this->db->update(
+            'UPDATE domains SET registrar_slug = ?, registrar_domain_id = NULL, registrar_contact_id = NULL, updated_at = ? WHERE id = ?',
+            [$registrarSlug, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function advanceRenewal(int $id, string $newExpiryDate, string $newNextDueDate): void
     {
         $this->db->update(

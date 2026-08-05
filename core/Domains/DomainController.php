@@ -186,7 +186,9 @@ final class DomainController
 
         return $this->render('domains.show', [
             'domain' => $domain,
+            'registrars' => $this->registrars->allEnabled(),
             'updated' => $request->query('updated') === '1',
+            'registrarError' => $request->query('registrar_error'),
             'childNameservers' => $this->domainService->getChildNameservers($id),
             'dnsRecords' => $this->domainService->getDnsRecords($id),
             'bulkMsg' => $request->query('bulk_msg'),
@@ -369,6 +371,44 @@ final class DomainController
             'domain',
             $id,
             "Updated domain status for \"{$domain['domain_name']}\" to {$status}",
+            $request->ip()
+        );
+
+        return Response::redirect("/admin/domains/{$id}?updated=1");
+    }
+
+    public function updateRegistrar(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $domain = $this->domains->find($id);
+
+        if ($domain === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $slug = trim((string) $request->input('registrar_slug', ''));
+
+        if ($slug === '' || $this->registrars->findBySlug($slug) === null) {
+            return Response::redirect("/admin/domains/{$id}?registrar_error=" . urlencode('That registrar does not exist.'));
+        }
+
+        if ($slug === (string) $domain['registrar_slug']) {
+            return Response::redirect("/admin/domains/{$id}?updated=1");
+        }
+
+        $this->domains->updateRegistrar($id, $slug);
+
+        $this->activity->log(
+            'admin',
+            (int) $this->guard->currentAdmin()['id'],
+            'domain.registrar_updated',
+            'domain',
+            $id,
+            "Changed registrar for \"{$domain['domain_name']}\" from {$domain['registrar_slug']} to {$slug}",
             $request->ip()
         );
 
