@@ -322,11 +322,7 @@
                     </div>
 
                     <div class="service-card__footer">
-                        <?php if (($service['domain_id'] ?? null) !== null): ?>
-                            <a class="service-card__cta" href="/client/domains/<?= (int) $service['domain_id'] ?>">Manage Domain →</a>
-                        <?php else: ?>
-                            <a class="service-card__cta" href="/client/services/<?= (int) $service['id'] ?>">Manage Service →</a>
-                        <?php endif; ?>
+                        <a class="service-card__cta" href="/client/services/<?= (int) $service['id'] ?>">Manage Service →</a>
                     </div>
                 </div>
             <?php endforeach; ?>

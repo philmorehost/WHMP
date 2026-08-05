@@ -307,7 +307,8 @@
                             </div>
                         </td>
                         <td style="text-align:right;font-family:'Monaco','Courier New',monospace;font-weight:700;">
-                            <?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $order['total'], 2) ?>
+                            <?php // NULL currency_id means "stored in the base currency already" — rate 1.0, never re-converted (see CurrencyService::formatLocked). ?>
+                            <?= e($order['currency_symbol'] ?? '$') ?><?= number_format(round((float) $order['total'] * (($order['currency_id'] ?? null) !== null ? (float) ($order['currency_rate'] ?? 1.0) : 1.0), 2), 2) ?>
                             <span style="font-size:.75rem;color:var(--cv-text-secondary);margin-left:6px;"><?= e($order['currency_code'] ?? 'USD') ?></span>
                         </td>
                         <td>

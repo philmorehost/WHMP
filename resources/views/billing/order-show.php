@@ -274,13 +274,20 @@
             <table class="admin-order-table">
                 <thead><tr><th>Product</th><th>Cycle</th><th style="text-align:center;">Qty</th><th>Setup Fee</th><th>Unit Price</th></tr></thead>
                 <tbody>
+                <?php
+                // Same locked-rate rule as the admin invoice list: NULL
+                // currency_id means "stored in the base currency already"
+                // (rate 1.0, never re-converted); a locked order multiplies
+                // its stored amount by the rate captured at checkout.
+                $orderRate = ($order['currency_id'] ?? null) !== null ? (float) ($order['currency_rate'] ?? 1.0) : 1.0;
+                ?>
                 <?php foreach ($items as $item): ?>
                     <tr>
                         <td><?= e($item['product_name']) ?></td>
                         <td><?= e($item['billing_cycle']) ?></td>
                         <td style="text-align:center;"><?= (int) $item['quantity'] ?></td>
-                        <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $item['setup_fee'], 2) ?></td>
-                        <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format((float) $item['unit_price'], 2) ?></td>
+                        <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format(round((float) $item['setup_fee'] * $orderRate, 2), 2) ?></td>
+                        <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format(round((float) $item['unit_price'] * $orderRate, 2), 2) ?></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>

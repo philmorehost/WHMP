@@ -69,34 +69,20 @@ final class ClientServiceController
 
         $services = $this->services->forClient((int) $client['id']);
 
-        // Same domain-carrier tagging as the client dashboard: a standalone
-        // domain registration rides on the hidden "Domain Registration"
-        // carrier service (see DomainService::carrierProductId()), so each
-        // such service links to the domain manager rather than a service
-        // page that would misrender a domain as if it were a hosting service.
+        // A standalone domain registration rides on the hidden "Domain
+        // Registration" carrier service (see DomainService::carrierProductId()),
+        // so it would otherwise appear here as a fake "service" whose only real
+        // management surface is the domain manager. Domains have their own page
+        // (/client/domains) — keep them out of the services list entirely.
         $carrierProductId = (int) ($this->db->selectOne(
             "SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1"
         )['id'] ?? 0);
 
         if ($carrierProductId > 0) {
-            $domainIdsByName = [];
-
-            foreach ($this->db->select('SELECT id, domain_name FROM domains WHERE client_id = ?', [(int) $client['id']]) as $domain) {
-                $domainIdsByName[strtolower((string) $domain['domain_name'])] = (int) $domain['id'];
-            }
-
-            foreach ($services as &$svc) {
-                $svc['domain_id'] = null;
-
-                if ((int) $svc['product_id'] === $carrierProductId) {
-                    $name = strtolower((string) ($svc['domain'] ?? ''));
-
-                    if ($name !== '' && isset($domainIdsByName[$name])) {
-                        $svc['domain_id'] = $domainIdsByName[$name];
-                    }
-                }
-            }
-            unset($svc);
+            $services = array_values(array_filter(
+                $services,
+                static fn (array $svc): bool => (int) $svc['product_id'] !== $carrierProductId
+            ));
         }
 
         return $this->page('billing.client-services-index', [
