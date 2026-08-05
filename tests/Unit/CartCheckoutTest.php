@@ -27,6 +27,7 @@ use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Database\Migrator;
+use CodeVault\Domains\DomainPricingRepository;
 use CodeVault\Domains\DomainSettings;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Session\SessionManager;
@@ -223,6 +224,38 @@ final class CartCheckoutTest extends DatabaseTestCase
 
         $items = $this->db->select('SELECT * FROM order_items WHERE order_id = ?', [$result['orderId']]);
         $this->assertEqualsWithDelta(14885.10, (float) $items[0]['unit_price'], 0.01);
+    }
+
+    public function test_place_order_records_the_domain_price_on_a_standalone_domain_order_item(): void
+    {
+        // A standalone domain rides on the hidden $0 "Domain Registration"
+        // carrier product (seeded by migration 0103). Its real charge is the
+        // domain's own price — the order item must carry that amount, or the
+        // admin order page shows 0.00 for a charged domain and the revenue
+        // report silently omits every domain registration.
+        $pricing = new DomainPricingRepository($this->db);
+        $pricing->save(['tld' => '.com.ng', 'registrar_slug' => 'local', 'register_price' => 15.00, 'transfer_price' => 15.00, 'renew_price' => 15.00]);
+
+        $carrier = $this->db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1");
+        $this->assertNotNull($carrier, 'Migration 0103 seeds the hidden Domain Registration carrier product.');
+
+        $this->cart->add((int) $carrier['id'], 'annually', [], 1, [
+            'option' => 'register',
+            'name' => 'example.com.ng',
+            'ns1' => 'ns1.example.test',
+            'ns2' => 'ns2.example.test',
+        ]);
+
+        $result = $this->checkout->placeOrder($this->clientId);
+
+        $this->assertTrue($result['success']);
+
+        $order = $this->db->selectOne('SELECT * FROM orders WHERE id = ?', [$result['orderId']]);
+        $this->assertEqualsWithDelta(15.00, (float) $order['total'], 0.0001);
+
+        $items = $this->db->select('SELECT * FROM order_items WHERE order_id = ?', [$result['orderId']]);
+        $this->assertCount(1, $items);
+        $this->assertEqualsWithDelta(15.00, (float) $items[0]['unit_price'], 0.0001);
     }
 
     public function test_place_order_decrements_finite_stock(): void

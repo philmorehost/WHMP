@@ -326,9 +326,25 @@ final class CheckoutService
 
         $serviceIds = [];
 
+        // A standalone domain rides on the $0 "Domain Registration" carrier
+        // product (DomainService::carrierProductId()), so its line's
+        // unit_price is 0 by design while the real charge lives in
+        // domain_price. Record that price on the order item — otherwise the
+        // admin order page shows a 0.00 line for a charged domain, and the
+        // product revenue report silently omits every domain registration.
+        $carrierProductId = (int) ($this->db->selectOne(
+            "SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1"
+        )['id'] ?? 0);
+
         foreach ($priced['lines'] as $lineIndex => $line) {
             $domainName = $orderLinesWithDomains[$lineIndex];
             
+            $unitPrice = (float) $line['unit_price'];
+
+            if ($domainName !== null && $carrierProductId > 0 && (int) $line['product_id'] === $carrierProductId) {
+                $unitPrice = (float) ($line['domain_price'] ?? 0.0);
+            }
+
             $this->db->insert(
                 'INSERT INTO order_items (order_id, product_id, product_name, billing_cycle, quantity, unit_price, setup_fee, configurable_options, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
@@ -337,7 +353,7 @@ final class CheckoutService
                     $line['product_name'],
                     $line['billing_cycle'],
                     $line['quantity'],
-                    $line['unit_price'],
+                    $unitPrice,
                     $line['setup_fee'],
                     json_encode($line['options']),
                     $now,
