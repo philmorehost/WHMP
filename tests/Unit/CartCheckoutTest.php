@@ -258,6 +258,61 @@ final class CartCheckoutTest extends DatabaseTestCase
         $this->assertEqualsWithDelta(15.00, (float) $items[0]['unit_price'], 0.0001);
     }
 
+    public function test_place_order_uses_the_tlds_configured_registrar_and_records_the_chosen_nameservers(): void
+    {
+        // Regression: the domain row used to be stamped with the hardcoded
+        // 'local' dev registrar, so every self-service registration ran
+        // through the disabled LocalRegistrarModule (never contacting a real
+        // registry) and ended up with fake "ns1.codevault.invalid"
+        // nameservers. Checkout must use the registrar configured on the
+        // TLD's pricing row and persist the nameservers the buyer chose.
+        $pricing = new DomainPricingRepository($this->db);
+        $pricing->save(['tld' => '.ng', 'registrar_slug' => 'upperlink', 'register_price' => 20.00, 'transfer_price' => 20.00, 'renew_price' => 20.00]);
+
+        $carrier = $this->db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1");
+
+        $this->cart->add((int) $carrier['id'], 'annually', [], 1, [
+            'option' => 'register',
+            'name' => 'fresh.ng',
+            'ns1' => 'ns1.pmhserver.name.ng',
+            'ns2' => 'ns2.pmhserver.name.ng',
+        ]);
+
+        $result = $this->checkout->placeOrder($this->clientId);
+
+        $this->assertTrue($result['success']);
+
+        $domain = $this->db->selectOne('SELECT * FROM domains WHERE order_id = ?', [$result['orderId']]);
+        $this->assertSame('upperlink', $domain['registrar_slug']);
+        $this->assertSame(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng'], json_decode($domain['nameservers'], true));
+    }
+
+    public function test_place_order_falls_back_to_the_admin_default_nameservers_when_the_buyer_chose_none(): void
+    {
+        $pricing = new DomainPricingRepository($this->db);
+        $pricing->save(['tld' => '.xyz', 'registrar_slug' => 'connectreseller', 'register_price' => 8.00, 'transfer_price' => 8.00, 'renew_price' => 8.00]);
+
+        // Admin-configured defaults (Admin -> Domains -> Default nameservers).
+        $settings = new SettingsRepository($this->db);
+        $domainSettings = new DomainSettings($settings);
+        $domainSettings->setDefaultNameservers(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng']);
+
+        $carrier = $this->db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1");
+
+        $this->cart->add((int) $carrier['id'], 'annually', [], 1, [
+            'option' => 'register',
+            'name' => 'defaultns.xyz',
+        ]);
+
+        $result = $this->checkout->placeOrder($this->clientId);
+
+        $this->assertTrue($result['success']);
+
+        $domain = $this->db->selectOne('SELECT * FROM domains WHERE order_id = ?', [$result['orderId']]);
+        $this->assertSame('connectreseller', $domain['registrar_slug']);
+        $this->assertSame(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng'], json_decode($domain['nameservers'], true));
+    }
+
     public function test_place_order_decrements_finite_stock(): void
     {
         $this->cart->add($this->productId, 'monthly', [], 1);

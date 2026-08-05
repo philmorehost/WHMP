@@ -154,6 +154,18 @@ final class DomainService
 
         $client = $this->clients->find((int) $domain['client_id']);
 
+        // The nameservers the buyer chose (or the admin's defaults, applied
+        // at checkout) live on the domain row — send them along so the
+        // registrar actually registers them instead of using its own
+        // default. Previously this call never carried nameservers at all,
+        // so every registration ended up with whatever the module guessed
+        // (the local dev module wrote literal "ns1.codevault.invalid"
+        // placeholders).
+        $storedNameservers = json_decode((string) ($domain['nameservers'] ?? '[]'), true);
+        $nameservers = is_array($storedNameservers)
+            ? array_values(array_filter($storedNameservers, static fn ($ns) => trim((string) $ns) !== ''))
+            : [];
+
         $result = $module->register([
             'domain' => $domain['domain_name'],
             'years' => $years,
@@ -161,6 +173,7 @@ final class DomainService
             'registrar' => $config,
             'client' => $client ?? [],
             'registrarClientId' => $client['registrar_client_id'] ?? null,
+            'nameservers' => $nameservers,
         ]);
 
         if (!$result['success']) {

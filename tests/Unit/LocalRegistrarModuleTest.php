@@ -112,6 +112,33 @@ final class LocalRegistrarModuleTest extends TestCase
         $this->assertSame($first['eppCode'], $second['eppCode']);
     }
 
+    public function test_register_stores_the_nameservers_that_were_supplied(): void
+    {
+        $this->module->register([
+            'domain' => 'example11.test',
+            'nameservers' => ['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng'],
+        ]);
+
+        $result = $this->module->getNameservers(['domain' => 'example11.test']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng'], $result['nameservers']);
+    }
+
+    public function test_register_without_nameservers_stores_an_empty_list_not_invalid_placeholders(): void
+    {
+        // Regression: a registration with no nameservers used to persist the
+        // literal "ns1.codevault.invalid" placeholders — a reserved testing
+        // TLD that then surfaced on real domains as fake nameservers.
+        $this->module->register(['domain' => 'example12.test']);
+
+        $result = $this->module->getNameservers(['domain' => 'example12.test']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame([], $result['nameservers']);
+        $this->assertStringNotContainsString('codevault.invalid', json_encode($result));
+    }
+
     public function test_sync_reports_status_and_expiry(): void
     {
         $registered = $this->module->register(['domain' => 'example9.test']);

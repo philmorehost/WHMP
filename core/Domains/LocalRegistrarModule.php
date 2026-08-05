@@ -53,11 +53,21 @@ final class LocalRegistrarModule implements RegistrarModule
         $now = new DateTimeImmutable();
         $expiry = $now->modify("+{$years} years");
 
+        // Only persist nameservers that were actually supplied. Storing the
+        // literal "ns1.codevault.invalid" placeholders used to be the fallback
+        // here — a reserved testing TLD — which then surfaced on real domains
+        // as fake nameservers whenever a registration carried none. An empty
+        // list is honest: the buyer/admin configured nothing.
+        $nameservers = array_values(array_filter(
+            (array) ($params['nameservers'] ?? []),
+            static fn ($ns) => trim((string) $ns) !== ''
+        ));
+
         $this->write($domain, [
             'status' => 'active',
             'registered_at' => $now->format('Y-m-d'),
             'expiry' => $expiry->format('Y-m-d'),
-            'nameservers' => $params['nameservers'] ?? ['ns1.codevault.invalid', 'ns2.codevault.invalid'],
+            'nameservers' => $nameservers,
             'locked' => true,
             'id_protection' => (bool) ($params['id_protection'] ?? false),
             'contacts' => $params['contacts'] ?? [],
@@ -81,7 +91,7 @@ final class LocalRegistrarModule implements RegistrarModule
             'status' => 'active',
             'registered_at' => $now->format('Y-m-d'),
             'expiry' => $expiry->format('Y-m-d'),
-            'nameservers' => ['ns1.codevault.invalid', 'ns2.codevault.invalid'],
+            'nameservers' => [],
             'locked' => true,
             'id_protection' => false,
             'contacts' => [],

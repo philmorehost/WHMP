@@ -190,12 +190,19 @@ final class DomainServiceTest extends DatabaseTestCase
 
     public function test_register_caches_nameservers_from_the_registrar(): void
     {
+        // The nameservers chosen at checkout (or the admin defaults) live on
+        // the domain row — register() hands them to the module, which
+        // returns them, and getNameservers() caches that on the domain.
         $domainId = $this->createPendingDomain('nscache.test');
+        $this->db->update(
+            'UPDATE domains SET nameservers = ? WHERE id = ?',
+            [json_encode(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng']), $domainId]
+        );
 
         $this->service->register($domainId, 1);
 
         $cached = json_decode($this->domains->find($domainId)['nameservers'], true);
-        $this->assertNotEmpty($cached);
+        $this->assertSame(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng'], $cached);
     }
 
     public function test_get_nameservers_refreshes_the_cached_copy(): void
@@ -247,6 +254,39 @@ final class DomainServiceTest extends DatabaseTestCase
 
         $this->assertFalse($this->service->setLock($domainId, true)['success']);
         $this->assertFalse($this->service->getEppCode($domainId)['success']);
+    }
+
+    public function test_register_passes_the_stored_nameservers_to_the_registrar(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('register', ['success' => true, 'message' => 'ok']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('nsflow.test');
+
+        // The nameservers the buyer chose (or the admin's defaults, applied
+        // at checkout) are persisted on the domain row — register() must
+        // hand them to the registrar instead of letting it use its own
+        // default (the local dev module used to write ".invalid" placeholders).
+        $this->db->update(
+            'UPDATE domains SET nameservers = ? WHERE id = ?',
+            [json_encode(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng']), $domainId]
+        );
+
+        $service->register($domainId, 1);
+
+        $registerParams = $fake->lastCall('register');
+        $this->assertSame(['ns1.pmhserver.name.ng', 'ns2.pmhserver.name.ng'], $registerParams['nameservers']);
+    }
+
+    public function test_register_passes_an_empty_nameserver_list_when_none_are_stored(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('register', ['success' => true, 'message' => 'ok']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('nons.test');
+
+        $service->register($domainId, 1);
+
+        $registerParams = $fake->lastCall('register');
+        $this->assertSame([], $registerParams['nameservers']);
     }
 
     public function test_register_fires_domain_registered_hook(): void

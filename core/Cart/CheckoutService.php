@@ -287,6 +287,7 @@ final class CheckoutService
         );
 
         // Insert domains into DB now that we have orderId
+        $domainPricingRepo = \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainPricingRepository::class);
         foreach ($priced['lines'] as $lineIndex => $line) {
             $domainName = $orderLinesWithDomains[$lineIndex];
             $domainOptions = $line['domain_options'] ?? null;
@@ -305,6 +306,14 @@ final class CheckoutService
 
                 $nameservers = json_encode($chosenNameservers !== [] ? $chosenNameservers : $this->domainSettings->defaultNameservers());
 
+                // The registrar is the one configured on the TLD's pricing
+                // row, not a hardcoded dev module: hardcoding 'local' here
+                // meant every self-service registration ran through the
+                // disabled LocalRegistrarModule, which never contacted a real
+                // registry and stamped fake "ns1.codevault.invalid"
+                // nameservers on the domain instead of the configured default.
+                $registrarSlug = (string) ($domainPricingRepo->findByTld($tld)['registrar_slug'] ?? 'local');
+
                 $this->db->insert(
                     'INSERT INTO domains (client_id, order_id, domain_name, tld, registrar_slug, status, amount, nameservers, auto_renew, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [
@@ -312,7 +321,7 @@ final class CheckoutService
                         $orderId,
                         $domainOptions['name'],
                         $tld,
-                        'local',
+                        $registrarSlug,
                         'pending',
                         $price,
                         $nameservers,

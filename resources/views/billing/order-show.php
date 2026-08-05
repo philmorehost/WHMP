@@ -1,6 +1,8 @@
 <?php
 /** @var array<string, mixed> $order */
 /** @var array<int, array<string, mixed>> $items */
+/** @var array<int, array<string, mixed>> $servicesByProduct */
+/** @var string|null $msg */
 ?>
 <style>
 /* Admin Order Detail Styles */
@@ -181,7 +183,7 @@
     padding: 12px 16px;
     color: var(--cv-text-primary);
 }
-.admin-order-table td:nth-child(n+4) {
+.admin-order-table td:nth-child(n+5) {
     text-align: right;
     font-family: 'Monaco', 'Courier New', monospace;
     font-weight: 700;
@@ -208,6 +210,11 @@
 </style>
 
 <!-- Hero Section -->
+<?php if ($msg !== null && $msg !== ''): ?>
+    <div style="background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);color:#059669;padding:14px 18px;border-radius:10px;margin-bottom:20px;font-weight:600;">
+        <?= e($msg) ?>
+    </div>
+<?php endif; ?>
 <div class="admin-order-hero">
     <div class="admin-order-hero__content">
         <a href="/admin/orders" class="admin-order-hero__back">
@@ -272,7 +279,7 @@
     <div class="admin-order-card__body" style="padding:0;">
         <div style="overflow-x:auto;">
             <table class="admin-order-table">
-                <thead><tr><th>Product</th><th>Cycle</th><th style="text-align:center;">Qty</th><th>Setup Fee</th><th>Unit Price</th></tr></thead>
+                <thead><tr><th>Product</th><th>Domain / Hostname</th><th>Cycle</th><th style="text-align:center;">Qty</th><th>Setup Fee</th><th>Unit Price</th></tr></thead>
                 <tbody>
                 <?php
                 // Same locked-rate rule as the admin invoice list: NULL
@@ -282,8 +289,22 @@
                 $orderRate = ($order['currency_id'] ?? null) !== null ? (float) ($order['currency_rate'] ?? 1.0) : 1.0;
                 ?>
                 <?php foreach ($items as $item): ?>
+                    <?php
+                    // The service checkout created for this product carries the
+                    // domain (shared hosting, domain registrations) or hostname
+                    // (VPS, dedicated) worth showing next to the line item.
+                    $service = $servicesByProduct[(int) $item['product_id']] ?? null;
+                    $domainOrHost = '';
+                    if ($service !== null) {
+                        $domainOrHost = trim((string) ($service['hostname'] ?? ''));
+                        if ($domainOrHost === '') {
+                            $domainOrHost = trim((string) ($service['domain'] ?? ''));
+                        }
+                    }
+                    ?>
                     <tr>
                         <td><?= e($item['product_name']) ?></td>
+                        <td><?= $domainOrHost !== '' ? e($domainOrHost) : '—' ?></td>
                         <td><?= e($item['billing_cycle']) ?></td>
                         <td style="text-align:center;"><?= (int) $item['quantity'] ?></td>
                         <td><?= e($order['currency_symbol'] ?? '$') ?><?= number_format(round((float) $item['setup_fee'] * $orderRate, 2), 2) ?></td>
