@@ -70,6 +70,35 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
     // Fetch recent tickets
     $recentTickets = $db->select("SELECT * FROM tickets WHERE client_id = ? ORDER BY updated_at DESC LIMIT 8", [$clientId]);
 
+    // A standalone domain registration rides on the hidden "Domain
+    // Registration" carrier service (see DomainService::carrierProductId()),
+    // so it appears in "Your Active Products & Services" next to hosting
+    // services. Tag each such service with the domain row it was created for
+    // so the dashboard links it to the domain manager (/client/domains/{id})
+    // instead of a service page that would misrender a domain as if it were a
+    // cPanel hosting service.
+    $carrierProductId = (int) ($db->selectOne("SELECT id FROM products WHERE name = 'Domain Registration' AND status = 'hidden' LIMIT 1")['id'] ?? 0);
+    $domainIdsByName = [];
+
+    if ($carrierProductId > 0) {
+        foreach ($db->select('SELECT id, domain_name FROM domains WHERE client_id = ?', [$clientId]) as $domain) {
+            $domainIdsByName[strtolower((string) $domain['domain_name'])] = (int) $domain['id'];
+        }
+    }
+
+    foreach ($activeServices as &$svc) {
+        $svc['domain_id'] = null;
+
+        if ($carrierProductId > 0 && (int) $svc['product_id'] === $carrierProductId) {
+            $name = strtolower((string) ($svc['domain'] ?? ''));
+
+            if ($name !== '' && isset($domainIdsByName[$name])) {
+                $svc['domain_id'] = $domainIdsByName[$name];
+            }
+        }
+    }
+    unset($svc);
+
     /** @var CurrencyService $currencyService */
     $currencyService = $container->make(CurrencyService::class);
     $currency = $currencyService->resolveForClient($client);

@@ -492,10 +492,14 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($activeServices as $svc): ?>
-                        <tr style="cursor:pointer;" onclick="location.href='/client/services/<?= (int)$svc['id'] ?>'">
+                        <?php foreach ($activeServices as $svc):
+                            $svcUrl = ($svc['domain_id'] ?? null) !== null
+                                ? '/client/domains/' . (int) $svc['domain_id']
+                                : '/client/services/' . (int) $svc['id'];
+                        ?>
+                        <tr style="cursor:pointer;" onclick="location.href='<?= e($svcUrl) ?>'">
                             <td>
-                                <strong><?= e((string)$svc['product_name']) ?></strong>
+                                <strong><a href="<?= e($svcUrl) ?>" style="color:inherit;text-decoration:none;"><?= e((string)$svc['product_name']) ?></a></strong>
                                 <?php $dom = $svc['domain'] ?? $svc['hostname'] ?? ''; if ($dom !== ''): ?>
                                 <div class="t-sub"><?= e((string)$dom) ?></div>
                                 <?php endif; ?>
