@@ -231,6 +231,84 @@ final class ExistingOrderTest extends DatabaseTestCase
         $this->assertEqualsWithDelta(12.50, (float) $domain['amount'], 0.01);
     }
 
+    public function test_existing_domain_order_rejected_when_domain_name_already_in_system(): void
+    {
+        $this->domainPricing->save([
+            'tld' => '.test',
+            'registrar_slug' => 'local',
+            'register_price' => 12.50,
+            'transfer_price' => 12.50,
+            'renew_price' => 12.50,
+        ]);
+
+        $item = [
+            'product_id' => $this->domainService->carrierProductId(),
+            'billing_cycle' => 'annually',
+            'quantity' => 1,
+            'options' => [],
+            'domain_options' => [
+                'name' => 'dupe.test',
+                'option' => 'existing',
+                'price' => 12.50,
+                'ns1' => 'ns1.example.test',
+                'ns2' => 'ns2.example.test',
+            ],
+            'server_options' => null,
+            'custom_fields' => null,
+        ];
+
+        // First recording succeeds.
+        $first = $this->checkout->placeOrderForClient($this->clientId, [$item], null, true);
+        $this->assertTrue($first['success']);
+
+        // Recording the same domain again must not 500 on the UNIQUE
+        // domains.domain_name index — the whole order is rolled back and a
+        // friendly error is returned.
+        $second = $this->checkout->placeOrderForClient($this->clientId, [$item], null, true);
+        $this->assertFalse($second['success']);
+        $this->assertStringContainsString('dupe.test', (string) $second['error']);
+        $this->assertStringContainsString('already in the system', (string) $second['error']);
+
+        // No stray order or domain row was left behind by the failed attempt.
+        $orderCount = $this->db->selectOne('SELECT COUNT(*) AS c FROM orders');
+        $this->assertSame(1, (int) $orderCount['c']);
+        $domainCount = $this->db->selectOne('SELECT COUNT(*) AS c FROM domains');
+        $this->assertSame(1, (int) $domainCount['c']);
+    }
+
+    public function test_duplicate_domain_guard_covers_register_orders_too(): void
+    {
+        $this->domainPricing->save([
+            'tld' => '.test',
+            'registrar_slug' => 'local',
+            'register_price' => 12.50,
+            'transfer_price' => 12.50,
+            'renew_price' => 12.50,
+        ]);
+
+        $item = [
+            'product_id' => $this->domainService->carrierProductId(),
+            'billing_cycle' => 'annually',
+            'quantity' => 1,
+            'options' => [],
+            'domain_options' => [
+                'name' => 'register-dupe.test',
+                'option' => 'register',
+                'ns1' => 'ns1.example.test',
+                'ns2' => 'ns2.example.test',
+            ],
+            'server_options' => null,
+            'custom_fields' => null,
+        ];
+
+        $first = $this->checkout->placeOrderForClient($this->clientId, [$item]);
+        $this->assertTrue($first['success']);
+
+        $second = $this->checkout->placeOrderForClient($this->clientId, [$item]);
+        $this->assertFalse($second['success']);
+        $this->assertStringContainsString('already in the system', (string) $second['error']);
+    }
+
     public function test_normal_order_still_raises_an_invoice_and_consumes_stock(): void
     {
         $result = $this->checkout->placeOrderForClient($this->clientId, [$this->productItem($this->productId)]);

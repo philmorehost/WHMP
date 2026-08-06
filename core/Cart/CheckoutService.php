@@ -166,6 +166,8 @@ final class CheckoutService
             });
         } catch (OutOfStockException $e) {
             return ['success' => false, 'error' => $e->getMessage()];
+        } catch (DomainExistsException $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
         }
 
         [$orderId, $invoiceId, $serviceIds] = $result;
@@ -223,6 +225,11 @@ final class CheckoutService
         }
 
         return ['success' => true, 'orderId' => $orderId, 'invoiceId' => $invoiceId, 'serviceIds' => $serviceIds];
+    }
+
+    private function domainRepo(): \CodeVault\Domains\DomainRepository
+    {
+        return \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainRepository::class);
     }
 
     private function notifyAdminsOfPendingApproval(int $orderId, ?array $client, float $orderTotal): void
@@ -325,6 +332,17 @@ final class CheckoutService
             if ($isNewDomain || $isExistingDomain) {
                 $tld = CartService::tldFromDomainName((string) $domainOptions['name']);
                 $price = (float) ($line['domain_price'] ?? 0.0);
+
+                // domains.domain_name is UNIQUE — if the name is already in
+                // the local table (say the admin records an "existing" domain
+                // that was migrated in earlier, or a self-service registration
+                // races a prior one), the raw PDO 1062 would 500 the request.
+                // Fail the whole order with a friendly message instead, the
+                // same way DomainController guards manual records.
+                $existingDomain = $this->domainRepo()->findByName((string) $domainOptions['name']);
+                if ($existingDomain !== null) {
+                    throw new DomainExistsException("\"{$domainOptions['name']}\" is already in the system.");
+                }
 
                 $chosenNameservers = array_values(array_filter([
                     $domainOptions['ns1'] ?? '',
