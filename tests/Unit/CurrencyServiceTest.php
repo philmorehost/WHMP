@@ -189,6 +189,28 @@ final class CurrencyServiceTest extends DatabaseTestCase
         $this->assertSame('USD', $this->service->codeFor(null));
     }
 
+    public function test_to_base_passes_null_currency_amounts_through_unchanged(): void
+    {
+        $this->assertSame(19370.00, $this->service->toBase(19370.00, null, 1.0000));
+    }
+
+    public function test_to_base_divides_denominated_amounts_by_the_live_rate(): void
+    {
+        $ngnId = $this->currencies->create('NGN', '₦', 1490.0000);
+
+        // A ₦19,370 denominated order is a $13 base-currency order.
+        $this->assertSame(13.00, $this->service->toBase(19370.00, $ngnId, 1.0000));
+    }
+
+    public function test_to_base_leaves_locked_rate_amounts_alone(): void
+    {
+        $ngnId = $this->currencies->create('NGN', '₦', 1490.0000);
+
+        // A lockColumns() row stores the base amount and keeps the rate only
+        // for display — recovering the base is a no-op.
+        $this->assertSame(13.00, $this->service->toBase(13.00, $ngnId, 1490.0000));
+    }
+
     public function test_delete_refuses_to_remove_the_default_currency(): void
     {
         $usd = $this->currencies->findByCode('USD');

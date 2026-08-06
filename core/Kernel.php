@@ -1153,6 +1153,7 @@ class Kernel
                 $c->make(OrderRepository::class),
                 $c->make(ClientRepository::class),
                 $c->make(HookDispatcher::class),
+                $c->make(CurrencyService::class),
             );
         });
 

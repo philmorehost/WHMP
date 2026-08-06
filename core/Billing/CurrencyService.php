@@ -192,6 +192,32 @@ final class CurrencyService
         return round($baseAmount * $effectiveRate, 2);
     }
 
+    /**
+     * The base-currency equivalent of a stored document amount, reversing
+     * whichever storage convention wrote it:
+     *
+     * - NULL currency_id: the amount is already in the base currency.
+     * - A currency_id with rate != 1.0 (lockColumns()): the amount was stored
+     *   in the base currency; the rate only re-expresses it for display.
+     * - A currency_id with rate 1.0 (denominateColumns()): the amount was
+     *   already converted to the client's currency at write time, so it must
+     *   be divided by that currency's live rate to recover the base figure.
+     *
+     * Used by fraud scoring so a high-value threshold ($500 base) is compared
+     * against a base-currency total instead of an NGN-denominated one — a
+     * ₦19,370 domain order was being read as a $19,370 order.
+     */
+    public function toBase(float $amount, ?int $currencyId, float $lockedRate): float
+    {
+        if ($currencyId === null || $lockedRate != 1.0) {
+            return round($amount, 2);
+        }
+
+        $rate = $this->rateFor($this->resolveLocked($currencyId));
+
+        return round($amount / ($rate > 0 ? $rate : 1.0), 2);
+    }
+
     /** @param array<string, mixed> $currency */
     public function format(float $baseAmount, array $currency): string
     {

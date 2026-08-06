@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Fraud;
 
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Billing\OrderRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Hooks\HookDispatcher;
@@ -25,7 +26,8 @@ final class FraudService
         private readonly ModuleManager $modules,
         private readonly OrderRepository $orders,
         private readonly ClientRepository $clients,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly CurrencyService $currency
     ) {
     }
 
@@ -69,9 +71,28 @@ final class FraudService
             $accountAgeMinutes = $accountAgeMinutes / 60;
         }
 
+        $currencyId = $order['currency_id'] !== null ? (int) $order['currency_id'] : null;
+        $lockedRate = (float) ($order['currency_rate'] ?? 1.0);
+
+        // Order totals and order_item prices are stored in the client's
+        // currency (denominateColumns() at checkout), so a "high-value"
+        // threshold expressed in the base currency must be compared against
+        // the base-currency equivalent — otherwise a ₦19,370 (=$13) domain
+        // order reads as a $19,370 fraud signal. Items are normalized the
+        // same way so the AI triage module doesn't reason over inflated
+        // NGN-denominated figures either.
+        $normalize = fn (float $amount) => $this->currency->toBase($amount, $currencyId, $lockedRate);
+
+        $items = array_map(static function (array $item) use ($normalize): array {
+            $item['unit_price'] = $normalize((float) $item['unit_price']);
+            $item['setup_fee'] = $normalize((float) $item['setup_fee']);
+
+            return $item;
+        }, $this->orders->items((int) $order['id']));
+
         return [
-            'total' => (float) $order['total'],
-            'items' => $this->orders->items((int) $order['id']),
+            'total' => $normalize((float) $order['total']),
+            'items' => $items,
             'clientName' => $client !== null ? $client['first_name'] . ' ' . $client['last_name'] : '',
             'clientEmail' => $client['email'] ?? '',
             'clientAccountAgeMinutes' => $accountAgeMinutes,

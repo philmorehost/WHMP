@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace CodeVault\Tests\Unit;
 
+use CodeVault\Billing\CurrencyRepository;
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Billing\OrderRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database\Migrator;
@@ -20,6 +22,7 @@ final class FraudServiceTest extends DatabaseTestCase
     private ClientRepository $clients;
     private ModuleManager $modules;
     private int $clientId;
+    private CurrencyService $currency;
 
     protected function setUp(): void
     {
@@ -29,6 +32,7 @@ final class FraudServiceTest extends DatabaseTestCase
         $this->orders = new OrderRepository($this->db);
         $this->clients = new ClientRepository($this->db);
         $this->modules = new ModuleManager(new HookDispatcher());
+        $this->currency = new CurrencyService(new CurrencyRepository($this->db));
 
         $this->clientId = $this->clients->create([
             'email' => 'fraudtest@example.test',
@@ -45,6 +49,16 @@ final class FraudServiceTest extends DatabaseTestCase
         return (int) $this->db->insert(
             'INSERT INTO orders (client_id, status, total, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             [$this->clientId, 'pending', $total, $now, $now]
+        );
+    }
+
+    private function createOrderFor(?int $currencyId, float $total): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return (int) $this->db->insert(
+            'INSERT INTO orders (client_id, status, total, currency_id, currency_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$this->clientId, 'pending', $total, $currencyId, 1.0000, $now, $now]
         );
     }
 
@@ -77,7 +91,7 @@ final class FraudServiceTest extends DatabaseTestCase
         $this->modules->register(FraudModule::class, 'low', $this->stubModule(20.0, false, ['low reason']));
         $this->modules->register(FraudModule::class, 'high', $this->stubModule(80.0, true, ['high reason']));
 
-        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher());
+        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher(), $this->currency);
         $orderId = $this->createOrder(50.0);
 
         $service->evaluate($orderId);
@@ -95,7 +109,7 @@ final class FraudServiceTest extends DatabaseTestCase
     {
         $this->modules->register(FraudModule::class, 'quiet', $this->stubModule(10.0, false, []));
 
-        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher());
+        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher(), $this->currency);
         $orderId = $this->createOrder(50.0);
 
         $service->evaluate($orderId);
@@ -114,7 +128,7 @@ final class FraudServiceTest extends DatabaseTestCase
             $fired[] = $p;
         });
 
-        $service = new FraudService($this->modules, $this->orders, $this->clients, $hooks);
+        $service = new FraudService($this->modules, $this->orders, $this->clients, $hooks, $this->currency);
         $orderId = $this->createOrder(50.0);
         $service->evaluate($orderId);
 
@@ -132,7 +146,7 @@ final class FraudServiceTest extends DatabaseTestCase
             $fired[] = $p;
         });
 
-        $service = new FraudService($this->modules, $this->orders, $this->clients, $hooks);
+        $service = new FraudService($this->modules, $this->orders, $this->clients, $hooks, $this->currency);
         $orderId = $this->createOrder(50.0);
         $service->evaluate($orderId);
 
@@ -141,7 +155,7 @@ final class FraudServiceTest extends DatabaseTestCase
 
     public function test_no_registered_modules_leaves_order_unheld_with_zero_score(): void
     {
-        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher());
+        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher(), $this->currency);
         $orderId = $this->createOrder(50.0);
 
         $service->evaluate($orderId);
@@ -154,10 +168,91 @@ final class FraudServiceTest extends DatabaseTestCase
     public function test_unknown_order_id_is_a_no_op(): void
     {
         $this->modules->register(FraudModule::class, 'high', $this->stubModule(80.0, true, []));
-        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher());
+        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher(), $this->currency);
 
         $service->evaluate(999999);
 
         $this->assertNull($this->orders->find(999999));
+    }
+
+    public function test_ngn_denominated_order_total_is_normalized_to_base_for_modules(): void
+    {
+        $currencies = new CurrencyRepository($this->db);
+        $ngnId = $currencies->create('NGN', '₦', 1490.0000);
+
+        $seen = [];
+        $this->modules->register(FraudModule::class, 'spy', new class ($seen) implements FraudModule {
+            public function __construct(private array &$seen)
+            {
+            }
+
+            public function metadata(): array
+            {
+                return ['name' => 'spy', 'description' => '', 'version' => '1.0.0', 'author' => 'test'];
+            }
+
+            public function configOptions(): array
+            {
+                return [];
+            }
+
+            public function score(array $order): array
+            {
+                $this->seen['total'] = $order['total'];
+
+                return ['score' => 0.0, 'hold' => false, 'reasons' => []];
+            }
+        });
+
+        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher(), $this->currency);
+        // A ₦19,370 denominated order is a $13 base-currency order.
+        $orderId = $this->createOrderFor($ngnId, 19370.0);
+
+        $service->evaluate($orderId);
+
+        $this->assertSame(13.0, $seen['total']);
+        $order = $this->orders->find($orderId);
+        $this->assertSame('pending', $order['status']);
+    }
+
+    public function test_locked_rate_order_total_passes_through_unchanged(): void
+    {
+        $currencies = new CurrencyRepository($this->db);
+        $ngnId = $currencies->create('NGN', '₦', 1490.0000);
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $orderId = (int) $this->db->insert(
+            'INSERT INTO orders (client_id, status, total, currency_id, currency_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$this->clientId, 'pending', 13.0, $ngnId, 1490.0000, $now, $now]
+        );
+
+        $seen = [];
+        $this->modules->register(FraudModule::class, 'spy', new class ($seen) implements FraudModule {
+            public function __construct(private array &$seen)
+            {
+            }
+
+            public function metadata(): array
+            {
+                return ['name' => 'spy', 'description' => '', 'version' => '1.0.0', 'author' => 'test'];
+            }
+
+            public function configOptions(): array
+            {
+                return [];
+            }
+
+            public function score(array $order): array
+            {
+                $this->seen['total'] = $order['total'];
+
+                return ['score' => 0.0, 'hold' => false, 'reasons' => []];
+            }
+        });
+
+        $service = new FraudService($this->modules, $this->orders, $this->clients, new HookDispatcher(), $this->currency);
+        $service->evaluate($orderId);
+
+        $this->assertSame(13.0, $seen['total']);
     }
 }

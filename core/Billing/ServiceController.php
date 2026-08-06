@@ -6,9 +6,11 @@ namespace CodeVault\Billing;
 
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Billing\CurrencyService;
 use CodeVault\Catalog\BillingCycle;
 use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
+use CodeVault\Clients\ClientRepository;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -29,7 +31,9 @@ final class ServiceController
         private readonly ProvisioningService $provisioning,
         private readonly ActivityLogger $activity,
         private readonly ServerRepository $servers,
-        private readonly ServiceDetailsNotifier $serviceDetails
+        private readonly ServiceDetailsNotifier $serviceDetails,
+        private readonly CurrencyService $currency,
+        private readonly ClientRepository $clients
     ) {
     }
 
@@ -197,7 +201,17 @@ final class ServiceController
                 return Response::redirect("/admin/services/{$id}?price_error=" . urlencode('This product has no price for the service\'s billing cycle.'));
             }
 
-            $this->services->updateAmount($id, (float) $priceRow['price']);
+            // Catalog prices are held in the base currency, but a service's
+            // amount is stored denominated in the owning client's currency.
+            // Converted once, for that client, same as CheckoutService does at
+            // checkout — otherwise a NGN client's service (₦1,043) is reset
+            // onto the raw USD catalog figure and read back as ₦0.70.
+            $amount = $this->currency->convert(
+                (float) $priceRow['price'],
+                $this->currency->rateFor($this->currency->resolveForClient($this->clients->find((int) $service['client_id'])))
+            );
+
+            $this->services->updateAmount($id, $amount);
 
             $this->activity->log(
                 'admin',
@@ -205,7 +219,7 @@ final class ServiceController
                 'service.price_set_to_package',
                 'service',
                 $id,
-                "Set service #{$id} recurring price to package price \$" . rtrim(rtrim(sprintf('%.2f', (float) $priceRow['price']), '0'), '.'),
+                "Set service #{$id} recurring price to package price (catalog \$" . number_format((float) $priceRow['price'], 2) . ", stored {$amount})",
                 $request->ip()
             );
         }
