@@ -371,4 +371,29 @@ final class DomainRepository
         }
         return $count;
     }
+
+    /**
+     * Re-point several domains at a different registrar. Same semantics as
+     * updateRegistrar(): registrar_domain_id / registrar_contact_id are
+     * opaque handles owned by the OLD registrar and are cleared so they can't
+     * leak into the new one.
+     *
+     * @param array<int, int> $ids
+     */
+    public function bulkUpdateRegistrar(array $ids, string $registrarSlug): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+        $count = 0;
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        foreach ($ids as $id) {
+            $this->db->update(
+                'UPDATE domains SET registrar_slug = ?, registrar_domain_id = NULL, registrar_contact_id = NULL, updated_at = ? WHERE id = ?',
+                [$registrarSlug, $now, (int) $id]
+            );
+            $count++;
+        }
+        return $count;
+    }
 }

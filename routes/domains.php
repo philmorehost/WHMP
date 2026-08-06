@@ -14,6 +14,7 @@ $router->post('/admin/domains/bulk-sync', [DomainController::class, 'bulkSync'])
 $router->post('/admin/domains/bulk-refresh-ns', [DomainController::class, 'bulkRefreshNameservers']);
 $router->post('/admin/domains/bulk-delete', [DomainController::class, 'bulkDelete']);
 $router->post('/admin/domains/bulk-status', [DomainController::class, 'bulkUpdateStatus']);
+$router->post('/admin/domains/bulk-registrar', [DomainController::class, 'bulkUpdateRegistrar']);
 $router->post('/admin/domains/nameservers', [DomainController::class, 'updateDefaultNameservers']);
 $router->post('/admin/domains/deletion-policy', [DomainController::class, 'updateDeletionPolicy']);
 $router->get('/admin/domains/create', [DomainController::class, 'createForm']);

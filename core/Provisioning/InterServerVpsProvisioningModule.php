@@ -567,13 +567,37 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
 
     /**
      * Lists the account's VPS services and finds the one whose hostname
-     * matches this service's local username — see class docblock.
+     * matches this service — see class docblock.
+     *
+     * InterServer keys lifecycle endpoints by the numeric `vps_id` it
+     * assigns, so this translates our local identifier into theirs. At
+     * order time this module stores the locally-generated username as the
+     * VPS hostname (see create()), so for app-created services the two are
+     * the same string. WHMCS-imported VPS services instead carry the real
+     * hostname in `services.hostname` with a generic username like "root" —
+     * try both identifiers so both are found.
      *
      * @param array<string, mixed> $params
      */
     private function resolveVpsId(array $params): ?int
     {
-        $hostname = (string) $params['username'];
+        $hostname = (string) ($params['hostname'] ?? '');
+        $username = (string) ($params['username'] ?? '');
+
+        // The service's recorded hostname is the authoritative identifier;
+        // the username is only a fallback for app-created services where
+        // create() stored it as the VPS hostname. Kept in stable order for
+        // the cache key.
+        $candidates = array_values(array_unique(array_filter(
+            [$hostname, $username],
+            static fn (string $candidate): bool => $candidate !== ''
+        )));
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        $cacheKey = implode('|', $candidates);
 
         // Memoized for the life of the request. Every lifecycle call pays a
         // `/vps` list to translate hostname -> numeric id, so rendering a
@@ -581,18 +605,31 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         // cost three identical list calls on top of the three real ones.
         // The module is a container singleton, so this cache lives exactly
         // as long as the request does.
-        if (array_key_exists($hostname, $this->vpsIdCache)) {
-            return $this->vpsIdCache[$hostname];
+        if (array_key_exists($cacheKey, $this->vpsIdCache)) {
+            return $this->vpsIdCache[$cacheKey];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', '/vps', null));
         $resolved = null;
 
         if ($decoded['success'] && is_array($decoded['data'])) {
-            foreach ($decoded['data'] as $row) {
-                if (is_array($row) && (string) ($row['vps_hostname'] ?? '') === $hostname) {
-                    $resolved = (int) $row['vps_id'];
-                    break;
+            // Two passes, most-specific first. Hostname only, then username.
+            // Without the ordering a VPS literally named "root" would win
+            // over the real one for every WHMCS-imported service.
+            foreach ([$hostname, $username] as $preferred) {
+                if ($preferred === '') {
+                    continue;
+                }
+
+                foreach ($decoded['data'] as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+
+                    if ((string) ($row['vps_hostname'] ?? '') === $preferred) {
+                        $resolved = (int) $row['vps_id'];
+                        break 2;
+                    }
                 }
             }
         }
@@ -600,7 +637,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         // Only a successful lookup is cached — a transient API failure must
         // not pin this VPS to "not found" for the rest of the request.
         if ($resolved !== null) {
-            $this->vpsIdCache[$hostname] = $resolved;
+            $this->vpsIdCache[$cacheKey] = $resolved;
         }
 
         return $resolved;

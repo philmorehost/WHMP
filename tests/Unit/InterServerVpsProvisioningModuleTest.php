@@ -425,4 +425,64 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $this->assertSame('suspended', $result['info']['status']);
         $this->assertSame('10.0.0.7', $result['info']['ip']);
     }
+
+    /**
+     * WHMCS-imported VPS services carry the real hostname in
+     * services.hostname with a generic username like "root". The lifecycle
+     * lookup must resolve by that hostname, not the useless username — this
+     * is the failure behind "your VPS wasn't found at the provider" for
+     * every imported service.
+     */
+    public function test_whmcs_imported_vps_resolves_by_service_hostname(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            ['vps_id' => '12', 'vps_hostname' => 'vps200.example.com', 'vps_status' => 'active'],
+        ]));
+
+        $result = $this->module->power(
+            ['username' => 'root', 'hostname' => 'vps200.example.com', 'server' => $this->server],
+            'restart'
+        );
+
+        $this->assertTrue($result['success']);
+        $this->assertCount(2, $this->http->requests, 'one resolve call, one restart call');
+        $this->assertSame('https://my.interserver.net/apiv2/vps', $this->http->requests[0]['url']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/12/restart', $this->http->requests[1]['url']);
+    }
+
+    /**
+     * When both identifiers are present, the recorded hostname must win
+     * even if a different VPS happens to be literally named like the
+     * generic username. A first-match-wins scan against either would
+     * hijack the imported service onto the wrong VPS.
+     */
+    public function test_recorded_hostname_wins_over_a_vps_named_like_the_username(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            ['vps_id' => '77', 'vps_hostname' => 'root'],
+            ['vps_id' => '88', 'vps_hostname' => 'vps200.example.com'],
+        ]));
+
+        $result = $this->module->power(
+            ['username' => 'root', 'hostname' => 'vps200.example.com', 'server' => $this->server],
+            'restart'
+        );
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/88/restart', $this->http->lastRequest()['url']);
+    }
+
+    public function test_username_still_resolves_when_hostname_is_unset(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            ['vps_id' => '99', 'vps_hostname' => 'cv300', 'vps_status' => 'active'],
+        ]));
+
+        // App-created services: services.hostname is null and the username
+        // IS the hostname create() sent to InterServer.
+        $result = $this->module->unsuspend(['username' => 'cv300', 'server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/99/start', $this->http->lastRequest()['url']);
+    }
 }

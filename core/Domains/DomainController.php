@@ -49,6 +49,7 @@ final class DomainController
             'statusFilter' => $status,
             'statusCounts' => $this->domains->countByStatus(),
             'registrarCounts' => $this->domains->countActiveByRegistrar(),
+            'registrars' => $this->registrars->allEnabled(),
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
             'autoDeleteExpiredEnabled' => $this->domainSettings->autoDeleteExpiredEnabled(),
             'deletionGraceDays' => $this->domainSettings->deletionGraceDays(),
@@ -277,6 +278,32 @@ final class DomainController
         $this->activity->log('admin', $adminId, 'domains.bulk_status', 'domain', null, "Bulk updated status to {$status} for {$updatedCount} domains.");
 
         $msg = "Successfully updated status for {$updatedCount} domain(s) to " . ucfirst($status) . ".";
+        return Response::redirect('/admin/domains?bulk_msg=' . urlencode($msg));
+    }
+
+    public function bulkUpdateRegistrar(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = array_map('intval', (array) $request->input('domain_ids', []));
+        $slug = trim((string) $request->input('registrar_slug', ''));
+
+        if (empty($ids)) {
+            return Response::redirect('/admin/domains?bulk_msg=' . urlencode('No domains were selected for registrar update.'));
+        }
+
+        if ($slug === '' || $this->registrars->findBySlug($slug) === null) {
+            return Response::redirect('/admin/domains?bulk_msg=' . urlencode('Please select a valid registrar to apply.'));
+        }
+
+        $updatedCount = $this->domainService->bulkUpdateRegistrar($ids, $slug);
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $this->activity->log('admin', $adminId, 'domains.bulk_registrar', 'domain', null, "Bulk updated registrar to {$slug} for {$updatedCount} domains.");
+
+        $msg = "Successfully updated registrar to {$slug} for {$updatedCount} domain(s).";
         return Response::redirect('/admin/domains?bulk_msg=' . urlencode($msg));
     }
 

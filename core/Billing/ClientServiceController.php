@@ -28,7 +28,10 @@ use CodeVault\Activity\ActivityLogger;
  * Encrypted)"). A client could power off a server that was already gone and
  * be told it worked. Anything that cannot be performed against the real API
  * now either reports the vendor's own error or is routed to a support
- * ticket; nothing on this page reports success it did not observe.
+ * ticket; nothing on this page reports success it did not observe. Actions
+ * the vendor API cannot perform at all (unimplemented module features, or
+ * services that cannot be resolved at the provider) open a support ticket
+ * so the client's request is picked up by staff instead of dropped.
  */
 final class ClientServiceController
 {
@@ -46,7 +49,6 @@ final class ClientServiceController
         private readonly CancellationRequestRepository $cancellations,
         private readonly InvoiceRepository $invoices,
         private readonly ActivityLogger $activity,
-        private readonly \CodeVault\Domains\DomainSettings $domainSettings,
         private readonly TicketService $tickets,
         private readonly DepartmentRepository $departments,
         private readonly AddonModuleRepository $addons,
@@ -208,6 +210,10 @@ final class ClientServiceController
      * Start / stop / restart against the real hypervisor. The module returns
      * a queued-action acknowledgement, not a completed one, and the message
      * says so rather than claiming the machine has finished changing state.
+     *
+     * If the API cannot act (module lacks the feature, or the VPS cannot be
+     * resolved at the provider), the request is routed into a support ticket
+     * instead of being dropped with an error — see performOrTicket().
      */
     public function power(Request $request, array $params): Response
     {
@@ -223,28 +229,21 @@ final class ClientServiceController
             return $this->back((int) $service['id'], null, 'Unrecognised power action.');
         }
 
-        $result = $this->provisioning->power((int) $service['id'], $action);
-
-        $this->activity->log(
-            'client',
-            (int) $client['id'],
+        return $this->performOrTicket(
+            $request,
+            $service,
+            $client,
             "server.power_{$action}",
-            'service',
-            (int) $service['id'],
-            sprintf(
-                'Client requested %s on service #%d — %s: %s',
-                $action,
-                (int) $service['id'],
-                $result['success'] ? 'accepted' : 'rejected',
-                $result['message']
-            ),
-            $request->ip()
+            "Client requested to {$action} service #{$service['id']} ({$service['product_name']})",
+            fn () => $this->provisioning->power((int) $service['id'], $action),
+            fn (array $result) => "Power {$action} could not be performed via the VPS API ({$result['message']}). Please run it manually."
         );
-
-        return $this->backFrom((int) $service['id'], $result);
     }
 
-    /** Reads live VNC connection info; never invents a port. */
+    /**
+     * Reads live VNC connection info; never invents a port. Falls back to a
+     * support ticket when the console details cannot be read from the API.
+     */
     public function vnc(Request $request, array $params): Response
     {
         [$service, $client, $denied] = $this->ownedService($params);
@@ -253,26 +252,22 @@ final class ClientServiceController
             return $denied;
         }
 
-        $result = $this->provisioning->singleSignOn((int) $service['id']);
-
-        $this->activity->log(
-            'client',
-            (int) $client['id'],
+        return $this->performOrTicket(
+            $request,
+            $service,
+            $client,
             'vps.vnc_requested',
-            'service',
-            (int) $service['id'],
-            "Client requested VNC console for service #{$service['id']}: " . $result['message'],
-            $request->ip()
+            "Client requested the VNC console for service #{$service['id']} ({$service['product_name']})",
+            fn () => $this->provisioning->singleSignOn((int) $service['id']),
+            fn (array $result) => "VNC console details could not be retrieved from the VPS API ({$result['message']}). Please provide the connection details manually.",
+            fn (array $result) => 'VNC console ready — connect with a VNC client to ' . (string) ($result['url'] ?? '')
         );
-
-        if (!$result['success']) {
-            return $this->back((int) $service['id'], null, $result['message']);
-        }
-
-        return $this->back((int) $service['id'], 'VNC console ready — connect with a VNC client to ' . $result['url']);
     }
 
-    /** Queues a real on-demand snapshot. */
+    /**
+     * Queues a real on-demand snapshot; falls back to a support ticket when
+     * the API cannot queue it.
+     */
     public function backup(Request $request, array $params): Response
     {
         [$service, $client, $denied] = $this->ownedService($params);
@@ -281,19 +276,15 @@ final class ClientServiceController
             return $denied;
         }
 
-        $result = $this->provisioning->createBackup((int) $service['id']);
-
-        $this->activity->log(
-            'client',
-            (int) $client['id'],
+        return $this->performOrTicket(
+            $request,
+            $service,
+            $client,
             'vps.backup_requested',
-            'service',
-            (int) $service['id'],
-            sprintf('Client requested a snapshot of service #%d — %s: %s', (int) $service['id'], $result['success'] ? 'queued' : 'rejected', $result['message']),
-            $request->ip()
+            "Client requested an on-demand backup of service #{$service['id']} ({$service['product_name']})",
+            fn () => $this->provisioning->createBackup((int) $service['id']),
+            fn (array $result) => "An on-demand backup could not be queued via the VPS API ({$result['message']}). Please create the snapshot manually."
         );
-
-        return $this->backFrom((int) $service['id'], $result);
     }
 
     /**
@@ -405,19 +396,15 @@ final class ClientServiceController
             return $this->back((int) $service['id'], null, 'Choose which IP address to set reverse DNS for.');
         }
 
-        $result = $this->provisioning->setReverseDns((int) $service['id'], $rdns, $ip);
-
-        $this->activity->log(
-            'client',
-            (int) $client['id'],
+        return $this->performOrTicket(
+            $request,
+            $service,
+            $client,
             'server.rdns_updated',
-            'service',
-            (int) $service['id'],
-            sprintf('Client set PTR for %s to %s on service #%d — %s: %s', $ip, $rdns, (int) $service['id'], $result['success'] ? 'accepted' : 'rejected', $result['message']),
-            $request->ip()
+            "Client requested reverse DNS (PTR) for IP {$ip} → {$rdns} on service #{$service['id']} ({$service['product_name']})",
+            fn () => $this->provisioning->setReverseDns((int) $service['id'], $rdns, $ip),
+            fn (array $result) => "The PTR for {$ip} could not be set via the VPS API ({$result['message']}). Please update the record manually."
         );
-
-        return $this->backFrom((int) $service['id'], $result);
     }
 
     /**
@@ -533,6 +520,64 @@ final class ClientServiceController
     }
 
     /**
+     * Runs a provisioning action against the vendor API and, when the API
+     * cannot perform it (module lacks the feature or the service cannot be
+     * resolved at the provider), funnels the request into a support ticket
+     * instead of dropping it with an error. The client's intent is never
+     * lost — either the action happens, or a staff member takes it over.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $client
+     * @param callable(): array{success: bool, message: string, ...} $perform
+     * @param callable(array<string, mixed>): string $failureMessage
+     * @param callable(array<string, mixed>): string|null $successMessage
+     */
+    private function performOrTicket(
+        Request $request,
+        array $service,
+        array $client,
+        string $activityAction,
+        string $subject,
+        callable $perform,
+        callable $failureMessage,
+        ?callable $successMessage = null
+    ): Response {
+        $result = $perform();
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            $activityAction,
+            'service',
+            (int) $service['id'],
+            sprintf(
+                'Client action on service #%d — %s: %s',
+                (int) $service['id'],
+                $result['success'] ? 'accepted' : 'rejected',
+                $result['message']
+            ),
+            $request->ip()
+        );
+
+        if ($result['success']) {
+            return $this->back(
+                (int) $service['id'],
+                $successMessage !== null ? $successMessage($result) : (string) $result['message']
+            );
+        }
+
+        return $this->openRequestTicket(
+            $request,
+            $service,
+            $client,
+            $activityAction . '_ticket',
+            $subject,
+            $failureMessage($result),
+            'Your request has been opened as a support ticket — we\'ll take it from here.'
+        );
+    }
+
+    /**
      * Which management surface this service gets. Keyed off the assigned
      * server's module first — that is a fact about what actually runs the
      * service — and only falls back to product-name matching when a service
@@ -605,7 +650,6 @@ final class ClientServiceController
         $reverseDns = [];
         $backups = [];
         $osTemplates = [];
-        $slices = [];
 
         if ($isActive && $kind === self::KIND_VPS) {
             $info = $this->provisioning->remoteInfo($id);
@@ -619,9 +663,6 @@ final class ClientServiceController
 
             $templates = $this->provisioning->osTemplates($id);
             $osTemplates = $templates['success'] ? ($templates['templates'] ?? []) : [];
-
-            $sliceInfo = $this->provisioning->sliceOptions($id);
-            $slices = $sliceInfo['success'] ? ($sliceInfo['slices'] ?? []) : [];
         }
 
         return $this->page('billing.client-service-show', [
@@ -632,7 +673,6 @@ final class ClientServiceController
             'reverseDns' => $reverseDns,
             'backups' => $backups,
             'osTemplates' => $osTemplates,
-            'slices' => $slices,
             'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
             'domainChangerAvailable' => $this->isOnCpanelServer($service) && $this->addons->isActive(self::DOMAIN_CHANGER_SLUG),
             'currency' => $currency,
@@ -650,7 +690,6 @@ final class ClientServiceController
             // note on the client dashboard's services widget.
             'formattedAmount' => ($currency['symbol'] ?? '$') . number_format((float) ($service['amount'] ?? 0), 2),
             'pendingCancellation' => $this->cancellations->findPendingForService($id),
-            'nameservers' => $this->domainSettings->defaultNameservers(),
             'message' => $message,
             'error' => $error,
         ]);
@@ -675,14 +714,6 @@ final class ClientServiceController
         }
 
         return [$service, $client, null];
-    }
-
-    /** @param array<string, mixed> $result */
-    private function backFrom(int $serviceId, array $result): Response
-    {
-        return $result['success']
-            ? $this->back($serviceId, (string) $result['message'])
-            : $this->back($serviceId, null, (string) $result['message']);
     }
 
     private function back(int $serviceId, ?string $message = null, ?string $error = null): Response

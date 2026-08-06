@@ -2,6 +2,7 @@
 /** @var array<int, array<string, mixed>> $domains */
 /** @var string $statusFilter */
 /** @var array<int, string> $defaultNameservers */
+/** @var array<int, array<string, mixed>> $registrars */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Domains</h1>
@@ -134,7 +135,7 @@
     <?= csrf_field() ?>
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);background:var(--cv-bg-surface);border:1px solid var(--cv-border-color);">
         <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-2);">Bulk Operations for Selected Domains</h2>
-        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-bottom:var(--cv-space-3);">Select multiple domain names using the table checkboxes below to update their status (e.g. set Pending to Active) or permanently delete expired domains in bulk.</p>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-bottom:var(--cv-space-3);">Select multiple domain names using the table checkboxes below to update their status (e.g. set Pending to Active), re-point them at a different registrar, or permanently delete expired domains in bulk.</p>
         <div style="display:flex;gap:var(--cv-space-3);align-items:center;flex-wrap:wrap;justify-content:space-between;">
             <div style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
                 <select class="cv-select" name="status" id="bulkStatusSelect" style="width:auto;min-width:160px;">
@@ -151,6 +152,19 @@
                         data-require-checked-message="Please select at least one domain using the checkboxes."
                         data-require-value="#bulkStatusSelect"
                         data-require-value-message="Please select a status from the dropdown to apply to the selected domains.">Update Selected Status</button>
+            </div>
+            <div style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
+                <select class="cv-select" name="registrar_slug" id="bulkRegistrarSelect" style="width:auto;min-width:180px;">
+                    <option value="">-- Change Registrar --</option>
+                    <?php foreach ($registrars as $registrar): ?>
+                        <option value="<?= e($registrar['slug']) ?>"><?= e($registrar['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="submit" formaction="/admin/domains/bulk-registrar" class="cv-btn cv-btn--secondary"
+                        data-require-checked=".domain-select-checkbox"
+                        data-require-checked-message="Please select at least one domain using the checkboxes."
+                        data-require-value="#bulkRegistrarSelect"
+                        data-require-value-message="Please select a registrar from the dropdown to apply to the selected domains.">Update Selected Registrar</button>
             </div>
             <div>
                 <button type="submit" formaction="/admin/domains/bulk-delete" class="cv-btn cv-btn--danger" style="background:#ef4444;color:#fff;border:none;"

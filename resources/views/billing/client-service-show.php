@@ -12,7 +12,6 @@
 /** @var array<string, string> $reverseDns ip => current PTR */
 /** @var array<int, array<string, mixed>> $backups */
 /** @var array<int, array<string, mixed>> $osTemplates */
-/** @var array<string, mixed> $slices */
 
 $id = (int) $service['id'];
 $cpanelToolsAvailable ??= false;
@@ -31,7 +30,6 @@ $remote ??= [];
 $reverseDns ??= [];
 $backups ??= [];
 $osTemplates ??= [];
-$slices ??= [];
 
 $primaryIp = trim((string) ($service['dedicated_ip'] ?? $service['ip_address'] ?? ''));
 if ($primaryIp === '' && ($remote['ip'] ?? '') !== '') {
@@ -46,10 +44,6 @@ $ptrTargets = $reverseDns;
 foreach (array_merge($primaryIp !== '' ? [$primaryIp] : [], $assignedIps) as $ip) {
     $ptrTargets[$ip] ??= '';
 }
-
-// Supplied by the controller from Configuration -> Domains, never hardcoded.
-/** @var array<int, string> $nameservers */
-$nameservers ??= [];
 
 /** @var string $formattedAmount already converted+formatted by the controller (services carry no currency lock, so it must use the live rate) */
 $formattedAmount = e($formattedAmount);
@@ -647,15 +641,6 @@ $cpanelTabs = [
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
-
-                <?php if ($nameservers !== []): ?>
-                    <div class="svc-info-label">Nameservers:</div>
-                    <div class="svc-info-val">
-                        <?php foreach ($nameservers as $ns): ?>
-                            <div><?= e($ns) ?></div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
             </div>
         </div>
     <?php endif; ?>
@@ -866,37 +851,6 @@ $cpanelTabs = [
                                 </select>
                                 <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Request Restore</button>
                             </form>
-                        <?php endif; ?>
-                    </div>
-
-                    <!-- Up/Downgrade VPS Slices Card -->
-                    <div class="svc-action-card">
-                        <h4>⬆️ VPS Slices</h4>
-                        <?php
-                        // Real allocation and pricing from the module. The
-                        // button here used to link to /client/services — back
-                        // to the list page, having done nothing — under the
-                        // label "Upgrade VPS Slices".
-                        ?>
-                        <?php if (($slices['current'] ?? null) === null): ?>
-                            <p>Slice allocation could not be read from the server right now.</p>
-                        <?php else: ?>
-                            <p>
-                                Currently <strong><?= e((string) $slices['current']) ?></strong>
-                                slice<?= (int) $slices['current'] === 1 ? '' : 's' ?><?php
-                                    if (($slices['sliceRamGb'] ?? null) !== null && ($slices['sliceHdGb'] ?? null) !== null):
-                                        ?> · <?= e((string) $slices['sliceRamGb']) ?> GB RAM and <?= e((string) $slices['sliceHdGb']) ?> GB disk per slice<?php
-                                    endif;
-                                ?>.
-                                <?php if (($slices['max'] ?? null) !== null): ?>
-                                    This host supports up to <strong><?= e((string) $slices['max']) ?></strong>.
-                                <?php endif; ?>
-                                <?php if (($slices['proratedSliceCost'] ?? null) !== null): ?>
-                                    Adding one now costs <?= e($currency['symbol'] ?? '$') . number_format((float) $slices['proratedSliceCost'], 2) ?>
-                                    for the rest of this cycle.
-                                <?php endif; ?>
-                            </p>
-                            <a href="/client/tickets/create" class="svc-btn svc-btn--secondary" style="width:100%;">Contact us to rescale</a>
                         <?php endif; ?>
                     </div>
 

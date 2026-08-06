@@ -686,6 +686,22 @@ final class DomainService
         return $this->domains->bulkUpdateStatus($ids, $status);
     }
 
+    /**
+     * Re-point several domains at a different registrar. Refuses a slug that
+     * doesn't match a configured registrar — the same guard the per-domain
+     * updateRegistrar() applies.
+     *
+     * @param array<int, int> $ids
+     */
+    public function bulkUpdateRegistrar(array $ids, string $registrarSlug): int
+    {
+        $registrarSlug = trim($registrarSlug);
+        if ($registrarSlug === '' || $this->registrars->findBySlug($registrarSlug) === null) {
+            return 0;
+        }
+        return $this->domains->bulkUpdateRegistrar($ids, $registrarSlug);
+    }
+
     private function resolveModuleSlug(string $slug): string
     {
         $lower = strtolower($slug);
