@@ -108,15 +108,21 @@ final class CheckoutService
      * target client's own saved preference, not any in-session override.
      * See AdminOrderController.
      *
+     * When $existing is true the order records a service/domain that already
+     * exists (e.g. migrated from another system): it lands as `active`, no
+     * invoice is raised, and the prices passed in on the items are still
+     * written to the order/service/domain rows so the admin order page and
+     * the client's records show what it is worth.
+     *
      * @param array<int, array<string, mixed>> $items same shape Cart::add() produces
      * @return array{success: bool, orderId?: int, invoiceId?: int, error?: string}
      */
-    public function placeOrderForClient(int $clientId, array $items, ?string $promoCode = null): array
+    public function placeOrderForClient(int $clientId, array $items, ?string $promoCode = null, bool $existing = false): array
     {
         $client = $this->clients->find($clientId);
         $effectiveCurrency = $this->currency->resolveForClient($client);
 
-        return $this->executeOrder($clientId, $client, $this->cartService->priceItems($items, $promoCode), $effectiveCurrency);
+        return $this->executeOrder($clientId, $client, $this->cartService->priceItems($items, $promoCode), $effectiveCurrency, $existing);
     }
 
     /**
@@ -125,15 +131,20 @@ final class CheckoutService
      * @param array<string, mixed> $effectiveCurrency
      * @return array{success: bool, orderId?: int, invoiceId?: int, error?: string, serviceIds?: array<int, int>}
      */
-    private function executeOrder(int $clientId, ?array $client, array $priced, array $effectiveCurrency): array
+    private function executeOrder(int $clientId, ?array $client, array $priced, array $effectiveCurrency, bool $existing = false): array
     {
         if ($priced['lines'] === []) {
             return ['success' => false, 'error' => 'Your cart is empty.'];
         }
 
-        foreach ($priced['lines'] as $line) {
-            if (!$line['in_stock']) {
-                return ['success' => false, 'error' => "\"{$line['product_name']}\" is out of stock."];
+        // An existing-service/domain order records what the client already
+        // has — no stock is consumed, so stock level is irrelevant (and must
+        // not block recording a product that happens to be sold out).
+        if (!$existing) {
+            foreach ($priced['lines'] as $line) {
+                if (!$line['in_stock']) {
+                    return ['success' => false, 'error' => "\"{$line['product_name']}\" is out of stock."];
+                }
             }
         }
 
@@ -150,8 +161,8 @@ final class CheckoutService
         $currencyLock = $this->currency->denominateColumns($effectiveCurrency);
 
         try {
-            $result = $this->db->transaction(function () use ($priced, $clientId, $tax, $currencyLock) {
-                return $this->buildOrder($priced, $clientId, $tax, $currencyLock);
+            $result = $this->db->transaction(function () use ($priced, $clientId, $tax, $currencyLock, $existing) {
+                return $this->buildOrder($priced, $clientId, $tax, $currencyLock, $existing);
             });
         } catch (OutOfStockException $e) {
             return ['success' => false, 'error' => $e->getMessage()];
@@ -204,7 +215,12 @@ final class CheckoutService
         }
 
         $this->hooks->fire(HookPoints::ORDER_PLACED, ['orderId' => $orderId, 'clientId' => $clientId]);
-        $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'clientId' => $clientId]);
+
+        // An existing-service/domain order raises no invoice, so there is
+        // nothing for the invoice hook to announce.
+        if ($invoiceId > 0) {
+            $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'clientId' => $clientId]);
+        }
 
         return ['success' => true, 'orderId' => $orderId, 'invoiceId' => $invoiceId, 'serviceIds' => $serviceIds];
     }
@@ -244,7 +260,7 @@ final class CheckoutService
      * @param array{currency_id: int|null, currency_rate: float} $currencyLock
      * @return array{0: int, 1: int, 2: array<int, int>}
      */
-    private function buildOrder(array $priced, int $clientId, array $tax, array $currencyLock): array
+    private function buildOrder(array $priced, int $clientId, array $tax, array $currencyLock, bool $existing = false): array
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
@@ -257,8 +273,8 @@ final class CheckoutService
         $orderLinesWithDomains = [];
 
         // Pre-parse domains to build the invoice line description. The price
-        // itself comes from $line['domain_price'] — already resolved (and,
-        // by the time this runs, already currency-converted) by
+        // itself comes from $line['domain_price'] — already resolved (and, by
+        // the time this runs, already currency-converted) by
         // CartService::priced() — rather than a second, independent
         // domain_pricing lookup here that used to disagree with it.
         foreach ($priced['lines'] as $lineIndex => $line) {
@@ -280,10 +296,13 @@ final class CheckoutService
         }
 
         $invoiceTotal = $priced['total'] + $tax['amount'];
+        // An existing service/domain order never has an invoice to add tax to,
+        // so its order total is exactly what the items are worth.
+        $orderTotal = $existing ? $priced['total'] : $invoiceTotal;
 
         $orderId = (int) $this->db->insert(
-            'INSERT INTO orders (client_id, status, total, discount_amount, promotion_code, currency_id, currency_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$clientId, 'pending', $invoiceTotal, $discount, $promoCode, $currencyLock['currency_id'], $currencyLock['currency_rate'], $now, $now]
+            'INSERT INTO orders (client_id, status, total, discount_amount, promotion_code, currency_id, currency_rate, no_invoice, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$clientId, $existing ? 'active' : 'pending', $orderTotal, $discount, $promoCode, $currencyLock['currency_id'], $currencyLock['currency_rate'], $existing ? 1 : 0, $now, $now]
         );
 
         // Insert domains into DB now that we have orderId
@@ -291,7 +310,19 @@ final class CheckoutService
         foreach ($priced['lines'] as $lineIndex => $line) {
             $domainName = $orderLinesWithDomains[$lineIndex];
             $domainOptions = $line['domain_options'] ?? null;
-            if ($domainOptions !== null && !empty($domainOptions['name']) && in_array($domainOptions['option'], ['register', 'transfer'], true)) {
+            // A "register"/"transfer" domain is new to us and lands pending.
+            // In existing-order mode a "existing" domain is recorded as
+            // already-live instead — it must appear in the client's domain
+            // list, but nothing is registered or transferred.
+            $isNewDomain = $domainOptions !== null
+                && !empty($domainOptions['name'])
+                && in_array($domainOptions['option'], ['register', 'transfer'], true);
+            $isExistingDomain = $existing
+                && $domainOptions !== null
+                && !empty($domainOptions['name'])
+                && ($domainOptions['option'] ?? '') === 'existing';
+
+            if ($isNewDomain || $isExistingDomain) {
                 $tld = CartService::tldFromDomainName((string) $domainOptions['name']);
                 $price = (float) ($line['domain_price'] ?? 0.0);
 
@@ -322,7 +353,7 @@ final class CheckoutService
                         $domainOptions['name'],
                         $tld,
                         $registrarSlug,
-                        'pending',
+                        $isExistingDomain ? 'active' : 'pending',
                         $price,
                         $nameservers,
                         1,
@@ -369,12 +400,17 @@ final class CheckoutService
                 ]
             );
 
-            $product = $this->products->find((int) $line['product_id']);
-            $hasLimitedStock = $product !== null && $product['stock_quantity'] !== null;
-            $decremented = $this->products->decrementStock($line['product_id']);
+            // An existing order records what the client already has — it must
+            // not consume stock or provision anything new, and its services are
+            // created active (already live) rather than pending.
+            if (!$existing) {
+                $product = $this->products->find((int) $line['product_id']);
+                $hasLimitedStock = $product !== null && $product['stock_quantity'] !== null;
+                $decremented = $this->products->decrementStock($line['product_id']);
 
-            if ($hasLimitedStock && !$decremented) {
-                throw new OutOfStockException("\"{$line['product_name']}\" just sold out — please remove it from your cart.");
+                if ($hasLimitedStock && !$decremented) {
+                    throw new OutOfStockException("\"{$line['product_name']}\" just sold out — please remove it from your cart.");
+                }
             }
 
             if ($line['billing_cycle'] !== BillingCycle::ONE_TIME) {
@@ -392,7 +428,7 @@ final class CheckoutService
                     'domain' => $domainName,
                     'hostname' => $hostname,
                     'password' => $password,
-                    'status' => 'pending',
+                    'status' => $existing ? 'active' : 'pending',
                     'next_due_date' => ServiceRepository::nextCycleDate($today, $line['billing_cycle']),
                 ]);
                 $serviceIds[] = $serviceId;
@@ -405,6 +441,12 @@ final class CheckoutService
                     );
                 }
             }
+        }
+
+        // Existing-service/domain orders never generate an invoice — they are
+        // records of things the client already has, not new charges.
+        if ($existing) {
+            return [$orderId, 0, $serviceIds];
         }
 
         $settingsRepo = \CodeVault\Support\App::container()->make(\CodeVault\Settings\SettingsRepository::class);

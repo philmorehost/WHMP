@@ -86,6 +86,36 @@ final class ClientRepository
         );
     }
 
+    /**
+     * Lightweight autocomplete lookup for admin order forms — returns just
+     * the id/name/email fields, capped at $limit, matching the same name/
+     * email/company filter as paginate(). This stays a separate method (not
+     * paginate() with a big perPage) so a keystroke-search endpoint can never
+     * pull the heavy GROUP BY subqueries that paginate()'s list view needs.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function search(string $search = '', int $limit = 20): array
+    {
+        $limit = max(1, min(100, $limit));
+
+        $where = '';
+        $bindings = [];
+
+        if ($search !== '') {
+            $where = 'WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ?';
+            $needle = "%{$search}%";
+            $bindings = [$needle, $needle, $needle, $needle];
+        }
+
+        $bindings[] = $limit;
+
+        return $this->db->select(
+            "SELECT id, email, first_name, last_name, company_name FROM clients {$where} ORDER BY last_name ASC, first_name ASC LIMIT ?",
+            $bindings
+        );
+    }
+
     /** @return array<int, array<string, mixed>> every client in the system */
     public function all(): array
     {

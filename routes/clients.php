@@ -18,6 +18,7 @@ $router->post('/admin/client-groups/{id}/delete', [ClientGroupController::class,
 $router->get('/admin/clients', [ClientController::class, 'index']);
 $router->post('/admin/clients/bulk-delete', [ClientController::class, 'bulkDelete']);
 $router->get('/admin/clients/export', [ClientController::class, 'export']);
+$router->get('/admin/clients/options', [ClientController::class, 'options']);
 $router->get('/admin/clients/create', [ClientController::class, 'createForm']);
 $router->post('/admin/clients', [ClientController::class, 'store']);
 $router->get('/admin/clients/{id}', [ClientController::class, 'show']);

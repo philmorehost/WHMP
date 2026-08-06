@@ -366,6 +366,9 @@ $showDomainField ??= true;
 <?php if (($_GET['details_error'] ?? '') !== ''): ?>
     <div class="admin-service-error">⚠️ <?= e((string) $_GET['details_error']) ?></div>
 <?php endif; ?>
+<?php if (($_GET['price_error'] ?? '') !== ''): ?>
+    <div class="admin-service-error">⚠️ <?= e((string) $_GET['price_error']) ?></div>
+<?php endif; ?>
 
 <div class="admin-service-card">
     <h2 class="admin-service-card__title">✏️ Edit Service Details</h2>
@@ -411,6 +414,13 @@ $showDomainField ??= true;
                     <?php endforeach; ?>
                 </select>
                 <small>Includes all VPS, Dedicated, and Shared Hosting servers configured in WHMP (<a href="/admin/servers" target="_blank" style="color:var(--cv-color-brand-500);text-decoration:underline;">Manage Servers & Server Groups</a>).</small>
+            </div>
+            <div class="admin-service-field">
+                <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;">
+                    <input type="checkbox" name="set_package_price" value="1" style="width:auto;">
+                    💲 Set recurring price to package price
+                </label>
+                <small>Rewrites this service's recurring amount (currently <strong><?= e($service['currency_symbol'] ?? '$') ?><?= number_format((float) $service['amount'], 2) ?></strong>) to the product's current catalog price for the <?= e($cycles[$service['billing_cycle']] ?? $service['billing_cycle']) ?> cycle. No order or proration is generated.</small>
             </div>
             <button class="admin-service-btn admin-service-btn--primary" type="submit">💾 Save Details</button>
         </form>

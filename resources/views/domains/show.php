@@ -114,6 +114,12 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
     </div>
 <?php endif; ?>
 
+<?php if (!empty($_GET['price_error'])): ?>
+    <div class="cv-card" style="background:rgba(239,68,68,0.1);border-color:#ef4444;color:#ef4444;margin-bottom:var(--cv-space-4);">
+        ⚠️ <?= e((string) $_GET['price_error']) ?>
+    </div>
+<?php endif; ?>
+
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Domain Status &amp; Management</h2>
     <form method="post" action="/admin/domains/<?= $id ?>/status"><?= csrf_field() ?>
@@ -148,6 +154,10 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
             <div class="cv-field">
                 <label class="cv-label">Renewal Amount ($)</label>
                 <input class="cv-input" type="number" step="0.01" min="0" name="amount" value="<?= e((string) ($domain['amount'] ?? '0.00')) ?>">
+                <small class="cv-field-hint" style="display:flex;align-items:center;gap:var(--cv-space-1);margin-top:var(--cv-space-1);">
+                    <input type="checkbox" name="set_tld_price" id="set_tld_price" value="1" style="width:auto;">
+                    <label for="set_tld_price" style="margin:0;">Set to current TLD renewal price</label>
+                </small>
             </div>
 
             <div class="cv-field" style="display:flex;align-items:center;margin-top:1.8rem;">

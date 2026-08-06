@@ -72,7 +72,7 @@ final class AdminOrderController
             'domainTlds' => array_column($this->domainPricing->all(), 'tld'),
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
             'error' => null,
-            'old' => ['client_id' => '', 'lines' => []],
+            'old' => ['client_id' => '', 'lines' => [], 'is_existing' => false],
         ]);
     }
 
@@ -89,7 +89,9 @@ final class AdminOrderController
             return $this->createError($request, 'Select a client for this order.');
         }
 
-        [$items, $error] = $this->buildItems($request);
+        $isExisting = (int) $request->input('is_existing', 0) === 1;
+
+        [$items, $error] = $this->buildItems($request, $isExisting);
 
         if ($error !== null) {
             return $this->createError($request, $error);
@@ -99,7 +101,7 @@ final class AdminOrderController
             return $this->createError($request, 'Add at least one product, or a domain registration.');
         }
 
-        $result = $this->checkoutService->placeOrderForClient($clientId, $items);
+        $result = $this->checkoutService->placeOrderForClient($clientId, $items, null, $isExisting);
 
         if (!$result['success']) {
             return $this->createError($request, (string) ($result['error'] ?? 'Could not create the order.'));
@@ -109,17 +111,29 @@ final class AdminOrderController
         $invoiceId = (int) $result['invoiceId'];
         $adminId = (int) $this->guard->currentAdmin()['id'];
 
-        $this->activity->log(
-            'admin',
-            $adminId,
-            'order.created_by_admin',
-            'order',
-            $orderId,
-            "Created order #{$orderId} (invoice #{$invoiceId}) on behalf of client #{$clientId}",
-            $request->ip()
-        );
+        if ($isExisting) {
+            $this->activity->log(
+                'admin',
+                $adminId,
+                'order.existing_recorded',
+                'order',
+                $orderId,
+                "Recorded existing service/domain order #{$orderId} for client #{$clientId} (no invoice generated)",
+                $request->ip()
+            );
+        } else {
+            $this->activity->log(
+                'admin',
+                $adminId,
+                'order.created_by_admin',
+                'order',
+                $orderId,
+                "Created order #{$orderId} (invoice #{$invoiceId}) on behalf of client #{$clientId}",
+                $request->ip()
+            );
 
-        $this->sendInvoiceEmail($client, $orderId, $invoiceId);
+            $this->sendInvoiceEmail($client, $orderId, $invoiceId);
+        }
 
         return Response::redirect("/admin/orders/{$orderId}");
     }
@@ -132,11 +146,12 @@ final class AdminOrderController
      * here — the same safety check CheckoutController::addToCart() and
      * DomainRegistrationController::addToCart() already apply — so an admin
      * can't accidentally queue an unavailable domain any more than a client
-     * can.
+     * can. (That check is skipped when $existing is set: an existing-order
+     * records a domain the client already holds, so availability is moot.)
      *
      * @return array{0: array<int, array<string, mixed>>, 1: string|null}
      */
-    private function buildItems(Request $request): array
+    private function buildItems(Request $request, bool $existing = false): array
     {
         $items = [];
 
@@ -205,7 +220,9 @@ final class AdminOrderController
                 return [[], "\"{$tld}\" isn't offered here."];
             }
 
-            if ($domainOption === 'register') {
+            // An existing order records a domain the client already holds, so
+            // no availability check — nothing is registered or transferred.
+            if (!$existing && $domainOption === 'register') {
                 $check = $this->domainService->checkAvailability($fullDomain, (string) $pricingRow['registrar_slug']);
 
                 if (!$check['success'] || !$check['available']) {
@@ -216,21 +233,35 @@ final class AdminOrderController
             $useDefaultNs = (string) $request->input('nameserver_choice', 'default') !== 'custom';
             $nameservers = $useDefaultNs ? $this->domainSettings->defaultNameservers() : $this->customNameserversFrom($request);
 
+            $domainOptions = [
+                'name' => $fullDomain,
+                'option' => $domainOption,
+                'ns1' => $nameservers[0] ?? '',
+                'ns2' => $nameservers[1] ?? '',
+                'ns3' => $nameservers[2] ?? '',
+                'ns4' => $nameservers[3] ?? '',
+                'ns5' => $nameservers[4] ?? '',
+                'ns6' => $nameservers[5] ?? '',
+            ];
+
+            // For an existing order the client already has the domain, so it
+            // is recorded as "existing" (active) with the TLD's register price
+            // as its value — no new registration is sold, but the domain's
+            // worth still shows on the order and in the client's records.
+            if ($existing && $domainOption !== 'existing') {
+                $domainOptions['option'] = 'existing';
+            }
+
+            if ($existing) {
+                $domainOptions['price'] = (float) $pricingRow['register_price'];
+            }
+
             $items[] = [
                 'product_id' => $this->domainService->carrierProductId(),
                 'billing_cycle' => self::DOMAIN_CARRIER_CYCLE,
                 'quantity' => 1,
                 'options' => [],
-                'domain_options' => [
-                    'name' => $fullDomain,
-                    'option' => $domainOption,
-                    'ns1' => $nameservers[0] ?? '',
-                    'ns2' => $nameservers[1] ?? '',
-                    'ns3' => $nameservers[2] ?? '',
-                    'ns4' => $nameservers[3] ?? '',
-                    'ns5' => $nameservers[4] ?? '',
-                    'ns6' => $nameservers[5] ?? '',
-                ],
+                'domain_options' => $domainOptions,
                 'server_options' => null,
                 'custom_fields' => null,
             ];
@@ -306,7 +337,10 @@ final class AdminOrderController
             'domainTlds' => array_column($this->domainPricing->all(), 'tld'),
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
             'error' => $message,
-            'old' => ['client_id' => (string) $request->input('client_id', '')],
+            'old' => [
+                'client_id' => (string) $request->input('client_id', ''),
+                'is_existing' => (int) $request->input('is_existing', 0) === 1,
+            ],
         ]);
     }
 

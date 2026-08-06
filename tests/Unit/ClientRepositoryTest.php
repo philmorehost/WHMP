@@ -79,6 +79,54 @@ final class ClientRepositoryTest extends DatabaseTestCase
         $this->assertCount(1, $page3['data']);
     }
 
+    public function test_search_returns_lightweight_rows_matching_name_email_or_company(): void
+    {
+        $this->clients->create($this->sample(['email' => 'jane@example.test', 'first_name' => 'Jane', 'last_name' => 'Doe']));
+        $this->clients->create($this->sample(['email' => 'bob@example.test', 'first_name' => 'Bob', 'last_name' => 'Smith', 'company_name' => 'Widgets Ltd']));
+
+        $byName = $this->clients->search('Jane');
+        $this->assertCount(1, $byName);
+        $this->assertSame('jane@example.test', $byName[0]['email']);
+
+        $byEmail = $this->clients->search('bob@example');
+        $this->assertCount(1, $byEmail);
+
+        $byCompany = $this->clients->search('Widgets');
+        $this->assertCount(1, $byCompany);
+        $this->assertSame('bob@example.test', $byCompany[0]['email']);
+    }
+
+    public function test_search_returns_only_id_name_email_company_columns(): void
+    {
+        $id = $this->clients->create($this->sample(['email' => 'lean@example.test', 'first_name' => 'Lean', 'last_name' => 'Row', 'company_name' => 'Slim Co']));
+
+        $rows = $this->clients->search('Lean');
+        $this->assertCount(1, $rows);
+        $this->assertSame($id, (int) $rows[0]['id']);
+        $this->assertArrayHasKey('email', $rows[0]);
+        $this->assertArrayHasKey('first_name', $rows[0]);
+        $this->assertArrayHasKey('last_name', $rows[0]);
+        $this->assertArrayHasKey('company_name', $rows[0]);
+        // Heavy list-view columns must NOT be pulled by the autocomplete path.
+        $this->assertArrayNotHasKey('services_active', $rows[0]);
+        $this->assertArrayNotHasKey('services_total', $rows[0]);
+        $this->assertArrayNotHasKey('group_name', $rows[0]);
+        $this->assertArrayNotHasKey('created_at', $rows[0]);
+    }
+
+    public function test_search_respects_and_clamps_the_limit(): void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            $this->clients->create($this->sample(['email' => "limit{$i}@example.test"]));
+        }
+
+        $limited = $this->clients->search('', 2);
+        $this->assertCount(2, $limited);
+
+        // Over-limit requests clamp to 100 rather than erroring.
+        $this->assertCount(5, $this->clients->search('', 1000));
+    }
+
     public function test_all_for_export_includes_email_and_phone_and_respects_search(): void
     {
         $this->clients->create($this->sample(['email' => 'jane@example.test', 'phone' => '+1-555-0100']));

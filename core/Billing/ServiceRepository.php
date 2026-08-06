@@ -497,6 +497,19 @@ final class ServiceRepository
         );
     }
 
+    /**
+     * Rewrites the recurring amount in one go — used by the admin "set to
+     * package price" toggle, which backs a service onto its product's current
+     * catalog price (WHMCS parity) without going through order/upgrade logic.
+     */
+    public function updateAmount(int $id, float $amount): void
+    {
+        $this->db->update(
+            'UPDATE services SET amount = ?, updated_at = ? WHERE id = ?',
+            [$amount, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM services WHERE id = ?', [$id]);

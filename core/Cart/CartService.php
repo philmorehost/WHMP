@@ -92,7 +92,14 @@ final class CartService
             $domainPrice = 0.00;
             $domainOptions = $item['domain_options'] ?? null;
             if ($domainOptions !== null && !empty($domainOptions['name'])) {
-                if (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
+                // Admin existing-service/domain orders supply the price
+                // explicitly (AdminOrderController resolves the TLD's
+                // register price) rather than via the register/transfer
+                // lookup below — the domain already exists, so there's no
+                // new registration price to fetch from a registrar.
+                if (($domainOptions['option'] ?? '') === 'existing' && isset($domainOptions['price'])) {
+                    $domainPrice = (float) $domainOptions['price'];
+                } elseif (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
                     $tld = self::tldFromDomainName((string) $domainOptions['name']);
                     $priceRow = $this->db->selectOne("SELECT register_price, transfer_price FROM domain_pricing WHERE tld = ? LIMIT 1", [$tld]);
                     if ($priceRow !== null) {

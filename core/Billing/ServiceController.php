@@ -186,6 +186,30 @@ final class ServiceController
 
         $this->services->updateDetails($id, $fields);
 
+        // "Set to package price" backs the service's recurring amount onto the
+        // product's current catalog price for this billing cycle — the admin
+        // equivalent of "WHMCS: update pricing" for a single service. It is a
+        // plain write; no order, proration or upgrade logic runs.
+        if ($request->input('set_package_price') !== null) {
+            $priceRow = $this->pricing->find((int) $service['product_id'], (string) $service['billing_cycle']);
+
+            if ($priceRow === null) {
+                return Response::redirect("/admin/services/{$id}?price_error=" . urlencode('This product has no price for the service\'s billing cycle.'));
+            }
+
+            $this->services->updateAmount($id, (float) $priceRow['price']);
+
+            $this->activity->log(
+                'admin',
+                (int) $this->guard->currentAdmin()['id'],
+                'service.price_set_to_package',
+                'service',
+                $id,
+                "Set service #{$id} recurring price to package price \$" . rtrim(rtrim(sprintf('%.2f', (float) $priceRow['price']), '0'), '.'),
+                $request->ip()
+            );
+        }
+
         $admin = $this->guard->currentAdmin();
         $this->activity->log(
             'admin',

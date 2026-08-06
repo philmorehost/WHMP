@@ -57,10 +57,48 @@ final class ClientController
         $search = trim((string) $request->query('q', ''));
         $page = max(1, (int) $request->query('page', 1));
 
+        $results = $this->clients->paginate($search, $page);
+
+        // Live-search target: same search, same data, but only the results
+        // table + pagination, no layout — the admin clients page fetches it
+        // via XHR and swaps it into #admin-client-results, so typing never
+        // reloads the page or loses focus.
+        if ($request->query('fragment') === '1') {
+            return Response::html($this->view->render('clients.index-results', [
+                'results' => $results,
+                'search' => $search,
+            ]));
+        }
+
         return $this->render('clients.index', [
-            'results' => $this->clients->paginate($search, $page),
+            'results' => $results,
             'search' => $search,
         ]);
+    }
+
+    /**
+     * Autocomplete endpoint for the admin "add order" client picker — returns
+     * a small JSON list of id/name/email matches instead of a full page, so
+     * the create-order form can filter a large client base as the admin
+     * types without reloading. Kept separate from index() (which returns a
+     * full paginated HTML page) and intentionally light (see
+     * ClientRepository::search()).
+     */
+    public function options(Request $request): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_VIEW)) {
+            return $denied;
+        }
+
+        $search = trim((string) $request->query('q', ''));
+        $limit = max(1, min(100, (int) $request->query('limit', 20)));
+
+        $json = json_encode([
+            'clients' => $this->clients->search($search, $limit),
+        ], JSON_UNESCAPED_UNICODE);
+
+        return (new Response($json, 200))
+            ->withHeader('Content-Type', 'application/json');
     }
 
     /**

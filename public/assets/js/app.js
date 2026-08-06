@@ -1532,6 +1532,15 @@
     // answered the same way in both places.
     var domainAvailabilityTimer;
     function checkProductPageDomainAvailability() {
+        // Existing service/domain orders record a domain the client already
+        // holds — there is no availability to check, and the result box would
+        // only confuse ("already taken" for something we're intentionally
+        // adding). Skip the call entirely while that mode is enabled.
+        var existingMode = document.getElementById('order-is-existing');
+        if (existingMode && existingMode.checked) {
+            return;
+        }
+
         var input = document.querySelector('[data-domain-availability-input]');
         var tldSelect = document.querySelector('[data-domain-availability-tld]');
         var resultEl = document.querySelector('[data-domain-availability-result]');
@@ -2453,25 +2462,151 @@
         });
     });
 
-    // Admin clients live search (debounced auto-search as user types)
+    // Admin clients live search (debounced AJAX filter, no page reload) — the
+    // server returns just the results table + pagination for ?fragment=1, and
+    // it is swapped into #admin-client-results, so typing never loses focus.
     var clientSearchInput = document.getElementById('client-search-input');
-    if (clientSearchInput) {
+    var clientResultsContainer = document.getElementById('admin-client-results');
+    if (clientSearchInput && clientResultsContainer) {
         var searchDebounceTimer = null;
-        // Keep focus at end of input if redirected with search query
-        if (clientSearchInput.value) {
-            clientSearchInput.focus();
-            clientSearchInput.setSelectionRange(clientSearchInput.value.length, clientSearchInput.value.length);
+        var searchRequestSeq = 0;
+        var clientSearchXhr = null;
+        var clientSearchMessage = null;
+
+        function performClientSearch(query) {
+            if (clientSearchXhr) {
+                clientSearchXhr.abort();
+            }
+
+            var seq = ++searchRequestSeq;
+            var url = '/admin/clients?q=' + encodeURIComponent(query) + '&fragment=1';
+
+            clientSearchXhr = new XMLHttpRequest();
+            clientSearchXhr.open('GET', url);
+            clientSearchXhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            clientSearchXhr.onreadystatechange = function () {
+                if (clientSearchXhr.readyState !== 4 || clientSearchXhr.status !== 200) {
+                    return;
+                }
+                if (seq !== searchRequestSeq) {
+                    return;
+                }
+                clientResultsContainer.innerHTML = clientSearchXhr.responseText;
+                clientSearchMessage = null;
+                clientSearchInput.focus();
+                clientSearchInput.setSelectionRange(clientSearchInput.value.length, clientSearchInput.value.length);
+            };
+            clientSearchXhr.onerror = function () {
+                if (seq !== searchRequestSeq) {
+                    return;
+                }
+                if (!clientSearchMessage) {
+                    clientSearchMessage = document.createElement('div');
+                    clientSearchMessage.style.cssText = 'color:var(--cv-text-secondary);font-size:var(--cv-text-sm);padding:16px;';
+                    clientResultsContainer.prepend(clientSearchMessage);
+                }
+                clientSearchMessage.textContent = 'Could not refresh results.';
+            };
+            clientSearchXhr.send();
         }
-        clientSearchInput.addEventListener('input', function() {
+
+        clientSearchInput.addEventListener('input', function () {
             clearTimeout(searchDebounceTimer);
             var query = this.value;
-            searchDebounceTimer = setTimeout(function() {
-                var url = new URL(window.location.href);
-                url.searchParams.set('q', query);
-                url.searchParams.set('page', '1');
-                window.location.href = url.toString();
-            }, 500);
+            searchDebounceTimer = setTimeout(function () {
+                performClientSearch(query);
+            }, 400);
         });
+    }
+
+    // Admin "create order" client picker (order-create.php) — an autocomplete
+    // search over /admin/clients/options instead of a full-page <select> that
+    // would be unusable once the client base grows. Type >= 2 chars, pick a
+    // match; the hidden client_id input drives the form. Also toggles the
+    // "existing service/domain" hint when the checkbox is flipped.
+    var orderClientPicker = document.querySelector('[data-client-picker]');
+    if (orderClientPicker) {
+        var searchInput = orderClientPicker.querySelector('[data-client-search-input]');
+        var idInput = orderClientPicker.querySelector('[data-client-id-input]');
+        var resultsEl = orderClientPicker.querySelector('[data-client-results]');
+        var hintEl = orderClientPicker.querySelector('[data-client-picker-hint]');
+        var pickerTimer = null;
+
+        // Preselect the label when the form re-renders with a client already
+        // chosen (validation error) — look the id up from the server data.
+        var preselectedId = (idInput ? idInput.value : '');
+        if (preselectedId && searchInput && hintEl) {
+            fetch('/admin/clients/options?q=&limit=100', {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var list = data.clients || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (String(list[i].id) === String(preselectedId)) {
+                        searchInput.value = list[i].first_name + ' ' + list[i].last_name;
+                        hintEl.textContent = list[i].email;
+                        break;
+                    }
+                }
+            })
+            .catch(function () {});
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                var query = this.value.trim();
+                clearTimeout(pickerTimer);
+
+                if (query.length < 2) {
+                    if (resultsEl) resultsEl.style.display = 'none';
+                    return;
+                }
+
+                pickerTimer = setTimeout(function () {
+                    fetch('/admin/clients/options?q=' + encodeURIComponent(query), {
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (!resultsEl) return;
+                        resultsEl.innerHTML = '';
+
+                        var list = data.clients || [];
+                        if (list.length === 0) {
+                            resultsEl.innerHTML = '<div style="padding:8px 12px;color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">No clients match &ldquo;' + query.replace(/</g, '&lt;') + '&rdquo;</div>';
+                            resultsEl.style.display = 'block';
+                            return;
+                        }
+
+                        list.forEach(function (client) {
+                            var row = document.createElement('button');
+                            row.type = 'button';
+                            row.className = 'cv-client-option';
+                            row.style.cssText = 'display:block;width:100%;text-align:left;padding:8px 12px;background:none;border:none;border-bottom:1px solid var(--cv-border-default);cursor:pointer;font-size:var(--cv-text-sm);';
+                            row.innerHTML = '<strong>' + (client.first_name + ' ' + client.last_name).replace(/</g, '&lt;') + '</strong> &mdash; <span style="color:var(--cv-text-secondary);">' + client.email.replace(/</g, '&lt;') + '</span>';
+                            row.addEventListener('click', function () {
+                                if (idInput) idInput.value = String(client.id);
+                                if (searchInput) searchInput.value = client.first_name + ' ' + client.last_name;
+                                if (hintEl) hintEl.textContent = client.email + ' (ID #' + client.id + ')';
+                                if (resultsEl) resultsEl.style.display = 'none';
+                            });
+                            resultsEl.appendChild(row);
+                        });
+
+                        resultsEl.style.display = 'block';
+                    })
+                    .catch(function () {});
+                }, 250);
+            });
+
+            searchInput.addEventListener('blur', function () {
+                // Let a click on a result register before hiding.
+                setTimeout(function () {
+                    if (resultsEl) resultsEl.style.display = 'none';
+                }, 150);
+            });
+        }
     }
 
     // Promo banner popup (partials/promo-banner.php) — shown once per browser

@@ -5,7 +5,7 @@
 /** @var array<int, string> $domainTlds */
 /** @var array<int, string> $defaultNameservers */
 /** @var string|null $error */
-/** @var array{client_id: string|int} $old */
+/** @var array{client_id: string|int, is_existing?: bool} $old */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Create Order</h1>
@@ -24,15 +24,31 @@
 
     <form method="post" action="/admin/orders"><?= csrf_field() ?>
         <div class="cv-field">
-            <label class="cv-label" for="order-client">Client</label>
-            <select class="cv-select" name="client_id" id="order-client" required>
-                <option value="">— Select client —</option>
-                <?php foreach ($clients as $client): ?>
-                    <option value="<?= (int) $client['id'] ?>" <?= (string) ($old['client_id'] ?? '') === (string) $client['id'] ? 'selected' : '' ?>>
-                        <?= e(trim($client['first_name'] . ' ' . $client['last_name'])) ?> (<?= e($client['email']) ?>)
-                    </option>
-                <?php endforeach; ?>
-            </select>
+            <label class="cv-label" for="order-client-search">Client</label>
+            <div data-client-picker>
+                <input type="hidden" name="client_id" id="order-client-id" value="<?= e((string) ($old['client_id'] ?? '')) ?>" data-client-id-input>
+                <input type="text" id="order-client-search" class="cv-input" autocomplete="off"
+                       placeholder="Type to search clients by name, email or company…"
+                       data-client-search-input>
+                <div data-client-results style="display:none;border:1px solid var(--cv-border-default);border-radius:6px;margin-top:4px;max-height:220px;overflow-y:auto;"></div>
+                <small style="color:var(--cv-text-secondary);display:block;margin-top:4px;" data-client-picker-hint>
+                    Start typing — the selected client appears here.
+                </small>
+            </div>
+        </div>
+
+        <div class="cv-field" style="margin-top:var(--cv-space-2);">
+            <label style="display:flex;gap:var(--cv-space-2);align-items:flex-start;cursor:pointer;font-size:var(--cv-text-sm);">
+                <input type="checkbox" name="is_existing" value="1" id="order-is-existing" <?= !empty($old['is_existing']) ? 'checked' : '' ?>>
+                <span>
+                    <strong>Existing service / domain</strong>
+                    <span style="color:var(--cv-text-secondary);display:block;">
+                        The service or domain already exists (e.g. moved over from another system). No invoice
+                        is generated — the product/domain price is still recorded on the order so its value shows
+                        everywhere. Orders created this way land as <strong>active</strong>.
+                    </span>
+                </span>
+            </label>
         </div>
 
         <h3 style="font-size:var(--cv-text-base);margin:var(--cv-space-4) 0 var(--cv-space-2);">Products</h3>

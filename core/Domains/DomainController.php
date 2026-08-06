@@ -384,6 +384,24 @@ final class DomainController
         $autoRenew = $request->input('auto_renew') ? 1 : 0;
         $amount = (float) $request->input('amount', 0);
 
+        // "Set to TLD price" backs the domain's amount onto the current
+        // catalog renewal price for its TLD — the admin equivalent of pulling
+        // a migrated-in domain onto the current price list. Converted once,
+        // for the owning client, same as CheckoutService does at checkout.
+        if ($request->input('set_tld_price') !== null) {
+            $tld = '.' . ltrim(substr((string) $domain['domain_name'], (int) strpos((string) $domain['domain_name'], '.') + 1), '.');
+            $tldPricing = $this->domainPricing->findByTld($tld);
+
+            if ($tldPricing === null) {
+                return Response::redirect("/admin/domains/{$id}?price_error=" . urlencode("No pricing row exists for the TLD {$tld}."));
+            }
+
+            $amount = $this->currency->convert(
+                (float) $tldPricing['renew_price'],
+                $this->currency->rateFor($this->currency->resolveForClient($this->clients->find((int) $domain['client_id'])))
+            );
+        }
+
         $this->domains->updateStatusAndDates($id, [
             'status' => $status,
             'registration_date' => $registrationDate !== '' ? $registrationDate : null,
@@ -399,7 +417,7 @@ final class DomainController
             'domain.status_updated',
             'domain',
             $id,
-            "Updated domain status for \"{$domain['domain_name']}\" to {$status}",
+            "Updated domain status for \"{$domain['domain_name']}\" to {$status}" . ($request->input('set_tld_price') !== null ? ' (amount set to TLD price)' : ''),
             $request->ip()
         );
 
