@@ -51,6 +51,48 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
     </form>
 </div>
 
+<?php if (!empty($registerError)): ?>
+    <div class="cv-card" style="background:rgba(239,68,68,0.1);border-color:#ef4444;color:#ef4444;margin-bottom:var(--cv-space-4);">
+        Registration error: <?= e($registerError) ?>
+    </div>
+<?php endif; ?>
+
+<?php if (!empty($registered)): ?>
+    <div class="cv-card" style="background:rgba(16,185,129,0.1);border-color:#10b981;color:#10b981;margin-bottom:var(--cv-space-4);">
+        ✔ Registration submitted to the registrar successfully.
+    </div>
+<?php endif; ?>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Register Domain at Registrar</h2>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);">
+        Re-submit this domain for registration at the selected registrar. Use this when the customer paid but the domain failed to register (see the error above). The optional registrar selection re-points the domain before submitting, so a domain stuck on the wrong registrar can be corrected in one step.
+    </p>
+    <form method="post" action="/admin/domains/<?= $id ?>/register"><?= csrf_field() ?>
+        <div style="display:flex;gap:var(--cv-space-3);align-items:flex-end;flex-wrap:wrap;">
+            <div class="cv-field" style="margin:0;flex:1;min-width:240px;">
+                <label class="cv-label">Registrar</label>
+                <select class="cv-select" name="registrar_slug">
+                    <?php foreach ($registrars as $registrar): ?>
+                        <option value="<?= e($registrar['slug']) ?>" <?= $registrar['slug'] === (string) $domain['registrar_slug'] ? 'selected' : '' ?>>
+                            <?= e($registrar['name']) ?> (<?= e($registrar['slug']) ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="cv-field" style="margin:0;">
+                <label class="cv-label">Years</label>
+                <select class="cv-select" name="years">
+                    <?php for ($y = 1; $y <= 10; $y++): ?>
+                        <option value="<?= $y ?>" <?= $y === 1 ? 'selected' : '' ?>><?= $y ?></option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+            <button class="cv-btn" type="submit" onclick="return confirm('Submit this domain for registration at the selected registrar now?')">Register Domain</button>
+        </div>
+    </form>
+</div>
+
 <?php if (isset($whoisResult)): ?>
     <div class="cv-card" id="whois-record" style="margin-bottom:var(--cv-space-4);">
         <h2 class="cv-card__title">WHOIS Record: <?= e($domain['domain_name']) ?></h2>

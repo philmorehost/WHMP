@@ -55,7 +55,11 @@ final class RegistrarController
         }
 
         $slug = (string) $params['slug'];
-        $config = match ($slug) {
+        // WHMCS-era registrars carried the slug "Upperlinkreseller2" while the
+        // module is keyed "upperlink" — normalize so config saves work for
+        // either spelling, but write the config under the row's own slug.
+        $moduleSlug = str_contains(strtolower($slug), 'upperlink') ? 'upperlink' : $slug;
+        $config = match ($moduleSlug) {
             'upperlink' => [
                 'email' => trim((string) $request->input('email', '')),
                 'api_key' => trim((string) $request->input('api_key', '')),

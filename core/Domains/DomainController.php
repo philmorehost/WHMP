@@ -189,6 +189,8 @@ final class DomainController
             'registrars' => $this->registrars->allEnabled(),
             'updated' => $request->query('updated') === '1',
             'registrarError' => $request->query('registrar_error'),
+            'registered' => $request->query('registered') === '1',
+            'registerError' => $request->query('register_error'),
             'childNameservers' => $this->domainService->getChildNameservers($id),
             'dnsRecords' => $this->domainService->getDnsRecords($id),
             'bulkMsg' => $request->query('bulk_msg'),
@@ -413,6 +415,68 @@ final class DomainController
         );
 
         return Response::redirect("/admin/domains/{$id}?updated=1");
+    }
+
+    /**
+     * Recovery path for a domain that was paid for but failed to register at
+     * the registrar (its provisioning_error is populated, status is pending).
+     * The admin picks the registrar to submit it to and re-runs the
+     * registration — the optional registrar_slug re-points the domain first
+     * (clearing any stale handles from the previous registrar) so the wrong
+     * registrar can be corrected in the same step.
+     */
+    public function registerDomain(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $domain = $this->domains->find($id);
+
+        if ($domain === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $slug = trim((string) $request->input('registrar_slug', ''));
+
+        if ($slug !== '' && $this->registrars->findBySlug($slug) === null) {
+            return Response::redirect("/admin/domains/{$id}?register_error=" . urlencode('That registrar does not exist.'));
+        }
+
+        if ($slug !== '' && $slug !== (string) $domain['registrar_slug']) {
+            $this->domains->updateRegistrar($id, $slug);
+
+            $this->activity->log(
+                'admin',
+                (int) $this->guard->currentAdmin()['id'],
+                'domain.registrar_updated',
+                'domain',
+                $id,
+                "Changed registrar for \"{$domain['domain_name']}\" from {$domain['registrar_slug']} to {$slug}",
+                $request->ip()
+            );
+        }
+
+        $effectiveSlug = $slug !== '' ? $slug : (string) $domain['registrar_slug'];
+        $years = max(1, min(10, (int) $request->input('years', 1)));
+        $result = $this->domainService->register($id, $years);
+
+        $this->activity->log(
+            'admin',
+            (int) $this->guard->currentAdmin()['id'],
+            'domain.register_retried',
+            'domain',
+            $id,
+            $result['success']
+                ? "Registration re-triggered for \"{$domain['domain_name']}\" via {$effectiveSlug} ({$years}y)."
+                : "Registration re-trigger FAILED for \"{$domain['domain_name']}\" via {$effectiveSlug}: {$result['message']}",
+            $request->ip()
+        );
+
+        return Response::redirect($result['success']
+            ? "/admin/domains/{$id}?registered=1"
+            : "/admin/domains/{$id}?register_error=" . urlencode((string) ($result['message'] ?? 'Registration failed.')));
     }
 
     public function renew(Request $request, array $params): Response

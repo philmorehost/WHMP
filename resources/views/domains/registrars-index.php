@@ -162,8 +162,8 @@
         </div>
 
         <div class="admin-reg-card__body">
-            <?php if ($registrar['slug'] === 'upperlink'): ?>
-                <form method="post" action="/admin/registrars/upperlink/config" class="admin-reg-form"><?= csrf_field() ?>
+            <?php if (str_contains(strtolower((string) $registrar['slug']), 'upperlink')): ?>
+                <form method="post" action="/admin/registrars/<?= e($registrar['slug']) ?>/config" class="admin-reg-form"><?= csrf_field() ?>
                     <div class="admin-reg-field">
                         <label>Reseller Client Email</label>
                         <input name="email" value="<?= e((string) ($config['email'] ?? '')) ?>">
