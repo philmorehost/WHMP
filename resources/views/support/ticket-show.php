@@ -334,6 +334,18 @@ $identityLabel = static function (array $t): string {
     </div>
 <?php endif; ?>
 
+<?php if (($blockedSenderAdded ?? false) === true): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        🚫 Sender <strong><?= e($ticket['email']) ?></strong> is now blocked — mail piping will ignore messages from it.
+    </div>
+<?php endif; ?>
+
+<?php if (($blockedSenderError ?? false) === true): ?>
+    <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);">
+        This ticket has no sender email to block.
+    </div>
+<?php endif; ?>
+
 <!-- Hero Section -->
 <div class="admin-ticket-hero">
     <div class="admin-ticket-hero__content">
@@ -374,6 +386,16 @@ $identityLabel = static function (array $t): string {
             <?php else: ?>
                 <form method="post" action="/admin/tickets/<?= $id ?>/close"><?= csrf_field() ?>
                     <button class="admin-ticket-btn admin-ticket-btn--secondary" type="submit">✕ Close</button>
+                </form>
+            <?php endif; ?>
+
+            <?php $senderBlockedPattern = $senderBlockedPattern ?? null; ?>
+            <?php if ($senderBlockedPattern !== null): ?>
+                <span class="admin-ticket-btn admin-ticket-btn--secondary" style="cursor:default; background:rgba(239,68,68,.15); border-color:rgba(239,68,68,.4); color:#fca5a5;"
+                      title="Sender <?= e($ticket['email']) ?> is blocked by the pattern <?= e($senderBlockedPattern) ?>">🚫 Sender blocked</span>
+            <?php elseif (trim((string) $ticket['email']) !== ''): ?>
+                <form method="post" action="/admin/tickets/<?= $id ?>/block-sender" data-confirm="Block <?= e($ticket['email']) ?>? Mail piping will ignore all future messages from this sender and they will no longer become tickets or replies."><?= csrf_field() ?>
+                    <button class="admin-ticket-btn admin-ticket-btn--secondary" type="submit">🚫 Block Sender</button>
                 </form>
             <?php endif; ?>
 

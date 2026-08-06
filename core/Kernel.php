@@ -162,6 +162,7 @@ use CodeVault\Seo\SeoTags;
 use CodeVault\Knowledgebase\KbCategoryRepository;
 use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\AnnouncementRepository;
+use CodeVault\Support\BlockedEmailSenderRepository;
 use CodeVault\Support\CannedReplyRepository;
 use CodeVault\Support\DepartmentRepository;
 use CodeVault\Support\ImapMailboxClient;
@@ -1094,6 +1095,10 @@ class Kernel
             return new SettingsRepository($c->make(Database::class));
         });
 
+        $this->container->singleton(BlockedEmailSenderRepository::class, function (Container $c) {
+            return new BlockedEmailSenderRepository($c->make(Database::class));
+        });
+
         $this->container->singleton(MailboxClient::class, fn () => new ImapMailboxClient());
 
         $this->container->singleton(MailPipingJob::class, function (Container $c) {
@@ -1104,6 +1109,7 @@ class Kernel
                 $c->make(TicketRepository::class),
                 $c->make(TicketService::class),
                 $c->make(ClientRepository::class),
+                $c->make(BlockedEmailSenderRepository::class),
             );
         });
 

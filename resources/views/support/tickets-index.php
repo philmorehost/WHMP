@@ -345,6 +345,24 @@ $ticketClientLabel = static function (array $t): string {
     </div>
 <?php endif; ?>
 
+<?php if (($blockAdded ?? false) === true): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        🚫 Sender blocked — mail piping will now ignore messages from that address.
+    </div>
+<?php endif; ?>
+
+<?php if (($blockRemoved ?? false) === true): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        Sender unblocked.
+    </div>
+<?php endif; ?>
+
+<?php if (($blockError ?? null) !== null && $blockError !== ''): ?>
+    <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);">
+        <?= e($blockError) ?>
+    </div>
+<?php endif; ?>
+
 <div class="admin-status-tabs">
     <a href="/admin/tickets" class="admin-status-tab <?= $statusFilter === '' ? 'active' : '' ?>">
         All (<?= count($tickets) ?>)
@@ -489,4 +507,55 @@ $ticketClientLabel = static function (array $t): string {
             </div>
         <?php endif; ?>
     <?php endif; ?>
+</div>
+
+<!-- Blocked Senders -->
+<div class="admin-table-card" style="margin-top:24px;">
+    <div style="padding:20px 24px; border-bottom:1px solid var(--cv-border-default); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+            <h2 style="font-family:'Hanken Grotesk',sans-serif; font-size:1.25rem; font-weight:800; color:var(--cv-text-primary); margin:0 0 4px 0;">🚫 Blocked Email Senders</h2>
+            <p style="margin:0; color:var(--cv-text-secondary); font-size:.85rem;">
+                Emails from these senders are ignored by mail piping — they never become tickets or replies. Use <code>*@example.com</code> to block a whole domain (handy for bounce senders like <code>*@pmhserver.name.ng</code>).
+            </p>
+        </div>
+    </div>
+    <div class="admin-table-wrapper" style="padding:20px 24px;">
+        <form method="post" action="/admin/tickets/blocked-senders" style="display:flex; gap:12px; align-items:flex-end; margin-bottom:20px; flex-wrap:wrap;"><?= csrf_field() ?>
+            <div style="flex:1; min-width:280px;">
+                <label style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Email address or pattern</label>
+                <input class="cv-input" type="text" name="pattern" placeholder="Mailer-Daemon@example.com or *@pmhserver.name.ng" required>
+            </div>
+            <button class="cv-btn" type="submit">Block</button>
+        </form>
+        <?php if (($blockedSenders ?? []) === []): ?>
+            <p style="margin:0; color:var(--cv-text-secondary); font-size:.9rem;">No senders are blocked yet.</p>
+        <?php else: ?>
+            <div style="overflow-x:auto;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Pattern</th>
+                            <th>Reason</th>
+                            <th>Blocked</th>
+                            <th style="width:80px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($blockedSenders as $blocked): ?>
+                        <tr>
+                            <td><code style="color:var(--cv-text-primary);"><?= e($blocked['pattern']) ?></code></td>
+                            <td><?= e((string) ($blocked['reason'] ?? '')) ?: '<span style="color:var(--cv-text-secondary);">—</span>' ?></td>
+                            <td style="color:var(--cv-text-secondary); font-size:.85rem;"><?= e((string) $blocked['created_at']) ?></td>
+                            <td>
+                                <form method="post" action="/admin/tickets/blocked-senders/<?= (int) $blocked['id'] ?>/delete" data-confirm="Unblock <?= e($blocked['pattern']) ?>? Its messages will become tickets again."><?= csrf_field() ?>
+                                    <button class="cv-btn cv-btn--danger" type="submit" style="padding:6px 10px; font-size:.75rem;">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
 </div>

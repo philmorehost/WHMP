@@ -31,7 +31,8 @@ final class TicketController
         private readonly AiProvider $aiProvider,
         private readonly \CodeVault\Ai\AiSettings $aiSettings,
         private readonly TicketAttachmentRepository $attachments,
-        private readonly TicketAttachmentService $attachmentService
+        private readonly TicketAttachmentService $attachmentService,
+        private readonly BlockedEmailSenderRepository $blockedSenders
     ) {
     }
 
@@ -156,6 +157,10 @@ final class TicketController
             'deletedFiles' => max(0, (int) $request->query('files', 0)),
             'closedCount' => $request->query('closed') !== null ? max(0, (int) $request->query('closed')) : null,
             'closeSkipped' => max(0, (int) $request->query('close_skipped', 0)),
+            'blockedSenders' => $this->blockedSenders->all(),
+            'blockAdded' => $request->query('blocked_added') === '1',
+            'blockRemoved' => $request->query('blocked_removed') === '1',
+            'blockError' => $request->query('block_error'),
         ]);
     }
 
@@ -192,6 +197,9 @@ final class TicketController
             'mergedFromTicket' => $mergedFromId !== null ? $this->tickets->find($mergedFromId) : null,
             'mergeCrossClientNotice' => $request->query('merge_cross_client') === '1',
             'mergeTargetPrefill' => $request->query('merge_target_prefill') !== null ? (int) $request->query('merge_target_prefill') : null,
+            'senderBlockedPattern' => $this->blockedSenders->matchingPattern((string) $ticket['email']),
+            'blockedSenderAdded' => $request->query('blocked') === '1',
+            'blockedSenderError' => $request->query('blocked') === '0',
         ]));
     }
 
@@ -468,6 +476,85 @@ final class TicketController
         }
 
         return Response::redirect("/admin/tickets/{$id}");
+    }
+
+    /**
+     * One-click block straight from a ticket's page: the ticket's reporter
+     * email joins the blocked-senders list (with the ticket recorded as the
+     * source), so mail piping stops turning that sender's messages into
+     * tickets or replies. Existing tickets are untouched.
+     */
+    public function blockSender(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $ticket = $this->tickets->find($id);
+
+        if ($ticket === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $email = strtolower(trim((string) $ticket['email']));
+
+        if ($email === '') {
+            return Response::redirect("/admin/tickets/{$id}?blocked=0");
+        }
+
+        $admin = $this->guard->currentAdmin();
+        $this->blockedSenders->block($email, (int) $admin['id'], $id, "Blocked from ticket #{$id}");
+        $this->activity->log('admin', (int) $admin['id'], 'ticket.blocked_sender_added', 'ticket', $id, "Blocked email sender {$email}", $request->ip());
+
+        return Response::redirect("/admin/tickets/{$id}?blocked=1");
+    }
+
+    /**
+     * Adds a sender pattern from the blocked-senders box on the tickets
+     * page. Wildcards are allowed, so an admin can block a whole domain at
+     * once ("*@pmhserver.name.ng") instead of one bounce address at a time.
+     */
+    public function addBlockedSender(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $pattern = trim((string) $request->input('pattern', ''));
+
+        if ($pattern === '') {
+            return Response::redirect('/admin/tickets?block_error=' . urlencode('Enter an email address or pattern to block.'));
+        }
+
+        $admin = $this->guard->currentAdmin();
+        $this->blockedSenders->block($pattern, (int) $admin['id'], null, 'Added from the tickets page');
+        $this->activity->log('admin', (int) $admin['id'], 'ticket.blocked_sender_added', 'ticket', null, "Blocked email sender {$pattern}", $request->ip());
+
+        return Response::redirect('/admin/tickets?blocked_added=1');
+    }
+
+    public function removeBlockedSender(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $removed = $this->blockedSenders->delete((int) $params['id']);
+
+        if ($removed) {
+            $this->activity->log(
+                'admin',
+                (int) $this->guard->currentAdmin()['id'],
+                'ticket.blocked_sender_removed',
+                'ticket',
+                null,
+                'Unblocked an email sender',
+                $request->ip()
+            );
+        }
+
+        return Response::redirect('/admin/tickets?blocked_removed=' . ($removed ? '1' : '0'));
     }
 
     private function transition(Request $request, array $params, callable $action, string $logAction, string $description): Response

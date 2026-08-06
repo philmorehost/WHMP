@@ -23,7 +23,8 @@ final class MailPipingJob implements CronJob
         private readonly DepartmentRepository $departments,
         private readonly TicketRepository $tickets,
         private readonly TicketService $ticketService,
-        private readonly ClientRepository $clients
+        private readonly ClientRepository $clients,
+        private readonly BlockedEmailSenderRepository $blockedSenders
     ) {
     }
 
@@ -73,6 +74,13 @@ final class MailPipingJob implements CronJob
         $fromEmail = $this->extractEmail($message['from']);
 
         if ($fromEmail === '') {
+            return;
+        }
+
+        // Blocked senders (bounce loops, spam, wrong-party mail) are skipped
+        // entirely — no ticket, no reply — but still marked seen upstream so
+        // the same message isn't re-processed on the next sweep.
+        if ($this->blockedSenders->isBlocked($fromEmail)) {
             return;
         }
 

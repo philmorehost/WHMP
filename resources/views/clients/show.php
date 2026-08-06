@@ -513,11 +513,22 @@ $id = (int) $client['id'];
         <div class="admin-detail-card__body" style="padding:0;">
             <div style="overflow-x:auto;">
                 <table class="admin-detail-table">
-                    <thead><tr><th>Product</th><th>Cycle</th><th>Amount</th><th>Next Due</th><th>Status</th><th style="width:100px;">Action</th></tr></thead>
+                    <thead><tr><th>Product</th><th>Domain / Hostname</th><th>Cycle</th><th>Amount</th><th>Next Due</th><th>Status</th><th style="width:100px;">Action</th></tr></thead>
                     <tbody>
                     <?php foreach ($services as $service): ?>
+                        <?php
+                        // A shared/reseller product is identified by its domain;
+                        // a VPS/dedicated one by its hostname. Fall back to the
+                        // other field when the primary is empty.
+                        $isHostnameService = in_array((string) ($service['product_type'] ?? ''), ['vps', 'dedicated'], true);
+                        $serviceLabel = trim((string) ($isHostnameService ? ($service['hostname'] ?? '') : ($service['domain'] ?? '')));
+                        if ($serviceLabel === '') {
+                            $serviceLabel = trim((string) ($isHostnameService ? ($service['domain'] ?? '') : ($service['hostname'] ?? '')));
+                        }
+                        ?>
                         <tr>
                             <td><?= e($service['product_name']) ?></td>
+                            <td><?= $serviceLabel !== '' ? e($serviceLabel) : '<span style="color:var(--cv-text-secondary);">—</span>' ?></td>
                             <td><?= e($service['billing_cycle']) ?></td>
                             <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($serviceMoney((float) $service['amount'])) ?></td>
                             <td><?= e($service['next_due_date']) ?></td>
@@ -526,7 +537,7 @@ $id = (int) $client['id'];
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($services === []): ?>
-                        <tr><td colspan="6" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No services yet.</td></tr>
+                        <tr><td colspan="7" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No services yet.</td></tr>
                     <?php endif; ?>
                     </tbody>
                 </table>

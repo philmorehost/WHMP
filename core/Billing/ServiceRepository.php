@@ -34,9 +34,10 @@ final class ServiceRepository
     {
         return $this->db->select(
             <<<SQL
-            SELECT s.*, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            SELECT s.*, p.type AS product_type, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM services s
             JOIN clients c ON c.id = s.client_id
+            LEFT JOIN products p ON p.id = s.product_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             WHERE s.client_id = ? 
             ORDER BY s.id DESC
