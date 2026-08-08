@@ -17,6 +17,7 @@ use CodeVault\Clients\ClientRegistrationOtpRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
+use CodeVault\Database;
 use CodeVault\Database\Migrator;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Mail\EmailDispatcher;
@@ -34,6 +35,7 @@ use CodeVault\Security\CountryRuleRepository;
 use CodeVault\Security\IpRuleRepository;
 use CodeVault\Security\LoginAttemptRepository;
 use CodeVault\Security\NullGeoIpResolver;
+use CodeVault\Security\PhpassHasher;
 use CodeVault\Security\PasswordResetToken;
 use CodeVault\Security\PasswordResetTokenRepository;
 use CodeVault\Security\RecoveryCodes;
@@ -90,7 +92,7 @@ final class ClientAuthControllerTwoFactorTest extends DatabaseTestCase
             new NullGeoIpResolver(),
             new \CodeVault\Hooks\HookDispatcher(),
         );
-        $auth = new ClientAuthManager($this->clients, $bruteGuard);
+        $auth = new ClientAuthManager($this->clients, $bruteGuard, new SettingsRepository($this->db), new PhpassHasher());
 
         $affiliateService = new AffiliateService(
             new AffiliateRepository($this->db),
@@ -102,6 +104,7 @@ final class ClientAuthControllerTwoFactorTest extends DatabaseTestCase
 
         $container = new Container();
         $container->instance(SessionManager::class, $session);
+        $container->instance(Database::class, $this->db);
         App::setContainer($container);
 
         $this->controller = new ClientAuthController(

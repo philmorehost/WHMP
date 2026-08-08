@@ -150,6 +150,27 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $this->assertSame('100.00', $invoice['total']);
     }
 
+    public function test_import_preserves_a_legacy_phpass_hash_and_randomizes_a_missing_password(): void
+    {
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, password, status, datecreated) VALUES (1, 'phpass@example.test', 'Php', 'Ass', '\$P\$9IQRaTwmfeRo7ud9Fh4E2PdI0S3r.L0', 'Active', '2020-01-01 00:00:00')");
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, password, status, datecreated) VALUES (2, 'nopass@example.test', 'No', 'Password', '', 'Active', '2020-01-01 00:00:00')");
+
+        $result = $this->importer->import($this->credentials());
+
+        $this->assertTrue($result['success']);
+
+        $clients = new ClientRepository($this->db);
+
+        $phpass = $clients->findByEmail('phpass@example.test');
+        $this->assertSame('$P$9IQRaTwmfeRo7ud9Fh4E2PdI0S3r.L0', $phpass['password_hash'], 'a valid phpass hash must survive the import untouched so the client can still log in');
+
+        $nopass = $clients->findByEmail('nopass@example.test');
+        $this->assertNotEmpty($nopass['password_hash'], 'a missing WHMCS password must never import as an empty hash');
+        $this->assertNotSame('', $nopass['password_hash']);
+        $this->assertFalse(password_verify('', $nopass['password_hash']), 'the random fallback must not be an empty-password hash');
+        $this->assertFalse(password_verify('anything', $nopass['password_hash']), 'the random fallback must be unguessable, forcing the forgot-password flow');
+    }
+
     public function test_import_migrates_transactions_keyed_to_the_remapped_invoice(): void
     {
         $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, status, datecreated) VALUES (1, 'payer@example.test', 'Pay', 'Er', 'Active', '2020-01-01 00:00:00')");

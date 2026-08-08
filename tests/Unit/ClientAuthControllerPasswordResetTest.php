@@ -37,6 +37,7 @@ use CodeVault\Security\CountryRuleRepository;
 use CodeVault\Security\IpRuleRepository;
 use CodeVault\Security\LoginAttemptRepository;
 use CodeVault\Security\NullGeoIpResolver;
+use CodeVault\Security\PhpassHasher;
 use CodeVault\Security\PasswordResetToken;
 use CodeVault\Security\PasswordResetTokenRepository;
 use CodeVault\Security\RecoveryCodes;
@@ -92,7 +93,7 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
             new NullGeoIpResolver(),
             new HookDispatcher(),
         );
-        $auth = new ClientAuthManager($this->clients, $bruteGuard);
+        $auth = new ClientAuthManager($this->clients, $bruteGuard, new SettingsRepository($this->db), new PhpassHasher());
 
         $affiliateService = new AffiliateService(
             new AffiliateRepository($this->db),
@@ -257,7 +258,7 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
                 new AccountLockRepository($this->db),
                 new NullGeoIpResolver(),
                 new HookDispatcher(),
-            )),
+            ), new SettingsRepository($this->db), new PhpassHasher()),
             new ClientAuthGuard(App::container()->make(SessionManager::class), $this->clients),
             new View(dirname(__DIR__, 2) . '/resources/views'),
             new AffiliateService(

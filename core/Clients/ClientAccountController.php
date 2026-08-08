@@ -11,6 +11,7 @@ use CodeVault\Gdpr\GdprRequestRepository;
 use CodeVault\Modules\SecurityQuestionModuleService;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Security\PhpassHasher;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
 use CodeVault\View;
@@ -34,7 +35,8 @@ final class ClientAccountController
         private readonly GdprRequestRepository $gdprRequests,
         private readonly SecurityQuestionModuleService $securityQuestions,
         private readonly VatNumberValidator $vatValidator,
-        private readonly VatLookupService $vatLookup
+        private readonly VatLookupService $vatLookup,
+        private readonly PhpassHasher $phpass
     ) {
     }
 
@@ -174,7 +176,7 @@ final class ClientAccountController
         $currentPassword = (string) $request->input('current_password', '');
         $newPassword = (string) $request->input('new_password', '');
 
-        if (!password_verify($currentPassword, (string) $client['password_hash'])) {
+        if (!$this->passwordMatches((string) $client['password_hash'], $currentPassword)) {
             return $this->page('client-account.profile', [
                 'client' => $client,
                 'error' => 'Current password is incorrect — your password was not changed.',
@@ -210,7 +212,7 @@ final class ClientAccountController
         $currentPassword = (string) $request->input('current_password', '');
         $newPin = (string) $request->input('new_security_pin', '');
 
-        if (!password_verify($currentPassword, (string) $client['password_hash'])) {
+        if (!$this->passwordMatches((string) $client['password_hash'], $currentPassword)) {
             return $this->page('client-account.profile', [
                 'client' => $client,
                 'error' => 'Current password is incorrect — your Security PIN was not changed.',
@@ -345,7 +347,7 @@ final class ClientAccountController
 
         $password = (string) $request->input('password', '');
 
-        if (!password_verify($password, (string) $client['password_hash'])) {
+        if (!$this->passwordMatches((string) $client['password_hash'], $password)) {
             return $this->page('client-account.security', [
                 'client' => $client,
                 'error' => 'Incorrect password — 2FA was not disabled.',
@@ -439,6 +441,26 @@ final class ClientAccountController
         }
 
         return false;
+    }
+
+    /**
+     * Verifies a client's current password whether the stored hash is a
+     * modern bcrypt/Argon2 (password_verify) or a legacy phpass hash
+     * carried over from a WHMCS import. The stored hash is upgraded to
+     * Argon2 at login; if a session predates that upgrade, this fallback
+     * keeps account self-service working too.
+     */
+    private function passwordMatches(string $storedHash, string $plainPassword): bool
+    {
+        if ($storedHash === '') {
+            return false;
+        }
+
+        if (password_verify($plainPassword, $storedHash)) {
+            return true;
+        }
+
+        return $this->phpass->isPhpassHash($storedHash) && $this->phpass->verify($plainPassword, $storedHash);
     }
 
     /** @param array<string, mixed> $data */

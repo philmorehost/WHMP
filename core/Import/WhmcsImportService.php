@@ -294,8 +294,21 @@ final class WhmcsImportService
                             continue;
                         }
 
-                        // Map password hash directly (WHMCS uses bcrypt or phpass, compatible with PHP password_verify)
-                        $passwordHash = $row['password'] ?? password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
+                        // Map password hash directly. WHMCS 8+ stores bcrypt
+                        // (password_verify-compatible) but WHMCS <= 7.x stores
+                        // PHPass portable hashes ($P$...), which PHP's
+                        // password_verify() cannot check. Both formats are
+                        // preserved as-is: ClientAuthManager::attempt() now
+                        // falls back to PhpassHasher and transparently
+                        // upgrades to Argon2id on first successful login.
+                        // A genuinely missing password (never set in WHMCS)
+                        // gets an unguessable random hash so the account can
+                        // never be logged into with an empty/unknown value —
+                        // the client recovers via the forgot-password flow.
+                        $passwordHash = $row['password'];
+                        if (!is_string($passwordHash) || $passwordHash === '') {
+                            $passwordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
+                        }
                         $currencyId = isset($row['currency']) && isset($currencyMap[(int) $row['currency']]) ? $currencyMap[(int) $row['currency']] : null;
 
                         $localClientId = (int) $this->db->insert(

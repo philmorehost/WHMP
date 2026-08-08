@@ -11,6 +11,7 @@ use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
+use CodeVault\Database;
 use CodeVault\Database\Migrator;
 use CodeVault\Gdpr\GdprRequestRepository;
 use CodeVault\Hooks\HookDispatcher;
@@ -20,6 +21,7 @@ use CodeVault\Modules\SecurityQuestionModuleRepository;
 use CodeVault\Modules\SecurityQuestionModuleService;
 use CodeVault\Request;
 use CodeVault\Security\RecoveryCodes;
+use CodeVault\Security\PhpassHasher;
 use CodeVault\Security\Totp;
 use CodeVault\Session\SessionManager;
 use CodeVault\Support\App;
@@ -60,6 +62,7 @@ final class ClientAccountControllerTest extends DatabaseTestCase
 
         $container = new Container();
         $container->instance(SessionManager::class, $session);
+        $container->instance(Database::class, $this->db);
         App::setContainer($container);
 
         $this->totp = new Totp();
@@ -80,7 +83,8 @@ final class ClientAccountControllerTest extends DatabaseTestCase
                 new ClientSecurityAnswerRepository($this->db)
             ),
             new VatNumberValidator(),
-            new ViesVatLookupService($this->vatHttp = new FakeHttpClient())
+            new ViesVatLookupService($this->vatHttp = new FakeHttpClient()),
+            new PhpassHasher()
         );
     }
 
@@ -112,6 +116,9 @@ final class ClientAccountControllerTest extends DatabaseTestCase
             'last_name' => 'Holder',
             'company_name' => 'Acme Co',
             'city' => 'Lagos',
+            'address1' => '1 Test Street',
+            'postcode' => '100001',
+            'phone' => '+2348000000000',
         ]));
 
         $this->assertSame(200, $response->status());

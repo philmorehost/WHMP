@@ -12,6 +12,7 @@ use CodeVault\Clients\ClientAuthManager;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
+use CodeVault\Database;
 use CodeVault\Database\Migrator;
 use CodeVault\Gdpr\GdprRequestRepository;
 use CodeVault\Hooks\HookDispatcher;
@@ -26,9 +27,11 @@ use CodeVault\Security\CountryRuleRepository;
 use CodeVault\Security\IpRuleRepository;
 use CodeVault\Security\LoginAttemptRepository;
 use CodeVault\Security\NullGeoIpResolver;
+use CodeVault\Security\PhpassHasher;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
 use CodeVault\Session\SessionManager;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\App;
 use CodeVault\Tests\Fixtures\FakeHttpClient;
 use CodeVault\Tests\Support\DatabaseTestCase;
@@ -72,6 +75,7 @@ final class ClientVatSelfServiceTest extends DatabaseTestCase
 
         $container = new Container();
         $container->instance(SessionManager::class, $session);
+        $container->instance(Database::class, $this->db);
         App::setContainer($container);
 
         $this->vatHttp = new FakeHttpClient();
@@ -90,7 +94,8 @@ final class ClientVatSelfServiceTest extends DatabaseTestCase
                 new ClientSecurityAnswerRepository($this->db)
             ),
             new VatNumberValidator(),
-            new ViesVatLookupService($this->vatHttp)
+            new ViesVatLookupService($this->vatHttp),
+            new PhpassHasher()
         );
     }
 
@@ -106,7 +111,7 @@ final class ClientVatSelfServiceTest extends DatabaseTestCase
             new NullGeoIpResolver(),
             new HookDispatcher(),
         );
-        $auth = new ClientAuthManager($this->clients, $bruteGuard);
+        $auth = new ClientAuthManager($this->clients, $bruteGuard, new SettingsRepository($this->db), new PhpassHasher());
 
         $result = $auth->register('newbiz@example.test', 'correct-horse-battery', 'New', 'Biz', '127.0.0.1', 'DE', 'DE123456789');
 
@@ -125,7 +130,7 @@ final class ClientVatSelfServiceTest extends DatabaseTestCase
             new NullGeoIpResolver(),
             new HookDispatcher(),
         );
-        $auth = new ClientAuthManager($this->clients, $bruteGuard);
+        $auth = new ClientAuthManager($this->clients, $bruteGuard, new SettingsRepository($this->db), new PhpassHasher());
 
         $result = $auth->register('noaddress@example.test', 'correct-horse-battery', 'No', 'Address', '127.0.0.1');
 
@@ -257,6 +262,10 @@ final class ClientVatSelfServiceTest extends DatabaseTestCase
             'email' => $client['email'],
             'first_name' => $client['first_name'],
             'last_name' => $client['last_name'],
+            'address1' => $client['address1'] ?: '1 Test Street',
+            'city' => $client['city'] ?: 'Lagos',
+            'postcode' => $client['postcode'] ?: '100001',
+            'phone' => $client['phone'] ?: '+2348000000000',
             'country' => $client['country'],
             'vat_number' => $client['vat_number'],
         ], $overrides);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Clients;
 
 use CodeVault\Security\BruteGuard;
+use CodeVault\Security\PhpassHasher;
 
 /**
  * Client-area registration/login. Reuses BruteGuard as-is (blueprint §5
@@ -18,7 +19,8 @@ final class ClientAuthManager
     public function __construct(
         private readonly ClientRepository $clients,
         private readonly BruteGuard $bruteGuard,
-        private readonly \CodeVault\Settings\SettingsRepository $settings
+        private readonly \CodeVault\Settings\SettingsRepository $settings,
+        private readonly PhpassHasher $phpass
     ) {
     }
 
@@ -71,8 +73,22 @@ final class ClientAuthManager
 
         $client = $this->clients->findByEmail($email);
 
-        if ($client === null || !password_verify($password, $client['password_hash'])) {
-            $this->bruteGuard->recordFailedAttempt($ip, $email, userExists: $client !== null);
+        if ($client === null) {
+            $this->bruteGuard->recordFailedAttempt($ip, $email, userExists: false);
+
+            return ClientAuthResult::invalid();
+        }
+
+        $passwordHash = (string) $client['password_hash'];
+
+        $passwordOk = $passwordHash !== '' && password_verify($password, $passwordHash);
+
+        if (!$passwordOk && $passwordHash !== '' && $this->phpass->isPhpassHash($passwordHash)) {
+            $passwordOk = $this->phpass->verify($password, $passwordHash);
+        }
+
+        if (!$passwordOk) {
+            $this->bruteGuard->recordFailedAttempt($ip, $email, userExists: true);
 
             return ClientAuthResult::invalid();
         }
@@ -82,6 +98,11 @@ final class ClientAuthManager
         }
 
         $this->bruteGuard->recordSuccessfulAttempt($ip, $email);
+
+        if ($this->phpass->isPhpassHash($passwordHash)) {
+            $this->clients->updatePassword((int) $client['id'], $password);
+            $client = $this->clients->find((int) $client['id']);
+        }
 
         $is2faGloballyEnabled = $this->settings->get('security.2fa_enabled', '1') === '1';
 

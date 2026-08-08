@@ -127,6 +127,7 @@ use CodeVault\Security\GeoIpResolver;
 use CodeVault\Security\IpRuleRepository;
 use CodeVault\Security\LoginAttemptRepository;
 use CodeVault\Security\NullGeoIpResolver;
+use CodeVault\Security\PhpassHasher;
 use CodeVault\Session\SessionManager;
 use CodeVault\Staff\RoleRepository;
 use CodeVault\Affiliates\AffiliateCommissionRepository;
@@ -428,7 +429,7 @@ class Kernel
         });
 
         $this->container->singleton(ClientAuthManager::class, function (Container $c) {
-            return new ClientAuthManager($c->make(ClientRepository::class), $c->make(BruteGuard::class), $c->make(SettingsRepository::class));
+            return new ClientAuthManager($c->make(ClientRepository::class), $c->make(BruteGuard::class), $c->make(SettingsRepository::class), new PhpassHasher());
         });
 
         $this->container->singleton(CustomFieldRepository::class, function (Container $c) {
