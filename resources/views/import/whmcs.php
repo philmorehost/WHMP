@@ -1,7 +1,9 @@
 <?php
 /** @var array{success: bool, message: string, imported: array<string, int>, errors: array<int, array{row: int, reason: string}>}|null $result */
+/** @var array{success: bool, message: string, matched: int, not_found: int, empty_remote: int, errors: array<int, array{row: int, reason: string}>}|null $syncResult */
 /** @var string|null $error */
 /** @var array<int, array<string, mixed>> $runs */
+$syncResult = $syncResult ?? null;
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">WHMCS Database Migrator</h1>
@@ -82,6 +84,63 @@
                     Make sure the WHMP server can reach the specified WHMCS database host. All imports run inside a safe local transaction.
                 </p>
                 <button id="submit-btn" class="cv-btn" type="submit" style="grid-column: 1 / -1;">Connect and Migrate</button>
+            </form>
+        </div>
+
+        <div class="cv-card" style="margin-bottom:var(--cv-space-4); border-top: 4px solid var(--cv-color-brand-500);">
+            <h2 class="cv-card__title">Sync Client Passwords Only</h2>
+            <p style="font-size:var(--cv-text-sm); color:var(--cv-text-secondary); margin-top:0;">
+                For clients already migrated from WHMCS. Connects to the WHMCS database, reads <strong>only</strong>
+                the client account table, and fills in the WHMCS password for any local account whose stored hash
+                is empty/unusable. Services, invoices, domains and all other data are left untouched, and accounts
+                that already have a working password are not overwritten.
+            </p>
+
+            <div id="sync-error" class="cv-field-error" style="display:none; margin-bottom:var(--cv-space-3);"></div>
+            <div id="sync-success" class="cv-badge cv-badge--success" style="display:none; padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);font-size:var(--cv-text-sm); width: 100%; box-sizing: border-box; text-align: center;"></div>
+
+            <?php if ($syncResult !== null): ?>
+                <?php if ($syncResult['success']): ?>
+                    <div class="cv-badge cv-badge--success" style="display:block; padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);font-size:var(--cv-text-sm); text-align:center;">
+                        <?= e($syncResult['message']) ?> — <?= (int) $syncResult['matched'] ?> restored, <?= (int) $syncResult['not_found'] ?> local account(s) with no WHMCS match, <?= (int) $syncResult['empty_remote'] ?> with an empty WHMCS password (given an unusable fallback).
+                    </div>
+                <?php else: ?>
+                    <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);">
+                        <?= e($syncResult['message']) ?>
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+
+            <form id="password-sync-form" method="post" action="/admin/import/whmcs/passwords" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:var(--cv-space-3);"><?= csrf_field() ?>
+                <div class="cv-field">
+                    <label class="cv-label">Database Host</label>
+                    <input class="cv-input" name="host" value="127.0.0.1" required>
+                </div>
+                <div class="cv-field">
+                    <label class="cv-label">Database Port</label>
+                    <input class="cv-input" type="number" name="port" value="3306" required>
+                </div>
+                <div class="cv-field">
+                    <label class="cv-label">Database Name</label>
+                    <input class="cv-input" name="database" placeholder="whmcs_db" required>
+                </div>
+                <div class="cv-field">
+                    <label class="cv-label">Database Username</label>
+                    <input class="cv-input" name="username" placeholder="root" required>
+                </div>
+                <div class="cv-field">
+                    <label class="cv-label">Database Password</label>
+                    <input class="cv-input" type="password" name="password" placeholder="••••••••">
+                </div>
+                <div class="cv-field">
+                    <label class="cv-label">Table Prefix (optional)</label>
+                    <input class="cv-input" name="prefix" placeholder="e.g. whmcs_" value="">
+                </div>
+
+                <p style="grid-column: 1 / -1;color:var(--cv-text-secondary);font-size:var(--cv-text-sm); margin-top:0;">
+                    Only local accounts with an empty password hash are updated. This does not run the full migration.
+                </p>
+                <button id="password-sync-btn" class="cv-btn" type="submit" style="grid-column: 1 / -1;">Sync Client Passwords</button>
             </form>
         </div>
     </div>

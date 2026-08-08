@@ -43,4 +43,12 @@ final class ImportRunRepository
             [$entityType]
         );
     }
+
+    /** @return array<int, array<string, mixed>> most recent WHMCS runs (full migrations + password syncs), newest first */
+    public function recentWhmcsRuns(int $limit = 20): array
+    {
+        return $this->db->select(
+            "SELECT * FROM import_runs WHERE entity_type IN ('whmcs', 'whmcs_password_sync') ORDER BY id DESC LIMIT " . max(1, min(100, $limit))
+        );
+    }
 }

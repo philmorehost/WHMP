@@ -171,6 +171,51 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $this->assertFalse(password_verify('anything', $nopass['password_hash']), 'the random fallback must be unguessable, forcing the forgot-password flow');
     }
 
+    public function test_sync_client_passwords_fills_only_empty_local_hashes(): void
+    {
+        // Remote WHMCS side — the accounts that hold the real passwords.
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, password, status, datecreated) VALUES (1, 'phpass@example.test', 'Php', 'Ass', '\$P\$9IQRaTwmfeRo7ud9Fh4E2PdI0S3r.L0', 'Active', '2020-01-01 00:00:00')");
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, password, status, datecreated) VALUES (2, 'bcrypt@example.test', 'Bc', 'Rypt', '\$2y\$10\$abcdefghijklmnopqrstuv.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', 'Active', '2020-01-01 00:00:00')");
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, password, status, datecreated) VALUES (3, 'emptyremote@example.test', 'Empty', 'Remote', '', 'Active', '2020-01-01 00:00:00')");
+        // A WHMCS account with no local counterpart — must be ignored, not create anything.
+        $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, password, status, datecreated) VALUES (4, 'ghost@example.test', 'Ghost', 'Account', '\$2y\$10\$abcdefghijklmnopqrstuv.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', 'Active', '2020-01-01 00:00:00')");
+
+        // Local side — the already-migrated clients.
+        $this->db->statement("INSERT INTO clients (email, password_hash, first_name, last_name, status, created_at, updated_at) VALUES ('phpass@example.test', '', 'Php', 'Ass', 'active', NOW(), NOW())");
+        $this->db->statement("INSERT INTO clients (email, password_hash, first_name, last_name, status, created_at, updated_at) VALUES ('bcrypt@example.test', '', 'Bc', 'Rypt', 'active', NOW(), NOW())");
+        $this->db->statement("INSERT INTO clients (email, password_hash, first_name, last_name, status, created_at, updated_at) VALUES ('emptyremote@example.test', '', 'Empty', 'Remote', 'active', NOW(), NOW())");
+        // A client who reset their password locally after migration — must be left alone.
+        $this->db->statement("INSERT INTO clients (email, password_hash, first_name, last_name, status, created_at, updated_at) VALUES ('working@example.test', '\$2y\$10\$localhashAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'Work', 'Ing', 'active', NOW(), NOW())");
+        // A local account with no WHMCS counterpart — counted as not_found.
+        $this->db->statement("INSERT INTO clients (email, password_hash, first_name, last_name, status, created_at, updated_at) VALUES ('localonly@example.test', '', 'Local', 'Only', 'active', NOW(), NOW())");
+
+        $result = $this->importer->syncClientPasswords($this->credentials());
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(3, $result['matched'], 'phpass, bcrypt and emptyremote all matched a local account');
+        $this->assertSame(1, $result['not_found'], 'localonly@example.test has no WHMCS counterpart');
+        $this->assertSame(1, $result['empty_remote'], 'emptyremote@example.test has no password in WHMCS');
+
+        $clients = new ClientRepository($this->db);
+
+        $phpass = $clients->findByEmail('phpass@example.test');
+        $this->assertSame('$P$9IQRaTwmfeRo7ud9Fh4E2PdI0S3r.L0', $phpass['password_hash'], 'the phpass hash must be copied verbatim so the PHPass fallback can verify it');
+
+        $bcrypt = $clients->findByEmail('bcrypt@example.test');
+        $this->assertSame('$2y$10$abcdefghijklmnopqrstuv.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', $bcrypt['password_hash'], 'the bcrypt hash must be copied verbatim');
+
+        $emptyRemote = $clients->findByEmail('emptyremote@example.test');
+        $this->assertNotEmpty($emptyRemote['password_hash']);
+        $this->assertNotSame('', $emptyRemote['password_hash']);
+        $this->assertFalse(password_verify('', $emptyRemote['password_hash']), 'a WHMCS account with no password must get an unusable fallback, forcing forgot-password');
+
+        $working = $clients->findByEmail('working@example.test');
+        $this->assertSame('$2y$10$localhashAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', $working['password_hash'], 'a client who already has a working hash must NOT be overwritten');
+
+        $localOnly = $clients->findByEmail('localonly@example.test');
+        $this->assertSame('', $localOnly['password_hash'], 'an account with no WHMCS match stays as-is');
+    }
+
     public function test_import_migrates_transactions_keyed_to_the_remapped_invoice(): void
     {
         $this->remote->exec("INSERT INTO tblclients (id, email, firstname, lastname, status, datecreated) VALUES (1, 'payer@example.test', 'Pay', 'Er', 'Active', '2020-01-01 00:00:00')");

@@ -29,7 +29,7 @@ final class WhmcsImportController
         return $this->render('import.whmcs', [
             'result' => null,
             'error' => null,
-            'runs' => $this->runs->recentByType('whmcs'),
+            'runs' => $this->runs->recentWhmcsRuns(),
         ]);
     }
 
@@ -76,7 +76,7 @@ final class WhmcsImportController
             return $this->render('import.whmcs', [
                 'result' => null,
                 'error' => 'Database name and username are required fields.',
-                'runs' => $this->runs->recentByType('whmcs'),
+                'runs' => $this->runs->recentWhmcsRuns(),
             ]);
         }
 
@@ -114,7 +114,7 @@ final class WhmcsImportController
             return $this->render('import.whmcs', [
                 'result' => $result,
                 'error' => null,
-                'runs' => $this->runs->recentByType('whmcs'),
+                'runs' => $this->runs->recentWhmcsRuns(),
             ]);
         } catch (\Throwable $e) {
             $logFile = dirname(__DIR__, 2) . '/storage/migration_error.log';
@@ -140,7 +140,103 @@ final class WhmcsImportController
             return $this->render('import.whmcs', [
                 'result' => null,
                 'error' => 'Migration failed with fatal error: ' . $e->getMessage(),
-                'runs' => $this->runs->recentByType('whmcs'),
+                'runs' => $this->runs->recentWhmcsRuns(),
+            ]);
+        }
+    }
+
+    public function syncPasswords(Request $request): Response
+    {
+        $isAjax = $request->header('X-Requested-With') === 'XMLHttpRequest' || $request->input('ajax') === '1';
+
+        if ($denied = $this->requirePermission()) {
+            if ($isAjax) {
+                return Response::json([
+                    'success' => false,
+                    'message' => 'Your admin session has expired or you lack permission to run imports. Log back in, reload the migrator page, and try again.',
+                ], 403);
+            }
+            return $denied;
+        }
+
+        $host = trim((string) $request->input('host', '127.0.0.1'));
+        $port = (int) $request->input('port', 3306);
+        $database = trim((string) $request->input('database', ''));
+        $username = trim((string) $request->input('username', ''));
+        $password = (string) $request->input('password', '');
+        $prefix = trim((string) $request->input('prefix', ''));
+        if (str_ends_with(strtolower($prefix), 'tbl')) {
+            $prefix = substr($prefix, 0, -3);
+        } elseif (str_ends_with(strtolower($prefix), 'tbl_')) {
+            $prefix = substr($prefix, 0, -4);
+        }
+
+        if ($database === '' || $username === '') {
+            if ($isAjax) {
+                return Response::json(['success' => false, 'message' => 'Database name and username are required fields.']);
+            }
+            return $this->render('import.whmcs', [
+                'result' => null,
+                'error' => 'Database name and username are required fields.',
+                'runs' => $this->runs->recentWhmcsRuns(),
+            ]);
+        }
+
+        session_write_close();
+
+        try {
+            $result = $this->importer->syncClientPasswords([
+                'host' => $host,
+                'port' => $port,
+                'database' => $database,
+                'username' => $username,
+                'password' => $password,
+                'prefix' => $prefix,
+            ]);
+
+            $adminId = (int) $this->guard->currentAdmin()['id'];
+            $this->runs->create(
+                $adminId,
+                'whmcs_password_sync',
+                "Password sync: {$database}",
+                $result['matched'] + $result['not_found'],
+                $result['matched'],
+                $result['not_found'],
+                $result['errors']
+            );
+
+            if ($isAjax) {
+                return Response::json($result);
+            }
+
+            return $this->render('import.whmcs', [
+                'result' => null,
+                'syncResult' => $result,
+                'error' => null,
+                'runs' => $this->runs->recentWhmcsRuns(),
+            ]);
+        } catch (\Throwable $e) {
+            $logFile = dirname(__DIR__, 2) . '/storage/migration_error.log';
+            file_put_contents($logFile, $e->getMessage() . "\n" . $e->getTraceAsString());
+
+            $errorResult = [
+                'success' => false,
+                'message' => 'Password sync failed: ' . $e->getMessage(),
+                'matched' => 0,
+                'not_found' => 0,
+                'empty_remote' => 0,
+                'errors' => [['row' => 0, 'reason' => $e->getMessage()]],
+            ];
+
+            if ($isAjax) {
+                return Response::json($errorResult);
+            }
+
+            return $this->render('import.whmcs', [
+                'result' => null,
+                'syncResult' => null,
+                'error' => 'Password sync failed: ' . $e->getMessage(),
+                'runs' => $this->runs->recentWhmcsRuns(),
             ]);
         }
     }

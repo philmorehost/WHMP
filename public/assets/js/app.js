@@ -1977,6 +1977,95 @@
         }
     });
 
+    // Password-only re-sync (import/whmcs.php). Unlike the full migration
+    // above this reads nothing but the remote client accounts table and
+    // only fills empty local password hashes — but it still goes over the
+    // network, so the same AJAX + error-mapping handling applies.
+    document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (form.id !== 'password-sync-form') {
+            return;
+        }
+
+        event.preventDefault();
+
+        var syncError = document.getElementById('sync-error');
+        var syncSuccess = document.getElementById('sync-success');
+        if (syncError) { syncError.style.display = 'none'; }
+        if (syncSuccess) { syncSuccess.style.display = 'none'; }
+
+        var formData = new FormData(form);
+        formData.append('ajax', '1');
+
+        var elements = form.elements;
+        for (var i = 0; i < elements.length; i++) {
+            elements[i].disabled = true;
+        }
+        var syncBtn = document.getElementById('password-sync-btn');
+        if (syncBtn) { syncBtn.innerText = 'Syncing...'; }
+
+        function reEnableForm() {
+            for (var j = 0; j < elements.length; j++) {
+                elements[j].disabled = false;
+            }
+            if (syncBtn) { syncBtn.innerText = 'Sync Client Passwords'; }
+        }
+
+        fetch('/admin/import/whmcs/passwords', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            redirect: 'manual',
+        })
+        .then(function (r) {
+            return r.text().then(function (body) {
+                return { status: r.status, type: r.type, body: body };
+            });
+        })
+        .then(function (resp) {
+            reEnableForm();
+
+            var data = null;
+            try { data = JSON.parse(resp.body); } catch (e) { data = null; }
+
+            if (data) {
+                if (data.success) {
+                    if (syncSuccess) {
+                        var detail = '';
+                        if (typeof data.matched === 'number' && typeof data.not_found === 'number') {
+                            detail = ' (' + data.matched + ' password(s) restored, ' + data.not_found + ' local account(s) had no matching WHMCS record)';
+                        }
+                        syncSuccess.innerText = (data.message || 'Password sync completed successfully!') + detail;
+                        syncSuccess.style.display = 'block';
+                    }
+                } else if (syncError) {
+                    syncError.innerText = data.message || 'Password sync failed.';
+                    syncError.style.display = 'block';
+                }
+                return;
+            }
+
+            if (!syncError) { return; }
+            if (resp.status === 403) {
+                syncError.innerText = 'Security check failed (403) — your session or CSRF token has expired. Reload this page to get a fresh token, then try the sync again. (Nothing was changed.)';
+            } else if (resp.status === 401 || resp.status === 419 || resp.type === 'opaqueredirect' || resp.status === 0) {
+                syncError.innerText = 'You appear to be logged out. Log back into the admin area, reload this page, then retry the sync. (Nothing was changed.)';
+            } else if (resp.status >= 500) {
+                syncError.innerText = 'The server hit a fatal error (HTTP ' + resp.status + ') before it could respond. Check storage/migration_error.log on the server for the exact cause.';
+            } else {
+                syncError.innerText = 'The server returned an unexpected response (HTTP ' + resp.status + '). Nothing was changed.';
+            }
+            syncError.style.display = 'block';
+        })
+        .catch(function () {
+            reEnableForm();
+            if (syncError) {
+                syncError.innerText = 'Lost connection to the server before it responded — the sync may still have completed server-side. Reload this page and check the recent imports table below.';
+                syncError.style.display = 'block';
+            }
+        });
+    });
+
     // Domain Spinner (domains/register.php) — asks /domains/spin for name
     // variations of whatever's typed in the search box against whichever
     // TLDs an admin enabled for the spinner. /domains/spin returns those

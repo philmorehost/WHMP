@@ -1373,6 +1373,126 @@ final class WhmcsImportService
     }
 
     /**
+     * Password-only re-sync for clients already imported from WHMCS.
+     *
+     * The full import copies `tblclients.password` into `clients.password_hash`,
+     * but WHMCS <= 7.x stores PHPass portable hashes ($P$...) that PHP's
+     * password_verify() cannot check — so those clients could never log in.
+     * This method does NOT re-import any services/invoices/etc.: it connects
+     * to the remote WHMCS database, reads ONLY `tblclients` (id, email,
+     * password), and for every local client whose password_hash is currently
+     * empty/unusable, copies the matching WHMCS hash by email (case-insensitive).
+     * Accounts that already have a working hash are left untouched.
+     *
+     * @param array{host: string, port: int, database: string, username: string, password: string, prefix: string} $credentials
+     * @return array{success: bool, message: string, matched: int, not_found: int, empty_remote: int, errors: array<int, array{row: int, reason: string}>}
+     */
+    public function syncClientPasswords(array $credentials): array
+    {
+        set_time_limit(0);
+        ini_set('memory_limit', '1024M');
+        ignore_user_abort(true);
+
+        $host = $credentials['host'];
+        $port = $credentials['port'];
+        $dbname = $credentials['database'];
+        $user = $credentials['username'];
+        $pass = $credentials['password'];
+        $prefix = $credentials['prefix'] ?? '';
+
+        $stats = ['matched' => 0, 'not_found' => 0, 'empty_remote' => 0];
+        $errors = [];
+
+        $fp = @fsockopen($host, (int)$port, $errno, $errstr, 3.0);
+        if (!$fp) {
+            return [
+                'success' => false,
+                'message' => "Could not connect to database port {$port} on host {$host} (timeout or firewall block).",
+                ...$stats,
+                'errors' => [['row' => 0, 'reason' => "Connection failed on port {$port}: {$errstr}"]],
+            ];
+        }
+        fclose($fp);
+
+        try {
+            $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
+            $remotePdo = new PDO($dsn, $user, $pass, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_TIMEOUT => 5,
+            ]);
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'message' => 'Failed to connect to the remote WHMCS database: ' . $e->getMessage(),
+                ...$stats,
+                'errors' => [['row' => 0, 'reason' => 'Connection failed: ' . $e->getMessage()]],
+            ];
+        }
+
+        try {
+            // Remote email => password hash, normalised exactly the way the
+            // clients import step does it (trim + lowercase) so the match key
+            // is identical between a full import and this re-sync.
+            $remotePasswords = [];
+            $whmcsClients = $remotePdo->query("SELECT id, email, password FROM {$prefix}tblclients")->fetchAll();
+            foreach ($whmcsClients as $row) {
+                $email = strtolower(trim((string) ($row['email'] ?? '')));
+                if ($email === '') {
+                    continue;
+                }
+                $remotePasswords[$email] = $row['password'];
+            }
+
+            // Only accounts whose stored hash is empty/unusable are candidates —
+            // a client who reset their password locally after migration keeps it.
+            $localClients = $this->db->select(
+                "SELECT id, email, password_hash FROM clients WHERE email != '' AND (password_hash IS NULL OR password_hash = '')"
+            );
+
+            $this->db->transaction(function () use ($localClients, $remotePasswords, &$stats, &$errors) {
+                foreach ($localClients as $local) {
+                    $email = strtolower(trim((string) $local['email']));
+
+                    if (!isset($remotePasswords[$email])) {
+                        $stats['not_found']++;
+                        continue;
+                    }
+
+                    $remoteHash = $remotePasswords[$email];
+                    if (!is_string($remoteHash) || $remoteHash === '') {
+                        // WHMCS itself has no password for this account — a
+                        // random unusable hash keeps the account secure and
+                        // forces the forgot-password flow to set a real one.
+                        $remoteHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
+                        $stats['empty_remote']++;
+                    }
+
+                    $this->db->update(
+                        'UPDATE clients SET password_hash = ?, updated_at = ? WHERE id = ?',
+                        [$remoteHash, (new DateTimeImmutable())->format('Y-m-d H:i:s'), (int) $local['id']]
+                    );
+                    $stats['matched']++;
+                }
+            });
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'message' => 'Password sync failed: ' . $e->getMessage(),
+                ...$stats,
+                'errors' => [['row' => 0, 'reason' => $e->getMessage()]],
+            ];
+        }
+
+        return [
+            'success' => true,
+            'message' => "Password sync complete: {$stats['matched']} account(s) updated.",
+            ...$stats,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
      * Matches a WHMCS registrar module directory name (tbldomainpricing.autoreg,
      * e.g. "enom", "resellerclub") against this app's registered registrars
      * by slug or display name. Returns null (rather than guessing) when
