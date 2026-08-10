@@ -319,6 +319,15 @@
                     <label class="cv-label">Sender From Name</label>
                     <input class="cv-input" type="text" name="smtp_from_name" value="<?= e($smtpFromName ?? '') ?>" placeholder="e.g. PhilmoreHost Support">
                 </div>
+
+                <div class="cv-field" style="grid-column:1 / -1;display:flex;align-items:flex-end;gap:var(--cv-space-3);flex-wrap:wrap;">
+                    <div style="flex:1;min-width:220px;">
+                        <label class="cv-label">Send Test Email To</label>
+                        <input class="cv-input" type="email" id="smtp-test-to" placeholder="you@example.com">
+                    </div>
+                    <button class="cv-btn" type="button" id="smtp-test-send" data-token="<?= e(csrf_token() ?? '') ?>" style="min-width:180px;">📨 Send Test Email</button>
+                    <span id="smtp-test-result" style="font-size:0.85rem;"></span>
+                </div>
             </div>
         </div>
 

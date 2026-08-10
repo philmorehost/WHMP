@@ -2732,4 +2732,56 @@
         var bannerId = banner.getAttribute('data-promo-banner-id');
         document.cookie = 'cv_promo_banner_dismissed_' + bannerId + '=1; max-age=86400; path=/; samesite=lax';
     });
+
+    // SMTP test-send on the General Settings screen: posts the recipient to
+    // /admin/settings/general/test-send and surfaces the transport's outcome
+    // inline, so an admin can confirm real SMTP delivery without digging
+    // through the email log.
+    var smtpTestButton = document.getElementById('smtp-test-send');
+    if (smtpTestButton) {
+        var smtpTestResult = document.getElementById('smtp-test-result');
+
+        smtpTestButton.addEventListener('click', function() {
+            var to = (document.getElementById('smtp-test-to') || {}).value || '';
+
+            if (!to) {
+                smtpTestResult.textContent = 'Enter a recipient email first.';
+                smtpTestResult.style.color = 'var(--cv-danger, #dc2626)';
+                return;
+            }
+
+            smtpTestButton.disabled = true;
+            smtpTestButton.textContent = 'Sending…';
+            smtpTestResult.textContent = '';
+            smtpTestResult.style.color = '';
+
+            var body = new URLSearchParams();
+            body.set('_token', smtpTestButton.getAttribute('data-token') || '');
+            body.set('to', to);
+
+            fetch('/admin/settings/general/test-send', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: body.toString(),
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data || !data.success) {
+                    smtpTestResult.textContent = (data && data.message) || 'Test email failed.';
+                    smtpTestResult.style.color = 'var(--cv-danger, #dc2626)';
+                    return;
+                }
+                smtpTestResult.textContent = data.message || 'Test email sent successfully.';
+                smtpTestResult.style.color = '#16a34a';
+            })
+            .catch(function () {
+                smtpTestResult.textContent = 'Could not reach the server to send the test email.';
+                smtpTestResult.style.color = 'var(--cv-danger, #dc2626)';
+            })
+            .then(function () {
+                smtpTestButton.disabled = false;
+                smtpTestButton.textContent = '📨 Send Test Email';
+            });
+        });
+    }
 })();

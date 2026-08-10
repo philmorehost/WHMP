@@ -11,3 +11,4 @@ $router->get('/admin/cron', [CronInfoController::class, 'index']);
 $router->post('/admin/cron/automation', [CronInfoController::class, 'update']);
 $router->get('/admin/settings/general', [GeneralSettingsController::class, 'index']);
 $router->post('/admin/settings/general', [GeneralSettingsController::class, 'update']);
+$router->post('/admin/settings/general/test-send', [GeneralSettingsController::class, 'sendTest']);

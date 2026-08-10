@@ -5,18 +5,21 @@ declare(strict_types=1);
 namespace CodeVault\Configuration;
 
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Mail\Mailer;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Settings\SettingsRepository;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
+use Throwable;
 
 final class GeneralSettingsController
 {
     public function __construct(
         private readonly AuthGuard $guard,
         private readonly View $view,
-        private readonly SettingsRepository $settings
+        private readonly SettingsRepository $settings,
+        private readonly Mailer $mailer
     ) {
     }
 
@@ -142,6 +145,45 @@ final class GeneralSettingsController
         $this->settings->set('smtp.from_name', trim((string) $request->input('smtp_from_name', '')));
 
         return Response::redirect('/admin/settings/general?saved=1');
+    }
+
+    /**
+     * Sends a real message through the configured SMTP transport so an admin
+     * can confirm delivery end-to-end from the settings screen — the same
+     * Mailer instance every notification, invoice and ticket email uses.
+     */
+    public function sendTest(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $to = trim((string) $request->input('to', ''));
+
+        if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            return Response::json(['success' => false, 'message' => 'Enter a valid recipient email address.'], 422);
+        }
+
+        $fromEmail = (string) $this->settings->get('smtp.from_email', '');
+        $fromName = (string) $this->settings->get('smtp.from_name', '');
+
+        $html = sprintf(
+            '<p>This is a test email from your billing system.</p>'
+            . '<p>It was sent through your configured SMTP server'
+            . ($fromEmail !== '' ? ' as <strong>%s</strong>' : '') . '.</p>'
+            . '<p>If you received this, the <strong>%s</strong> configuration is working correctly '
+            . 'and your inbox delivery settings are in place.</p>',
+            htmlspecialchars($fromEmail, ENT_QUOTES, 'UTF-8'),
+            htmlspecialchars(($fromName !== '' ? $fromName . ' / ' : '') . $fromEmail, ENT_QUOTES, 'UTF-8')
+        );
+
+        try {
+            $this->mailer->send($to, 'SMTP Connection Test', $html);
+        } catch (Throwable $e) {
+            return Response::json(['success' => false, 'message' => $e->getMessage()], 502);
+        }
+
+        return Response::json(['success' => true, 'message' => 'Test email sent successfully.']);
     }
 
     private function requirePermission(): ?Response
