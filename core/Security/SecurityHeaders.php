@@ -21,6 +21,24 @@ final class SecurityHeaders
     private static ?string $nonce = null;
 
     /**
+     * Whether the Tawk.To live-chat widget may load on this response.
+     *
+     * Only set when the tawk-to addon is active AND a widget code is saved
+     * AND the current page is in its target list (partials/tawk-widget.php).
+     * When true, script/connect sources for tawk.to are added to the CSP so
+     * the embed — an inline <script> that injects a loader from
+     * https://embed.tawk.to and talks to *.tawk.to over WebSocket — is
+     * allowed to run. Set from the widget partial, which renders before
+     * SecurityHeaders::apply() is called in Kernel::handle().
+     */
+    private static bool $allowTawkTo = false;
+
+    public static function setAllowTawkTo(bool $allowed): void
+    {
+        self::$allowTawkTo = $allowed;
+    }
+
+    /**
      * Per-request nonce for the app's own inline <script> blocks.
      *
      * Ten views still carried inline scripts (ticket filters, the invoice
@@ -45,6 +63,27 @@ final class SecurityHeaders
 
     public static function apply(Response $response): Response
     {
+        // merchant.payhub.com.ng is allowed as a script/frame/connect
+        // source so PayHub's inline checkout can load and run its popup.
+        // script-src deliberately does NOT carry 'unsafe-inline': the
+        // PayHub integration lives in app.js behind a [data-payhub-pay]
+        // delegated listener precisely so this stays locked down —
+        // re-adding it would silently re-enable every injected inline
+        // script across the app, which is what this class exists to stop.
+        //
+        // Tawk.To (the tawk-to addon's live-chat widget) is allowed only
+        // when the addon is actively rendering a widget on this page — the
+        // inline embed is nonce-stamped by the widget partial and the loader
+        // script + websocket origins are appended here. Off by default so a
+        // deactivated addon doesn't widen the surface at all.
+        $scriptSrc = "'self' 'nonce-" . self::nonce() . "' https://merchant.payhub.com.ng";
+        $connectSrc = "'self' https://merchant.payhub.com.ng";
+
+        if (self::$allowTawkTo) {
+            $scriptSrc .= " https://embed.tawk.to https://*.tawk.to";
+            $connectSrc .= " https://*.tawk.to wss://*.tawk.to";
+        }
+
         return $response
             ->withHeader('X-Content-Type-Options', 'nosniff')
             ->withHeader('X-Frame-Options', 'DENY')
@@ -52,15 +91,8 @@ final class SecurityHeaders
             ->withHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
             ->withHeader(
                 'Content-Security-Policy',
-                // merchant.payhub.com.ng is allowed as a script/frame/connect
-                // source so PayHub's inline checkout can load and run its popup.
-                // script-src deliberately does NOT carry 'unsafe-inline': the
-                // PayHub integration lives in app.js behind a [data-payhub-pay]
-                // delegated listener precisely so this stays locked down —
-                // re-adding it would silently re-enable every injected inline
-                // script across the app, which is what this class exists to stop.
-                "default-src 'self'; script-src 'self' 'nonce-" . self::nonce() . "' https://merchant.payhub.com.ng; style-src 'self' 'unsafe-inline'; "
-                . "img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://merchant.payhub.com.ng; "
+                "default-src 'self'; script-src {$scriptSrc}; style-src 'self' 'unsafe-inline'; "
+                . "img-src 'self' data: https:; font-src 'self'; connect-src {$connectSrc}; "
                 . "frame-src 'self' https://merchant.payhub.com.ng; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
             );
     }

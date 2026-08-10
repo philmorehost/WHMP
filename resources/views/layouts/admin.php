@@ -45,5 +45,6 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
         </main>
     </div>
 </div>
+<?= $view->partial('partials.tawk-widget') ?>
 </body>
 </html>

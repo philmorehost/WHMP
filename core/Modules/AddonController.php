@@ -77,10 +77,16 @@ final class AddonController
             return Response::html('404 Not Found — unknown addon', 404);
         }
 
+        $renderParams = (array) $request->input();
+        // Addons render their own settings forms, so they need the CSRF
+        // field for any POST they emit. Handed in rather than leaving the
+        // addon to reach for the container, which keeps render() unit-testable.
+        $renderParams['csrf_field'] = csrf_field();
+
         return $this->render('addons.show', [
             'slug' => $slug,
             'metadata' => $module->metadata(),
-            'output' => $module->render((array) $request->input()),
+            'output' => $module->render($renderParams),
         ]);
     }
 

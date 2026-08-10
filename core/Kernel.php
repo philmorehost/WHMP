@@ -82,6 +82,7 @@ use CodeVault\Modules\AddonModuleRepository;
 use CodeVault\Modules\AddonModuleService;
 use CodeVault\Modules\Addons\DomainChangerAddon;
 use CodeVault\Modules\Addons\SystemDiagnosticsAddon;
+use CodeVault\Modules\Addons\TawkToAddon;
 use CodeVault\Modules\GatewayModule;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
@@ -738,6 +739,7 @@ class Kernel
             $manager->register(FraudModule::class, 'deepseek', $c->make(DeepSeekFraudTriageModule::class));
             $manager->register(AddonModule::class, 'system-diagnostics', $c->make(SystemDiagnosticsAddon::class));
             $manager->register(AddonModule::class, 'domain-changer', $c->make(DomainChangerAddon::class));
+            $manager->register(AddonModule::class, 'tawk-to', $c->make(TawkToAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));
             $manager->register(SecurityQuestionModule::class, 'mother-maiden-name', $c->make(MotherMaidenNameQuestion::class));
@@ -810,6 +812,10 @@ class Kernel
 
         $this->container->singleton(DomainChangerAddon::class, function (Container $c) {
             return new DomainChangerAddon($c->make(Database::class));
+        });
+
+        $this->container->singleton(TawkToAddon::class, function (Container $c) {
+            return new TawkToAddon($c->make(AddonModuleRepository::class));
         });
 
         $this->container->singleton(Router::class, function (Container $c) {

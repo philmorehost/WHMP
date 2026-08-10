@@ -12,7 +12,9 @@ use CodeVault\Modules\AddonModule;
 use CodeVault\Modules\AddonModuleRepository;
 use CodeVault\Modules\AddonModuleService;
 use CodeVault\Modules\Addons\SystemDiagnosticsAddon;
+use CodeVault\Modules\Addons\TawkToAddon;
 use CodeVault\Modules\ModuleManager;
+use CodeVault\Marketing\TawkToPages;
 use CodeVault\Tests\Support\DatabaseTestCase;
 
 final class AddonModuleTest extends DatabaseTestCase
@@ -243,5 +245,65 @@ final class AddonModuleTest extends DatabaseTestCase
         $this->assertCount(20, $decoded);
         $this->assertSame('job-24', $decoded[array_key_last($decoded)]['job']);
         $this->assertSame('job-5', $decoded[0]['job']);
+    }
+
+    // --- TawkToPages ---------------------------------------------------------
+
+    public function test_tawk_page_resolver_maps_paths_to_keys(): void
+    {
+        $this->assertSame('home', TawkToPages::keyForPath('/'));
+        $this->assertSame('store', TawkToPages::keyForPath('/store'));
+        $this->assertSame('cart', TawkToPages::keyForPath('/cart'));
+        $this->assertSame('domains', TawkToPages::keyForPath('/domains/register'));
+        $this->assertSame('kb', TawkToPages::keyForPath('/kb'));
+        $this->assertSame('downloads', TawkToPages::keyForPath('/downloads'));
+        $this->assertSame('client', TawkToPages::keyForPath('/client/dashboard'));
+        $this->assertSame('admin', TawkToPages::keyForPath('/admin/addons/tawk-to'));
+    }
+
+    // --- TawkToAddon ---------------------------------------------------------
+
+    public function test_tawk_addon_render_offers_widget_code_and_all_pages_choices(): void
+    {
+        $addon = new TawkToAddon($this->repository);
+
+        $html = $addon->render(['csrf_field' => '<input type="hidden" name="_token" value="x">']);
+
+        $this->assertStringContainsString('Tawk.To embed code', $html);
+        $this->assertStringContainsString('value="all"', $html);
+        $this->assertStringContainsString('All pages', $html);
+        $this->assertStringContainsString('Save Settings', $html);
+    }
+
+    public function test_tawk_addon_render_saves_widget_code_and_pages(): void
+    {
+        $addon = new TawkToAddon($this->repository);
+
+        $html = $addon->render([
+            'csrf_field' => '<input type="hidden" name="_token" value="x">',
+            'save' => '1',
+            'widget_code' => '<script type="text/javascript">var Tawk_API = {};</script>',
+            'pages' => ['home', 'store'],
+        ]);
+
+        $config = $this->repository->getConfig('tawk-to');
+        $this->assertSame(['home', 'store'], $config['pages']);
+        $this->assertStringContainsString('var Tawk_API', $config['widget_code']);
+        $this->assertStringContainsString('settings saved', $html);
+    }
+
+    public function test_tawk_addon_render_all_pages_overrides_individual_selection(): void
+    {
+        $addon = new TawkToAddon($this->repository);
+
+        $addon->render([
+            'csrf_field' => '<input type="hidden" name="_token" value="x">',
+            'save' => '1',
+            'widget_code' => '<script>tawk();</script>',
+            'pages' => ['all', 'home'],
+        ]);
+
+        $config = $this->repository->getConfig('tawk-to');
+        $this->assertSame(['all'], $config['pages']);
     }
 }
