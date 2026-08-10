@@ -136,12 +136,12 @@ final class TawkToAddon implements AddonModule
         $widgetCodeEscaped = e($widgetCode);
 
         return $banner . $errorHtml . <<<HTML
-        <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-            <h2 class="cv-card__title">Chat Widget</h2>
-            {$currentCode}
-            <form method="post" action="/admin/addons/{$slug}">
-                {$csrf}
-                <input type="hidden" name="save" value="1">
+        <form method="post" action="/admin/addons/{$slug}">
+            {$csrf}
+            <input type="hidden" name="save" value="1">
+            <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+                <h2 class="cv-card__title">Chat Widget</h2>
+                {$currentCode}
                 <div class="cv-field">
                     <label class="cv-label">Tawk.To embed code</label>
                     <textarea class="cv-input" name="widget_code" rows="10" style="width:100%;font-family:monospace;font-size:var(--cv-text-xs);white-space:pre;" placeholder="&lt;!--Start of Tawk.to Script--&gt;&#10;&lt;script type=&quot;text/javascript&quot;&gt; ...">{$widgetCodeEscaped}</textarea>
@@ -149,13 +149,9 @@ final class TawkToAddon implements AddonModule
                         Paste the full snippet from <strong>Tawk.To Dashboard → Admin → Chat Widget → Get Code</strong>.
                     </p>
                 </div>
-            </form>
-        </div>
-        <div class="cv-card">
-            <h2 class="cv-card__title">Show the widget on</h2>
-            <form method="post" action="/admin/addons/{$slug}">
-                {$csrf}
-                <input type="hidden" name="save" value="1">
+            </div>
+            <div class="cv-card">
+                <h2 class="cv-card__title">Show the widget on</h2>
                 <label style="display:flex;align-items:center;gap:var(--cv-space-2);cursor:pointer;margin-bottom:var(--cv-space-2);font-weight:600;">
                     <input type="checkbox" name="pages[]" value="all"{$allChecked}> All pages (storefront, client area &amp; admin panel)
                 </label>
@@ -163,8 +159,8 @@ final class TawkToAddon implements AddonModule
                     {$pageCheckboxes}
                 </div>
                 <button class="cv-btn" type="submit">Save Settings</button>
-            </form>
-        </div>
+            </div>
+        </form>
         HTML;
     }
 }
