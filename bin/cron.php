@@ -11,6 +11,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use CodeVault\Backup\BackupCronJob;
+use CodeVault\Cart\AbandonedCartJob;
 use CodeVault\Billing\AutoChargeJob;
 use CodeVault\Billing\BillableItemInvoicingJob;
 use CodeVault\Billing\DunningJob;
@@ -69,6 +70,9 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));
     $scheduler->register($kernel->container->make(DataPruningJob::class));
     $scheduler->register($kernel->container->make(QuoteExpiryJob::class));
+    // Cart abandonment recovery — hourly so the idle threshold (default
+    // 2h) resolves within a reasonable window of a visitor leaving.
+    $scheduler->register($kernel->container->make(AbandonedCartJob::class));
 
     // Service lifecycle. Suspension runs before termination so a service
     // that becomes due for both in the same tick is suspended first, and

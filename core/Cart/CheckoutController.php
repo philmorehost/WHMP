@@ -49,7 +49,9 @@ final class CheckoutController
         private readonly LanguageSelection $languageSelection,
         private readonly DomainSettings $domainSettings,
         private readonly DomainPricingRepository $domainPricing,
-        private readonly DomainService $domainService
+        private readonly DomainService $domainService,
+        private readonly AbandonedCartRepository $abandonedCarts,
+        private readonly \CodeVault\Session\SessionManager $session
     ) {
     }
 
@@ -245,6 +247,8 @@ final class CheckoutController
             $this->cart->add($productId, $cycle, $selectedOptions, $quantity, $domainOptions, $serverOptions, $customFieldsInput);
         }
 
+        $this->persistCart();
+
         return Response::redirect('/cart');
     }
 
@@ -254,11 +258,19 @@ final class CheckoutController
         $client = $this->guard->currentClient();
         $currency = $this->currency->resolveEffective($client, $this->currencySelection->get());
 
+        // Refresh the snapshot timestamp whenever the cart page is viewed —
+        // a visitor actively reviewing their cart is not "abandoned", and
+        // without this the idle sweep would email someone mid-session.
+        $this->persistCart($client, $currency);
+
         return $this->page('cart.cart', [
             'priced' => $this->cartService->priced(),
             'loggedIn' => $this->guard->check(),
             'upsells' => $this->products->upsellProducts($inCart),
             'currency' => $currency,
+            'savedEmail' => (string) $this->session->get('cart_reminder_email', ''),
+            'error' => $request->query('error'),
+            'msg' => $request->query('msg'),
         ], [
             'currencies' => $this->currencies->all(),
             'selectedCurrency' => $currency,
@@ -268,6 +280,8 @@ final class CheckoutController
     public function removeFromCart(Request $request, array $params): Response
     {
         $this->cart->removeAt((int) $params['index']);
+
+        $this->persistCart();
 
         return Response::redirect('/cart');
     }
@@ -280,6 +294,8 @@ final class CheckoutController
             $this->cart->setPromoCode($code);
         }
 
+        $this->persistCart();
+
         return Response::redirect('/cart');
     }
 
@@ -287,7 +303,29 @@ final class CheckoutController
     {
         $this->cart->clearPromoCode();
 
+        $this->persistCart();
+
         return Response::redirect('/cart');
+    }
+
+    /**
+     * Guest cart-saver: captures an email so the abandoned-cart sweep has
+     * somewhere to send a recovery reminder even without a login. The email
+     * is stored in the session and folded into the persisted snapshot.
+     */
+    public function saveEmail(Request $request): Response
+    {
+        $email = trim((string) $request->input('email', ''));
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return Response::redirect('/cart?error=' . urlencode('Please enter a valid email address to save your cart.'));
+        }
+
+        $this->session->set('cart_reminder_email', $email);
+
+        $this->persistCart();
+
+        return Response::redirect('/cart?msg=' . urlencode('Thanks! We\'ll email you a reminder if you leave your cart behind.'));
     }
 
     public function checkout(Request $request): Response
@@ -333,7 +371,63 @@ final class CheckoutController
             ], $client);
         }
 
+        // Converted — stop the abandoned-cart sweep chasing this session.
+        if (session_id() !== '') {
+            try {
+                $this->abandonedCarts->markRecoveredBySession(session_id());
+            } catch (\Throwable) {
+                // Best-effort tracking.
+            }
+        }
+
         return Response::redirect("/client/invoices/{$result['invoiceId']}");
+    }
+
+    /**
+     * Snapshots the current session cart into abandoned_carts so the
+     * AbandonedCartJob has a persisted, timestamped record to sweep.
+     * Best-effort: persistence is an enhancement on top of the session
+     * cart, so a failure here must never break the shopping flow.
+     */
+    private function persistCart(?array $client = null, ?array $currency = null): void
+    {
+        try {
+            if (session_id() === '') {
+                return;
+            }
+
+            $items = $this->cart->items();
+
+            if ($items === []) {
+                // Nothing in the cart — drop any stale snapshot so a later
+                // empty sweep never emails about a cart that's been emptied.
+                $this->abandonedCarts->deleteBySession(session_id());
+
+                return;
+            }
+
+            $client ??= $this->guard->currentClient();
+            $currency ??= $this->currency->resolveEffective($client, $this->currencySelection->get());
+
+            $email = $client !== null && !empty($client['email'])
+                ? $client['email']
+                : (string) $this->session->get('cart_reminder_email', '');
+
+            $priced = $this->cartService->priced();
+
+            $this->abandonedCarts->upsertBySession(
+                session_id(),
+                $items,
+                $priced['lines'],
+                $priced['promoCode'],
+                (float) $priced['total'],
+                $client !== null ? (int) $client['id'] : null,
+                $email !== '' ? $email : null,
+                isset($currency['id']) ? (int) $currency['id'] : null
+            );
+        } catch (\Throwable) {
+            // Never block checkout over a tracking snapshot.
+        }
     }
 
     /**

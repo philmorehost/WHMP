@@ -517,6 +517,10 @@ $cpanelTabs = [
                     <?php endif; ?>
 
                     <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
+                        <a class="svc-btn svc-btn--secondary" href="/client/services/<?= $id ?>/upgrade" style="text-decoration:none;">⇅ Upgrade / Downgrade</a>
+                    <?php endif; ?>
+
+                    <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
                         <form method="post" action="/client/services/<?= $id ?>/cancel-request" style="margin:0;" data-confirm="Are you sure you want to request cancellation for this service?">
                             <?= csrf_field() ?>
                             <input type="hidden" name="type" value="end_of_period">

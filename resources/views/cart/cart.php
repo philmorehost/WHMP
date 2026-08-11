@@ -75,6 +75,14 @@
     font-size: .95rem;
 }
 
+/* Success Alert */
+.alert--success {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(16, 185, 129, 0.04));
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: var(--cv-color-success-600, #059669);
+}
+
+
 /* Grid Layout */
 .checkout-grid {
     display: grid;
@@ -444,6 +452,66 @@
     background: var(--cv-border-default);
 }
 
+/* Cart Save (guest email capture) */
+.cart-save-form {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px dashed var(--cv-border-default);
+    text-align: left;
+}
+.cart-save-form__label {
+    color: var(--cv-text-secondary);
+    font-size: .85rem;
+    line-height: 1.5;
+    margin: 0 0 12px 0;
+}
+.cart-save-form__row {
+    display: flex;
+    gap: 8px;
+}
+.cart-save-form__row input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--cv-border-default);
+    border-radius: 8px;
+    font-size: .85rem;
+    background: var(--cv-bg-surface-sunken);
+    color: var(--cv-text-primary);
+    font-family: inherit;
+}
+.cart-save-form__row input:focus {
+    outline: none;
+    border-color: var(--cv-color-brand-500);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.cart-save-form__row button {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    font-weight: 600;
+    font-size: .85rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+.cart-save-form__row button:hover {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    transform: translateY(-1px);
+}
+.cart-save-form__saved {
+    margin: 24px 0 0;
+    padding-top: 20px;
+    border-top: 1px dashed var(--cv-border-default);
+    color: var(--cv-text-secondary);
+    font-size: .85rem;
+    line-height: 1.5;
+    text-align: left;
+}
+
+
 /* Empty State */
 .empty-state {
     text-align: center;
@@ -522,6 +590,13 @@
     <?php if (!empty($error)): ?>
         <div class="alert">
             <?= $error ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- Success Alert (e.g. cart saved for a reminder) -->
+    <?php if (!empty($msg)): ?>
+        <div class="alert alert--success">
+            <?= e($msg) ?>
         </div>
     <?php endif; ?>
 
@@ -701,6 +776,19 @@
                                     <a href="/client/login" class="auth-btn auth-btn--primary">Sign In</a>
                                     <a href="/client/register" class="auth-btn auth-btn--secondary">Create Account</a>
                                 </div>
+
+                                <?php if (empty($savedEmail)): ?>
+                                    <form method="post" action="/cart/save-email" class="cart-save-form">
+                                        <?= csrf_field() ?>
+                                        <p class="cart-save-form__label">🌱 Don't want to sign up yet? Enter your email and we'll save your cart &amp; send a reminder if you leave.</p>
+                                        <div class="cart-save-form__row">
+                                            <input type="email" name="email" placeholder="you@example.com" required>
+                                            <button type="submit">Save My Cart</button>
+                                        </div>
+                                    </form>
+                                <?php else: ?>
+                                    <p class="cart-save-form__saved">✓ Cart saved — we'll email <strong><?= e($savedEmail) ?></strong> a reminder if you leave it behind.</p>
+                                <?php endif; ?>
                             </div>
                         <?php endif; ?>
                     </div>

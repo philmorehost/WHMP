@@ -13,4 +13,5 @@ $router->get('/cart', [CheckoutController::class, 'cart']);
 $router->post('/cart/remove/{index}', [CheckoutController::class, 'removeFromCart']);
 $router->post('/cart/apply-promo', [CheckoutController::class, 'applyPromo']);
 $router->post('/cart/remove-promo', [CheckoutController::class, 'removePromo']);
+$router->post('/cart/save-email', [CheckoutController::class, 'saveEmail']);
 $router->post('/cart/checkout', [CheckoutController::class, 'checkout']);

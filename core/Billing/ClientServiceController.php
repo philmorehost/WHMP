@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace CodeVault\Billing;
 
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Catalog\ProductPricingRepository;
+use CodeVault\Catalog\ProductRepository;
 use CodeVault\Database;
 use CodeVault\Modules\AddonModuleRepository;
 use CodeVault\Provisioning\ProvisioningService;
@@ -52,7 +54,10 @@ final class ClientServiceController
         private readonly TicketService $tickets,
         private readonly DepartmentRepository $departments,
         private readonly AddonModuleRepository $addons,
-        private readonly Database $db
+        private readonly Database $db,
+        private readonly ProductRepository $products,
+        private readonly ProductPricingRepository $pricing,
+        private readonly ProrationService $proration
     ) {
     }
 
@@ -115,6 +120,138 @@ final class ClientServiceController
             $request->query('msg') !== null ? (string) $request->query('msg') : null,
             $request->query('err') !== null ? (string) $request->query('err') : null
         );
+    }
+
+    /**
+     * Upgrade/downgrade form (blueprint §4.4 "Upgrade/Downgrade engine").
+     *
+     * Only active services can be changed, and the candidate list is
+     * deliberately scoped to the service's own product group — a shared
+     * hosting client sees other shared plans, not VPS boxes. Candidates are
+     * only those with a price for the service's current billing cycle
+     * (ProrationService::upgrade() reads exactly that price row).
+     *
+     * @return array<int, array<string, mixed>> candidate products with their cycle price
+     */
+    private function upgradeCandidates(array $service): array
+    {
+        $current = $this->products->find((int) $service['product_id']);
+        $groupId = $current !== null ? (int) ($current['product_group_id'] ?? 0) : 0;
+
+        if ($groupId <= 0) {
+            return [];
+        }
+
+        $candidates = [];
+        foreach ($this->products->forGroup($groupId, includeHidden: false) as $product) {
+            if ((int) $product['id'] === (int) $service['product_id']) {
+                continue;
+            }
+
+            $price = $this->pricing->find((int) $product['id'], (string) $service['billing_cycle']);
+
+            if ($price !== null) {
+                $product['cycle_price'] = (float) $price['price'];
+                $candidates[] = $product;
+            }
+        }
+
+        return $candidates;
+    }
+
+    public function upgradeForm(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        if ($service['status'] !== 'active') {
+            return $this->back((int) $service['id'], null, 'Only an active service can be upgraded or downgraded.');
+        }
+
+        $candidates = $this->upgradeCandidates($service);
+
+        if ($candidates === []) {
+            return $this->back((int) $service['id'], null, 'There are no other plans available to upgrade to at this time.');
+        }
+
+        $content = $this->view->render('billing.client-service-upgrade', [
+            'service' => $service,
+            'candidates' => $candidates,
+            'modes' => ProrationMode::labels(),
+            'currency' => $this->currency->resolveForClient($client),
+            'formattedAmount' => ($this->currency->resolveForClient($client)['symbol'] ?? '$') . number_format((float) ($service['amount'] ?? 0), 2),
+        ]);
+
+        return Response::html($this->view->render('layouts.client', [
+            'title' => 'Upgrade / Downgrade — ' . $service['product_name'],
+            'content' => $content,
+        ]));
+    }
+
+    public function upgrade(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        if ($service['status'] !== 'active') {
+            return $this->back((int) $service['id'], null, 'Only an active service can be upgraded or downgraded.');
+        }
+
+        $newProductId = (int) $request->input('product_id', 0);
+        $mode = (string) $request->input('proration_mode', ProrationMode::NONE);
+
+        if (!array_key_exists($mode, ProrationMode::labels())) {
+            return $this->back((int) $service['id'], null, 'Invalid proration option.');
+        }
+
+        $product = $this->products->find($newProductId);
+        $priceRow = $product !== null ? $this->pricing->find($newProductId, (string) $service['billing_cycle']) : null;
+
+        // Guard against a client submitting an arbitrary product_id — the
+        // target must be in the same group as the current plan, with a price
+        // for the current cycle, and not the current plan itself.
+        $candidate = $this->products->find((int) $service['product_id']);
+        $groupId = $candidate !== null ? (int) ($candidate['product_group_id'] ?? 0) : 0;
+        $isValidTarget = $product !== null
+            && (int) $product['id'] !== (int) $service['product_id']
+            && (int) ($product['product_group_id'] ?? 0) === $groupId
+            && $priceRow !== null;
+
+        if (!$isValidTarget) {
+            return $this->back((int) $service['id'], null, 'That plan is not available to switch to.');
+        }
+
+        $result = $this->proration->upgrade($id = (int) $service['id'], $newProductId, $product['name'], (float) $priceRow['price'], $mode);
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'service.upgraded',
+            'service',
+            $id,
+            "Client upgraded service #{$id} to \"{$product['name']}\" ({$mode}): charge \${$result['chargeAmount']}, credit \${$result['creditAmount']}",
+            $request->ip()
+        );
+
+        $message = "Service switched to \"{$product['name']}\".";
+        if ((float) $result['chargeAmount'] > 0) {
+            $invoiceId = (int) ($result['invoiceId'] ?? 0);
+            $message .= ' A charge of ' . ($this->currency->resolveForClient($client)['symbol'] ?? '$')
+                . number_format((float) $result['chargeAmount'], 2)
+                . ($invoiceId > 0 ? " has been added to invoice #{$invoiceId}." : ' will be added to your next invoice.');
+        }
+        if ((float) $result['creditAmount'] > 0) {
+            $message .= ' A credit of ' . ($this->currency->resolveForClient($client)['symbol'] ?? '$')
+                . number_format((float) $result['creditAmount'], 2) . ' was added to your account.';
+        }
+
+        return $this->back($id, $message);
     }
 
     public function sso(Request $request, array $params): Response

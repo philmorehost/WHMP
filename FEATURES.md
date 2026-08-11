@@ -52,6 +52,8 @@ Generated from the live codebase.
 - **Product catalog** — products organized into groups, with per-billing-cycle pricing.
 - **Configurable options** — add-ons and tiered choices with their own pricing per option.
 - **Shopping cart & checkout** — guest-friendly session cart, promo codes, full checkout flow.
+- **Abandoned-cart recovery** 🆕 — carts are snapshotted to the DB on every change and an hourly sweep emails a reminder with a direct checkout link (guest email opt-in on the cart page; one reminder per cart by default).
+- **Client-side upgrade / downgrade** 🆕 — clients switch plans from their service page; pricing prorated (none / full credit / prorata) with charge/credit invoiced automatically.
 - **Order management** — orders with items, admin review, cancel, and status tracking.
 - **Fraud triage** 🤖 — rule-based scoring plus optional AI risk analysis at order time.
 - **Direct order links** — shareable per-product purchase URLs, WHMCS-style.
@@ -106,6 +108,7 @@ Generated from the live codebase.
 
 - **Staff & roles** — admin accounts with granular role-based permissions.
 - **Dashboard & reports** — revenue, client, and operational reporting for admins.
+- **AI Insights widget** 🤖🆕 — a dashboard card that summarizes income, new clients, pending orders, overdue totals, open tickets, and renewals in plain language from the configured AI provider (cached hourly; falls back to live figures offline).
 - **Activity log** — audit trail of admin and client actions.
 - **Theme & branding** — brand name, logo, accent color, and Terms-of-Service URL.
 - **Email templates** — editable transactional templates with a delivery log.

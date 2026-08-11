@@ -155,6 +155,7 @@ use CodeVault\Modules\FraudModule;
 use CodeVault\Knowledgebase\KbArticleRepository;
 use CodeVault\Reports\ReportRepository;
 use CodeVault\Reports\ServiceChurnReport;
+use CodeVault\Reports\AiInsightsWidget;
 use CodeVault\Reports\TopClientsWidget;
 use CodeVault\Security\MotherMaidenNameQuestion;
 use CodeVault\Cache\ArrayCache;
@@ -753,6 +754,7 @@ class Kernel
             $manager->register(AddonModule::class, 'domain-changer', $c->make(DomainChangerAddon::class));
             $manager->register(AddonModule::class, 'tawk-to', $c->make(TawkToAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
+            $manager->register(WidgetModule::class, 'ai-insights', $c->make(AiInsightsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));
             $manager->register(SecurityQuestionModule::class, 'mother-maiden-name', $c->make(MotherMaidenNameQuestion::class));
             $manager->register(NotificationModule::class, 'discord', $c->make(DiscordNotificationModule::class));
