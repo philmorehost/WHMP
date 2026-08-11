@@ -41,8 +41,10 @@ Generated from the live codebase.
 - **Sub-contacts** — additional contacts per account with granular permissions.
 - **Client groups** — segment clients for pricing, filtering, and bulk actions.
 - **Custom fields** — admin-defined fields on clients and on individual services/products.
-- **Account security** — security questions, login-attempt lockouts, per-account locks.
+- **Account security** — security questions, login-attempt lockouts, per-account locks, **scan-to-setup 2FA QR codes** 🆕.
 - **Saved payment methods** 🆕 — clients save and manage cards for automatic renewals.
+- **My Emails** 🆕 — clients see every email we've sent them (invoices, renewals, tickets), with delivery status.
+- **Add Funds** 🆕 — clients top up their wallet balance and pay the deposit invoice online.
 - **Login as client** — admins impersonate a client for support without their password.
 
 ## Products, Cart & Orders
@@ -80,7 +82,7 @@ Generated from the live codebase.
 - **Escalation & auto-close** ⏱ — SLA escalation and automatic closing of idle resolved tickets.
 - **Knowledgebase** 🤖 — categorized help articles with AI-assisted search.
 - **Network status** — public status page and network-issue announcements.
-- **Announcements & downloads** — news posts and a categorized client download library.
+- **Announcements & downloads** — news posts and a categorized client download library, plus an **RSS feed** 🆕 (`/announcements.rss`) so subscribers can follow updates in their reader.
 
 ## AI Copilot (DeepSeek-powered)
 
@@ -119,7 +121,8 @@ Generated from the live codebase.
 - **WHMCS import** — full migration of clients, services, domains, invoices, and more from WHMCS.
 - **Backups** ⏱ — scheduled database backups with run history.
 - **GDPR tools** ⏱ — client data export, erasure requests, and automated data pruning.
-- **REST API** — Bearer-authenticated API for external integrations.
+- **REST API** 🆕 — real, scoped API: Bearer-authenticated (`key.secret`) with per-credential permissions. Read clients/invoices/services/domains/tickets, create invoices, reply to tickets. Managed at **Admin → API Credentials** (settings.manage).
+- **Health endpoint** 🆕 — `GET /health` returns JSON liveness/DB status for uptime monitors, and stays up during maintenance mode.
 - **Licensing & integrity** ⏱ — activation-key validation and scheduled integrity checks.
 - **Framework** — custom PHP MVC: DI container, router, hooks, module manager, PDF engine, Redis/file sessions & queue.
 - **Guided installer** — multi-step setup: requirements, database, admin account, and lock.

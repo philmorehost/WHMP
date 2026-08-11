@@ -1,6 +1,7 @@
 <?php
 /** @var string $secret */
 /** @var string $provisioningUri */
+/** @var string $qrSvg SVG markup for the provisioning URI */
 /** @var array<int, string>|null $recoveryCodes */
 /** @var string|null $error */
 $formattedSecret = implode(' ', str_split($secret, 4));
@@ -17,10 +18,13 @@ $formattedSecret = implode(' ', str_split($secret, 4));
 <?php endif; ?>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h2 class="cv-card__title" style="font-size:var(--cv-text-md);">1. Add to your authenticator app</h2>
-    <p style="color:var(--cv-text-secondary);">Add a new account in your authenticator app (Google Authenticator, Authy, 1Password, ...) using this key:</p>
-    <p style="font-family:monospace;font-size:var(--cv-text-lg);letter-spacing:0.1em;background:var(--cv-color-brand-50);padding:var(--cv-space-3);border-radius:var(--cv-radius-sm);"><?= e($formattedSecret) ?></p>
-    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);">Or, if your app supports importing a link directly: <code style="word-break:break-all;"><?= e($provisioningUri) ?></code></p>
+    <h2 class="cv-card__title" style="font-size:var(--cv-text-md);">1. Scan with your authenticator app</h2>
+    <p style="color:var(--cv-text-secondary);">Open Google Authenticator, Authy, 1Password or another TOTP app and scan this code — it contains everything the app needs, so no manual entry is required:</p>
+    <div style="text-align:center;margin:var(--cv-space-3) 0;background:var(--cv-bg-surface-sunken, #f8fafc);border:1px solid var(--cv-border-default);border-radius:var(--cv-radius-md);padding:var(--cv-space-4);display:inline-block;width:100%;">
+        <img src="data:image/svg+xml;base64,<?= e(base64_encode($qrSvg)) ?>" alt="Two-factor authentication QR code" style="width:min(100%, 220px);height:auto;display:block;margin:0 auto;">
+    </div>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);">If scanning doesn't work, enter this key manually:</p>
+    <p style="font-family:monospace;font-size:var(--cv-text-lg);letter-spacing:0.1em;background:var(--cv-color-brand-50);padding:var(--cv-space-3);border-radius:var(--cv-radius-sm);margin-bottom:0;"><?= e($formattedSecret) ?></p>
 </div>
 
 <?php if ($recoveryCodes !== null): ?>

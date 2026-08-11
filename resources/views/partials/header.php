@@ -87,6 +87,7 @@ try {
         <a href="/domains/register">Register New Domain</a>
         <a href="/domains/transfer">Transfer a Domain</a>
         <a href="/client/invoices">Billing</a>
+        <a href="/client/emails">My Emails</a>
         <a href="/client/payment-methods">Payment Methods</a>
         <a href="/client/tickets">Support</a>
     </nav>

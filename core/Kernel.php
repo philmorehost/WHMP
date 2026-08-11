@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace CodeVault;
 
 use CodeVault\Activity\ActivityLogger;
+use CodeVault\Api\ApiAuthenticator;
+use CodeVault\Api\ApiCredentialRepository;
+use CodeVault\Api\DatabaseApiCredentialRepository;
 use CodeVault\Auth\AdminRepository;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Auth\AuthManager;
@@ -294,6 +297,15 @@ class Kernel
         });
 
         $this->container->singleton(IntegrityHttpClient::class, fn () => new CurlIntegrityHttpClient());
+
+        // External REST API: bind the ApiCredentialRepository interface to the
+        // DB-backed implementation so ApiAuthenticator can resolve it (the
+        // interface existed since R0 but had no implementation — /api/* could
+        // never authenticate, which is why only /api/ping existed).
+        $this->container->singleton(
+            ApiCredentialRepository::class,
+            fn (Container $c) => new DatabaseApiCredentialRepository($c->make(Database::class))
+        );
 
         $this->container->singleton(IntegrityManager::class, function (Container $c) use ($basePath) {
             /** @var Config $config */
@@ -1504,8 +1516,22 @@ class Kernel
                 $settingsRepo = $this->container->make(\CodeVault\Settings\SettingsRepository::class);
                 if ($settingsRepo->get('system.maintenance_mode', '0') === '1') {
                     $path = $request->path();
-                    if (!str_starts_with($path, '/admin') && !str_starts_with($path, '/login') && !str_starts_with($path, '/assets')) {
-                        return Response::html('<!DOCTYPE html><html><head><title>Maintenance Mode</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#e2e8f0;}h1{color:#f59e0b;}</style></head><body><h1>🛠️ System Maintenance</h1><p>We are currently performing scheduled maintenance. Please check back shortly.</p></body></html>', 530);
+                    if (!str_starts_with($path, '/admin') && !str_starts_with($path, '/login') && !str_starts_with($path, '/assets') && $path !== '/health') {
+                        // Themed page when the view layer can render it; a
+                        // minimal inline fallback if it cannot (the DB is
+                        // down mid-bootstrap, a theme setting is corrupt,
+                        // etc). Either way the response is fail-closed —
+                        // maintenance mode must never silently let visitors
+                        // through because the fancy page failed to build.
+                        try {
+                            $body = $this->container->make(View::class)->render('errors.maintenance');
+                        } catch (\Throwable) {
+                            $body = '<!DOCTYPE html><html><head><title>Maintenance Mode</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#e2e8f0;}h1{color:#f59e0b;}</style></head><body><h1>🛠️ System Maintenance</h1><p>We are currently performing scheduled maintenance. Please check back shortly.</p></body></html>';
+                        }
+
+                        return (new Response($body, 530))
+                            ->withHeader('Retry-After', '3600')
+                            ->withHeader('Cache-Control', 'no-store');
                     }
                 }
             } catch (\Throwable) {

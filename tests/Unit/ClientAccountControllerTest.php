@@ -173,6 +173,12 @@ final class ClientAccountControllerTest extends DatabaseTestCase
 
         $this->assertSame(200, $response->status());
 
+        // The setup page now embeds a scannable QR for the provisioning URI.
+        $this->assertStringContainsString('data:image/svg+xml;base64,', $response->body());
+        $this->assertStringContainsString('<svg', base64_decode(
+            explode('data:image/svg+xml;base64,', $response->body())[1]
+        ));
+
         $client = $this->clients->find($this->clientId);
         $this->assertNotNull($client['two_factor_secret']);
         $this->assertSame(0, (int) $client['two_factor_enabled']);

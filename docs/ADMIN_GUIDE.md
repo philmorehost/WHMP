@@ -38,6 +38,29 @@ Lifecycle emails run automatically via cron — currently just the service renew
 
 **Admin → Backups.** "Run Backup Now" triggers an immediate full DB dump (plain SQL, no `mysqldump` dependency) + a zip of the application files, saved to `storage/backups/`. Also runs automatically once a day via cron. The history table shows status/size/duration for every run, including failures with the error message.
 
+## API credentials & the external API
+
+**Admin → API Credentials** (requires `settings.manage`). Issue a scoped key/secret pair for the external REST API under `/api/*`:
+
+- Each credential carries its own **scopes** (e.g. `clients.read`, `invoices.write`, `tickets.read`), so an integration only sees what you grant it. A credential with no matching scope gets a clear 401.
+- The plaintext secret is shown **once**, at creation — only its Argon2id hash is stored, so it can't be recovered later. Copy it down immediately.
+- Authenticate every request with `Authorization: Bearer <key>.<secret>`. Credentials are validated per request; deactivating one immediately cuts off every integration using it.
+
+Available endpoints (all JSON, wrapped in `{status, data}`):
+
+| Method | Path | Scope |
+|---|---|---|
+| GET | `/api/clients` / `/api/clients/{id}` | `clients.read` |
+| GET | `/api/invoices` / `/api/invoices/{id}` | `invoices.read` |
+| POST | `/api/invoices` (create from line items) | `invoices.write` |
+| GET | `/api/services` | `services.read` |
+| GET | `/api/domains` | `domains.read` |
+| GET | `/api/tickets` | `tickets.read` |
+| POST | `/api/tickets/{id}/reply` | `tickets.write` |
+| GET | `/api/ping` | none (public liveness probe) |
+
+**Uptime monitoring:** `GET /health` returns `{"status":"ok","database":"ok",...}` (200 when healthy, 503 when the DB is unreachable) and deliberately stays up during maintenance mode, so a monitor can tell "maintenance" apart from "down".
+
 ## Support
 
 - **Tickets** — auto-escalate and auto-close on configurable timers (cron-driven); a resolved ticket can convert to a billable item.

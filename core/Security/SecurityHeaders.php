@@ -78,8 +78,15 @@ final class SecurityHeaders
         // deactivated addon doesn't widen the surface at all.
         $scriptSrc = "'self' 'nonce-" . self::nonce() . "' https://merchant.payhub.com.ng";
         $connectSrc = "'self' https://merchant.payhub.com.ng";
-        $styleSrc = "'self' 'unsafe-inline'";
-        $fontSrc = "'self'";
+        // Google Fonts is loaded by every layout (client/admin/installer,
+        // via <link preconnect> + stylesheet) and the 404 page. The
+        // stylesheet comes from fonts.googleapis.com (style-src), the font
+        // files from fonts.gstatic.com (font-src), and the <link
+        // rel="preconnect"> hints need both origins in connect-src or the
+        // browser won't open the early connection.
+        $styleSrc = "'self' 'unsafe-inline' https://fonts.googleapis.com";
+        $fontSrc = "'self' https://fonts.gstatic.com";
+        $connectSrc .= " https://fonts.googleapis.com https://fonts.gstatic.com";
 
         if (self::$allowTawkTo) {
             $scriptSrc .= " https://embed.tawk.to https://*.tawk.to";

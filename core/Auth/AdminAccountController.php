@@ -7,6 +7,7 @@ namespace CodeVault\Auth;
 use CodeVault\Config;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Security\QrCode;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
 use CodeVault\View;
@@ -56,12 +57,17 @@ final class AdminAccountController
 
         $secret = $this->totp->generateSecret();
         $plainCodes = $this->recoveryCodes->generate();
+        $provisioningUri = $this->totp->provisioningUri($secret, (string) $admin['email'], (string) $this->config->env('APP_NAME', 'CodeVault'));
 
         $this->admins->pendingTwoFactorSecret((int) $admin['id'], $secret, $this->recoveryCodes->hashForStorage($plainCodes));
 
         return $this->page('auth.account-security-setup', [
             'secret' => $secret,
-            'provisioningUri' => $this->totp->provisioningUri($secret, (string) $admin['email'], (string) $this->config->env('APP_NAME', 'CodeVault')),
+            'provisioningUri' => $provisioningUri,
+            // QR rendered in the controller (not the template) so the encoder
+            // runs once per request; embedded as a data: URI under the app's
+            // img-src data: CSP rule.
+            'qrSvg' => QrCode::svg($provisioningUri),
             'recoveryCodes' => $plainCodes,
             'error' => null,
         ]);
@@ -82,9 +88,12 @@ final class AdminAccountController
         $code = trim((string) $request->input('code', ''));
 
         if (!$this->totp->verify((string) $admin['two_factor_secret'], $code)) {
+            $provisioningUri = $this->totp->provisioningUri((string) $admin['two_factor_secret'], (string) $admin['email'], (string) $this->config->env('APP_NAME', 'CodeVault'));
+
             return $this->page('auth.account-security-setup', [
                 'secret' => $admin['two_factor_secret'],
-                'provisioningUri' => $this->totp->provisioningUri((string) $admin['two_factor_secret'], (string) $admin['email'], (string) $this->config->env('APP_NAME', 'CodeVault')),
+                'provisioningUri' => $provisioningUri,
+                'qrSvg' => QrCode::svg($provisioningUri),
                 'recoveryCodes' => null,
                 'error' => 'That code did not verify — check the time on your device and try again.',
             ]);

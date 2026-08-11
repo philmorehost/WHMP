@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use CodeVault\Billing\PaymentMethodController;
 use CodeVault\Clients\ClientAccountController;
+use CodeVault\Mail\ClientEmailLogController;
 
 /** @var CodeVault\Router $router */
+
+$router->get('/client/emails', [ClientEmailLogController::class, 'index']);
 
 $router->get('/client/payment-methods', [PaymentMethodController::class, 'index']);
 $router->post('/client/payment-methods/{id}/default', [PaymentMethodController::class, 'setDefault']);

@@ -12,6 +12,7 @@ use CodeVault\Modules\SecurityQuestionModuleService;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Security\PhpassHasher;
+use CodeVault\Security\QrCode;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
 use CodeVault\View;
@@ -298,12 +299,18 @@ final class ClientAccountController
 
         $secret = $this->totp->generateSecret();
         $plainCodes = $this->recoveryCodes->generate();
+        $provisioningUri = $this->totp->provisioningUri($secret, (string) $client['email'], (string) $this->config->env('APP_NAME', 'CodeVault'));
 
         $this->clients->pendingTwoFactorSecret((int) $client['id'], $secret, $this->recoveryCodes->hashForStorage($plainCodes));
 
         return $this->page('client-account.security-setup', [
             'secret' => $secret,
-            'provisioningUri' => $this->totp->provisioningUri($secret, (string) $client['email'], (string) $this->config->env('APP_NAME', 'CodeVault')),
+            'provisioningUri' => $provisioningUri,
+            // Rendered here (not in the template) so the encoder — which
+            // auto-picks the smallest version and best mask — is exercised
+            // once per request. The SVG is embedded as a data: URI, which
+            // the app's CSP allows under img-src data:.
+            'qrSvg' => QrCode::svg($provisioningUri),
             'recoveryCodes' => $plainCodes,
             'error' => null,
         ]);
@@ -327,6 +334,7 @@ final class ClientAccountController
             return $this->page('client-account.security-setup', [
                 'secret' => $client['two_factor_secret'],
                 'provisioningUri' => $this->totp->provisioningUri((string) $client['two_factor_secret'], (string) $client['email'], (string) $this->config->env('APP_NAME', 'CodeVault')),
+                'qrSvg' => QrCode::svg($this->totp->provisioningUri((string) $client['two_factor_secret'], (string) $client['email'], (string) $this->config->env('APP_NAME', 'CodeVault'))),
                 'recoveryCodes' => null,
                 'error' => 'That code did not verify — check the time on your device and try again.',
             ]);
