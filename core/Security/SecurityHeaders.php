@@ -78,10 +78,18 @@ final class SecurityHeaders
         // deactivated addon doesn't widen the surface at all.
         $scriptSrc = "'self' 'nonce-" . self::nonce() . "' https://merchant.payhub.com.ng";
         $connectSrc = "'self' https://merchant.payhub.com.ng";
+        $styleSrc = "'self' 'unsafe-inline'";
+        $fontSrc = "'self'";
 
         if (self::$allowTawkTo) {
             $scriptSrc .= " https://embed.tawk.to https://*.tawk.to";
             $connectSrc .= " https://*.tawk.to wss://*.tawk.to";
+            // The widget's stylesheets and icon fonts are served from
+            // embed.tawk.to. Without them in style-src/font-src the bubble
+            // renders unstyled — i.e. invisible — which is exactly the
+            // "widget doesn't show" report.
+            $styleSrc .= " https://embed.tawk.to https://*.tawk.to";
+            $fontSrc .= " https://embed.tawk.to https://*.tawk.to";
         }
 
         return $response
@@ -91,8 +99,8 @@ final class SecurityHeaders
             ->withHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
             ->withHeader(
                 'Content-Security-Policy',
-                "default-src 'self'; script-src {$scriptSrc}; style-src 'self' 'unsafe-inline'; "
-                . "img-src 'self' data: https:; font-src 'self'; connect-src {$connectSrc}; "
+                "default-src 'self'; script-src {$scriptSrc}; style-src {$styleSrc}; "
+                . "img-src 'self' data: https:; font-src {$fontSrc}; connect-src {$connectSrc}; "
                 . "frame-src 'self' https://merchant.payhub.com.ng; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:"
             );
     }
