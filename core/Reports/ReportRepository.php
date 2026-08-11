@@ -26,17 +26,22 @@ use CodeVault\Database;
  * base currency is NGN), and it ignored currency_rate entirely so an invoice
  * locked at a rate counted as its unconverted stored figure.
  *
- * `currency_id IS NULL` means "the base currency" and is preserved as NULL so
- * the caller resolves it exactly as every other screen does.
+ * A NULL currency_id collapses onto the *client's* currency first (imported
+ * rows and pre-locking batches store no lock even for NGN clients — see
+ * InvoiceRepository::sumByCurrency), and only then onto the default currency
+ * for clients that have no currency at all. Collapsing onto the default alone
+ * used to label naira money with "$" and inflate the dollar totals.
  */
 final class ReportRepository
 {
     /**
      * Multiplier for a document's locked rate. NULLIF guards rows whose rate
      * was never set (legacy/imported), where a literal 0 would zero out the
-     * whole currency's total.
+     * whole currency's total. Rows with no locked currency are stored "as
+     * billed" and are never re-converted (the same rule
+     * CurrencyService::formatLocked applies), so their rate is forced to 1.
      */
-    private const RATE = 'COALESCE(NULLIF(%s.currency_rate, 0), 1)';
+    private const RATE = 'COALESCE(CASE WHEN %s.currency_id IS NULL THEN 1 ELSE NULLIF(%s.currency_rate, 0) END, 1)';
 
     public function __construct(
         private readonly Database $db
@@ -44,14 +49,13 @@ final class ReportRepository
     }
 
     /**
-     * The id of the default currency, for collapsing NULLs onto it.
+     * The id of the default currency, the final fallback in the currency
+     * COALESCE after the invoice's own lock and the client's currency.
      *
-     * A NULL currency_id means "the default currency", so it has to group
-     * *together with* rows that name that currency explicitly — an imported
-     * client can carry the default's id outright while a natively-created one
-     * stores NULL for the very same currency. Grouping on the raw column split
-     * those apart and printed one currency as two totals on the same line:
-     * "$59.11 USD | $67,388.37 USD".
+     * A default-currency invoice stores NULL (native) or the default's own id
+     * (imported), and both have to group together — grouping on the raw column
+     * split those apart and printed one currency as two totals on the same
+     * line: "$59.11 USD | $67,388.37 USD".
      */
     private function defaultCurrencyId(): ?int
     {
@@ -63,14 +67,17 @@ final class ReportRepository
     /** @return array<int, array{month: string, currency_id: ?int, total: float}> */
     public function incomeByMonth(int $year): array
     {
-        $rate = sprintf(self::RATE, 'i');
+        $rate = sprintf(self::RATE, 'i', 'i');
 
         return $this->normalise($this->db->select(
             <<<SQL
-            SELECT DATE_FORMAT(i.paid_at, '%Y-%m') AS month, COALESCE(i.currency_id, ?) AS currency_id, SUM(i.total * {$rate}) AS total
+            SELECT DATE_FORMAT(i.paid_at, '%Y-%m') AS month,
+                   COALESCE(i.currency_id, c.currency_id, ?) AS currency_id,
+                   SUM(i.total * {$rate}) AS total
             FROM invoices i
+            JOIN clients c ON c.id = i.client_id
             WHERE i.status = 'paid' AND YEAR(i.paid_at) = ?
-            GROUP BY DATE_FORMAT(i.paid_at, '%Y-%m'), COALESCE(i.currency_id, ?)
+            GROUP BY DATE_FORMAT(i.paid_at, '%Y-%m'), COALESCE(i.currency_id, c.currency_id, ?)
             ORDER BY month
             SQL,
             [$this->defaultCurrencyId(), $year, $this->defaultCurrencyId()]
@@ -87,15 +94,18 @@ final class ReportRepository
      */
     public function incomeByGateway(int $year): array
     {
-        $rate = sprintf(self::RATE, 'i');
+        $rate = sprintf(self::RATE, 'i', 'i');
 
         return $this->normalise($this->db->select(
             <<<SQL
-            SELECT t.gateway_slug, COALESCE(i.currency_id, ?) AS currency_id, SUM(t.amount * {$rate}) AS total
+            SELECT t.gateway_slug,
+                   COALESCE(i.currency_id, c.currency_id, ?) AS currency_id,
+                   SUM(t.amount * {$rate}) AS total
             FROM transactions t
             JOIN invoices i ON i.id = t.invoice_id
+            JOIN clients c ON c.id = i.client_id
             WHERE t.status = 'completed' AND YEAR(t.created_at) = ?
-            GROUP BY t.gateway_slug, COALESCE(i.currency_id, ?)
+            GROUP BY t.gateway_slug, COALESCE(i.currency_id, c.currency_id, ?)
             ORDER BY total DESC
             SQL,
             [$this->defaultCurrencyId(), $year, $this->defaultCurrencyId()]
@@ -105,14 +115,17 @@ final class ReportRepository
     /** @return array<int, array{month: string, currency_id: ?int, tax_amount: float}> */
     public function taxLiabilityByMonth(int $year): array
     {
-        $rate = sprintf(self::RATE, 'i');
+        $rate = sprintf(self::RATE, 'i', 'i');
 
         return $this->normalise($this->db->select(
             <<<SQL
-            SELECT DATE_FORMAT(i.paid_at, '%Y-%m') AS month, COALESCE(i.currency_id, ?) AS currency_id, SUM(i.tax_amount * {$rate}) AS tax_amount
+            SELECT DATE_FORMAT(i.paid_at, '%Y-%m') AS month,
+                   COALESCE(i.currency_id, c.currency_id, ?) AS currency_id,
+                   SUM(i.tax_amount * {$rate}) AS tax_amount
             FROM invoices i
+            JOIN clients c ON c.id = i.client_id
             WHERE i.status = 'paid' AND YEAR(i.paid_at) = ?
-            GROUP BY DATE_FORMAT(i.paid_at, '%Y-%m'), COALESCE(i.currency_id, ?)
+            GROUP BY DATE_FORMAT(i.paid_at, '%Y-%m'), COALESCE(i.currency_id, c.currency_id, ?)
             ORDER BY month
             SQL,
             [$this->defaultCurrencyId(), $year, $this->defaultCurrencyId()]
