@@ -51,6 +51,7 @@ final class MailCampaignController
         $groupId = null;
         $clientId = null;
         $externalEmails = null;
+        $onlyInactive = false;
         if ($targetType === 'group' && (string) $request->input('client_group_id', '') !== '') {
             $groupId = (int) $request->input('client_group_id');
         } elseif ($targetType === 'individual' && (string) $request->input('client_id', '') !== '') {
@@ -71,6 +72,11 @@ final class MailCampaignController
             }
 
             $externalEmails = implode("\n", $parsed);
+        } elseif ($targetType === 'inactive') {
+            // Active accounts with no active service or domain — the
+            // re-engagement audience. Stored as a flag, resolved at send time
+            // so the list is always current.
+            $onlyInactive = true;
         }
 
         if ($subject === '' || $body === '') {
@@ -82,7 +88,7 @@ final class MailCampaignController
             ]);
         }
 
-        $this->campaigns->create($subject, $body, $groupId, $clientId, $externalEmails);
+        $this->campaigns->create($subject, $body, $groupId, $clientId, $externalEmails, $onlyInactive);
 
         return Response::redirect('/admin/campaigns');
     }

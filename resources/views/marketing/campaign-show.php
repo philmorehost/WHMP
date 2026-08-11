@@ -30,6 +30,18 @@ $feedback = [
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <p><strong>Status:</strong> <?= e(ucfirst($campaign['status'])) ?></p>
+    <p>
+        <strong>Audience:</strong>
+        <?php if (!empty($campaign['client_id'])): ?>
+            👤 Individual client
+        <?php elseif (!empty($campaign['only_inactive'])): ?>
+            📭 Accounts with no active product/domain
+        <?php elseif (!empty($campaign['client_group_id'])): ?>
+            📁 Client group
+        <?php else: ?>
+            🌐 All active clients
+        <?php endif; ?>
+    </p>
 
     <?php
     // Sending is now queued and drained by the cron, so the admin needs to see

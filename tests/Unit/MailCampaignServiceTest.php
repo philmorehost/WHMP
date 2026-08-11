@@ -182,4 +182,73 @@ final class MailCampaignServiceTest extends DatabaseTestCase
         $token = $this->campaigns->recipients($campaignId)[0]['open_token'];
         $this->assertStringContainsString("<img src=\"/campaigns/track/{$token}\"", $spy->sent[0]);
     }
+
+    public function test_send_to_inactive_targets_only_accounts_with_no_active_product_or_domain(): void
+    {
+        // Bare account — no service, no domain → targeted.
+        $bare = $this->createActiveClient('bare@example.test');
+
+        // Has an active service → excluded.
+        $withService = $this->createActiveClient('service@example.test');
+
+        // Has an active domain → excluded.
+        $withDomain = $this->createActiveClient('domain@example.test');
+
+        // Has only a suspended service → targeted (nothing is active).
+        $suspended = $this->createActiveClient('suspended@example.test');
+
+        $now = date('Y-m-d H:i:s');
+        $this->db->connection()->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->db->insert(
+                'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$withService, 1, 'Hosting', 'monthly', 10.00, 'active', '2030-01-01', $now, $now]
+            );
+            $this->db->insert(
+                'INSERT INTO domains (client_id, domain_name, tld, registrar_slug, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [$withDomain, 'has-domain.test', 'test', 'local', 'active', $now, $now]
+            );
+            $this->db->insert(
+                'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$suspended, 1, 'Hosting', 'monthly', 10.00, 'suspended', '2030-01-01', $now, $now]
+            );
+        } finally {
+            $this->db->connection()->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+
+        $campaignId = $this->campaigns->create('Re-engage', '<p>Come back</p>', null, null, null, true);
+        $sent = $this->service->send($campaignId);
+
+        $this->assertSame(2, $sent);
+
+        $emails = array_map(static fn (array $r): string => (string) $r['to_email'], $this->emailLog->recent(10));
+        sort($emails);
+        $this->assertSame(['bare@example.test', 'suspended@example.test'], $emails);
+    }
+
+    public function test_queue_to_inactive_resolves_the_same_audience(): void
+    {
+        $bare = $this->createActiveClient('bare@example.test');
+        $withService = $this->createActiveClient('service@example.test');
+
+        $now = date('Y-m-d H:i:s');
+        $this->db->connection()->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->db->insert(
+                'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$withService, 1, 'Hosting', 'monthly', 10.00, 'active', '2030-01-01', $now, $now]
+            );
+        } finally {
+            $this->db->connection()->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+
+        $campaignId = $this->campaigns->create('Re-engage', '<p>Come back</p>', null, null, null, true);
+        $queued = $this->service->queue($campaignId);
+
+        $this->assertSame(1, $queued);
+
+        $recipients = $this->campaigns->recipients($campaignId);
+        $this->assertCount(1, $recipients);
+        $this->assertSame('bare@example.test', $recipients[0]['email']);
+    }
 }

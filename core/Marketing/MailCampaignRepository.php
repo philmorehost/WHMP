@@ -37,7 +37,7 @@ final class MailCampaignRepository
         return $this->db->selectOne('SELECT * FROM mail_campaigns WHERE id = ?', [$id]);
     }
 
-    public function create(string $subject, string $body, ?int $clientGroupId, ?int $clientId = null, ?string $externalEmails = null): int
+    public function create(string $subject, string $body, ?int $clientGroupId, ?int $clientId = null, ?string $externalEmails = null, bool $onlyInactive = false): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
@@ -46,9 +46,13 @@ final class MailCampaignRepository
         // worked: all() joins on the column and crashes the campaign list
         // before any code path can reach create(). Schema changes belong in a
         // migration, which the kernel applies automatically on boot.
+        //
+        // only_inactive (migration 0161) is a flag that narrows the "all
+        // active clients" audience to accounts with no active service or
+        // domain; see MailCampaignService::resolveRecipients().
         return (int) $this->db->insert(
-            'INSERT INTO mail_campaigns (subject, body, client_group_id, client_id, external_emails, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [$subject, $body, $clientGroupId, $clientId, $externalEmails, 'draft', $now, $now]
+            'INSERT INTO mail_campaigns (subject, body, client_group_id, client_id, external_emails, only_inactive, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$subject, $body, $clientGroupId, $clientId, $externalEmails, $onlyInactive ? 1 : 0, 'draft', $now, $now]
         );
     }
 

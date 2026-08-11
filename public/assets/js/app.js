@@ -2492,17 +2492,19 @@
         });
     });
 
-    // Campaign target type switcher (All vs Group vs Individual)
+    // Campaign target type switcher (All vs Inactive vs Group vs Individual vs External)
     document.addEventListener('change', function(event) {
         if (event.target.id === 'campaign-target-type') {
             var val = event.target.value;
             var groupField = document.getElementById('target-group-field');
             var individualField = document.getElementById('target-individual-field');
             var externalField = document.getElementById('target-external-field');
+            var inactiveField = document.getElementById('target-inactive-field');
 
             if (groupField) groupField.style.display = (val === 'group') ? 'block' : 'none';
             if (individualField) individualField.style.display = (val === 'individual') ? 'block' : 'none';
             if (externalField) externalField.style.display = (val === 'external') ? 'block' : 'none';
+            if (inactiveField) inactiveField.style.display = (val === 'inactive') ? 'block' : 'none';
         } else if (event.target.id === 'select-all-clients') {
             var isChecked = event.target.checked;
             var checkboxes = document.querySelectorAll('.client-checkbox');

@@ -29,6 +29,8 @@
                         👤 <?= e($campaign['client_first_name'] . ' ' . $campaign['client_last_name'] . ' (' . $campaign['client_email'] . ')') ?>
                     <?php elseif (!empty($campaign['group_name'])): ?>
                         📁 Group: <?= e($campaign['group_name']) ?>
+                    <?php elseif (!empty($campaign['only_inactive'])): ?>
+                        📭 Accounts with no active product/domain
                     <?php else: ?>
                         🌐 All active clients
                     <?php endif; ?>
@@ -68,10 +70,18 @@
             <label class="cv-label">Audience Target</label>
             <select class="cv-select" name="target_type" id="campaign-target-type">
                 <option value="all">🌐 All active clients</option>
+                <option value="inactive">📭 Accounts with no active product/domain</option>
                 <option value="group">📁 Client Group</option>
                 <option value="individual">👤 Individual Client</option>
                 <option value="external">✉️ External email addresses</option>
             </select>
+        </div>
+        <div class="cv-field" id="target-inactive-field" style="display:none;">
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
+                Emails every <strong>active</strong> account that currently has no service and no domain in an
+                <strong>active</strong> state — someone with a suspended, cancelled, terminated or expired product,
+                or with nothing ordered at all. The recipient list is resolved at send time, so it stays current.
+            </div>
         </div>
         <div class="cv-field" id="target-external-field" style="display:none;">
             <label class="cv-label">External Email Addresses</label>

@@ -155,6 +155,32 @@ final class ClientRepository
         return $this->db->select("SELECT * FROM clients WHERE status = 'active' AND client_group_id = ?", [$groupId]);
     }
 
+    /**
+     * Active clients holding no active service and no active domain — the
+     * "account with nothing live" audience for re-engagement campaigns.
+     *
+     * "Active" is interpreted strictly as the row's own status: a service or
+     * domain must be in the `active` state to disqualify a client, so someone
+     * whose only product is suspended, cancelled, terminated or expired still
+     * qualifies. A client with nothing but a pending order also qualifies —
+     * they have not been provisioned anything yet.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function activeWithoutProductsOrDomains(): array
+    {
+        return $this->db->select(
+            <<<'SQL'
+            SELECT c.*
+            FROM clients c
+            WHERE c.status = 'active'
+              AND NOT EXISTS (SELECT 1 FROM services s WHERE s.client_id = c.id AND s.status = 'active')
+              AND NOT EXISTS (SELECT 1 FROM domains d WHERE d.client_id = c.id AND d.status = 'active')
+            ORDER BY c.last_name ASC, c.first_name ASC
+            SQL
+        );
+    }
+
     /** @return array<string, mixed>|null */
     public function findByEmail(string $email): ?array
     {

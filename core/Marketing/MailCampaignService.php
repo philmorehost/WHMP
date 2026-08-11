@@ -219,6 +219,10 @@ final class MailCampaignService
         if (!empty($campaign['client_id'])) {
             $singleClient = $this->clients->find((int) $campaign['client_id']);
             $clients = $singleClient !== null ? [$singleClient] : [];
+        } elseif (!empty($campaign['only_inactive'])) {
+            // Accounts with no active service or domain — the re-engagement
+            // audience (see ClientRepository::activeWithoutProductsOrDomains).
+            $clients = $this->clients->activeWithoutProductsOrDomains();
         } elseif ($externalEmails !== [] && $campaign['client_group_id'] === null) {
             // External-only: must not fan out to the whole client base.
             $clients = [];
@@ -269,6 +273,9 @@ final class MailCampaignService
         if (!empty($campaign['client_id'])) {
             $singleClient = $this->clients->find((int) $campaign['client_id']);
             $recipients = $singleClient !== null ? [$singleClient] : [];
+        } elseif (!empty($campaign['only_inactive'])) {
+            // Accounts with no active service or domain — see resolveRecipients().
+            $recipients = $this->clients->activeWithoutProductsOrDomains();
         } elseif ($externalEmails !== [] && $campaign['client_group_id'] === null) {
             // An external-only campaign must not silently fan out to every
             // active client — that's the difference between mailing 20
