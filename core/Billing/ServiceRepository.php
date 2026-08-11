@@ -222,10 +222,11 @@ final class ServiceRepository
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
-            'INSERT INTO services (client_id, order_id, product_id, product_name, billing_cycle, amount, domain, hostname, password, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO services (client_id, order_id, parent_id, product_id, product_name, billing_cycle, amount, domain, hostname, password, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $fields['client_id'],
                 $fields['order_id'] ?? null,
+                $fields['parent_id'] ?? null,
                 $fields['product_id'],
                 $fields['product_name'],
                 $fields['billing_cycle'],
@@ -238,6 +239,26 @@ final class ServiceRepository
                 $now,
                 $now,
             ]
+        );
+    }
+
+    /**
+     * Child add-on services attached to a parent service (services.parent_id).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function addonsFor(int $parentServiceId): array
+    {
+        return $this->db->select(
+            <<<'SQL'
+            SELECT s.*, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            FROM services s
+            LEFT JOIN clients c ON c.id = s.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            WHERE s.parent_id = ?
+            ORDER BY s.id ASC
+            SQL,
+            [$parentServiceId]
         );
     }
 

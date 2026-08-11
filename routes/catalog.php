@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use CodeVault\Catalog\ConfigurableOptionController;
+use CodeVault\Catalog\ProductAddonController;
 use CodeVault\Catalog\ProductController;
 use CodeVault\Catalog\ProductGroupController;
 
@@ -21,6 +22,10 @@ $router->post('/admin/products/bulk-update', [ProductController::class, 'bulkUpd
 $router->get('/admin/products/{id}/edit', [ProductController::class, 'editForm']);
 $router->post('/admin/products/{id}', [ProductController::class, 'update']);
 $router->post('/admin/products/{id}/delete', [ProductController::class, 'destroy']);
+
+$router->get('/admin/products/addons', [ProductAddonController::class, 'index']);
+$router->post('/admin/products/addons', [ProductAddonController::class, 'attach']);
+$router->post('/admin/products/addons/{id}/delete', [ProductAddonController::class, 'detach']);
 
 $router->get('/admin/configurable-options', [ConfigurableOptionController::class, 'index']);
 $router->post('/admin/configurable-options', [ConfigurableOptionController::class, 'storeGroup']);

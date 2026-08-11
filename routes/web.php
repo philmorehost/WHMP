@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use CodeVault\Container;
+use CodeVault\Media\ImageController;
 use CodeVault\Reports\AdminDashboardController;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -10,6 +11,9 @@ use CodeVault\Seo\SeoTags;
 use CodeVault\View;
 
 /** @var CodeVault\Router $router */
+
+// WebP image pipeline — /img?path=/assets/uploads/photo.jpg&w=400
+$router->get('/img', [ImageController::class, 'serve']);
 
 $router->get('/db-debug', function (Request $request, array $params, Container $container): Response {
     /** @var CodeVault\Database $db */

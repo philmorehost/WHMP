@@ -36,7 +36,17 @@ try {
 <header class="cv-topbar" style="position:relative;display:flex;align-items:center;justify-content:space-between;padding:var(--cv-space-4) var(--cv-space-6);border-bottom:1px solid var(--cv-border-default);">
     <a href="/client/dashboard" style="text-decoration:none; color:inherit; display:flex;align-items:center;gap:var(--cv-space-2);flex-shrink:0;font-weight:bold;">
         <?php if (!empty($theme['logoUrl'])): ?>
-            <img src="<?= e($theme['logoUrl']) ?>" alt="<?= e($theme['brandName']) ?>" style="height:1.75rem;">
+            <?php
+            // A logo hosted on this install (under /assets or /uploads) goes
+            // through the WebP pipeline (img()) so browsers get an optimized
+            // derivative with far-future cache headers; an external CDN URL is
+            // served as-is.
+            $logo = (string) $theme['logoUrl'];
+            if (str_starts_with($logo, '/assets') || str_starts_with($logo, '/uploads')) {
+                $logo = img($logo, 320);
+            }
+            ?>
+            <img src="<?= e($logo) ?>" alt="<?= e($theme['brandName']) ?>" style="height:1.75rem;">
         <?php else: ?>
             <?php // The masthead is the brand, not the page title — this used to
                   // print $title, so the login page (title "CodeVault") showed the

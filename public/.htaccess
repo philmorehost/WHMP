@@ -7,3 +7,32 @@ RewriteRule ^ - [L]
 
 # Everything else goes through the front controller
 RewriteRule ^ index.php [L]
+
+# ---------------------------------------------------------------------------
+# Static-asset caching (blueprint performance gap: no caching-header layer).
+# Every asset()/img() URL is cache-busted with ?v=<filemtime>, so far-future
+# cache headers are safe — an updated file gets a NEW URL, never a stale one.
+# Files under /assets carry the version query, but the immutable header is
+# harmless for the handful of non-versioned static files (favicon etc.).
+# ---------------------------------------------------------------------------
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/webp "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(jpe?g|png|gif|webp|svg|css|js|woff2)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
+
+# Serve pre-compressed .webp when present (the WebP pipeline writes these)
+# only via the app's /img endpoint; static files here are served as-is.
+

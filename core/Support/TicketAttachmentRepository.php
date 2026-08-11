@@ -64,4 +64,18 @@ final class TicketAttachmentRepository
             [$toTicketId, $fromTicketId]
         );
     }
+
+    /**
+     * Ticket split: moves only the attachments attached to replies at or
+     * after the split point (those replies already moved to the new ticket
+     * with TicketReplyRepository::splitFrom()). Attachments on replies that
+     * stayed behind keep the original ticket id.
+     */
+    public function moveSplitToTicket(int $fromTicketId, int $fromReplyId, int $toTicketId): int
+    {
+        return $this->db->update(
+            'UPDATE ticket_attachments SET ticket_id = ? WHERE ticket_id = ? AND reply_id IS NOT NULL AND reply_id >= ?',
+            [$toTicketId, $fromTicketId, $fromReplyId]
+        );
+    }
 }

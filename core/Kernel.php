@@ -161,6 +161,8 @@ use CodeVault\Security\MotherMaidenNameQuestion;
 use CodeVault\Cache\ArrayCache;
 use CodeVault\Cache\Cache;
 use CodeVault\Cache\RedisCache;
+use CodeVault\Media\ImageController;
+use CodeVault\Media\WebpImageService;
 use CodeVault\Seo\AiVisibilityScorer;
 use CodeVault\Seo\InProcessPageFetcher;
 use CodeVault\Seo\PageFetcher;
@@ -875,6 +877,12 @@ class Kernel
 
             return new ArrayCache();
         });
+
+        $this->container->singleton(WebpImageService::class, fn (Container $c) => new WebpImageService($basePath));
+        $this->container->singleton(ImageController::class, fn (Container $c) => new ImageController(
+            $c->make(WebpImageService::class),
+            $basePath
+        ));
 
         $this->container->singleton(DomainRepository::class, function (Container $c) {
             return new DomainRepository($c->make(Database::class));

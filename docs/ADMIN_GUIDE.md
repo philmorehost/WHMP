@@ -6,6 +6,7 @@ A day-to-day operations reference for whoever runs the admin panel (`/admin`). F
 
 - **Orders / Invoices / Services** — orders land `pending`; accept them from the Orders queue. Invoices generate automatically ahead of a service's due date (recurring billing cron) or on-demand (billable items, upgrade/downgrade proration).
 - **Products** — organized into Product Groups, each product has per-billing-cycle pricing (Products → a product → Pricing) and optional Configurable Options. A product flagged `is_upsell` shows as a cart add-on suggestion.
+- **Product Add-ons** (Admin → Products → Product Add-ons) — link any product as a recurring add-on to a parent product (optionally pin it to one billing cycle, or leave it available on any). Clients then see an **Add-ons** button on that service and can add/remove the linked add-ons themselves. Each add-on is billed as its own child service: setup fee + first period are invoiced immediately, and the recurring billing engine handles every later period on the parent's cycle. Removing an add-on stops it renewing; the parent service is never touched.
 - **Tax Rules** — country/state-specific rates; a client's tax is resolved by their billing address, `tax_exempt` clients are never taxed regardless of a matching rule.
 - **Payment Gateways** — the built-in Manual gateway (bank transfer, staff mark-paid) always works with zero configuration; add real gateway modules by implementing the `GatewayModule` SDK interface.
 - **Fraud Protection** — every order is scored on placement by all registered `FraudModule`s (max score wins, not average); a hold routes it to the fraud review queue instead of the normal pending queue.
@@ -65,7 +66,7 @@ Available endpoints (all JSON, wrapped in `{status, data}`):
 
 ## Support
 
-- **Tickets** — auto-escalate and auto-close on configurable timers (cron-driven); a resolved ticket can convert to a billable item.
+- **Tickets** — auto-escalate and auto-close on configurable timers (cron-driven); a resolved ticket can convert to a billable item. **Merge** folds one ticket's replies/attachments into another; **Split** (✂️ Split Ticket on a ticket page) moves a chosen reply and everything after it into a brand-new ticket with its own subject and department — useful when one ticket has quietly become two conversations. Both sides carry a private note marking where the split happened.
 - **Mail Piping** — inbound email-to-ticket via IMAP (spec-correct; live delivery unverified in environments without `ext-imap`).
 - **Knowledgebase** — public search includes an AI-synthesized answer (DeepSeek) drawn only from the matching articles' content, when a `DEEPSEEK_API_KEY` is configured.
 

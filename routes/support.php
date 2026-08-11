@@ -29,6 +29,7 @@ $router->post('/admin/tickets/{id}/department', [TicketController::class, 'setDe
 $router->post('/admin/tickets/{id}/billable', [TicketController::class, 'convertToBillable']);
 $router->post('/admin/tickets/{id}/ai-suggest', [TicketController::class, 'aiSuggest']);
 $router->post('/admin/tickets/{id}/merge', [TicketController::class, 'merge']);
+$router->post('/admin/tickets/{id}/split', [TicketController::class, 'split']);
 // Literal segment routes after the parameter routes — a POST to
 // /admin/tickets/blocked-senders must never be captured by {id}.
 $router->post('/admin/tickets/{id}/block-sender', [TicketController::class, 'blockSender']);

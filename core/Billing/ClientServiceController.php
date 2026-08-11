@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Billing;
 
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Catalog\ProductAddonRepository;
 use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Database;
@@ -57,7 +58,9 @@ final class ClientServiceController
         private readonly Database $db,
         private readonly ProductRepository $products,
         private readonly ProductPricingRepository $pricing,
-        private readonly ProrationService $proration
+        private readonly ProrationService $proration,
+        private readonly ProductAddonRepository $addonConfig,
+        private readonly ServiceAddonService $addonService
     ) {
     }
 
@@ -91,6 +94,14 @@ final class ClientServiceController
                 static fn (array $svc): bool => (int) $svc['product_id'] !== $carrierProductId
             ));
         }
+
+        // Child add-ons (services.parent_id set) are managed under their
+        // parent service's Add-ons page — don't list them as standalone
+        // "My Services" entries.
+        $services = array_values(array_filter(
+            $services,
+            static fn (array $svc): bool => (int) ($svc['parent_id'] ?? 0) === 0
+        ));
 
         return $this->page('billing.client-services-index', [
             'services' => $services,
@@ -252,6 +263,152 @@ final class ClientServiceController
         }
 
         return $this->back($id, $message);
+    }
+
+    /**
+     * Add-on management page for a service: lists the add-ons currently
+     * attached (child services) and the add-ons available to order for this
+     * service's product + billing cycle.
+     */
+    public function addons(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        if ($service['status'] !== 'active') {
+            return $this->back((int) $service['id'], null, 'Only an active service can manage add-ons.');
+        }
+
+        $currency = $this->currency->resolveForClient($client);
+        $current = $this->services->addonsFor((int) $service['id']);
+        $available = $this->addonConfig->availableFor((int) $service['product_id'], (string) $service['billing_cycle']);
+
+        // Don't offer an add-on the client already owns on this service.
+        $ownedProductIds = array_map(static fn (array $a) => (int) $a['product_id'], $current);
+        $available = array_values(array_filter(
+            $available,
+            static fn (array $a): bool => !in_array((int) $a['product_id'], $ownedProductIds, true)
+        ));
+
+        return $this->page('billing.client-service-addons', [
+            'service' => $service,
+            'current' => $current,
+            'available' => $available,
+            'currency' => $currency,
+            'formattedAmount' => ($currency['symbol'] ?? '$') . number_format((float) ($service['amount'] ?? 0), 2),
+            'money' => fn (float $baseAmount): string => $this->currency->format($baseAmount, $currency),
+            'error' => $request->query('error'),
+        ]);
+    }
+
+    public function orderAddon(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        if ($service['status'] !== 'active') {
+            return $this->back((int) $service['id'], null, 'Only an active service can order add-ons.');
+        }
+
+        $addonProductId = (int) $request->input('addon_product_id', 0);
+        $available = $this->addonConfig->availableFor((int) $service['product_id'], (string) $service['billing_cycle']);
+
+        $match = null;
+        foreach ($available as $candidate) {
+            if ((int) $candidate['product_id'] === $addonProductId) {
+                $match = $candidate;
+                break;
+            }
+        }
+
+        if ($match === null) {
+            return Response::redirect("/client/services/{$service['id']}/addons?error=" . urlencode('That add-on is not available for this service.'));
+        }
+
+        // Re-check ownership inside the action too — a stale page with a
+        // double-submit or a reloaded form shouldn't attach the add-on twice.
+        $owned = $this->services->addonsFor((int) $service['id']);
+        foreach ($owned as $a) {
+            if ((int) $a['product_id'] === $addonProductId && !in_array($a['status'], ['cancelled', 'terminated'], true)) {
+                return Response::redirect("/client/services/{$service['id']}/addons?error=" . urlencode('You already have this add-on on this service.'));
+            }
+        }
+
+        $result = $this->addonService->orderAddon(
+            (int) $service['id'],
+            $addonProductId,
+            (string) $match['addon_name'],
+            (float) $match['price'],
+            (float) ($match['setup_fee'] ?? 0.0),
+            (string) $service['billing_cycle']
+        );
+
+        if (!$result['success']) {
+            return Response::redirect("/client/services/{$service['id']}/addons?error=" . urlencode($result['error'] ?? 'Could not add that add-on.'));
+        }
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'service.addon_ordered',
+            'service',
+            (int) $service['id'],
+            "Client ordered add-on \"{$match['addon_name']}\" on service #{$service['id']} — invoice #{$result['invoiceId']}",
+            $request->ip()
+        );
+
+        return Response::redirect("/client/services/{$service['id']}/addons?msg=" . urlencode('Add-on added. An invoice for the first period has been raised.'));
+    }
+
+    /**
+     * Immediately cancels an add-on child service (the parent is untouched).
+     * Add-ons are billable-only attachments, so a client can drop one without
+     * an end-of-period request — there's nothing remote to deprovision.
+     */
+    public function removeAddon(Request $request, array $params): Response
+    {
+        [$addon, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $parentId = (int) ($addon['parent_id'] ?? 0);
+
+        if ($parentId <= 0) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $parent = $this->services->find($parentId);
+
+        if ($parent === null || (int) $parent['client_id'] !== (int) $client['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        if (!in_array($addon['status'], ['active', 'suspended'], true)) {
+            return Response::redirect("/client/services/{$parentId}/addons?error=" . urlencode('This add-on is not active.'));
+        }
+
+        $this->services->cancel((int) $addon['id']);
+        $this->invoices->cancelUnpaidForService((int) $addon['id']);
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'service.addon_removed',
+            'service',
+            (int) $addon['id'],
+            "Client removed add-on \"{$addon['product_name']}\" from service #{$parentId}",
+            $request->ip()
+        );
+
+        return Response::redirect("/client/services/{$parentId}/addons?msg=" . urlencode('Add-on removed.'));
     }
 
     public function sso(Request $request, array $params): Response
@@ -827,6 +984,7 @@ final class ClientServiceController
             // note on the client dashboard's services widget.
             'formattedAmount' => ($currency['symbol'] ?? '$') . number_format((float) ($service['amount'] ?? 0), 2),
             'pendingCancellation' => $this->cancellations->findPendingForService($id),
+            'addonCount' => count($this->services->addonsFor($id)),
             'message' => $message,
             'error' => $error,
         ]);

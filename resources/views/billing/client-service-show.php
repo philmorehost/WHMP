@@ -12,6 +12,7 @@
 /** @var array<string, string> $reverseDns ip => current PTR */
 /** @var array<int, array<string, mixed>> $backups */
 /** @var array<int, array<string, mixed>> $osTemplates */
+/** @var int $addonCount */
 
 $id = (int) $service['id'];
 $cpanelToolsAvailable ??= false;
@@ -518,6 +519,12 @@ $cpanelTabs = [
 
                     <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
                         <a class="svc-btn svc-btn--secondary" href="/client/services/<?= $id ?>/upgrade" style="text-decoration:none;">⇅ Upgrade / Downgrade</a>
+                    <?php endif; ?>
+
+                    <?php if ($service['status'] === 'active'): ?>
+                        <a class="svc-btn svc-btn--secondary" href="/client/services/<?= $id ?>/addons" style="text-decoration:none;">
+                            ➕ Add-ons<?= (int) ($addonCount ?? 0) > 0 ? ' (' . (int) $addonCount . ')' : '' ?>
+                        </a>
                     <?php endif; ?>
 
                     <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>

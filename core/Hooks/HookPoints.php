@@ -72,6 +72,7 @@ final class HookPoints
     public const TICKET_CLOSE = 'TicketClose';
     public const TICKET_ESCALATED = 'TicketEscalated';
     public const TICKET_MERGED = 'TicketMerged';
+    public const TICKET_SPLIT = 'TicketSplit';
 
     // --- Cron / system -----------------------------------------------------
     public const DAILY_CRON_JOB = 'DailyCronJob';

@@ -45,4 +45,18 @@ final class TicketReplyRepository
             [$toTicketId, $fromTicketId]
         );
     }
+
+    /**
+     * Ticket split: moves the given reply AND every later reply on the
+     * source ticket onto the new ticket (replies keep their ids, so the
+     * split thread reads in the same order it always did). Replies older
+     * than $fromReplyId stay on the source.
+     */
+    public function splitFrom(int $sourceTicketId, int $fromReplyId, int $newTicketId): int
+    {
+        return $this->db->update(
+            'UPDATE ticket_replies SET ticket_id = ? WHERE ticket_id = ? AND id >= ?',
+            [$newTicketId, $sourceTicketId, $fromReplyId]
+        );
+    }
 }

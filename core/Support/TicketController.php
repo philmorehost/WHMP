@@ -200,6 +200,8 @@ final class TicketController
             'senderBlockedPattern' => $this->blockedSenders->matchingPattern((string) $ticket['email']),
             'blockedSenderAdded' => $request->query('blocked') === '1',
             'blockedSenderError' => $request->query('blocked') === '0',
+            'splitError' => $request->query('split_error'),
+            'splitFromId' => $request->query('split_from') !== null ? (int) $request->query('split_from') : null,
         ]));
     }
 
@@ -295,6 +297,67 @@ final class TicketController
     }
 
     /**
+     * Splits this ticket at a chosen reply: that reply and everything after
+     * it move into a new ticket with a fresh subject and department, leaving
+     * the earlier part of the conversation here.
+     */
+    public function split(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $sourceId = (int) $params['id'];
+        $fromReplyId = (int) $request->input('from_reply_id', 0);
+        $newSubject = trim((string) $request->input('subject', ''));
+        $departmentId = (int) $request->input('department_id', 0);
+
+        if ($fromReplyId <= 0) {
+            return Response::redirect("/admin/tickets/{$sourceId}?split_error=" . urlencode('Choose the reply to split from.'));
+        }
+
+        if ($newSubject === '') {
+            return Response::redirect("/admin/tickets/{$sourceId}?split_error=" . urlencode('Enter a subject for the new ticket.'));
+        }
+
+        if ($departmentId <= 0) {
+            return Response::redirect("/admin/tickets/{$sourceId}?split_error=" . urlencode('Choose a department for the new ticket.'));
+        }
+
+        $ticket = $this->tickets->find($sourceId);
+
+        if ($ticket === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $admin = $this->guard->currentAdmin();
+        $result = $this->ticketService->split(
+            $sourceId,
+            $fromReplyId,
+            $newSubject,
+            $departmentId,
+            (int) $admin['id'],
+            $admin['display_name']
+        );
+
+        if (!$result['success']) {
+            return Response::redirect("/admin/tickets/{$sourceId}?split_error=" . urlencode((string) ($result['error'] ?? 'Could not split this ticket.')));
+        }
+
+        $this->activity->log(
+            'admin',
+            (int) $admin['id'],
+            'ticket.split',
+            'ticket',
+            $sourceId,
+            "Split ticket #{$sourceId} from reply #{$fromReplyId} into new ticket #{$result['newTicketId']}",
+            $request->ip()
+        );
+
+        return Response::redirect("/admin/tickets/{$result['newTicketId']}?split_from={$sourceId}");
+    }
+
+    /**
      * Shared support.ticket-show payload — show(), aiSuggest(), and merge()'s
      * cross-client confirm redirect all render this same view.
      *
@@ -334,6 +397,8 @@ final class TicketController
             'mergedFromTicket' => null,
             'mergeCrossClientNotice' => false,
             'mergeTargetPrefill' => null,
+            'splitError' => null,
+            'splitFromId' => null,
         ], $extra);
     }
 

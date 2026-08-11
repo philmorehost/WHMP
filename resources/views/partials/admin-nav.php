@@ -39,6 +39,7 @@ $groups = [
         '/admin/servers' => 'Servers',
         '/admin/products' => 'Products',
         '/admin/products/groups' => 'Product Groups',
+        '/admin/products/addons' => 'Product Add-ons',
         '/admin/configurable-options' => 'Configurable Options',
         '/admin/import-resellerclub' => 'ResellerClub Import',
     ]],

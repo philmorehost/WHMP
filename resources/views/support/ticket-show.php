@@ -15,6 +15,8 @@
 /** @var array<string, mixed>|null $mergeConfirmTargetTicket */
 /** @var array<string, mixed>|null $mergedFromTicket */
 /** @var int|null $mergeTargetPrefill a ticket id to preselect in the merge picker (from the index page's "Merge Selected") */
+/** @var string|null $splitError */
+/** @var int|null $splitFromId set on the new ticket right after a split lands here */
 $id = (int) $ticket['id'];
 
 // "Full Name (email)" when the ticket has a client account, otherwise just
@@ -334,6 +336,18 @@ $identityLabel = static function (array $t): string {
     </div>
 <?php endif; ?>
 
+<?php if (!empty($splitError)): ?>
+    <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);">
+        ⚠️ Could not split the ticket: <?= e($splitError) ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($splitFromId !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        ✂️ This conversation was split out of ticket #<?= $splitFromId ?>. The original keeps the earlier messages.
+    </div>
+<?php endif; ?>
+
 <?php if (($blockedSenderAdded ?? false) === true): ?>
     <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
         🚫 Sender <strong><?= e($ticket['email']) ?></strong> is now blocked — mail piping will ignore messages from it.
@@ -477,6 +491,35 @@ $identityLabel = static function (array $t): string {
         <?php elseif ($ticket['client_id'] === null): ?>
             <p style="font-size:.8rem;color:rgba(255,255,255,.6);margin-top:4px;">This ticket has no client on file — merging into any ticket # will need cross-client confirmation.</p>
         <?php endif; ?>
+
+        <form method="post" action="/admin/tickets/<?= $id ?>/split" class="admin-ticket-action-group" style="align-items:flex-end;margin-top:16px;flex-wrap:wrap;"
+              data-confirm="Split this ticket at the chosen reply? That reply and everything after it move into a new ticket with its own subject — the earlier conversation stays here."><?= csrf_field() ?>
+            <div style="min-width:180px;">
+                <label style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Split From Reply #</label>
+                <select name="from_reply_id" style="width:100%;">
+                    <option value="">— Choose a reply —</option>
+                    <?php foreach ($replies as $reply): ?>
+                        <?php if ($reply['id'] === (int) ($replies[0]['id'] ?? 0)) { continue; } // can't split from the opening message ?>
+                        <option value="<?= (int) $reply['id'] ?>" <?= (int) ($splitFromId ?? 0) === (int) $reply['id'] ? 'selected' : '' ?>>
+                            #<?= (int) $reply['id'] ?> — <?= e($reply['author_name']) ?> · <?= e($reply['created_at']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div style="min-width:220px;flex:1;">
+                <label style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">New Ticket Subject</label>
+                <input type="text" name="subject" placeholder="Subject for the split-off conversation" value="<?= e((string) ($ticket['subject'] ?? '')) ?> — continued" style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:rgba(255,255,255,.1); color:white;">
+            </div>
+            <div style="min-width:160px;">
+                <label style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Department</label>
+                <select name="department_id" style="width:100%;">
+                    <?php foreach ($departments as $department): ?>
+                        <option value="<?= (int) $department['id'] ?>" <?= (int) $ticket['department_id'] === (int) $department['id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button class="admin-ticket-btn admin-ticket-btn--secondary" type="submit">✂️ Split Ticket</button>
+        </form>
     </div>
 </div>
 

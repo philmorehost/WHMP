@@ -140,4 +140,98 @@ final class TicketService
 
         return ['success' => true, 'error' => null, 'crossClient' => $crossClient];
     }
+
+    /**
+     * Splits a ticket in two: everything from $fromReplyId onwards (the
+     * selected reply and every later one) moves into a brand-new ticket
+     * with its own subject/department, leaving the earlier conversation on
+     * the original. Both threads keep their reply ids, so chronology is
+     * preserved on each side.
+     *
+     * A private note is left on each ticket so staff can see where the
+     * conversation was cut and where the other half went.
+     *
+     * @return array{success: bool, newTicketId?: int, error?: ?string}
+     */
+    public function split(
+        int $sourceTicketId,
+        int $fromReplyId,
+        string $newSubject,
+        int $departmentId,
+        int $splitByAdminId,
+        string $splitByAdminName
+    ): array {
+        $source = $this->tickets->find($sourceTicketId);
+
+        if ($source === null) {
+            return ['success' => false, 'error' => 'Ticket not found.'];
+        }
+
+        if ($source['merged_into_id'] !== null) {
+            return ['success' => false, 'error' => "Ticket #{$sourceTicketId} was merged into another ticket and can't be split."];
+        }
+
+        $replies = $this->replies->forTicket($sourceTicketId, includePrivate: true);
+
+        if ($replies === []) {
+            return ['success' => false, 'error' => 'There are no replies to split.'];
+        }
+
+        // The split point must be a real reply id on this ticket.
+        $splitPointFound = false;
+        foreach ($replies as $reply) {
+            if ((int) $reply['id'] === $fromReplyId) {
+                $splitPointFound = true;
+                break;
+            }
+        }
+
+        if (!$splitPointFound) {
+            return ['success' => false, 'error' => 'That reply does not exist on this ticket.'];
+        }
+
+        // The first reply is the opening message — splitting from it would
+        // move the whole conversation and leave an empty ticket behind.
+        if ($fromReplyId === (int) $replies[0]['id']) {
+            return ['success' => false, 'error' => 'That is the ticket\'s opening message — there would be nothing left on the original ticket.'];
+        }
+
+        $newTicketId = $this->tickets->create([
+            'client_id' => $source['client_id'],
+            'email' => $source['email'],
+            'department_id' => $departmentId,
+            'subject' => $newSubject,
+            'status' => 'open',
+            'priority' => $source['priority'],
+        ]);
+
+        $this->replies->splitFrom($sourceTicketId, $fromReplyId, $newTicketId);
+        $this->attachments->moveSplitToTicket($sourceTicketId, $fromReplyId, $newTicketId);
+
+        // Mark where the conversation was cut on both sides.
+        $this->replies->create(
+            $sourceTicketId,
+            'admin',
+            $splitByAdminId,
+            $splitByAdminName,
+            "— Split: replies from #{$fromReplyId} onwards moved to ticket #{$newTicketId} (\"{$newSubject}\") —",
+            true
+        );
+        $this->replies->create(
+            $newTicketId,
+            'admin',
+            $splitByAdminId,
+            $splitByAdminName,
+            "— Split from ticket #{$sourceTicketId} (\"{$source['subject']}\") —",
+            true
+        );
+
+        $this->hooks->fire(HookPoints::TICKET_SPLIT, [
+            'sourceTicketId' => $sourceTicketId,
+            'newTicketId' => $newTicketId,
+            'fromReplyId' => $fromReplyId,
+        ]);
+
+        return ['success' => true, 'newTicketId' => $newTicketId, 'error' => null];
+    }
 }

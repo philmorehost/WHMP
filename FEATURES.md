@@ -54,6 +54,7 @@ Generated from the live codebase.
 - **Shopping cart & checkout** — guest-friendly session cart, promo codes, full checkout flow.
 - **Abandoned-cart recovery** 🆕 — carts are snapshotted to the DB on every change and an hourly sweep emails a reminder with a direct checkout link (guest email opt-in on the cart page; one reminder per cart by default).
 - **Client-side upgrade / downgrade** 🆕 — clients switch plans from their service page; pricing prorated (none / full credit / prorata) with charge/credit invoiced automatically.
+- **Recurring add-ons** 🆕 — admin links any product as an add-on to a parent product (**Admin → Products → Product Add-ons**); clients add/remove them from the service page. An add-on is a child service billed on its own cycle (setup + first period invoiced immediately, renewals via the recurring engine), never touching the parent.
 - **Order management** — orders with items, admin review, cancel, and status tracking.
 - **Fraud triage** 🤖 — rule-based scoring plus optional AI risk analysis at order time.
 - **Direct order links** — shareable per-product purchase URLs, WHMCS-style.
@@ -82,6 +83,7 @@ Generated from the live codebase.
 - **Canned replies** — reusable saved responses for common questions.
 - **Email piping** ⏱ — inbound email becomes tickets and replies via a mailbox poller.
 - **Escalation & auto-close** ⏱ — SLA escalation and automatic closing of idle resolved tickets.
+- **Merge & split** 🆕 — merge tickets into one conversation, or split one ticket in two at any reply (the reply and everything after move into a new ticket with its own subject/department; both sides carry a private note).
 - **Knowledgebase** 🤖 — categorized help articles with AI-assisted search.
 - **Network status** — public status page and network-issue announcements.
 - **Announcements & downloads** — news posts and a categorized client download library, plus an **RSS feed** 🆕 (`/announcements.rss`) so subscribers can follow updates in their reader.
@@ -124,6 +126,7 @@ Generated from the live codebase.
 - **WHMCS import** — full migration of clients, services, domains, invoices, and more from WHMCS.
 - **Backups** ⏱ — scheduled database backups with run history.
 - **GDPR tools** ⏱ — client data export, erasure requests, and automated data pruning.
+- **WebP image pipeline** 🆕 — the `img()` helper and `/img` endpoint serve WebP derivatives (optionally downscaled) to capable browsers with far-future cache headers, falling back to the original bytes otherwise; `public/.htaccess` now sends immutable cache headers for versioned static assets.
 - **REST API** 🆕 — real, scoped API: Bearer-authenticated (`key.secret`) with per-credential permissions. Read clients/invoices/services/domains/tickets, create invoices, reply to tickets. Managed at **Admin → API Credentials** (settings.manage).
 - **Health endpoint** 🆕 — `GET /health` returns JSON liveness/DB status for uptime monitors, and stays up during maintenance mode.
 - **Licensing & integrity** ⏱ — activation-key validation and scheduled integrity checks.

@@ -44,6 +44,36 @@ if (!function_exists('asset')) {
     }
 }
 
+if (!function_exists('img')) {
+    /**
+     * Builds a URL for an image through the WebP pipeline (`/img/{width}/…`).
+     * The pipeline serves a WebP derivative to WebP-capable browsers and the
+     * original otherwise — both with far-future cache headers — so a page
+     * can downscale an uploaded photo or brand asset once and stop shipping
+     * the full-size original to every visitor. A non-empty $width caps the
+     * largest dimension (aspect ratio is preserved); pass 0/null for the
+     * original size, converted to WebP where possible.
+     *
+     * Like asset(), appends a ?v= cache-buster so an updated file (or a
+     * changed width) invalidates the browser/CDN cache. Falls back to a
+     * plain asset() URL when the file doesn't exist, so a view can call
+     * img() unconditionally.
+     */
+    function img(string $path, ?int $width = null): string
+    {
+        $path = '/' . ltrim($path, '/');
+        $file = dirname(__DIR__) . '/public' . $path;
+        $version = is_file($file) ? (string) @filemtime($file) : '';
+
+        $query = http_build_query([
+            'path' => $path,
+            'w' => $width !== null && $width > 0 ? (int) $width : 0,
+        ]) . ($version !== '' ? '&v=' . $version : '');
+
+        return '/img?' . $query;
+    }
+}
+
 if (!function_exists('page_title')) {
     /**
      * Renders a page title under the admin's own brand name.

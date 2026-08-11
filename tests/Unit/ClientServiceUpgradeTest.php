@@ -123,7 +123,25 @@ final class ClientServiceUpgradeTest extends DatabaseTestCase
             $this->db,
             new ProductRepository($this->db),
             new ProductPricingRepository($this->db),
-            $this->proration()
+            $this->proration(),
+            new \CodeVault\Catalog\ProductAddonRepository($this->db),
+            $this->addonService()
+        );
+    }
+
+    private function addonService(): \CodeVault\Billing\ServiceAddonService
+    {
+        return new \CodeVault\Billing\ServiceAddonService(
+            $this->services,
+            new ClientRepository($this->db),
+            new \CodeVault\Billing\TaxCalculator(
+                new \CodeVault\Billing\TaxRuleRepository($this->db),
+                new \CodeVault\Billing\VatNumberValidator(),
+                new \CodeVault\Billing\TaxSettings(new \CodeVault\Settings\SettingsRepository($this->db))
+            ),
+            new CurrencyService(new CurrencyRepository($this->db)),
+            $this->db,
+            new HookDispatcher()
         );
     }
 
