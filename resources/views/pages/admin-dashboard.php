@@ -306,14 +306,14 @@
             <?php if ($primaryIncome === null): ?>
                 <?= e((string) ($defaultCurrency['symbol'] ?? '')) ?>0
             <?php else: ?>
-                <?= e($primaryIncome['symbol']) ?><?= e(number_format((float) $primaryIncome['amount'], 0)) ?>
+                <?= e($primaryIncome['symbol']) ?> <?= e(number_format((float) $primaryIncome['amount'], 0)) ?>
             <?php endif; ?>
         </span>
         <span class="admin-stat-meta">
             <?php if (count($incomeRows) > 1): ?>
                 <?php foreach (array_slice($incomeRows, 1) as $row): ?>
                     <span style="display:inline-block;margin-right:8px;" title="<?= e($row['code']) ?>">
-                        + <?= e($row['symbol']) ?><?= e(number_format((float) $row['amount'], 0)) ?>
+                        + <?= e($row['symbol']) ?> <?= e(number_format((float) $row['amount'], 0)) ?>
                     </span>
                 <?php endforeach; ?>
                 ·
