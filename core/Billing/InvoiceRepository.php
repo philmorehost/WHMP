@@ -373,16 +373,18 @@ final class InvoiceRepository
      * under whichever symbol the template happens to hardcode. It also ignores
      * currency_rate, so an invoice locked at 1500 counted as its base figure.
      *
-     * Grouping by currency_id and multiplying by the locked rate gives the
-     * amount as actually invoiced, per currency, which is the only figure that
-     * can be honestly displayed or added up.
+     * Grouping by effective currency and multiplying by the locked rate gives
+     * the amount as actually invoiced, per currency, which is the only figure
+     * that can be honestly displayed or added up. Invoices with no locked
+     * currency fall back to their owner's currency (see sumByCurrency()) so
+     * naira-billed rows never leak into the dollar bucket.
      *
      * @return array<int, array{currency_id: ?int, amount: float, invoices: int}>
      */
     public function paidThisMonthByCurrency(): array
     {
         return $this->sumByCurrency(
-            "status = 'paid' AND paid_at >= ?",
+            "i.status = 'paid' AND i.paid_at >= ?",
             [(new DateTimeImmutable('first day of this month'))->format('Y-m-d 00:00:00')]
         );
     }
@@ -391,7 +393,7 @@ final class InvoiceRepository
     public function overdueByCurrency(): array
     {
         return $this->sumByCurrency(
-            "status = 'unpaid' AND due_date < ?",
+            "i.status = 'unpaid' AND i.due_date < ?",
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
@@ -404,13 +406,35 @@ final class InvoiceRepository
     {
         // NULLIF guards rows whose rate was never set (legacy/imported), where
         // a literal 0 would zero the whole currency's total.
+        //
+        // Grouping is by the *effective* currency, not the raw column. A NULL
+        // currency_id is "base currency" for a row locked via lockColumns(),
+        // but it also covers invoices that never locked a currency at all —
+        // imported rows, and batches written before currency locking (the
+        // recurring-billing job stores NGN-client invoices as NULL). Lumping
+        // all of those into one bucket labels naira money with the default
+        // "$" symbol and sums it into the dollar figure on the dashboard.
+        // Falling back to the client's currency (the same rule paginate() and
+        // formatDocument() already use) keeps each amount under the symbol it
+        // was actually billed in.
+        //
+        // The rate is applied only to rows that locked a non-default currency
+        // (lockColumns(): total is stored in the base currency, × rate
+        // re-expresses it). NULL and rate-1.0 rows are stored "as billed" and
+        // are never re-converted.
         $rows = $this->db->select(
-            "SELECT currency_id,
-                    COALESCE(SUM(total * COALESCE(NULLIF(currency_rate, 0), 1)), 0) AS amount,
+            "SELECT COALESCE(i.currency_id, c.currency_id) AS currency_id,
+                    COALESCE(SUM(
+                        i.total * COALESCE(
+                            CASE WHEN i.currency_id IS NULL THEN 1 ELSE NULLIF(i.currency_rate, 0) END,
+                            1
+                        )
+                    ), 0) AS amount,
                     COUNT(*) AS invoices
-             FROM invoices
+             FROM invoices i
+             JOIN clients c ON c.id = i.client_id
              WHERE {$where}
-             GROUP BY currency_id
+             GROUP BY COALESCE(i.currency_id, c.currency_id)
              ORDER BY amount DESC",
             $bindings
         );
