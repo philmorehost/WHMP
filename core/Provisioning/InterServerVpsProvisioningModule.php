@@ -101,7 +101,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         return [
             'success' => true,
             'message' => $serviceId !== null
-                ? "VPS order placed (InterServer service #{$serviceId})."
+                ? "VPS order placed (service #{$serviceId})."
                 : 'VPS order placed.',
         ];
     }
@@ -179,7 +179,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'backups' => []];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'backups' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/backups", null));
@@ -224,7 +224,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'slices' => []];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'slices' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/slices", null));
@@ -261,7 +261,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'info' => []];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'info' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}", null));
@@ -291,7 +291,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/change_root_password", [
@@ -306,7 +306,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $slices = (int) ($params['package'] ?? $params['slices'] ?? 0);
@@ -338,11 +338,15 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $response = $this->call($params['server'], 'GET', "/vps/{$vpsId}/setup_vnc", null);
         $decoded = $this->decode($response);
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message']];
+        }
 
         if (!$decoded['success']) {
             return ['success' => false, 'message' => $decoded['message']];
@@ -355,7 +359,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         if ($ip === null) {
             return [
                 'success' => false,
-                'message' => 'No VNC console is provisioned for this VPS yet — provision one from the InterServer dashboard first.',
+                'message' => 'No VNC console is provisioned for this VPS yet — contact support to provision one.',
             ];
         }
 
@@ -369,7 +373,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $response = $this->call($params['server'], 'GET', "/vps/{$vpsId}/traffic_usage", null);
@@ -413,7 +417,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'templates' => []];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'templates' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/reinstall_os", null));
@@ -457,7 +461,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $template = trim((string) ($params['template'] ?? ''));
@@ -470,7 +474,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         if ($localPassword === '') {
             return [
                 'success' => false,
-                'message' => 'InterServer requires the MyAdmin account password to reinstall a VPS, which is not stored on this server record. Submit the reinstall as a support request instead.',
+                'message' => 'The hosting provider requires the control panel account password to reinstall a VPS, which is not stored on this server record. Submit the reinstall as a support request instead.',
             ];
         }
 
@@ -499,7 +503,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $ips = $params['ips'] ?? null;
@@ -532,7 +536,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).', 'ips' => []];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'ips' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/reverse_dns", null));
@@ -556,7 +560,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
         }
 
         $path = str_replace('{id}', (string) $vpsId, $pathTemplate);
@@ -680,7 +684,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
     private function decode(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the InterServer API.', 'data' => null];
+            return ['success' => false, 'message' => 'Could not reach the hosting provider API.', 'data' => null];
         }
 
         $decoded = json_decode($response['body'], true);

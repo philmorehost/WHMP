@@ -61,7 +61,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
         return [
             'success' => true,
             'message' => $serviceId !== null
-                ? "Dedicated server order placed (InterServer service #{$serviceId})."
+                ? "Dedicated server order placed (service #{$serviceId})."
                 : 'Dedicated server order placed.',
         ];
     }
@@ -102,7 +102,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
         $dedicatedId = $this->resolveDedicatedId($params);
 
         if ($dedicatedId === null) {
-            return ['success' => false, 'message' => 'Could not find this dedicated server on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this dedicated server on the hosting provider (hostname lookup failed).'];
         }
 
         $response = $this->call($params['server'], 'GET', "/dedicated/{$dedicatedId}/kvm", null);
@@ -130,7 +130,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
         $dedicatedId = $this->resolveDedicatedId($params);
 
         if ($dedicatedId === null) {
-            return ['success' => false, 'message' => 'Could not find this dedicated server on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this dedicated server on the hosting provider (hostname lookup failed).'];
         }
 
         $response = $this->call($params['server'], 'GET', "/dedicated/{$dedicatedId}/traffic_usage", null);
@@ -163,7 +163,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
         $dedicatedId = $this->resolveDedicatedId($params);
 
         if ($dedicatedId === null) {
-            return ['success' => false, 'message' => 'Could not find this dedicated server on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this dedicated server on the hosting provider (hostname lookup failed).'];
         }
 
         $osVersion = (string) ($params['osVersion'] ?? 'ubuntu24');
@@ -180,7 +180,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
         $dedicatedId = $this->resolveDedicatedId($params);
 
         if ($dedicatedId === null) {
-            return ['success' => false, 'message' => 'Could not find this dedicated server on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this dedicated server on the hosting provider (hostname lookup failed).'];
         }
 
         $rdns = (string) $params['rdns'];
@@ -198,7 +198,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
         $dedicatedId = $this->resolveDedicatedId($params);
 
         if ($dedicatedId === null) {
-            return ['success' => false, 'message' => 'Could not find this dedicated server on InterServer (hostname lookup failed).'];
+            return ['success' => false, 'message' => 'Could not find this dedicated server on the hosting provider (hostname lookup failed).'];
         }
 
         $path = str_replace('{id}', (string) $dedicatedId, $pathTemplate);
@@ -269,7 +269,7 @@ final class InterServerDedicatedProvisioningModule implements ProvisioningModule
     private function decode(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the InterServer API.', 'data' => null];
+            return ['success' => false, 'message' => 'Could not reach the hosting provider API.', 'data' => null];
         }
 
         $decoded = json_decode($response['body'], true);
