@@ -132,4 +132,34 @@ final class ServiceControllerPriceTest extends DatabaseTestCase
         $service = $this->services->find($serviceId);
         $this->assertSame(1043.00, (float) $service['amount']);
     }
+
+    public function test_admin_can_edit_the_renewal_date(): void
+    {
+        [, $serviceId] = $this->makeService(0.70, 1, 4);
+
+        $this->post($serviceId, ['next_due_date' => '2026-12-01']);
+
+        $service = $this->services->find($serviceId);
+        $this->assertSame('2026-12-01', (string) $service['next_due_date']);
+    }
+
+    public function test_blank_renewal_date_leaves_the_existing_one_unchanged(): void
+    {
+        [, $serviceId] = $this->makeService(0.70, 1, 5);
+
+        $this->post($serviceId, ['next_due_date' => '', 'hostname' => 'srv.example.com']);
+
+        $service = $this->services->find($serviceId);
+        $this->assertSame('2026-09-01', (string) $service['next_due_date']);
+    }
+
+    public function test_invalid_renewal_date_is_rejected_and_not_saved(): void
+    {
+        [, $serviceId] = $this->makeService(0.70, 1, 6);
+
+        $this->post($serviceId, ['next_due_date' => 'not-a-date']);
+
+        $service = $this->services->find($serviceId);
+        $this->assertSame('2026-09-01', (string) $service['next_due_date']);
+    }
 }

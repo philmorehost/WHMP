@@ -188,7 +188,36 @@ final class ServiceController
             $fields['password'] = $password;
         }
 
+        // Next renewal date. The column is NOT NULL, so a blank submission
+        // means "leave it unchanged" — never clear it. Only pass the key
+        // through when a real calendar date was supplied.
+        $nextDueDate = trim((string) $request->input('next_due_date', ''));
+
+        if ($nextDueDate !== '') {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $nextDueDate);
+
+            if ($parsed === false || $parsed->format('Y-m-d') !== $nextDueDate) {
+                return Response::redirect("/admin/services/{$id}?details_error=" . urlencode('Enter a valid next renewal date (YYYY-MM-DD).'));
+            }
+
+            $fields['next_due_date'] = $nextDueDate;
+        }
+
         $this->services->updateDetails($id, $fields);
+
+        // Billing-significant change deserves its own audit trail showing
+        // the before/after dates, not just the generic "details edited" row.
+        if (isset($fields['next_due_date'])) {
+            $this->activity->log(
+                'admin',
+                (int) $this->guard->currentAdmin()['id'],
+                'service.renewal_date_changed',
+                'service',
+                $id,
+                "Changed renewal date for service #{$id} from {$service['next_due_date']} to {$fields['next_due_date']}",
+                $request->ip()
+            );
+        }
 
         // "Set to package price" backs the service's recurring amount onto the
         // product's current catalog price for this billing cycle — the admin

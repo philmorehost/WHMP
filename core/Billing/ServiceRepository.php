@@ -491,7 +491,7 @@ final class ServiceRepository
     {
         $this->ensureSchema();
 
-        $writable = ['username', 'domain', 'hostname', 'password', 'dedicated_ip', 'assigned_ips', 'server_id'];
+        $writable = ['username', 'domain', 'hostname', 'password', 'dedicated_ip', 'assigned_ips', 'server_id', 'next_due_date'];
         $assignments = [];
         $bindings = [];
 

@@ -416,6 +416,11 @@ $showDomainField ??= true;
                 <small>Includes all VPS, Dedicated, and Shared Hosting servers configured in WHMP (<a href="/admin/servers" target="_blank" style="color:var(--cv-color-brand-500);text-decoration:underline;">Manage Servers & Server Groups</a>).</small>
             </div>
             <div class="admin-service-field">
+                <label>📅 Next Renewal Date</label>
+                <input type="date" name="next_due_date" value="<?= e((string) ($service['next_due_date'] ?? '')) ?>">
+                <small>When the next renewal invoice is generated. Leave unchanged unless the billing date moved — changing it here only affects future renewals and does not create or backdate an invoice.</small>
+            </div>
+            <div class="admin-service-field">
                 <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;">
                     <input type="checkbox" name="set_package_price" value="1" style="width:auto;">
                     💲 Set recurring price to package price
