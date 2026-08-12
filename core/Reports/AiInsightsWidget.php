@@ -32,7 +32,7 @@ use CodeVault\Support\TicketRepository;
  */
 final class AiInsightsWidget implements WidgetModule
 {
-    private const CACHE_KEY = 'ai_insights_dashboard_v1';
+    private const CACHE_KEY = 'ai_insights_dashboard_v2';
     private const CACHE_TTL_SECONDS = 3600;
     private const RENEWAL_WINDOW_DAYS = 7;
 
@@ -109,25 +109,82 @@ final class AiInsightsWidget implements WidgetModule
     /**
      * The live numbers, always computed locally.
      *
+     * Income and overdue are per-currency breakdowns (see
+     * InvoiceRepository::sumByCurrency()) — a single SUM(total) across the
+     * table would add naira to dollars and report the result under one
+     * symbol, which is exactly the wrong-figure bug this widget used to have.
+     *
      * @return array<string, mixed>
      */
     private function snapshot(): array
     {
-        $default = $this->currencies->default();
-
         return [
-            'income_this_month' => $this->invoices->totalPaidThisMonth(),
+            'income_this_month' => $this->labelCurrencies($this->invoices->paidThisMonthByCurrency()),
             'new_clients_this_month' => $this->clients->countNewThisMonth(),
             'total_clients' => $this->clients->countAll(),
             'pending_orders' => $this->orders->countPending(),
             'overdue_invoice_count' => $this->invoices->countOverdue(),
-            'overdue_invoice_total' => $this->invoices->sumOverdue(),
+            'overdue_invoice_total' => $this->labelCurrencies($this->invoices->overdueByCurrency()),
             'open_tickets' => $this->tickets->countOpen(),
             'renewing_services' => $this->services->countDueForBilling(self::RENEWAL_WINDOW_DAYS),
             'renewing_domains' => $this->domains->countDueForRenewal(self::RENEWAL_WINDOW_DAYS),
-            'currency_symbol' => (string) ($default['symbol'] ?? '$'),
-            'currency_code' => (string) ($default['code'] ?? 'USD'),
         ];
+    }
+
+    /**
+     * Attaches each currency bucket's code and symbol.
+     *
+     * A NULL currency_id means the invoice never locked one, which resolves
+     * to the system default — the same rule the dashboard and client-facing
+     * pages follow.
+     *
+     * @param array<int, array{currency_id: ?int, amount: float, invoices: int}> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function labelCurrencies(array $rows): array
+    {
+        $out = [];
+
+        foreach ($rows as $row) {
+            $currency = $row['currency_id'] !== null
+                ? ($this->currencies->find((int) $row['currency_id']) ?? $this->currencies->default())
+                : $this->currencies->default();
+
+            $out[] = $row + [
+                'code' => (string) ($currency['code'] ?? ''),
+                'symbol' => (string) ($currency['symbol'] ?? ''),
+                'is_default' => $row['currency_id'] === null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * "₦95,246.00 (NGN) + $29,761.00 (USD)" — each bucket under its own
+     * symbol so nothing gets silently re-labelled or summed across
+     * currencies. An empty breakdown (no paid invoices, nothing overdue)
+     * renders the default currency's zero.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     */
+    private function formatMoney(array $rows): string
+    {
+        $parts = [];
+
+        foreach ($rows as $row) {
+            $parts[] = ($row['symbol'] ?? '')
+                . number_format((float) $row['amount'], 2)
+                . ' (' . ($row['code'] ?? '') . ')';
+        }
+
+        if ($parts !== []) {
+            return implode(' + ', $parts);
+        }
+
+        $default = $this->currencies->default();
+
+        return ($default['symbol'] ?? '$') . '0.00 (' . ($default['code'] ?? 'USD') . ')';
     }
 
     /**
@@ -157,13 +214,11 @@ final class AiInsightsWidget implements WidgetModule
     /** @param array<string, mixed> $data */
     private function describe(array $data): string
     {
-        $sym = $data['currency_symbol'];
-
         return implode("\n", [
-            'Income this month: ' . $sym . number_format((float) $data['income_this_month'], 2) . ' (' . $data['currency_code'] . ')',
+            'Income this month: ' . $this->formatMoney($data['income_this_month']),
             'New clients this month: ' . (int) $data['new_clients_this_month'] . ' (total clients: ' . (int) $data['total_clients'] . ')',
             'Pending orders: ' . (int) $data['pending_orders'],
-            'Overdue invoices: ' . (int) $data['overdue_invoice_count'] . ' totalling ' . $sym . number_format((float) $data['overdue_invoice_total'], 2),
+            'Overdue invoices: ' . (int) $data['overdue_invoice_count'] . ' totalling ' . $this->formatMoney($data['overdue_invoice_total']),
             'Open support tickets: ' . (int) $data['open_tickets'],
             'Services renewing within 7 days: ' . (int) $data['renewing_services'],
             'Domains renewing within 7 days: ' . (int) $data['renewing_domains'],
@@ -173,9 +228,7 @@ final class AiInsightsWidget implements WidgetModule
     /** @param array<string, mixed> $data */
     private function plainFacts(array $data): string
     {
-        $sym = $data['currency_symbol'];
-
-        return '<strong>' . $sym . number_format((float) $data['income_this_month'], 2) . '</strong> income this month · '
+        return '<strong>' . $this->formatMoney($data['income_this_month']) . '</strong> income this month · '
             . '<strong>' . (int) $data['new_clients_this_month'] . '</strong> new clients · '
             . '<strong>' . (int) $data['pending_orders'] . '</strong> pending orders · '
             . '<strong>' . (int) $data['overdue_invoice_count'] . '</strong> overdue invoices · '
