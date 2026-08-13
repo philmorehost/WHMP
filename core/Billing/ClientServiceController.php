@@ -770,6 +770,62 @@ final class ClientServiceController
     }
 
     /**
+     * Changes the cPanel password for a shared-hosting service.
+     *
+     * The live WHM passwd call can be slow, so the request never blocks on
+     * it: this validates the submission, hands the work to a
+     * ChangeServicePasswordJob on the queue, and returns immediately. The
+     * worker emails the client the exact outcome (success, or the precise
+     * failure reason) when it finishes.
+     */
+    public function changePassword(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        if ($service['status'] !== 'active') {
+            return $this->back((int) $service['id'], null, 'This service must be active to change its password.');
+        }
+
+        if (!$this->isOnCpanelServer($service)) {
+            return $this->back((int) $service['id'], null, 'Password changes are only available for cPanel hosting accounts.');
+        }
+
+        $newPassword = (string) $request->input('new_password', '');
+        $confirm = (string) $request->input('confirm_password', '');
+
+        if (strlen($newPassword) < 8) {
+            return $this->back((int) $service['id'], null, 'The new password must be at least 8 characters long.');
+        }
+
+        if ($newPassword !== $confirm) {
+            return $this->back((int) $service['id'], null, 'The password confirmation does not match.');
+        }
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'service.password_change_queued',
+            'service',
+            (int) $service['id'],
+            "Client queued a password change for service #{$service['id']} ({$service['product_name']})",
+            $request->ip()
+        );
+
+        \CodeVault\Support\App::container()
+            ->make(\CodeVault\Queue\QueueInterface::class)
+            ->push(new ChangeServicePasswordJob((int) $service['id'], $newPassword));
+
+        return $this->back(
+            (int) $service['id'],
+            'Password change is running in the background — you\'ll receive an email with the outcome.'
+        );
+    }
+
+    /**
      * Opens a support ticket for an action the vendor API cannot perform
      * unattended, logs it, and returns the client to the service page.
      *

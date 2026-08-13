@@ -585,6 +585,55 @@ $cpanelTabs = [
                         <?php endif; ?>
                     </div>
 
+                    <?php
+                    // Real disk usage from WHM's accountsummary. diskLimitMb is
+                    // the package's own quota — the "original disk size" of the
+                    // plan the client bought — so the percentage is honest.
+                    $diskUsedMb = isset($usage['diskUsedMb']) ? (float) $usage['diskUsedMb'] : null;
+                    $diskLimitMb = isset($usage['diskLimitMb']) ? (float) $usage['diskLimitMb'] : null;
+                    $diskPercent = ($diskUsedMb !== null && $diskLimitMb !== null && $diskLimitMb > 0)
+                        ? max(0, min(100, ($diskUsedMb / $diskLimitMb) * 100))
+                        : null;
+                    $diskBarColor = $diskPercent === null ? '#60a5fa' : ($diskPercent >= 90 ? '#ef4444' : ($diskPercent >= 70 ? '#f59e0b' : '#34d399'));
+                    ?>
+                    <!-- Disk Usage Meter (cPanel shared hosting) -->
+                    <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;margin-bottom:20px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                            <div>
+                                <span style="font-weight:700;font-size:0.9rem;">💾 Disk Usage</span>
+                                <span style="display:block;font-size:0.75rem;color:var(--cv-text-secondary);margin-top:2px;">
+                                    <?= $diskPercent !== null ? 'Live from your hosting account' : 'Live from your hosting account' ?>
+                                </span>
+                            </div>
+                            <?php if ($diskPercent !== null): ?>
+                                <span style="font-size:1.35rem;font-weight:800;color:<?= e($diskBarColor) ?>;"><?= e(number_format($diskPercent, 1)) ?>%</span>
+                            <?php endif; ?>
+                        </div>
+
+                        <?php if ($diskUsedMb !== null): ?>
+                            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;font-size:0.82rem;">
+                                <span style="color:var(--cv-text-secondary);">
+                                    <strong style="color:var(--cv-text-primary);"><?= e(number_format($diskUsedMb / 1024, 2)) ?> GB</strong> used
+                                </span>
+                                <span style="color:var(--cv-text-secondary);">
+                                    <?= $diskLimitMb !== null && $diskLimitMb > 0
+                                        ? 'of ' . e(number_format($diskLimitMb / 1024, 1)) . ' GB (package quota)'
+                                        : '(unlimited quota)' ?>
+                                </span>
+                            </div>
+                            <div style="width:100%;height:12px;background:rgba(255,255,255,0.1);border-radius:6px;overflow:hidden;">
+                                <div style="width:<?= e(number_format($diskPercent ?? 0, 2)) ?>%;height:100%;background:linear-gradient(90deg, <?= e($diskBarColor) ?>, <?= e($diskBarColor) ?>);border-radius:6px;transition:width .3s;"></div>
+                            </div>
+                            <?php if ($diskPercent !== null && $diskPercent >= 90): ?>
+                                <p style="margin:10px 0 0;font-size:0.78rem;color:#fca5a5;">⚠️ Your account is nearly full — consider upgrading your package or cleaning up files.</p>
+                            <?php elseif ($diskPercent !== null && $diskPercent >= 70): ?>
+                                <p style="margin:10px 0 0;font-size:0.78rem;color:#fcd34d;">Your account is getting close to its disk limit.</p>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <p style="margin:0;font-size:0.82rem;color:var(--cv-text-secondary);">Disk usage is not reported by this server right now.</p>
+                        <?php endif; ?>
+                    </div>
+
                     <?php if ($domainChangerAvailable): ?>
                         <div id="change-domain-form-<?= $id ?>" style="display:none;margin-bottom:20px;padding:16px;border:1px dashed var(--cv-border-default);border-radius:8px;">
                             <form method="post" action="/client/services/<?= $id ?>/change-domain" style="margin:0;" data-confirm="Change the primary domain for this hosting account? Existing mail and site content stays on the account, but anything pointed at the old domain must be updated separately.">
@@ -609,6 +658,33 @@ $cpanelTabs = [
                                 <h4><?= $tabIcon ?> <?= $tabLabel ?></h4>
                             </a>
                         <?php endforeach; ?>
+                    </div>
+
+                    <!-- Change cPanel Password -->
+                    <div style="margin-top:var(--cv-space-4);padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);">
+                        <h4 style="margin:0 0 4px 0;font-size:0.95rem;font-weight:700;">🔑 Change cPanel Password</h4>
+                        <p style="margin:0 0 12px 0;color:var(--cv-text-secondary);font-size:0.82rem;">
+                            Resets your cPanel login password. It processes in the background — you'll get an email
+                            confirming the change (or the reason it failed) without having to keep this page open.
+                        </p>
+                        <form method="post" action="/client/services/<?= $id ?>/password" style="margin:0;max-width:420px;">
+                            <?= csrf_field() ?>
+                            <div style="display:flex;flex-direction:column;gap:10px;">
+                                <div>
+                                    <label class="cv-label" for="new_password-<?= $id ?>" style="font-size:0.78rem;">New password</label>
+                                    <input class="cv-input" id="new_password-<?= $id ?>" type="password" name="new_password"
+                                           autocomplete="new-password" minlength="8" required style="width:100%;" placeholder="At least 8 characters">
+                                </div>
+                                <div>
+                                    <label class="cv-label" for="confirm_password-<?= $id ?>" style="font-size:0.78rem;">Confirm new password</label>
+                                    <input class="cv-input" id="confirm_password-<?= $id ?>" type="password" name="confirm_password"
+                                           autocomplete="new-password" minlength="8" required style="width:100%;" placeholder="Repeat the new password">
+                                </div>
+                                <div>
+                                    <button class="svc-btn svc-btn--primary" type="submit">Change Password</button>
+                                </div>
+                            </div>
+                        </form>
                     </div>
                 <?php endif; ?>
             </div>

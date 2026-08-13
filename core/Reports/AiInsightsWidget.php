@@ -103,6 +103,15 @@ final class AiInsightsWidget implements WidgetModule
             }
         }
 
+        // Always-on action: email clients whose accounts renew within 7 days,
+        // with per-client service/domain names, dates and amounts (see
+        // ExpiringReminderController).
+        $card .= '<div style="margin-top:var(--cv-space-3);padding-top:var(--cv-space-3);border-top:1px solid var(--cv-border-default);">'
+            . '<a href="/admin/expiring-reminders" style="display:inline-flex;align-items:center;gap:6px;color:var(--cv-color-brand-500);font-size:.85rem;font-weight:600;text-decoration:none;">'
+            . '📧 Email clients expiring in 7 days →'
+            . '</a>'
+            . '</div>';
+
         return $card . '</div>';
     }
 

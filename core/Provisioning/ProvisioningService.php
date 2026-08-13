@@ -227,6 +227,18 @@ final class ProvisioningService
         return $result;
     }
 
+    /**
+     * Changes the account's password on the live server (WHM passwd for
+     * cPanel). Runs in the background via ChangeServicePasswordJob because a
+     * live passwd call can be slow — the client's browser should not wait on
+     * it. The local `services.password` record is updated only after the
+     * module confirms success (see ChangeServicePasswordJob).
+     */
+    public function changePassword(int $serviceId, string $password): array
+    {
+        return $this->optional($serviceId, 'changePassword', ['password' => $password], 'Changing the password is not supported by this server module.');
+    }
+
     public function setReverseDns(int $serviceId, string $rdns, string $ip = ''): array
     {
         return $this->optional($serviceId, 'setReverseDns', [

@@ -20,11 +20,17 @@ final class FakeProvisioningModule implements ProvisioningModule
     /** @var array{success: bool, message: string} */
     public array $changePackageResult = ['success' => true, 'message' => 'Package changed.'];
 
+    /** @var array{success: bool, message: string} */
+    public array $changePasswordResult = ['success' => true, 'message' => 'Password changed.'];
+
     /** @var array<int, array<string, mixed>> */
     public array $createCalls = [];
 
     /** @var array<int, array<string, mixed>> */
     public array $changePackageCalls = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $changePasswordCalls = [];
 
     public function metadata(): array
     {
@@ -50,6 +56,13 @@ final class FakeProvisioningModule implements ProvisioningModule
         return $this->changePackageResult;
     }
 
+    public function changePassword(array $params): array
+    {
+        $this->changePasswordCalls[] = $params;
+
+        return $this->changePasswordResult;
+    }
+
     public function suspend(array $params): array
     {
         return ['success' => true, 'message' => 'Suspended.'];
@@ -63,11 +76,6 @@ final class FakeProvisioningModule implements ProvisioningModule
     public function terminate(array $params): array
     {
         return ['success' => true, 'message' => 'Terminated.'];
-    }
-
-    public function changePassword(array $params): array
-    {
-        return ['success' => true, 'message' => 'Password changed.'];
     }
 
     public function singleSignOn(array $params): array

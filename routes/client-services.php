@@ -17,6 +17,7 @@ $router->post('/client/services/{id}/sso', [ClientServiceController::class, 'sso
 $router->get('/client/services/{id}/cancel', [ClientServiceController::class, 'cancelForm']);
 $router->post('/client/services/{id}/cancel', [ClientServiceController::class, 'cancel']);
 $router->post('/client/services/{id}/power', [ClientServiceController::class, 'power']);
+$router->post('/client/services/{id}/password', [ClientServiceController::class, 'changePassword']);
 $router->post('/client/services/{id}/vnc', [ClientServiceController::class, 'vnc']);
 $router->post('/client/services/{id}/backup', [ClientServiceController::class, 'backup']);
 $router->post('/client/services/{id}/restore', [ClientServiceController::class, 'restore']);

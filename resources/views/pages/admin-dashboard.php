@@ -265,11 +265,57 @@
     .admin-dashboard-hero__greeting-title {
         font-size: 1.5rem;
     }
+    .admin-dashboard-hero__actions {
+        width: 100%;
+    }
     .admin-dashboard-search {
         max-width: 100%;
+        min-width: 0;
     }
     .admin-stat-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+/* Small phones: stack the search + logout so nothing overflows the viewport. */
+@media (max-width: 480px) {
+    .admin-dashboard-hero {
+        padding: 28px 16px;
+        margin-bottom: 28px;
+        border-radius: 12px;
+    }
+    .admin-dashboard-hero__greeting-title {
+        font-size: 1.3rem;
+    }
+    .admin-dashboard-hero__greeting-subtitle {
+        font-size: .82rem;
+        word-break: break-word;
+    }
+    .admin-dashboard-hero__actions {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .admin-dashboard-search {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+    .admin-dashboard-search input {
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 1rem; /* avoids iOS zoom on focus */
+    }
+    .admin-dashboard-search button {
+        width: 100%;
+        padding: 12px 16px;
+    }
+    .admin-dashboard-logout {
+        width: 100%;
+        box-sizing: border-box;
+        text-align: center;
     }
 }
 </style>
