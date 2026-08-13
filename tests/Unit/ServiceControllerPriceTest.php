@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Tests\Unit;
 
 use CodeVault\Auth\AdminRepository;
+use CodeVault\Billing\CreateAccountJob;
 use CodeVault\Billing\CurrencyRepository;
 use CodeVault\Billing\ServiceController;
 use CodeVault\Billing\ServiceRepository;
@@ -14,6 +15,10 @@ use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Database\Migrator;
+use CodeVault\Provisioning\ServerGroupRepository;
+use CodeVault\Provisioning\ServerRepository;
+use CodeVault\Queue\Job;
+use CodeVault\Queue\QueueInterface;
 use CodeVault\Request;
 use CodeVault\Session\SessionManager;
 use CodeVault\Staff\RoleRepository;
@@ -220,5 +225,90 @@ final class ServiceControllerPriceTest extends DatabaseTestCase
 
         $this->assertSame(302, $response->status());
         $this->assertSame('/login', (string) ($response->headers()['Location'] ?? ''));
+    }
+
+    public function test_create_account_queues_a_background_job_for_a_cpanel_service(): void
+    {
+        // cPanel shared-hosting setup: a shared product in a group with a
+        // cPanel server.
+        $productGroupId = (new ProductGroupRepository($this->db))->create('Hosting', null);
+        $serverGroupId = (new ServerGroupRepository($this->db))->create('Hosting');
+
+        $servers = new ServerRepository($this->db);
+        $serverId = $servers->create([
+            'server_group_id' => $serverGroupId,
+            'name' => 'WHM Primary',
+            'hostname' => 'whm.example.test',
+            'module_slug' => 'cpanel',
+            'api_username' => 'root',
+            'api_token' => str_repeat('A', 32),
+            'api_port' => 2087,
+            'use_ssl' => 1,
+            'active' => 1,
+        ]);
+
+        $products = new ProductRepository($this->db);
+        $sharedProductId = $products->create([
+            'product_group_id' => $productGroupId,
+            'server_group_id' => $serverGroupId,
+            'name' => 'PMH2 Shared',
+            'stock_quantity' => 5,
+            'type' => 'shared',
+            'whm_package_name' => 'cpanel_gold',
+        ]);
+
+        $clientId = $this->clients->create([
+            'email' => 'create-account-cpanel@example.test',
+            'password' => 'secret123',
+            'first_name' => 'CPanel',
+            'last_name' => 'Client',
+            'currency_id' => 1,
+        ]);
+
+        $serviceId = $this->services->create([
+            'client_id' => $clientId,
+            'product_id' => $sharedProductId,
+            'product_name' => 'PMH2 Shared',
+            'billing_cycle' => 'monthly',
+            'amount' => 10.00,
+            'next_due_date' => '2026-09-01',
+            'status' => 'active',
+        ]);
+        $this->services->assignServer($serviceId, $serverId, 'cvuser1');
+
+        // Capture what gets pushed onto the queue instead of running it.
+        $fakeQueue = new class () implements QueueInterface {
+            /** @var array<int, Job> */
+            public array $pushed = [];
+
+            public function push(Job $job): void
+            {
+                $this->pushed[] = $job;
+            }
+
+            public function pop(string $queue = 'default'): ?Job
+            {
+                return null;
+            }
+
+            public function size(string $queue = 'default'): int
+            {
+                return 0;
+            }
+        };
+        App::container()->instance(QueueInterface::class, $fakeQueue);
+
+        $response = $this->controller->createAccount(
+            new Request([], [], ['REQUEST_METHOD' => 'POST', 'REMOTE_ADDR' => '127.0.0.1'], []),
+            ['id' => $serviceId]
+        );
+
+        // The request returns immediately — the work is deferred, not run.
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString('create_queued=1', (string) ($response->headers()['Location'] ?? ''));
+
+        $this->assertCount(1, $fakeQueue->pushed);
+        $this->assertInstanceOf(CreateAccountJob::class, $fakeQueue->pushed[0]);
+        $this->assertSame($serviceId, $fakeQueue->pushed[0]->serviceId);
     }
 }

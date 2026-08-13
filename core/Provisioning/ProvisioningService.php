@@ -192,6 +192,41 @@ final class ProvisioningService
         return $result;
     }
 
+    /**
+     * Switches the account to a new hosting package on the live server (WHM
+     * changepackage for cPanel). The billing-side upgrade (product/price) is
+     * handled separately by ProrationService; this only pushes the new
+     * package to the server, ordered after the local record is updated.
+     *
+     * Runs in the background via UpgradePackageJob because a live
+     * changepackage can be slow — the admin's browser should not wait on it.
+     */
+    public function changePackage(int $serviceId, string $package): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        if (!method_exists($module, 'changePackage')) {
+            return ['success' => false, 'message' => 'Changing the hosting package is not supported by this server module.'];
+        }
+
+        $result = $module->changePackage(array_merge($params, ['package' => $package]));
+
+        if (!$result['success']) {
+            $this->recordFailure($serviceId, $result['message']);
+
+            return $result;
+        }
+
+        $this->clearFailure($serviceId);
+        $this->hooks->fire(HookPoints::AFTER_MODULE_CHANGE_PACKAGE, ['serviceId' => $serviceId, 'package' => $package]);
+
+        return $result;
+    }
+
     public function setReverseDns(int $serviceId, string $rdns, string $ip = ''): array
     {
         return $this->optional($serviceId, 'setReverseDns', [

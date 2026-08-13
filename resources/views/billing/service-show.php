@@ -382,9 +382,14 @@ $isCpanelSharedHosting ??= false;
 <?php if (($_GET['price_error'] ?? '') !== ''): ?>
     <div class="admin-service-error">⚠️ <?= e((string) $_GET['price_error']) ?></div>
 <?php endif; ?>
-<?php if (($_GET['create_account'] ?? '') !== ''): ?>
-    <div class="admin-service-error" style="background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.35);color:#10b981;">
-        ✅ cPanel account created and the service was activated<?= ($_GET['create_msg'] ?? '') !== '' ? ' — ' . e((string) $_GET['create_msg']) : '' ?>.
+<?php if (($_GET['create_queued'] ?? '') !== ''): ?>
+    <div class="admin-service-error" style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35);color:#60a5fa;">
+        🔄 Account creation is running in the background — you'll receive an email with the outcome when it finishes. This page won't block or time out.
+    </div>
+<?php endif; ?>
+<?php if (($_GET['upgrade_queued'] ?? '') !== ''): ?>
+    <div class="admin-service-error" style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35);color:#60a5fa;">
+        🔄 Package upgrade is running in the background — you'll receive an email with the outcome when it finishes. This page won't block or time out.
     </div>
 <?php endif; ?>
 <?php if (($_GET['create_error'] ?? '') !== ''): ?>

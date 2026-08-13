@@ -58,6 +58,7 @@ final class HookPoints
     public const AFTER_MODULE_UNSUSPEND = 'AfterModuleUnsuspend';
     public const AFTER_MODULE_TERMINATE = 'AfterModuleTerminate';
     public const AFTER_MODULE_CHANGE_DOMAIN = 'AfterModuleChangeDomain';
+    public const AFTER_MODULE_CHANGE_PACKAGE = 'AfterModuleChangePackage';
     public const SERVICE_STATUS_CHANGED = 'ServiceStatusChanged';
 
     // --- Domains ---------------------------------------------------------

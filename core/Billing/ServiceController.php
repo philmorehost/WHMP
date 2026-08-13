@@ -12,9 +12,11 @@ use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Queue\QueueInterface;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
+use CodeVault\Support\App;
 use CodeVault\View;
 use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Provisioning\ServiceDetailsNotifier;
@@ -187,11 +189,13 @@ final class ServiceController
     }
 
     /**
-     * Creates (or re-creates) the cPanel account for a shared-hosting service
-     * by running the assigned module's create() against the server — the
-     * admin-facing equivalent of the automated provisioning that happens at
-     * order acceptance. Useful when a service was imported or activated
-     * manually and the account was never actually built on WHM.
+     * Queues the cPanel account creation for a shared-hosting service.
+     *
+     * createacct (DNS zone, mail, AutoSSL) can take minutes — running it in
+     * the request used to block the admin's browser until PHP's time/memory
+     * limits cut in. This validates the request, hands the work to a
+     * CreateAccountJob on the queue, and returns immediately; the worker
+     * emails every admin with the exact outcome when it finishes.
      */
     public function createAccount(Request $request, array $params): Response
     {
@@ -207,41 +211,53 @@ final class ServiceController
         }
 
         $product = $this->products->find((int) $service['product_id']);
-        $eligibleServers = $this->servers->all();
-
-        if ($product !== null && $product['server_group_id'] !== null) {
-            $groupId = (int) $product['server_group_id'];
-            $eligibleServers = array_values(array_filter(
-                $eligibleServers,
-                static fn (array $srv): bool => (int) ($srv['server_group_id'] ?? 0) === $groupId
-            ));
-        }
 
         // Defensive: only cPanel shared hosting. A stale bookmarked POST must
         // not create an account on a VPS or dedicated server.
-        if (!$this->isCpanelSharedHosting($service, $product, $eligibleServers)) {
+        if (!$this->isCpanelSharedHosting($service, $product, $this->eligibleServersFor($product))) {
             return Response::redirect("/admin/services/{$id}?create_error=" . urlencode('Create Account is only available for cPanel shared hosting services.'));
         }
 
-        $result = $this->provisioning->provision($id);
+        $adminId = (int) $this->guard->currentAdmin()['id'];
 
         $this->activity->log(
             'admin',
-            (int) $this->guard->currentAdmin()['id'],
-            'service.create_account',
+            $adminId,
+            'service.create_account_queued',
             'service',
             $id,
-            $result['success']
-                ? "Created cPanel account for service #{$id}: {$result['message']}"
-                : "Create cPanel account FAILED for service #{$id}: {$result['message']}",
+            "Queued background cPanel account creation for service #{$id}",
             $request->ip()
         );
 
-        if (!$result['success']) {
-            return Response::redirect("/admin/services/{$id}?create_error=" . urlencode($result['message']));
+        App::container()
+            ->make(QueueInterface::class)
+            ->push(new CreateAccountJob($id, $adminId, $request->ip()));
+
+        return Response::redirect("/admin/services/{$id}?create_queued=1");
+    }
+
+    /**
+     * The servers a product's group can run on — used by the cPanel checks
+     * for Create Account and background package upgrades.
+     *
+     * @param array<string, mixed>|null $product
+     * @return array<int, array<string, mixed>>
+     */
+    private function eligibleServersFor(?array $product): array
+    {
+        $all = $this->servers->all();
+
+        if ($product === null || $product['server_group_id'] === null) {
+            return $all;
         }
 
-        return Response::redirect("/admin/services/{$id}?create_account=1&create_msg=" . urlencode($result['message']));
+        $groupId = (int) $product['server_group_id'];
+
+        return array_values(array_filter(
+            $all,
+            static fn (array $srv): bool => (int) ($srv['server_group_id'] ?? 0) === $groupId
+        ));
     }
 
     public function updateDetails(Request $request, array $params): Response
@@ -400,7 +416,29 @@ final class ServiceController
             $request->ip()
         );
 
-        return Response::redirect("/admin/services/{$id}");
+        // The billing record is now on the new product. For a cPanel
+        // shared-hosting service the account on WHM also needs switching to
+        // the new package — done in the background (UpgradePackageJob) so the
+        // browser isn't blocked on WHM's changepackage, and reported by email
+        // when it finishes.
+        $upgradeQueued = false;
+
+        if ($this->isCpanelSharedHosting($service, $product, $this->eligibleServersFor($product))) {
+            $newPackage = (string) ($product['whm_package_name'] ?: $product['name']);
+
+            App::container()
+                ->make(QueueInterface::class)
+                ->push(new UpgradePackageJob(
+                    $id,
+                    $newPackage,
+                    (int) $this->guard->currentAdmin()['id'],
+                    $request->ip()
+                ));
+
+            $upgradeQueued = true;
+        }
+
+        return Response::redirect("/admin/services/{$id}" . ($upgradeQueued ? '?upgrade_queued=1' : ''));
     }
 
     public function suspend(Request $request, array $params): Response
