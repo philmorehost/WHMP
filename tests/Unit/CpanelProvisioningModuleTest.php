@@ -17,7 +17,9 @@ final class CpanelProvisioningModuleTest extends TestCase
     private array $server = [
         'hostname' => 'whm.example.test',
         'api_username' => 'root',
-        'api_token' => 'TOKEN123',
+        // A 32-char token so the module treats it as a WHM API token (not a
+        // password) and sends the `whm user:token` Authorization header.
+        'api_token' => 'A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4',
         'api_port' => null,
         'use_ssl' => true,
     ];
@@ -39,7 +41,7 @@ final class CpanelProvisioningModuleTest extends TestCase
         $this->assertStringStartsWith('https://whm.example.test:2087/json-api/createacct?', $request['url']);
         $this->assertStringContainsString('username=cvuser1', $request['url']);
         $this->assertStringContainsString('api.version=1', $request['url']);
-        $this->assertSame('whm root:TOKEN123', $request['headers']['Authorization']);
+        $this->assertSame('whm root:A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4', $request['headers']['Authorization']);
     }
 
     public function test_create_reports_success_when_whm_result_is_one(): void
@@ -59,6 +61,62 @@ final class CpanelProvisioningModuleTest extends TestCase
 
         $this->assertFalse($result['success']);
         $this->assertSame('Username already exists', $result['message']);
+    }
+
+    public function test_create_falls_back_to_the_service_package_name_as_the_whm_plan(): void
+    {
+        $this->http->respondWith(200, json_encode(['metadata' => ['result' => 1, 'reason' => 'OK']]));
+
+        $this->module->create([
+            'username' => 'cvpkg1',
+            'product_name' => 'PMH2 Gold',
+            'server' => $this->server,
+            'domain' => 'cvpkg1.example.com',
+        ]);
+
+        // No whm_package_name set → the client service's package name is used,
+        // never WHM's bare "default" package.
+        $request = $this->http->lastRequest();
+        $this->assertStringContainsString('plan=PMH2+Gold', $request['url']);
+    }
+
+    public function test_create_prefers_whm_package_name_over_the_product_name(): void
+    {
+        $this->http->respondWith(200, json_encode(['metadata' => ['result' => 1, 'reason' => 'OK']]));
+
+        $this->module->create([
+            'username' => 'cvpkg2',
+            'product_name' => 'PMH2 Gold',
+            'whm_package_name' => 'cpanel_gold',
+            'server' => $this->server,
+            'domain' => 'cvpkg2.example.com',
+        ]);
+
+        $request = $this->http->lastRequest();
+        $this->assertStringContainsString('plan=cpanel_gold', $request['url']);
+    }
+
+    public function test_create_reports_success_when_createacct_times_out_but_the_account_exists(): void
+    {
+        // createacct drops the connection (status 0 = timed out) but the
+        // account actually got created — the module must verify via
+        // accountsummary and report success, not a stranded failure.
+        $this->http->respondInSequence([
+            ['status' => 0, 'body' => ''],
+            ['status' => 200, 'body' => json_encode([
+                'metadata' => ['result' => 1],
+                'data' => ['acct' => [['user' => 'cvuser-timedout', 'domain' => 'example.com']]],
+            ])],
+        ]);
+
+        $result = $this->module->create(['username' => 'cvuser-timedout', 'server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertStringContainsString('timed out', $result['message']);
+
+        // The verification path issued an accountsummary call after createacct.
+        $urls = array_column($this->http->requests, 'url');
+        $this->assertStringContainsString('/json-api/accountsummary?', (string) end($urls));
     }
 
     public function test_unreachable_server_reports_failure_without_throwing(): void

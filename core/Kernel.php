@@ -657,8 +657,13 @@ class Kernel
         // return in well under a second either way.
         $this->container->singleton(HttpClient::class, fn () => new CurlHttpClient(timeoutSeconds: 120));
 
+        // 300s for the cPanel module specifically — a live createacct
+        // (DNS zone, mail, AutoSSL) has been observed to exceed 120s, which
+        // timed out client-side even though WHM finished creating the account.
+        // create() also re-verifies via accountsummary after a dropped
+        // connection, so a slow-but-successful create reports success.
         $this->container->singleton(CpanelProvisioningModule::class, function (Container $c) {
-            return new CpanelProvisioningModule(new CurlHttpClient(timeoutSeconds: 120, verifySsl: false));
+            return new CpanelProvisioningModule(new CurlHttpClient(timeoutSeconds: 300, verifySsl: false));
         });
 
         $this->container->singleton(\CodeVault\CpanelTools\CpanelUapiClient::class, function (Container $c) {

@@ -19,8 +19,10 @@ use CodeVault\Modules\ProvisioningModule;
  * shape rather than the modern `{"metadata": {...}, "data": {...}}` shape
  * account-management functions use, even under /json-api/?api.version=1;
  * decode() normalizes both. (2) a real `createacct` call (DNS zone, mail,
- * AutoSSL) can comfortably exceed 60 seconds — the bound HttpClient uses a
- * 120s timeout, not a short default, because of this.
+ * AutoSSL) can comfortably exceed 120 seconds — the bound HttpClient uses a
+ * 300s timeout for this module (not a short default), and create() re-checks
+ * accountsummary after a dropped connection so a slow-but-successful create
+ * is reported as success rather than a stranded failure.
  *
  * NOT yet verified: the CyberPanel module (§4.4 doc note) and this
  * module's `changePassword`/`changePackage` paths specifically (the live
@@ -29,6 +31,14 @@ use CodeVault\Modules\ProvisioningModule;
 final class CpanelProvisioningModule implements ProvisioningModule
 {
     private const DEFAULT_PORT = 2087;
+
+    /**
+     * How long to keep re-checking accountsummary after a createacct drops
+     * the connection — WHM keeps building the account after the socket dies,
+     * so a bounded poll distinguishes "created but slow" from "unreachable".
+     */
+    private const CREATE_VERIFY_ATTEMPTS = 3;
+    private const CREATE_VERIFY_DELAY_SECONDS = 3;
 
     public function __construct(
         private readonly HttpClient $http
@@ -56,7 +66,17 @@ final class CpanelProvisioningModule implements ProvisioningModule
     {
         $server = $params['server'];
         $username = (string) $params['username'];
-        $plan = !empty($params['whm_package_name']) ? (string) $params['whm_package_name'] : ($server['default_package'] ?? 'default');
+        // WHM package resolution: an explicit per-product mapping
+        // (whm_package_name) wins, then the service's own package name — the
+        // exact name the client sees — and only then the server's
+        // default_package config. Previously an unset whm_package_name
+        // silently created the account on WHM's "default" package, giving the
+        // client the wrong resources.
+        $plan = (string) (
+            ($params['whm_package_name'] ?? '')
+            ?: ($params['product_name'] ?? '')
+            ?: ($server['default_package'] ?? 'default')
+        );
 
         $response = $this->call($server, 'createacct', [
             'username' => $username,
@@ -65,7 +85,50 @@ final class CpanelProvisioningModule implements ProvisioningModule
             'password' => $params['password'] ?? bin2hex(random_bytes(12)),
         ]);
 
-        return $this->toResult($response);
+        $decoded = $this->decode($response);
+
+        if ($decoded['success']) {
+            return $this->toResult($response);
+        }
+
+        // A createacct that drops the connection client-side (status 0 =
+        // connect/timeout) can still have completed on WHM — the server keeps
+        // building DNS, mail and AutoSSL after the socket dies. Confirm via
+        // accountsummary before reporting failure, so a "created but slow"
+        // account isn't recorded as an error and left stranded (service never
+        // activated, server never assigned).
+        if ($response['status'] === 0 && $this->verifyAccountCreated($server, $username)) {
+            return [
+                'success' => true,
+                'message' => 'Account created, but the WHM response timed out — verified via accountsummary.',
+            ];
+        }
+
+        return ['success' => false, 'message' => $decoded['reason']];
+    }
+
+    /**
+     * Briefly polls accountsummary to confirm a createacct that dropped the
+     * connection actually finished server-side. Bounded so a genuinely
+     * unreachable server still fails promptly rather than hanging.
+     *
+     * @param array<string, mixed> $server
+     */
+    private function verifyAccountCreated(array $server, string $username): bool
+    {
+        for ($attempt = 0; $attempt < self::CREATE_VERIFY_ATTEMPTS; $attempt++) {
+            $decoded = $this->decode($this->call($server, 'accountsummary', ['user' => $username]));
+
+            if ($decoded['success'] && !empty($decoded['data']['acct'])) {
+                return true;
+            }
+
+            if ($attempt + 1 < self::CREATE_VERIFY_ATTEMPTS) {
+                sleep(self::CREATE_VERIFY_DELAY_SECONDS);
+            }
+        }
+
+        return false;
     }
 
     public function suspend(array $params): array

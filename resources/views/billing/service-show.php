@@ -278,7 +278,7 @@ $isCpanelSharedHosting ??= false;
             // suspended service whose account was never actually built on WHM.
             ?>
             <?php if ($isCpanelSharedHosting && !in_array($service['status'], ['pending', 'terminated'], true)): ?>
-                <form method="post" action="/admin/services/<?= $id ?>/create-account" data-confirm="Create the cPanel account on the server for this service now? This runs createacct against the assigned cPanel/WHM server."><?= csrf_field() ?>
+                <form method="post" action="/admin/services/<?= $id ?>/create-account" data-confirm="Create the cPanel account on the server for this service now? This runs createacct against the assigned cPanel/WHM server and can take a few minutes — please wait for it to finish."><?= csrf_field() ?>
                     <button class="admin-service-btn admin-service-btn--primary" type="submit">🖥️ Create Account</button>
                 </form>
             <?php endif; ?>
