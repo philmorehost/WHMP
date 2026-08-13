@@ -144,7 +144,104 @@ final class ServiceController
             // A VPS/dedicated box is identified by hostname, so the domain
             // field is noise on those products.
             'showDomainField' => !in_array($product['type'] ?? '', ['vps', 'dedicated'], true),
+            // Only cPanel shared-hosting packages get the "Create Account"
+            // button — see isCpanelSharedHosting().
+            'isCpanelSharedHosting' => $this->isCpanelSharedHosting($service, $product, $servers),
         ]);
+    }
+
+    /**
+     * Whether a service is a cPanel shared-hosting package — the only surface
+     * where "Create Account" makes sense. A shared/reseller product (not VPS
+     * or dedicated) that already has a cPanel server assigned, or whose server
+     * group contains a cPanel server, qualifies. Mirrors the client-side
+     * isOnCpanelServer() check (exact module_slug 'cpanel').
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed>|null $product
+     * @param array<int, array<string, mixed>> $eligibleServers
+     */
+    private function isCpanelSharedHosting(array $service, ?array $product, array $eligibleServers): bool
+    {
+        if (in_array($product['type'] ?? '', ['vps', 'dedicated'], true)) {
+            return false;
+        }
+
+        $assignedServerId = (int) ($service['server_id'] ?? 0);
+
+        if ($assignedServerId > 0) {
+            $assigned = $this->servers->find($assignedServerId);
+
+            if ($assigned !== null && (string) ($assigned['module_slug'] ?? '') === 'cpanel') {
+                return true;
+            }
+        }
+
+        foreach ($eligibleServers as $server) {
+            if ((string) ($server['module_slug'] ?? '') === 'cpanel') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Creates (or re-creates) the cPanel account for a shared-hosting service
+     * by running the assigned module's create() against the server — the
+     * admin-facing equivalent of the automated provisioning that happens at
+     * order acceptance. Useful when a service was imported or activated
+     * manually and the account was never actually built on WHM.
+     */
+    public function createAccount(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+
+        if ($service === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $product = $this->products->find((int) $service['product_id']);
+        $eligibleServers = $this->servers->all();
+
+        if ($product !== null && $product['server_group_id'] !== null) {
+            $groupId = (int) $product['server_group_id'];
+            $eligibleServers = array_values(array_filter(
+                $eligibleServers,
+                static fn (array $srv): bool => (int) ($srv['server_group_id'] ?? 0) === $groupId
+            ));
+        }
+
+        // Defensive: only cPanel shared hosting. A stale bookmarked POST must
+        // not create an account on a VPS or dedicated server.
+        if (!$this->isCpanelSharedHosting($service, $product, $eligibleServers)) {
+            return Response::redirect("/admin/services/{$id}?create_error=" . urlencode('Create Account is only available for cPanel shared hosting services.'));
+        }
+
+        $result = $this->provisioning->provision($id);
+
+        $this->activity->log(
+            'admin',
+            (int) $this->guard->currentAdmin()['id'],
+            'service.create_account',
+            'service',
+            $id,
+            $result['success']
+                ? "Created cPanel account for service #{$id}: {$result['message']}"
+                : "Create cPanel account FAILED for service #{$id}: {$result['message']}",
+            $request->ip()
+        );
+
+        if (!$result['success']) {
+            return Response::redirect("/admin/services/{$id}?create_error=" . urlencode($result['message']));
+        }
+
+        return Response::redirect("/admin/services/{$id}?create_account=1&create_msg=" . urlencode($result['message']));
     }
 
     public function updateDetails(Request $request, array $params): Response

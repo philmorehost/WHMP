@@ -162,4 +162,63 @@ final class ServiceControllerPriceTest extends DatabaseTestCase
         $service = $this->services->find($serviceId);
         $this->assertSame('2026-09-01', (string) $service['next_due_date']);
     }
+
+    public function test_create_account_is_rejected_for_a_non_cpanel_service(): void
+    {
+        // A VPS-type product with no cPanel server anywhere — the guard must
+        // refuse before any provisioning call is attempted.
+        $groups = new ProductGroupRepository($this->db);
+        $vpsGroupId = $groups->create('Servers', null);
+        $products = new ProductRepository($this->db);
+        $vpsProductId = $products->create([
+            'product_group_id' => $vpsGroupId,
+            'name' => 'VPS-1',
+            'stock_quantity' => 5,
+            'type' => 'vps',
+        ]);
+
+        $clientId = $this->clients->create([
+            'email' => 'create-account-vps@example.test',
+            'password' => 'secret123',
+            'first_name' => 'VPS',
+            'last_name' => 'Client',
+            'currency_id' => 1,
+        ]);
+
+        $serviceId = $this->services->create([
+            'client_id' => $clientId,
+            'product_id' => $vpsProductId,
+            'product_name' => 'VPS-1',
+            'billing_cycle' => 'monthly',
+            'amount' => 20.00,
+            'next_due_date' => '2026-09-01',
+            'status' => 'active',
+        ]);
+
+        $response = $this->controller->createAccount(
+            new Request([], [], ['REQUEST_METHOD' => 'POST', 'REMOTE_ADDR' => '127.0.0.1'], []),
+            ['id' => $serviceId]
+        );
+
+        // Redirected back with the guard error; the service is untouched.
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString('create_error', (string) ($response->headers()['Location'] ?? ''));
+        $service = $this->services->find($serviceId);
+        $this->assertSame('active', (string) $service['status']);
+    }
+
+    public function test_create_account_requires_login(): void
+    {
+        [, $serviceId] = $this->makeService(0.70, 1, 7);
+
+        $_SESSION = [];
+
+        $response = $this->controller->createAccount(
+            new Request([], [], ['REQUEST_METHOD' => 'POST', 'REMOTE_ADDR' => '127.0.0.1'], []),
+            ['id' => $serviceId]
+        );
+
+        $this->assertSame(302, $response->status());
+        $this->assertSame('/login', (string) ($response->headers()['Location'] ?? ''));
+    }
 }

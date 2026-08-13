@@ -16,6 +16,7 @@ $router->post('/admin/services/{id}/upgrade', [ServiceController::class, 'upgrad
 $router->post('/admin/services/{id}/suspend', [ServiceController::class, 'suspend']);
 $router->post('/admin/services/{id}/unsuspend', [ServiceController::class, 'unsuspend']);
 $router->post('/admin/services/{id}/terminate', [ServiceController::class, 'terminate']);
+$router->post('/admin/services/{id}/create-account', [ServiceController::class, 'createAccount']);
 $router->post('/admin/services/{id}/retry-provisioning', [ServiceController::class, 'retryProvisioning']);
 $router->post('/admin/services/{id}/edit', [ServiceController::class, 'updateDetails']);
 $router->post('/admin/services/{id}/send-details', [ServiceController::class, 'sendDetails']);

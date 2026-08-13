@@ -5,10 +5,12 @@
 /** @var array<string, string> $modes */
 /** @var string|null $error */
 /** @var bool $showDomainField false for VPS/dedicated, which are addressed by hostname */
+/** @var bool $isCpanelSharedHosting only cPanel shared hosting gets the Create Account button */
 $id = (int) $service['id'];
 // Default to showing it: a caller that hasn't decided should get the full form
 // rather than silently drop a field the admin needs.
 $showDomainField ??= true;
+$isCpanelSharedHosting ??= false;
 ?>
 <style>
 /* Admin Service Detail Styles */
@@ -269,6 +271,17 @@ $showDomainField ??= true;
                     <button class="admin-service-btn admin-service-btn--primary" type="submit">✅ Unsuspend</button>
                 </form>
             <?php endif; ?>
+            <?php
+            // Create Account: only for cPanel shared-hosting packages. Pending
+            // services already get "⚙️ Provision Now" (same provision() call),
+            // so this is the management-button equivalent for an active or
+            // suspended service whose account was never actually built on WHM.
+            ?>
+            <?php if ($isCpanelSharedHosting && !in_array($service['status'], ['pending', 'terminated'], true)): ?>
+                <form method="post" action="/admin/services/<?= $id ?>/create-account" data-confirm="Create the cPanel account on the server for this service now? This runs createacct against the assigned cPanel/WHM server."><?= csrf_field() ?>
+                    <button class="admin-service-btn admin-service-btn--primary" type="submit">🖥️ Create Account</button>
+                </form>
+            <?php endif; ?>
             <?php if ($service['status'] !== 'terminated'): ?>
                 <form method="post" action="/admin/services/<?= $id ?>/terminate"><?= csrf_field() ?>
                     <button class="admin-service-btn admin-service-btn--danger" type="submit">🗑️ Terminate</button>
@@ -368,6 +381,14 @@ $showDomainField ??= true;
 <?php endif; ?>
 <?php if (($_GET['price_error'] ?? '') !== ''): ?>
     <div class="admin-service-error">⚠️ <?= e((string) $_GET['price_error']) ?></div>
+<?php endif; ?>
+<?php if (($_GET['create_account'] ?? '') !== ''): ?>
+    <div class="admin-service-error" style="background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.35);color:#10b981;">
+        ✅ cPanel account created and the service was activated<?= ($_GET['create_msg'] ?? '') !== '' ? ' — ' . e((string) $_GET['create_msg']) : '' ?>.
+    </div>
+<?php endif; ?>
+<?php if (($_GET['create_error'] ?? '') !== ''): ?>
+    <div class="admin-service-error">⚠️ <?= e((string) $_GET['create_error']) ?></div>
 <?php endif; ?>
 
 <div class="admin-service-card">
