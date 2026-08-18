@@ -60,11 +60,13 @@ final class RecurringBillingService
             $taxResult = $this->tax->calculate($client, (float) $service['amount']);
             $invoiceId = $this->createRenewalInvoice($service, $taxResult, $this->currency->denominateFor($client));
 
-            $this->services->advanceNextDueDate(
-                (int) $service['id'],
-                ServiceRepository::nextCycleDate($service['next_due_date'], $service['billing_cycle'])
-            );
-
+            // Deliberately NOT advancing next_due_date here. The renewal date
+            // only rolls forward once the renewal invoice is actually PAID
+            // (ServiceRenewalService via the InvoicePaid listener) — a client
+            // who has not paid must not have their next renewal silently
+            // pushed out a cycle. The idempotency guard above keys on
+            // (service_id, next_due_date), so the same unpaid invoice is
+            // never re-generated on later cron ticks.
             $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'serviceId' => $service['id']]);
             $generated[] = $invoiceId;
         }

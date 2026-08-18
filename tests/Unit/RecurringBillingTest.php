@@ -7,6 +7,7 @@ namespace CodeVault\Tests\Unit;
 use CodeVault\Billing\CurrencyRepository;
 use CodeVault\Billing\CurrencyService;
 use CodeVault\Billing\RecurringBillingService;
+use CodeVault\Billing\ServiceRenewalService;
 use CodeVault\Billing\ServiceRepository;
 use CodeVault\Billing\TaxCalculator;
 use CodeVault\Billing\TaxRuleRepository;
@@ -17,6 +18,9 @@ use CodeVault\Clients\ClientRepository;
 use CodeVault\Database\Migrator;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
+use CodeVault\Modules\ModuleManager;
+use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use DateTimeImmutable;
 
@@ -88,15 +92,46 @@ final class RecurringBillingTest extends DatabaseTestCase
         $this->assertCount(0, $this->billing->generateDueInvoices(14));
     }
 
-    public function test_advances_next_due_date_by_one_cycle(): void
+    public function test_generating_an_unpaid_invoice_does_not_advance_the_renewal_date(): void
     {
         $dueDate = (new DateTimeImmutable('+2 days'))->format('Y-m-d');
         $serviceId = $this->createService($dueDate, 'monthly');
 
         $this->billing->generateDueInvoices(14);
 
+        // The renewal date must NOT move until the client pays — generating
+        // an unpaid invoice is not payment. The advance happens on InvoicePaid
+        // (ServiceRenewalService), never here.
         $service = $this->services->find($serviceId);
-        $this->assertSame(ServiceRepository::nextCycleDate($dueDate, 'monthly'), $service['next_due_date']);
+        $this->assertSame($dueDate, $service['next_due_date']);
+    }
+
+    public function test_renewal_date_advances_only_when_the_invoice_is_paid(): void
+    {
+        $dueDate = (new DateTimeImmutable('+2 days'))->format('Y-m-d');
+        $serviceId = $this->createService($dueDate, 'monthly');
+
+        $this->billing->generateDueInvoices(14);
+
+        // Unpaid → still the same date.
+        $this->assertSame($dueDate, $this->services->find($serviceId)['next_due_date']);
+
+        // The exact path the InvoicePaid listener runs: pay → roll forward.
+        $renewal = new ServiceRenewalService(
+            $this->services,
+            new ProvisioningService(
+                $this->services,
+                new \CodeVault\Catalog\ProductRepository($this->db),
+                new ServerRepository($this->db),
+                new ModuleManager(new HookDispatcher()),
+                new HookDispatcher()
+            )
+        );
+
+        $result = $renewal->renewPaidService($serviceId);
+
+        $this->assertTrue($result['renewed']);
+        $this->assertSame(ServiceRepository::nextCycleDate($dueDate, 'monthly'), $this->services->find($serviceId)['next_due_date']);
     }
 
     public function test_running_twice_does_not_double_bill(): void
@@ -105,14 +140,14 @@ final class RecurringBillingTest extends DatabaseTestCase
         $this->createService($dueDate);
 
         $first = $this->billing->generateDueInvoices(14);
-        // Simulate a second cron tick before the due date field would
-        // naturally change — the idempotency guard keys on (service_id, due_date).
+        // Simulate a second cron tick before the client pays — next_due_date
+        // has not advanced, so the idempotency guard keys on (service_id,
+        // next_due_date) and must skip rather than bill the same cycle twice.
         $second = $this->billing->generateDueInvoices(14);
 
         $this->assertCount(1, $first);
-        // After the first run the service's next_due_date already advanced,
-        // so the second run bills the *new* cycle only if it's also within
-        // the window — assert no duplicate invoice exists for the original date.
+        $this->assertCount(0, $second);
+        // No duplicate invoice for the original due date.
         $invoicesForOriginalDate = $this->db->select('SELECT id FROM invoices WHERE due_date = ?', [$dueDate]);
         $this->assertCount(1, $invoicesForOriginalDate);
     }
