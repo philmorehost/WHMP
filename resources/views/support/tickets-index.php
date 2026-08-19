@@ -386,6 +386,15 @@ $ticketClientLabel = static function (array $t): string {
     <div>
         <?= $view->partial('partials.table-search', ['target' => '#tickets-table', 'placeholder' => 'Search by ticket #, subject, or client...']) ?>
     </div>
+    <div style="flex:0 0 auto;min-width:0;">
+        <?= $view->partial('partials.table-filter', [
+            'formId' => 'tickets-filter',
+            'action' => '/admin/tickets',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')],
+            'activeCount' => count($filters ?? []),
+        ]) ?>
+    </div>
 </div>
 
 <!-- Tickets Table -->
@@ -395,7 +404,7 @@ $ticketClientLabel = static function (array $t): string {
             <div class="admin-empty-state__icon">💬</div>
             <h2 class="admin-empty-state__title">No Tickets Found</h2>
             <p class="admin-empty-state__text">
-                <?= !empty($statusFilter) ? 'No tickets match this status filter.' : 'No support tickets have been created yet.' ?>
+                <?= !empty($filters) ? 'No tickets match the active column filters.' : (!empty($statusFilter) ? 'No tickets match this status filter.' : 'No support tickets have been created yet.') ?>
             </p>
         </div>
     <?php else: ?>
@@ -425,16 +434,23 @@ $ticketClientLabel = static function (array $t): string {
                 <thead>
                     <tr>
                         <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-ticket-checkbox]" aria-label="Select all tickets" style="cursor:pointer;"></th>
-                        <th>Ticket ID</th>
-                        <th>Client</th>
-                        <th>Subject</th>
-                        <th>Department</th>
-                        <th>Priority</th>
-                        <th>Status</th>
+                        <th data-col-filter="tickets-filter" data-col-filter-key="id">Ticket ID</th>
+                        <th data-col-filter="tickets-filter" data-col-filter-key="client">Client</th>
+                        <th data-col-filter="tickets-filter" data-col-filter-key="subject">Subject</th>
+                        <th data-col-filter="tickets-filter" data-col-filter-key="department">Department</th>
+                        <th data-col-filter="tickets-filter" data-col-filter-key="priority">Priority</th>
+                        <th data-col-filter="tickets-filter" data-col-filter-key="status">Status</th>
                         <th>Assigned To</th>
                         <th>Last Reply</th>
                         <th style="width: 80px;"></th>
                     </tr>
+                    <?= $view->partial('partials.table-filter-row', [
+                        'formId' => 'tickets-filter',
+                        'action' => '/admin/tickets',
+                        'columns' => $filterColumns ?? [],
+                        'filters' => $filters ?? [],
+                        'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')],
+                    ]) ?>
                 </thead>
                 <tbody>
                 <?php foreach ($tickets as $ticket): ?>
@@ -480,32 +496,13 @@ $ticketClientLabel = static function (array $t): string {
         </form>
 
         <!-- Pagination -->
-        <?php if (isset($pagination) && $pagination['total'] > 20): ?>
-            <?php
-            $totalPages = (int) ceil($pagination['total'] / 20);
-            $currentPage = $pagination['page'];
-            $queryStr = '';
-            if ($statusFilter !== '') {
-                $queryStr .= '&status=' . urlencode($statusFilter);
-            }
-            if ($departmentFilter !== null && $departmentFilter !== '') {
-                $queryStr .= '&department_id=' . urlencode((string)$departmentFilter);
-            }
-            ?>
-            <div class="admin-pagination">
-                <div class="admin-pagination__info">
-                    Page <strong><?= $currentPage ?></strong> of <strong><?= $totalPages ?></strong>
-                </div>
-                <div class="admin-pagination__controls">
-                    <?php if ($currentPage > 1): ?>
-                        <a class="admin-btn admin-btn--secondary" href="/admin/tickets?page=<?= $currentPage - 1 ?><?= $queryStr ?>">← Previous</a>
-                    <?php endif; ?>
-                    <?php if ($currentPage < $totalPages): ?>
-                        <a class="admin-btn admin-btn--secondary" href="/admin/tickets?page=<?= $currentPage + 1 ?><?= $queryStr ?>">Next →</a>
-                    <?php endif; ?>
-                </div>
-            </div>
-        <?php endif; ?>
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $pagination ?? ['data' => [], 'total' => 0, 'page' => 1, 'perPage' => 20],
+            'action' => '/admin/tickets',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')],
+            'label' => 'tickets',
+        ]) ?>
     <?php endif; ?>
 </div>
 

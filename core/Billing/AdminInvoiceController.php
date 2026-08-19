@@ -67,9 +67,28 @@ final class AdminInvoiceController
              [(new \DateTimeImmutable())->format('Y-m-d')]
         );
 
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => true, 'client' => true, 'total' => true, 'due_date' => true, 'status' => true]
+        );
+
         return $this->render('billing.invoices-index', [
-            'results' => $this->invoices->paginate($status !== '' ? $status : null, $page),
+            'results' => $this->invoices->paginate($status !== '' ? $status : null, $page, 20, $filters),
             'statusFilter' => $status,
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => false],
+                ['filterable' => true, 'key' => 'id', 'label' => 'Invoice #', 'type' => 'number', 'placeholder' => 'e.g. 3545'],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'total', 'label' => 'Total', 'type' => 'number', 'placeholder' => 'e.g. 19.99'],
+                ['filterable' => true, 'key' => 'due_date', 'label' => 'Due Date', 'type' => 'text', 'placeholder' => 'YYYY-MM-DD'],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'unpaid' => 'Unpaid',
+                    'paid' => 'Paid',
+                    'cancelled' => 'Cancelled',
+                ]],
+                ['filterable' => false],
+            ],
             'currencyStats' => $currencyStats,
             'cancelledCount' => $request->query('cancelled') !== null ? max(0, (int) $request->query('cancelled')) : null,
             'skippedCount' => max(0, (int) $request->query('skipped', 0)),

@@ -27,6 +27,53 @@ final class ServerRepository
         );
     }
 
+    /**
+     * Paginated, per-column-filterable server list for the admin Servers page.
+     *
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(int $page = 1, int $perPage = 20, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        // The status column is a boolean flag; map the UI's friendly values.
+        if (isset($filters['status'])) {
+            $filters['status'] = $filters['status'] === 'active' ? '1' : '0';
+        }
+
+        [$filterWhere, $bindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'name'     => ['s.name', 'like'],
+            'hostname' => ['s.hostname', 'like'],
+            'module'   => ['s.module_slug', 'like'],
+            'group'    => ['g.name', 'like'],
+            'status'   => ['s.active', 'eq'],
+        ]);
+
+        $where = $filterWhere === '' ? '' : 'WHERE ' . $filterWhere;
+
+        $total = (int) ($this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM servers s LEFT JOIN server_groups g ON g.id = s.server_group_id {$where}",
+            $bindings
+        )['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT s.*, g.name AS group_name
+            FROM servers s
+            LEFT JOIN server_groups g ON g.id = s.server_group_id
+            {$where}
+            ORDER BY s.name
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
     /** @return array<string, mixed>|null */
     public function find(int $id): ?array
     {

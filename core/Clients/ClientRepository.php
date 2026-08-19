@@ -15,25 +15,42 @@ final class ClientRepository
     }
 
     /**
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(string $search = '', int $page = 1, int $perPage = 20): array
+    public function paginate(string $search = '', int $page = 1, int $perPage = 20, array $filters = []): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $where = '';
+        $conditions = [];
         $bindings = [];
 
         if ($search !== '') {
-            $where = 'WHERE c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.company_name LIKE ?';
+            $conditions[] = '(c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.company_name LIKE ?)';
             $needle = "%{$search}%";
-            $bindings = [$needle, $needle, $needle, $needle];
+            $bindings = array_merge($bindings, [$needle, $needle, $needle, $needle]);
         }
 
+        [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'id'      => ['c.id', 'number'],
+            'name'    => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'email'   => ['c.email', 'like'],
+            'company' => ['c.company_name', 'like'],
+            'group'   => ['g.name', 'like'],
+            'status'  => ['c.status', 'eq'],
+        ]);
+
+        if ($filterWhere !== '') {
+            $conditions[] = $filterWhere;
+            $bindings = array_merge($bindings, $filterBindings);
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
+
         $total = (int) ($this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM clients c {$where}",
+            "SELECT COUNT(*) AS c FROM clients c LEFT JOIN client_groups g ON g.id = c.client_group_id {$where}",
             $bindings
         )['c'] ?? 0);
 

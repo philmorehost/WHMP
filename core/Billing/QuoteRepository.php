@@ -78,6 +78,50 @@ final class QuoteRepository
         );
     }
 
+    /**
+     * Paginated, per-column-filterable quote list for the admin Quotes page.
+     *
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(int $page = 1, int $perPage = 15, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        [$filterWhere, $bindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'id'           => ['q.id', 'number'],
+            'client'       => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'subject'      => ['q.subject', 'like'],
+            'total'        => ['q.total', 'number'],
+            'status'       => ['q.status', 'eq'],
+            'valid_until'  => ['q.valid_until', 'like'],
+        ]);
+
+        $where = $filterWhere === '' ? '' : 'WHERE ' . $filterWhere;
+
+        $total = (int) ($this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM quotes q JOIN clients c ON c.id = q.client_id {$where}",
+            $bindings
+        )['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT q.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol
+            FROM quotes q
+            JOIN clients c ON c.id = q.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            {$where}
+            ORDER BY q.id DESC
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
     /** Draft-only — a quote that's been sent is a real document a client may be viewing, never silently removed. */
     public function delete(int $id): void
     {

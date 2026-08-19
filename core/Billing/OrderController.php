@@ -43,10 +43,33 @@ final class OrderController
         }
 
         $status = (string) $request->query('status', '');
+        $page = max(1, (int) $request->query('page', 1));
+
+        // Column filters (Order ID / Client / Total / Status) — whitelisted
+        // in OrderRepository::paginate(), preserved across pagination links.
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => true, 'client' => true, 'total' => true, 'status' => true]
+        );
+
+        $results = $this->orders->paginate($status !== '' ? $status : null, $page, 15, $filters);
 
         return $this->render('billing.orders-index', [
-            'orders' => $this->orders->all($status !== '' ? $status : null),
+            'results' => $results,
             'statusFilter' => $status,
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => true, 'key' => 'id', 'label' => 'Order ID', 'type' => 'number', 'placeholder' => 'e.g. 13'],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'total', 'label' => 'Total', 'type' => 'number', 'placeholder' => 'e.g. 19.99'],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'pending' => 'Pending',
+                    'active' => 'Active',
+                    'cancelled' => 'Cancelled',
+                    'fraud' => 'Fraud Review',
+                ]],
+                ['filterable' => false],
+            ],
         ]);
     }
 

@@ -93,6 +93,67 @@ final class DomainRepository
     }
 
     /**
+     * Paginated, per-column-filterable domain list for the admin Domains page.
+     *
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 15, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        $conditions = [];
+        $bindings = [];
+
+        if ($status !== null) {
+            $conditions[] = 'd.status = ?';
+            $bindings[] = $status;
+        }
+
+        [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'domain'    => ['d.domain_name', 'like'],
+            'client'    => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'tld'       => ['d.tld', 'like'],
+            'registrar' => ['d.registrar_slug', 'like'],
+            'expiry'    => ['d.expiry_date', 'like'],
+            'status'    => ['d.status', 'eq'],
+        ]);
+
+        if ($filterWhere !== '') {
+            $conditions[] = $filterWhere;
+            $bindings = array_merge($bindings, $filterBindings);
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
+
+        $total = (int) ($this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM domains d JOIN clients c ON c.id = d.client_id {$where}",
+            $bindings
+        )['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT d.*, c.email AS client_email, c.first_name, c.last_name
+            FROM domains d
+            JOIN clients c ON c.id = d.client_id
+            {$where}
+            ORDER BY CASE
+                WHEN d.status = 'active' THEN 1
+                WHEN d.status = 'pending' THEN 2
+                WHEN d.status = 'expired' THEN 3
+                ELSE 4
+            END, d.id DESC
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
+    /**
      * Domains due for renewal within `$daysAhead` days — active only,
      * same shape as ServiceRepository::dueForBilling().
      *

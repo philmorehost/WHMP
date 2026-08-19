@@ -39,6 +39,66 @@ final class OrderRepository
         );
     }
 
+    /**
+     * Paginated, per-column-filterable order list for the admin Orders page.
+     *
+     * `$filters` is the sanitised `filters[]` bag (see Table\TableFilters)
+     * with a fixed set of allowed keys mapped to SQL columns — every column
+     * and value is bound, so nothing user-supplied reaches the query except
+     * through a placeholder.
+     *
+     * @param array<string, string> $filters
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 15, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        $conditions = [];
+        $bindings = [];
+
+        if ($status !== null) {
+            $conditions[] = 'o.status = ?';
+            $bindings[] = $status;
+        }
+
+        [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'id'     => ['o.id', 'number'],
+            'client' => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'total'  => ['o.total', 'number'],
+            'status' => ['o.status', 'eq'],
+        ]);
+
+        if ($filterWhere !== '') {
+            $conditions[] = $filterWhere;
+            $bindings = array_merge($bindings, $filterBindings);
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
+
+        $total = (int) ($this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM orders o JOIN clients c ON c.id = o.client_id {$where}",
+            $bindings
+        )['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.code AS currency_code, cu.symbol AS currency_symbol
+            FROM orders o
+            JOIN clients c ON c.id = o.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(o.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            {$where}
+            ORDER BY o.id DESC
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
     /** @return array<string, mixed>|null */
     public function find(int $id): ?array
     {

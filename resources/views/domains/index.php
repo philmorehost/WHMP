@@ -178,18 +178,32 @@
     <div class="cv-card">
         <div class="cv-datatable__toolbar">
             <?= $view->partial('partials.table-search', ['target' => '#domains-table', 'placeholder' => 'Search domains...']) ?>
+            <?= $view->partial('partials.table-filter', [
+                'formId' => 'domains-filter',
+                'action' => '/admin/domains',
+                'filters' => $filters ?? [],
+                'preserve' => ['status' => $statusFilter ?? ''],
+                'activeCount' => count($filters ?? []),
+            ]) ?>
         </div>
         <table class="cv-table" id="domains-table">
             <thead>
                 <tr>
                     <th style="width:38px;text-align:center;"><input type="checkbox" id="selectAllCheckbox" data-select-all=".domain-select-checkbox" title="Select all domains"></th>
-                    <th>Domain</th>
-                    <th>Client</th>
-                    <th>Registrar</th>
-                    <th>Expiry</th>
-                    <th>Status</th>
+                    <th data-col-filter="domains-filter" data-col-filter-key="domain">Domain</th>
+                    <th data-col-filter="domains-filter" data-col-filter-key="client">Client</th>
+                    <th data-col-filter="domains-filter" data-col-filter-key="registrar">Registrar</th>
+                    <th data-col-filter="domains-filter" data-col-filter-key="expiry">Expiry</th>
+                    <th data-col-filter="domains-filter" data-col-filter-key="status">Status</th>
                     <th></th>
                 </tr>
+                <?= $view->partial('partials.table-filter-row', [
+                    'formId' => 'domains-filter',
+                    'action' => '/admin/domains',
+                    'columns' => $filterColumns ?? [],
+                    'filters' => $filters ?? [],
+                    'preserve' => ['status' => $statusFilter ?? ''],
+                ]) ?>
             </thead>
             <tbody>
             <?php foreach ($domains as $domain): ?>
@@ -216,6 +230,15 @@
             <?php endif; ?>
             </tbody>
         </table>
+        <?php if (($results['data'] ?? []) !== []): ?>
+            <?= $view->partial('partials.table-pagination', [
+                'results' => $results,
+                'action' => '/admin/domains',
+                'filters' => $filters ?? [],
+                'preserve' => ['status' => $statusFilter ?? ''],
+                'label' => 'domains',
+            ]) ?>
+        <?php endif; ?>
     </div>
 </form>
 

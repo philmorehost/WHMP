@@ -54,21 +54,40 @@ final class InvoiceRepository
     /**
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 20): array
+    /**
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, array $filters = []): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $where = '';
+        $conditions = [];
         $bindings = [];
 
         if ($status !== null) {
-            $where = 'WHERE i.status = ?';
-            $bindings = [$status];
+            $conditions[] = 'i.status = ?';
+            $bindings[] = $status;
         }
 
-        $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM invoices i {$where}", $bindings)['c'] ?? 0);
+        [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'id'       => ['i.id', 'number'],
+            'client'   => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'total'    => ['i.total', 'number'],
+            'due_date' => ['i.due_date', 'like'],
+            'status'   => ['i.status', 'eq'],
+        ]);
+
+        if ($filterWhere !== '') {
+            $conditions[] = $filterWhere;
+            $bindings = array_merge($bindings, $filterBindings);
+        }
+
+        $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
+
+        $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM invoices i JOIN clients c ON c.id = i.client_id {$where}", $bindings)['c'] ?? 0);
 
         // currency_id IS NULL covers two different histories: an invoice
         // deliberately locked to the base currency (CurrencyService::

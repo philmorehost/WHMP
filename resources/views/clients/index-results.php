@@ -1,8 +1,22 @@
 <?php
 /** @var array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int} $results */
 /** @var string $search */
+/** @var array<string, string> $filters */
+/** @var array<int, array<string, mixed>> $filterColumns */
 $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
 ?>
+
+<?php if (($results['data'] ?? []) !== []): ?>
+<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+    <?= $view->partial('partials.table-filter', [
+        'formId' => 'clients-filter',
+        'action' => '/admin/clients',
+        'filters' => $filters ?? [],
+        'preserve' => ['q' => $search ?? ''],
+        'activeCount' => count($filters ?? []),
+    ]) ?>
+</div>
+<?php endif; ?>
 
 <form method="post" action="/admin/clients/bulk-delete" id="bulk-clients-form" data-confirm="Are you sure you want to delete the selected client account(s)? All associated services and data will be permanently removed.">
     <?= csrf_field() ?>
@@ -14,7 +28,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                 <div class="admin-empty-state__icon">👤</div>
                 <h2 class="admin-empty-state__title">No Clients Found</h2>
                 <p class="admin-empty-state__text">
-                    <?= !empty($search) ? 'Try adjusting your search criteria.' : 'Start by creating your first client.' ?>
+                    <?= !empty($filters) ? 'No clients match the active column filters.' : (!empty($search) ? 'Try adjusting your search criteria.' : 'Start by creating your first client.') ?>
                 </p>
             </div>
         <?php else: ?>
@@ -23,14 +37,21 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                     <thead>
                         <tr>
                             <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-clients" aria-label="Select all clients"></th>
-                            <th>Name / Email</th>
-                            <th>Company</th>
-                            <th>Group</th>
-                            <th>Status</th>
+                            <th data-col-filter="clients-filter" data-col-filter-key="name">Name / Email</th>
+                            <th data-col-filter="clients-filter" data-col-filter-key="company">Company</th>
+                            <th data-col-filter="clients-filter" data-col-filter-key="group">Group</th>
+                            <th data-col-filter="clients-filter" data-col-filter-key="status">Status</th>
                             <th>Services</th>
                             <th>Joined</th>
                             <th style="width: 140px; text-align: center;">Actions</th>
                         </tr>
+                        <?= $view->partial('partials.table-filter-row', [
+                            'formId' => 'clients-filter',
+                            'action' => '/admin/clients',
+                            'columns' => $filterColumns ?? [],
+                            'filters' => $filters ?? [],
+                            'preserve' => ['q' => $search ?? ''],
+                        ]) ?>
                     </thead>
                     <tbody>
                     <?php foreach ($results['data'] as $client): ?>
@@ -75,19 +96,13 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
             </div>
 
             <!-- Pagination -->
-            <div class="admin-pagination">
-                <div class="admin-pagination__info">
-                    Page <strong><?= $results['page'] ?></strong> of <strong><?= $totalPages ?></strong> (<?= number_format($results['total']) ?> total clients)
-                </div>
-                <div class="admin-pagination__controls">
-                    <?php if ($results['page'] > 1): ?>
-                        <a class="admin-btn admin-btn--secondary" href="/admin/clients?q=<?= urlencode($search) ?>&page=<?= $results['page'] - 1 ?>">← Previous</a>
-                    <?php endif; ?>
-                    <?php if ($results['page'] < $totalPages): ?>
-                        <a class="admin-btn admin-btn--secondary" href="/admin/clients?q=<?= urlencode($search) ?>&page=<?= $results['page'] + 1 ?>">Next →</a>
-                    <?php endif; ?>
-                </div>
-            </div>
+            <?= $view->partial('partials.table-pagination', [
+                'results' => $results,
+                'action' => '/admin/clients',
+                'filters' => $filters ?? [],
+                'preserve' => ['q' => $search ?? ''],
+                'label' => 'clients',
+            ]) ?>
         <?php endif; ?>
     </div>
 </form>

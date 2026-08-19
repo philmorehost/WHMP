@@ -108,10 +108,33 @@ final class ServiceController
         $page = (int) $request->query('page', 1);
         $search = trim((string) $request->query('q', ''));
 
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['client' => true, 'product' => true, 'domain' => true, 'cycle' => true, 'amount' => true, 'status' => true]
+        );
+
         return $this->render('billing.services-index', [
-            'results' => $this->services->paginate($status !== '' ? $status : null, $page, 20, $search),
+            'results' => $this->services->paginate($status !== '' ? $status : null, $page, 20, $search, $filters),
             'statusFilter' => $status,
             'search' => $search,
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => false],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'product', 'label' => 'Product', 'type' => 'text', 'placeholder' => 'Product name'],
+                ['filterable' => true, 'key' => 'domain', 'label' => 'Domain', 'type' => 'text', 'placeholder' => 'Domain or hostname'],
+                ['filterable' => true, 'key' => 'cycle', 'label' => 'Cycle', 'type' => 'text', 'placeholder' => 'e.g. monthly'],
+                ['filterable' => true, 'key' => 'amount', 'label' => 'Amount', 'type' => 'number', 'placeholder' => 'e.g. 19.99'],
+                ['filterable' => false],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'active' => 'Active',
+                    'suspended' => 'Suspended',
+                    'pending' => 'Pending',
+                    'cancelled' => 'Cancelled',
+                    'terminated' => 'Terminated',
+                ]],
+                ['filterable' => false],
+            ],
         ]);
     }
 

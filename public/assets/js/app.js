@@ -29,6 +29,78 @@
         }
     });
 
+    // Admin table column filters (partials/table-filter.php + table-filter-row).
+    // These are DELEGATED listeners, not inline scripts, so they keep working
+    // on pages whose results table is swapped in later via innerHTML (the
+    // admin clients live-search does exactly that — inline scripts inside
+    // innerHTML never execute).
+    //
+    // Disabling empty filter inputs before submit keeps the URL to just the
+    // active filters; disabled controls aren't serialized.
+    function adminFilterApply(input) {
+        var row = input.closest ? input.closest('.table-filter-row') : null;
+        var form = input.form || (input.getAttribute && document.getElementById(input.getAttribute('form')));
+        if (!row || !form) { return; }
+        row.querySelectorAll('[data-filter-input]').forEach(function (el) {
+            if (el.value === '') { el.disabled = true; }
+        });
+        form.submit();
+    }
+
+    // "⚙ Filters" toggle: reveal/hide the whole filter row.
+    document.addEventListener('click', function (event) {
+        var toggle = event.target.closest('[data-filter-toggle]');
+        if (toggle) {
+            var row = document.getElementById('filter-row-' + toggle.getAttribute('data-filter-toggle'));
+            if (!row) { return; }
+            var showingAll = !row.classList.contains('is-expanded');
+            row.classList.toggle('is-expanded', showingAll);
+            toggle.classList.add('is-active');
+            row.querySelectorAll('.table-filter-cell').forEach(function (cell) {
+                cell.classList.toggle('is-hidden', !showingAll);
+            });
+            event.preventDefault();
+            return;
+        }
+
+        // Clicking a filterable column header reveals + focuses that column's
+        // input in the filter row.
+        var th = event.target.closest('[data-col-filter]');
+        if (!th) { return; }
+        if (event.target.closest('input, select, button, a, label')) { return; }
+        var rowEl = document.getElementById('filter-row-' + th.getAttribute('data-col-filter'));
+        if (!rowEl) { return; }
+        var key = th.getAttribute('data-col-filter-key');
+        rowEl.classList.add('is-expanded');
+        var tgl = document.querySelector('[data-filter-toggle="' + th.getAttribute('data-col-filter') + '"]');
+        if (tgl) { tgl.classList.add('is-active'); }
+        var cell = rowEl.querySelector('[data-filter-cell="' + key + '"]');
+        if (cell) { cell.classList.remove('is-hidden'); }
+        var input = rowEl.querySelector('[data-filter-input="' + key + '"]');
+        if (input) {
+            input.focus();
+            // .select() only exists on text-like inputs, not <select>.
+            if (typeof input.select === 'function') { input.select(); }
+        }
+    });
+
+    // Enter in a text filter input applies the filter.
+    document.addEventListener('keydown', function (event) {
+        var input = event.target.closest ? event.target.closest('[data-filter-input]') : null;
+        if (input && event.key === 'Enter') {
+            event.preventDefault();
+            adminFilterApply(input);
+        }
+    });
+
+    // A <select> filter applies immediately when the admin picks an option.
+    document.addEventListener('change', function (event) {
+        var input = event.target.closest ? event.target.closest('[data-filter-input]') : null;
+        if (input && input.tagName === 'SELECT') {
+            adminFilterApply(input);
+        }
+    });
+
     // Onboarding copilot (client dashboard): ask a question, POST it to the
     // AI endpoint, render the answer as chat bubbles.
     function copilotAsk(widget, question) {

@@ -327,6 +327,7 @@ $pendingCount = 0;
             <?php if ($statusFilter !== ''): ?>
                 <input type="hidden" name="status" value="<?= e($statusFilter) ?>">
             <?php endif; ?>
+            <?= \CodeVault\Table\TableFilters::hidden($filters ?? [], []) ?>
             <input type="search" class="cv-input" name="q" value="<?= e($search ?? '') ?>"
                    placeholder="Search by domain, client, email, product or username..."
                    aria-label="Search services" style="max-width:24rem;flex:1;min-width:200px;">
@@ -336,6 +337,15 @@ $pendingCount = 0;
                    style="font-size:.85rem;color:var(--cv-text-secondary);">Clear</a>
             <?php endif; ?>
         </form>
+    </div>
+    <div style="flex:0 0 auto;min-width:0;">
+        <?= $view->partial('partials.table-filter', [
+            'formId' => 'services-filter',
+            'action' => '/admin/services',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''],
+            'activeCount' => count($filters ?? []),
+        ]) ?>
     </div>
     <button type="submit" form="bulk-delete-services-form" class="cv-btn cv-btn--danger" data-bulk-delete-for="[data-service-checkbox]" data-confirm="Are you sure you want to delete the selected service(s)? This action cannot be undone." style="display:none;padding:8px 16px;font-size:0.85rem;font-weight:700;cursor:pointer;">🗑️ Delete Selected</button>
 </div>
@@ -358,15 +368,22 @@ $pendingCount = 0;
                     <thead>
                         <tr>
                             <th style="width: 40px;"><input type="checkbox" data-select-all-trigger="[data-service-checkbox]" style="cursor:pointer;"></th>
-                            <th>Client</th>
-                            <th>Product</th>
-                            <th>Domain</th>
-                            <th>Cycle</th>
-                            <th>Amount</th>
+                            <th data-col-filter="services-filter" data-col-filter-key="client">Client</th>
+                            <th data-col-filter="services-filter" data-col-filter-key="product">Product</th>
+                            <th data-col-filter="services-filter" data-col-filter-key="domain">Domain</th>
+                            <th data-col-filter="services-filter" data-col-filter-key="cycle">Cycle</th>
+                            <th data-col-filter="services-filter" data-col-filter-key="amount">Amount</th>
                             <th>Next Due</th>
-                            <th>Status</th>
+                            <th data-col-filter="services-filter" data-col-filter-key="status">Status</th>
                             <th style="width: 140px; text-align: right;">Action</th>
                         </tr>
+                        <?= $view->partial('partials.table-filter-row', [
+                            'formId' => 'services-filter',
+                            'action' => '/admin/services',
+                            'columns' => $filterColumns ?? [],
+                            'filters' => $filters ?? [],
+                            'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''],
+                        ]) ?>
                     </thead>
                     <tbody>
                     <?php foreach ($results['data'] as $service): ?>
@@ -428,18 +445,12 @@ $pendingCount = 0;
         </form>
 
         <!-- Pagination -->
-        <div class="admin-pagination">
-            <div class="admin-pagination__info">
-                Page <strong><?= $results['page'] ?></strong> of <strong><?= max(1, $totalPages) ?></strong> (<?= number_format($results['total']) ?> total services)
-            </div>
-            <div class="admin-pagination__controls">
-                <?php if ($results['page'] > 1): ?>
-                    <a class="admin-btn admin-btn--secondary" href="/admin/services?status=<?= urlencode($statusFilter) ?>&page=<?= $results['page'] - 1 ?>">← Previous</a>
-                <?php endif; ?>
-                <?php if ($results['page'] < $totalPages): ?>
-                    <a class="admin-btn admin-btn--secondary" href="/admin/services?status=<?= urlencode($statusFilter) ?>&page=<?= $results['page'] + 1 ?>">Next →</a>
-                <?php endif; ?>
-            </div>
-        </div>
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $results,
+            'action' => '/admin/services',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''],
+            'label' => 'services',
+        ]) ?>
     <?php endif; ?>
 </div>

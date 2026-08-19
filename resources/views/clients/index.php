@@ -352,5 +352,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
     <?= $view->partial('clients.index-results', [
         'results' => $results,
         'search' => $search,
+        'filters' => $filters ?? [],
+        'filterColumns' => $filterColumns ?? [],
     ]) ?>
 </div>

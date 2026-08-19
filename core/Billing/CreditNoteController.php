@@ -36,7 +36,28 @@ final class CreditNoteController
             return $denied;
         }
 
-        return $this->render('billing.credit-notes-index', ['creditNotes' => $this->creditNotes->all()]);
+        $page = max(1, (int) $request->query('page', 1));
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => true, 'client' => true, 'reason' => true, 'total' => true, 'invoice' => true, 'issued' => true]
+        );
+
+        $results = $this->creditNotes->paginate($page, 15, $filters);
+
+        return $this->render('billing.credit-notes-index', [
+            'creditNotes' => $results['data'],
+            'results' => $results,
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => true, 'key' => 'id', 'label' => 'Credit Note ID', 'type' => 'number', 'placeholder' => 'e.g. 3'],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'reason', 'label' => 'Reason', 'type' => 'text', 'placeholder' => 'Reason'],
+                ['filterable' => true, 'key' => 'total', 'label' => 'Total', 'type' => 'number', 'placeholder' => 'e.g. 19.99'],
+                ['filterable' => true, 'key' => 'invoice', 'label' => 'Related Invoice', 'type' => 'number', 'placeholder' => 'e.g. 3545'],
+                ['filterable' => true, 'key' => 'issued', 'label' => 'Issued', 'type' => 'text', 'placeholder' => 'YYYY-MM-DD'],
+                ['filterable' => false],
+            ],
+        ]);
     }
 
     public function createForm(Request $request): Response

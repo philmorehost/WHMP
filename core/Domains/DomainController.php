@@ -38,15 +38,40 @@ final class DomainController
         }
 
         $status = (string) $request->query('status', '');
+        $page = max(1, (int) $request->query('page', 1));
         $whoisDomain = trim((string) $request->query('domain', ''));
         $whoisSearchResult = null;
         if ($whoisDomain !== '') {
             $whoisSearchResult = $this->whoisService->lookup($whoisDomain);
         }
 
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['domain' => true, 'client' => true, 'tld' => true, 'registrar' => true, 'expiry' => true, 'status' => true]
+        );
+
+        $results = $this->domains->paginate($status !== '' ? $status : null, $page, 15, $filters);
+
         return $this->render('domains.index', [
-            'domains' => $this->domains->all($status !== '' ? $status : null),
+            'results' => $results,
+            'domains' => $results['data'],
             'statusFilter' => $status,
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => false],
+                ['filterable' => true, 'key' => 'domain', 'label' => 'Domain', 'type' => 'text', 'placeholder' => 'e.g. example.com.ng'],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'registrar', 'label' => 'Registrar', 'type' => 'text', 'placeholder' => 'Registrar slug'],
+                ['filterable' => true, 'key' => 'expiry', 'label' => 'Expiry', 'type' => 'text', 'placeholder' => 'YYYY-MM-DD'],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'active' => 'Active',
+                    'pending' => 'Pending',
+                    'expired' => 'Expired',
+                    'cancelled' => 'Cancelled',
+                    'transferred' => 'Transferred',
+                ]],
+                ['filterable' => false],
+            ],
             'statusCounts' => $this->domains->countByStatus(),
             'registrarCounts' => $this->domains->countActiveByRegistrar(),
             'registrars' => $this->registrars->allEnabled(),

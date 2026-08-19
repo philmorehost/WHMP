@@ -95,9 +95,10 @@ final class TicketRepository
 
     /**
      * @param array{status?: string, departmentId?: int, assignedAdminId?: int} $filters
+     * @param array<string, string> $columnFilters sanitised `filters[]` bag (see Table\TableFilters)
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(array $filters = [], int $page = 1, int $perPage = 20): array
+    public function paginate(array $filters = [], int $page = 1, int $perPage = 20, array $columnFilters = []): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -121,9 +122,26 @@ final class TicketRepository
             $bindings[] = $filters['assignedAdminId'];
         }
 
+        [$columnWhere, $columnBindings] = \CodeVault\Table\TableFilters::where($columnFilters, [
+            'id'         => ['t.id', 'number'],
+            'client'     => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'subject'    => ['t.subject', 'like'],
+            'department' => ['d.name', 'like'],
+            'priority'   => ['t.priority', 'eq'],
+            'status'     => ['t.status', 'eq'],
+        ]);
+
+        if ($columnWhere !== '') {
+            $where[] = $columnWhere;
+            $bindings = array_merge($bindings, $columnBindings);
+        }
+
         $whereSql = $where !== [] ? 'WHERE ' . implode(' AND ', $where) : '';
 
-        $totalRow = $this->db->selectOne("SELECT COUNT(*) AS c FROM tickets t {$whereSql}", $bindings);
+        $totalRow = $this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM tickets t JOIN departments d ON d.id = t.department_id LEFT JOIN clients c ON c.id = t.client_id {$whereSql}",
+            $bindings
+        );
         $total = (int) ($totalRow['c'] ?? 0);
 
         $data = $this->db->select(

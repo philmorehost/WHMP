@@ -57,7 +57,27 @@ final class ClientController
         $search = trim((string) $request->query('q', ''));
         $page = max(1, (int) $request->query('page', 1));
 
-        $results = $this->clients->paginate($search, $page);
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => true, 'name' => true, 'email' => true, 'company' => true, 'group' => true, 'status' => true]
+        );
+
+        $results = $this->clients->paginate($search, $page, 20, $filters);
+
+        $filterColumns = [
+            ['filterable' => false],
+            ['filterable' => true, 'key' => 'name', 'label' => 'Name / Email', 'type' => 'text', 'placeholder' => 'Name or email'],
+            ['filterable' => true, 'key' => 'company', 'label' => 'Company', 'type' => 'text', 'placeholder' => 'Company name'],
+            ['filterable' => true, 'key' => 'group', 'label' => 'Group', 'type' => 'text', 'placeholder' => 'Group name'],
+            ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                'active' => 'Active',
+                'closed' => 'Closed',
+                'inactive' => 'Inactive',
+            ]],
+            ['filterable' => false],
+            ['filterable' => false],
+            ['filterable' => false],
+        ];
 
         // Live-search target: same search, same data, but only the results
         // table + pagination, no layout — the admin clients page fetches it
@@ -67,12 +87,16 @@ final class ClientController
             return Response::html($this->view->render('clients.index-results', [
                 'results' => $results,
                 'search' => $search,
+                'filters' => $filters,
+                'filterColumns' => $filterColumns,
             ]));
         }
 
         return $this->render('clients.index', [
             'results' => $results,
             'search' => $search,
+            'filters' => $filters,
+            'filterColumns' => $filterColumns,
         ]);
     }
 

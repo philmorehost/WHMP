@@ -29,8 +29,32 @@ final class ServerController
             return $denied;
         }
 
+        $page = max(1, (int) $request->query('page', 1));
+
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['name' => true, 'hostname' => true, 'module' => true, 'group' => true, 'status' => true]
+        );
+
+        // The status column is a boolean (active 0/1) — the repo maps the
+        // 'active'/'disabled' filter values to the stored flag.
+        $results = $this->servers->paginate($page, 20, $filters);
+
         return $this->render('provisioning.servers-index', [
-            'servers' => $this->servers->all(),
+            'results' => $results,
+            'servers' => $results['data'],
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => true, 'key' => 'name', 'label' => 'Name', 'type' => 'text', 'placeholder' => 'Server name'],
+                ['filterable' => true, 'key' => 'hostname', 'label' => 'Hostname', 'type' => 'text', 'placeholder' => 'Hostname'],
+                ['filterable' => true, 'key' => 'module', 'label' => 'Module', 'type' => 'text', 'placeholder' => 'e.g. cpanel'],
+                ['filterable' => true, 'key' => 'group', 'label' => 'Group', 'type' => 'text', 'placeholder' => 'Group name'],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'active' => 'Active',
+                    'disabled' => 'Disabled',
+                ]],
+                ['filterable' => false],
+            ],
             'groups' => $this->groups->all(),
             'moduleSlugs' => array_keys($this->modules->allOfType(ProvisioningModule::class)),
         ]);

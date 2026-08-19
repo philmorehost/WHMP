@@ -214,6 +214,15 @@
     <div>
         <?= $view->partial('partials.table-search', ['target' => '#credit-notes-table', 'placeholder' => 'Search by credit note ID, client, or reason...']) ?>
     </div>
+    <div style="flex:0 0 auto;min-width:0;">
+        <?= $view->partial('partials.table-filter', [
+            'formId' => 'credit-notes-filter',
+            'action' => '/admin/credit-notes',
+            'filters' => $filters ?? [],
+            'preserve' => [],
+            'activeCount' => count($filters ?? []),
+        ]) ?>
+    </div>
 </div>
 
 <!-- Credit Notes Table -->
@@ -229,14 +238,21 @@
             <table class="admin-cn-list-table" id="credit-notes-table">
                 <thead>
                     <tr>
-                        <th>Credit Note ID</th>
-                        <th>Client</th>
-                        <th>Reason</th>
-                        <th style="text-align:right;">Total</th>
-                        <th>Related Invoice</th>
-                        <th>Issued</th>
+                        <th data-col-filter="credit-notes-filter" data-col-filter-key="id">Credit Note ID</th>
+                        <th data-col-filter="credit-notes-filter" data-col-filter-key="client">Client</th>
+                        <th data-col-filter="credit-notes-filter" data-col-filter-key="reason">Reason</th>
+                        <th data-col-filter="credit-notes-filter" data-col-filter-key="total" style="text-align:right;">Total</th>
+                        <th data-col-filter="credit-notes-filter" data-col-filter-key="invoice">Related Invoice</th>
+                        <th data-col-filter="credit-notes-filter" data-col-filter-key="issued">Issued</th>
                         <th style="width:80px;"></th>
                     </tr>
+                    <?= $view->partial('partials.table-filter-row', [
+                        'formId' => 'credit-notes-filter',
+                        'action' => '/admin/credit-notes',
+                        'columns' => $filterColumns ?? [],
+                        'filters' => $filters ?? [],
+                        'preserve' => [],
+                    ]) ?>
                 </thead>
                 <tbody>
                 <?php foreach ($creditNotes as $note): ?>
@@ -258,5 +274,13 @@
                 </tbody>
             </table>
         </div>
+
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $results ?? ['data' => [], 'total' => 0, 'page' => 1, 'perPage' => 15],
+            'action' => '/admin/credit-notes',
+            'filters' => $filters ?? [],
+            'preserve' => [],
+            'label' => 'credit notes',
+        ]) ?>
     <?php endif; ?>
 </div>

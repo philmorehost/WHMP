@@ -240,11 +240,36 @@
 <div class="admin-srv-card">
     <div class="admin-srv-toolbar" style="padding:24px 24px 0 24px;">
         <h2 class="admin-srv-card__title" style="padding:0;border:none;margin:0;">🖥️ Servers</h2>
-        <?= $view->partial('partials.table-search', ['target' => '#servers-table', 'placeholder' => 'Search servers...']) ?>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <?= $view->partial('partials.table-search', ['target' => '#servers-table', 'placeholder' => 'Search servers...']) ?>
+            <?= $view->partial('partials.table-filter', [
+                'formId' => 'servers-filter',
+                'action' => '/admin/servers',
+                'filters' => $filters ?? [],
+                'preserve' => [],
+                'activeCount' => count($filters ?? []),
+            ]) ?>
+        </div>
     </div>
     <div style="overflow-x:auto;">
         <table class="admin-srv-table" id="servers-table">
-            <thead><tr><th>Name</th><th>Hostname</th><th>Module</th><th>Group</th><th>Status</th><th style="width:300px;">Actions</th></tr></thead>
+            <thead>
+                <tr>
+                    <th data-col-filter="servers-filter" data-col-filter-key="name">Name</th>
+                    <th data-col-filter="servers-filter" data-col-filter-key="hostname">Hostname</th>
+                    <th data-col-filter="servers-filter" data-col-filter-key="module">Module</th>
+                    <th data-col-filter="servers-filter" data-col-filter-key="group">Group</th>
+                    <th data-col-filter="servers-filter" data-col-filter-key="status">Status</th>
+                    <th style="width:300px;">Actions</th>
+                </tr>
+                <?= $view->partial('partials.table-filter-row', [
+                    'formId' => 'servers-filter',
+                    'action' => '/admin/servers',
+                    'columns' => $filterColumns ?? [],
+                    'filters' => $filters ?? [],
+                    'preserve' => [],
+                ]) ?>
+            </thead>
             <tbody>
             <?php foreach ($servers as $server): ?>
                 <tr>
@@ -280,6 +305,15 @@
             </tbody>
         </table>
     </div>
+    <?php if (($results['data'] ?? []) !== []): ?>
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $results,
+            'action' => '/admin/servers',
+            'filters' => $filters ?? [],
+            'preserve' => [],
+            'label' => 'servers',
+        ]) ?>
+    <?php endif; ?>
 </div>
 
 <div class="admin-srv-card">

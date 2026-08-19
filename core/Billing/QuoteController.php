@@ -36,7 +36,33 @@ final class QuoteController
             return $denied;
         }
 
-        return $this->render('billing.quotes-index', ['quotes' => $this->quotes->all()]);
+        $page = max(1, (int) $request->query('page', 1));
+        $filters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => true, 'client' => true, 'subject' => true, 'total' => true, 'status' => true, 'valid_until' => true]
+        );
+
+        $results = $this->quotes->paginate($page, 15, $filters);
+
+        return $this->render('billing.quotes-index', [
+            'quotes' => $results['data'],
+            'results' => $results,
+            'filters' => $filters,
+            'filterColumns' => [
+                ['filterable' => true, 'key' => 'id', 'label' => 'Quote ID', 'type' => 'number', 'placeholder' => 'e.g. 5'],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'subject', 'label' => 'Subject', 'type' => 'text', 'placeholder' => 'Subject'],
+                ['filterable' => true, 'key' => 'total', 'label' => 'Total', 'type' => 'number', 'placeholder' => 'e.g. 19.99'],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'draft' => 'Draft',
+                    'sent' => 'Sent',
+                    'accepted' => 'Accepted',
+                    'declined' => 'Declined',
+                ]],
+                ['filterable' => true, 'key' => 'valid_until', 'label' => 'Valid Until', 'type' => 'text', 'placeholder' => 'YYYY-MM-DD'],
+                ['filterable' => false],
+            ],
+        ]);
     }
 
     public function createForm(Request $request): Response

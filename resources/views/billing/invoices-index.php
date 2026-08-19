@@ -447,6 +447,15 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
     <div>
         <?= $view->partial('partials.table-search', ['target' => '#invoices-table', 'placeholder' => 'Search by invoice #, client name, or email...']) ?>
     </div>
+    <div style="flex:0 0 auto;min-width:0;">
+        <?= $view->partial('partials.table-filter', [
+            'formId' => 'invoices-filter',
+            'action' => '/admin/invoices',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? ''],
+            'activeCount' => count($filters ?? []),
+        ]) ?>
+    </div>
 </div>
 
 <!-- Invoices Table -->
@@ -456,7 +465,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
             <div class="admin-empty-state__icon">📄</div>
             <h2 class="admin-empty-state__title">No Invoices Found</h2>
             <p class="admin-empty-state__text">
-                <?= !empty($statusFilter) ? 'No invoices match this status filter.' : 'No invoices have been created yet.' ?>
+                <?= !empty($filters) ? 'No invoices match the active column filters.' : (!empty($statusFilter) ? 'No invoices match this status filter.' : 'No invoices have been created yet.') ?>
             </p>
         </div>
     <?php else: ?>
@@ -479,13 +488,20 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                 <thead>
                     <tr>
                         <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-invoice-checkbox]" aria-label="Select all invoices" style="cursor:pointer;"></th>
-                        <th>Invoice #</th>
-                        <th>Client</th>
-                        <th>Total</th>
-                        <th>Due Date</th>
-                        <th>Status</th>
+                        <th data-col-filter="invoices-filter" data-col-filter-key="id">Invoice #</th>
+                        <th data-col-filter="invoices-filter" data-col-filter-key="client">Client</th>
+                        <th data-col-filter="invoices-filter" data-col-filter-key="total">Total</th>
+                        <th data-col-filter="invoices-filter" data-col-filter-key="due_date">Due Date</th>
+                        <th data-col-filter="invoices-filter" data-col-filter-key="status">Status</th>
                         <th style="width: 80px;"></th>
                     </tr>
+                    <?= $view->partial('partials.table-filter-row', [
+                        'formId' => 'invoices-filter',
+                        'action' => '/admin/invoices',
+                        'columns' => $filterColumns ?? [],
+                        'filters' => $filters ?? [],
+                        'preserve' => ['status' => $statusFilter ?? ''],
+                    ]) ?>
                 </thead>
                 <tbody>
                 <?php foreach ($results['data'] as $invoice): ?>
@@ -534,18 +550,12 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
         </form>
 
         <!-- Pagination -->
-        <div class="admin-pagination">
-            <div class="admin-pagination__info">
-                Page <strong><?= $results['page'] ?></strong> of <strong><?= $totalPages ?></strong> (<?= number_format($results['total']) ?> total invoices)
-            </div>
-            <div class="admin-pagination__controls">
-                <?php if ($results['page'] > 1): ?>
-                    <a class="admin-btn admin-btn--secondary" href="/admin/invoices?status=<?= urlencode($statusFilter) ?>&page=<?= $results['page'] - 1 ?>">← Previous</a>
-                <?php endif; ?>
-                <?php if ($results['page'] < $totalPages): ?>
-                    <a class="admin-btn admin-btn--secondary" href="/admin/invoices?status=<?= urlencode($statusFilter) ?>&page=<?= $results['page'] + 1 ?>">Next →</a>
-                <?php endif; ?>
-            </div>
-        </div>
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $results,
+            'action' => '/admin/invoices',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? ''],
+            'label' => 'invoices',
+        ]) ?>
     <?php endif; ?>
 </div>

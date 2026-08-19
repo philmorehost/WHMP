@@ -74,7 +74,11 @@ final class ServiceRepository
     /**
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, string $search = ''): array
+    /**
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, string $search = '', array $filters = []): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -101,6 +105,20 @@ final class ServiceRepository
                 . " OR CONCAT(c.first_name, ' ', c.last_name) LIKE ?)";
             $needle = "%{$search}%";
             $bindings = array_merge($bindings, array_fill(0, 9, $needle));
+        }
+
+        [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'client'  => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'product' => ['s.product_name', 'like'],
+            'domain'  => [['s.domain', 's.hostname'], 'like'],
+            'cycle'   => ['s.billing_cycle', 'eq'],
+            'amount'  => ['s.amount', 'number'],
+            'status'  => ['s.status', 'eq'],
+        ]);
+
+        if ($filterWhere !== '') {
+            $conditions[] = $filterWhere;
+            $bindings = array_merge($bindings, $filterBindings);
         }
 
         $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);

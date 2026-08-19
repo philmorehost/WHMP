@@ -1,5 +1,7 @@
 <?php
-/** @var array<int, array<string, mixed>> $orders */
+/** @var array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int} $results */
+/** @var array<string, string> $filters */
+/** @var array<int, array<string, mixed>> $filterColumns */
 /** @var string $statusFilter */
 ?>
 <style>
@@ -272,16 +274,25 @@
     <div>
         <?= $view->partial('partials.table-search', ['target' => '#orders-table', 'placeholder' => 'Search orders by ID, client name, or email...']) ?>
     </div>
+    <div style="flex:0 0 auto;min-width:0;">
+        <?= $view->partial('partials.table-filter', [
+            'formId' => 'orders-filter',
+            'action' => '/admin/orders',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? ''],
+            'activeCount' => count($filters ?? []),
+        ]) ?>
+    </div>
 </div>
 
 <!-- Orders Table -->
 <div class="admin-orders-card">
-    <?php if ($orders === []): ?>
+    <?php if (($results['data'] ?? []) === []): ?>
         <div class="admin-orders-empty">
             <div class="admin-orders-empty__icon">📦</div>
             <h2 class="admin-orders-empty__title">No Orders Found</h2>
             <p class="admin-orders-empty__text">
-                <?= !empty($statusFilter) ? 'No orders match this status filter.' : 'No orders have been created yet.' ?>
+                <?= !empty($filters) ? 'No orders match the active column filters.' : (!empty($statusFilter) ? 'No orders match this status filter.' : 'No orders have been created yet.') ?>
             </p>
         </div>
     <?php else: ?>
@@ -289,15 +300,22 @@
             <table class="admin-orders-table" id="orders-table">
                 <thead>
                     <tr>
-                        <th>Order ID</th>
-                        <th>Client</th>
-                        <th style="text-align:right;">Total</th>
-                        <th>Status</th>
+                        <th data-col-filter="orders-filter" data-col-filter-key="id">Order ID</th>
+                        <th data-col-filter="orders-filter" data-col-filter-key="client">Client</th>
+                        <th data-col-filter="orders-filter" data-col-filter-key="total" style="text-align:right;">Total</th>
+                        <th data-col-filter="orders-filter" data-col-filter-key="status">Status</th>
                         <th style="width:140px;">Actions</th>
                     </tr>
+                    <?= $view->partial('partials.table-filter-row', [
+                        'formId' => 'orders-filter',
+                        'action' => '/admin/orders',
+                        'columns' => $filterColumns ?? [],
+                        'filters' => $filters ?? [],
+                        'preserve' => ['status' => $statusFilter ?? ''],
+                    ]) ?>
                 </thead>
                 <tbody>
-                <?php foreach ($orders as $order): ?>
+                <?php foreach (($results['data'] ?? []) as $order): ?>
                     <tr>
                         <td><a href="/admin/orders/<?= (int) $order['id'] ?>"><strong>ORD-<?= (int) $order['id'] ?></strong></a></td>
                         <td>
@@ -334,5 +352,13 @@
                 </tbody>
             </table>
         </div>
+
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $results ?? ['data' => [], 'total' => 0, 'page' => 1, 'perPage' => 15],
+            'action' => '/admin/orders',
+            'filters' => $filters ?? [],
+            'preserve' => ['status' => $statusFilter ?? ''],
+            'label' => 'orders',
+        ]) ?>
     <?php endif; ?>
 </div>

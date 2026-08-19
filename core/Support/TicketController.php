@@ -145,7 +145,12 @@ final class TicketController
             $filters['departmentId'] = (int) $departmentId;
         }
 
-        $pagination = $this->tickets->paginate($filters, $page, 20);
+        $columnFilters = \CodeVault\Table\TableFilters::fromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => true, 'client' => true, 'subject' => true, 'department' => true, 'priority' => true, 'status' => true]
+        );
+
+        $pagination = $this->tickets->paginate($filters, $page, 20, $columnFilters);
 
         return $this->render('support.tickets-index', [
             'tickets' => $pagination['data'],
@@ -153,6 +158,28 @@ final class TicketController
             'departments' => $this->departments->all(),
             'statusFilter' => $status,
             'departmentFilter' => $departmentId,
+            'filters' => $columnFilters,
+            'filterColumns' => [
+                ['filterable' => false],
+                ['filterable' => true, 'key' => 'id', 'label' => 'Ticket ID', 'type' => 'number', 'placeholder' => 'e.g. 12'],
+                ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],
+                ['filterable' => true, 'key' => 'subject', 'label' => 'Subject', 'type' => 'text', 'placeholder' => 'Subject'],
+                ['filterable' => true, 'key' => 'department', 'label' => 'Department', 'type' => 'text', 'placeholder' => 'Department'],
+                ['filterable' => true, 'key' => 'priority', 'label' => 'Priority', 'type' => 'select', 'options' => [
+                    'low' => 'Low',
+                    'medium' => 'Medium',
+                    'high' => 'High',
+                ]],
+                ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
+                    'open' => 'Open',
+                    'customer-reply' => 'Awaiting Support',
+                    'answered' => 'Answered',
+                    'closed' => 'Closed',
+                ]],
+                ['filterable' => false],
+                ['filterable' => false],
+                ['filterable' => false],
+            ],
             'deletedCount' => $request->query('deleted') !== null ? max(0, (int) $request->query('deleted')) : null,
             'deletedFiles' => max(0, (int) $request->query('files', 0)),
             'closedCount' => $request->query('closed') !== null ? max(0, (int) $request->query('closed')) : null,

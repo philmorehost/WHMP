@@ -251,6 +251,15 @@ $badgeClass = static fn (string $status): string => match ($status) {
     <div>
         <?= $view->partial('partials.table-search', ['target' => '#quotes-table', 'placeholder' => 'Search by quote ID, client name, or subject...']) ?>
     </div>
+    <div style="flex:0 0 auto;min-width:0;">
+        <?= $view->partial('partials.table-filter', [
+            'formId' => 'quotes-filter',
+            'action' => '/admin/quotes',
+            'filters' => $filters ?? [],
+            'preserve' => [],
+            'activeCount' => count($filters ?? []),
+        ]) ?>
+    </div>
 </div>
 
 <!-- Quotes Table -->
@@ -266,14 +275,21 @@ $badgeClass = static fn (string $status): string => match ($status) {
             <table class="admin-quotes-table" id="quotes-table">
                 <thead>
                     <tr>
-                        <th>Quote ID</th>
-                        <th>Client</th>
-                        <th>Subject</th>
-                        <th style="text-align:right;">Total</th>
-                        <th>Status</th>
-                        <th>Valid Until</th>
+                        <th data-col-filter="quotes-filter" data-col-filter-key="id">Quote ID</th>
+                        <th data-col-filter="quotes-filter" data-col-filter-key="client">Client</th>
+                        <th data-col-filter="quotes-filter" data-col-filter-key="subject">Subject</th>
+                        <th data-col-filter="quotes-filter" data-col-filter-key="total" style="text-align:right;">Total</th>
+                        <th data-col-filter="quotes-filter" data-col-filter-key="status">Status</th>
+                        <th data-col-filter="quotes-filter" data-col-filter-key="valid_until">Valid Until</th>
                         <th style="width:80px;"></th>
                     </tr>
+                    <?= $view->partial('partials.table-filter-row', [
+                        'formId' => 'quotes-filter',
+                        'action' => '/admin/quotes',
+                        'columns' => $filterColumns ?? [],
+                        'filters' => $filters ?? [],
+                        'preserve' => [],
+                    ]) ?>
                 </thead>
                 <tbody>
                 <?php foreach ($quotes as $quote): ?>
@@ -295,5 +311,13 @@ $badgeClass = static fn (string $status): string => match ($status) {
                 </tbody>
             </table>
         </div>
+
+        <?= $view->partial('partials.table-pagination', [
+            'results' => $results ?? ['data' => [], 'total' => 0, 'page' => 1, 'perPage' => 15],
+            'action' => '/admin/quotes',
+            'filters' => $filters ?? [],
+            'preserve' => [],
+            'label' => 'quotes',
+        ]) ?>
     <?php endif; ?>
 </div>

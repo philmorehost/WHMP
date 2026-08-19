@@ -77,4 +77,48 @@ final class CreditNoteRepository
             SQL
         );
     }
+
+    /**
+     * Paginated, per-column-filterable credit-note list for the admin page.
+     *
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
+     */
+    public function paginate(int $page = 1, int $perPage = 15, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $offset = ($page - 1) * $perPage;
+
+        [$filterWhere, $bindings] = \CodeVault\Table\TableFilters::where($filters, [
+            'id'      => ['cn.id', 'number'],
+            'client'  => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
+            'reason'  => ['cn.reason', 'like'],
+            'total'   => ['cn.total', 'number'],
+            'invoice' => ['cn.invoice_id', 'number'],
+            'issued'  => ['cn.created_at', 'like'],
+        ]);
+
+        $where = $filterWhere === '' ? '' : 'WHERE ' . $filterWhere;
+
+        $total = (int) ($this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM credit_notes cn JOIN clients c ON c.id = cn.client_id {$where}",
+            $bindings
+        )['c'] ?? 0);
+
+        $data = $this->db->select(
+            <<<SQL
+            SELECT cn.*, c.email AS client_email, c.first_name, c.last_name, cu.symbol AS currency_symbol
+            FROM credit_notes cn
+            JOIN clients c ON c.id = cn.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            {$where}
+            ORDER BY cn.id DESC
+            LIMIT {$perPage} OFFSET {$offset}
+            SQL,
+            $bindings
+        );
+
+        return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
 }
