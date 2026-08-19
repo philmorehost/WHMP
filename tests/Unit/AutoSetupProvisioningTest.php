@@ -113,7 +113,7 @@ final class AutoSetupProvisioningTest extends DatabaseTestCase
         $cart->add($productId, BillingCycle::MONTHLY);
 
         $container = \CodeVault\Support\App::container();
-        $cartService = new CartService($cart, $this->products, $pricing, $container->make(\CodeVault\Catalog\ConfigurableOptionRepository::class), $container->make(\CodeVault\Catalog\ConfigurableOptionPricingRepository::class), $container->make(\CodeVault\Billing\PromotionService::class));
+        $cartService = new CartService($cart, $this->products, $pricing, $container->make(\CodeVault\Catalog\ConfigurableOptionRepository::class), $container->make(\CodeVault\Catalog\ConfigurableOptionPricingRepository::class), $container->make(\CodeVault\Billing\PromotionService::class), $this->db);
         $checkout = new CheckoutService(
             $cart,
             $cartService,
@@ -159,7 +159,7 @@ final class AutoSetupProvisioningTest extends DatabaseTestCase
         $cart->add($productId, BillingCycle::MONTHLY);
 
         $container = \CodeVault\Support\App::container();
-        $cartService = new CartService($cart, $this->products, $pricing, $container->make(\CodeVault\Catalog\ConfigurableOptionRepository::class), $container->make(\CodeVault\Catalog\ConfigurableOptionPricingRepository::class), $container->make(\CodeVault\Billing\PromotionService::class));
+        $cartService = new CartService($cart, $this->products, $pricing, $container->make(\CodeVault\Catalog\ConfigurableOptionRepository::class), $container->make(\CodeVault\Catalog\ConfigurableOptionPricingRepository::class), $container->make(\CodeVault\Billing\PromotionService::class), $this->db);
         $checkout = new CheckoutService(
             $cart,
             $cartService,

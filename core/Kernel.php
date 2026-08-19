@@ -1277,7 +1277,17 @@ class Kernel
                     $autosetup = $product['autosetup'] ?? 'payment';
 
                     if ($autosetup === 'payment') {
-                        $provisioning->provision((int) $service['id']);
+                        // One service throwing must never abort the rest of
+                        // the paid order — the remaining services AND every
+                        // domain still have to be provisioned/registered.
+                        try {
+                            $provisioning->provision((int) $service['id']);
+                        } catch (\Throwable $e) {
+                            // Payment is already recorded; surface the failure
+                            // on the service so it's visible/retryable instead
+                            // of silently skipping the other items.
+                            $serviceRepo->recordProvisioningError((int) $service['id'], $e->getMessage());
+                        }
                     } elseif (in_array($autosetup, ['on_accept', 'off'], true)) {
                         $hasPendingApproval = true;
                     }
@@ -1292,7 +1302,13 @@ class Kernel
                     $autosetup = $tldPricing['autosetup_registration'] ?? 'payment';
 
                     if ($autosetup === 'payment') {
-                        $domainService->register((int) $domain['id']);
+                        try {
+                            $domainService->register((int) $domain['id']);
+                        } catch (\Throwable $e) {
+                            // Same rule: a registrar module throwing must not
+                            // stop the remaining domains being registered.
+                            $domainRepo->recordProvisioningError((int) $domain['id'], $e->getMessage());
+                        }
                     } elseif (in_array($autosetup, ['on_accept', 'off'], true)) {
                         $hasPendingApproval = true;
                     }

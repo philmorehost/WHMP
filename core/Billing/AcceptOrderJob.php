@@ -104,11 +104,21 @@ final class AcceptOrderJob implements Job
                     continue;
                 }
 
-                $result = $provisioning->provision((int) $service['id']);
+                try {
+                    $result = $provisioning->provision((int) $service['id']);
 
-                if (!$result['success']) {
-                    $failures[] = "Service #{$service['id']} ({$service['product_name']}): {$result['message']}";
-                    $activity->log('admin', $this->adminId, 'service.provisioning_failed', 'service', (int) $service['id'], "Provisioning failed: {$result['message']}", $this->adminIp);
+                    if (!$result['success']) {
+                        $failures[] = "Service #{$service['id']} ({$service['product_name']}): {$result['message']}";
+                        $activity->log('admin', $this->adminId, 'service.provisioning_failed', 'service', (int) $service['id'], "Provisioning failed: {$result['message']}", $this->adminIp);
+                    }
+                } catch (Throwable $e) {
+                    // A module throwing (HTTP layer, malformed response, …)
+                    // must never abort the rest of the order — the other
+                    // services AND every domain still need to be provisioned,
+                    // otherwise "accept" silently skips the remaining invoice
+                    // items. Record it as a failure and carry on.
+                    $failures[] = "Service #{$service['id']} ({$service['product_name']}): {$e->getMessage()}";
+                    $activity->log('admin', $this->adminId, 'service.provisioning_failed', 'service', (int) $service['id'], "Provisioning threw an exception: {$e->getMessage()}", $this->adminIp);
                 }
 
                 // Tell the client how to get in. Read after provisioning, not
@@ -149,11 +159,19 @@ final class AcceptOrderJob implements Job
                     continue;
                 }
 
-                $result = $domainService->register((int) $domain['id']);
+                try {
+                    $result = $domainService->register((int) $domain['id']);
 
-                if (!$result['success']) {
-                    $failures[] = "Domain {$domain['domain_name']}: {$result['message']}";
-                    $activity->log('admin', $this->adminId, 'domain.registration_failed', 'domain', (int) $domain['id'], "Domain registration failed: {$result['message']}", $this->adminIp);
+                    if (!$result['success']) {
+                        $failures[] = "Domain {$domain['domain_name']}: {$result['message']}";
+                        $activity->log('admin', $this->adminId, 'domain.registration_failed', 'domain', (int) $domain['id'], "Domain registration failed: {$result['message']}", $this->adminIp);
+                    }
+                } catch (Throwable $e) {
+                    // Same hardening as the service loop: a registrar module
+                    // throwing must not stop the remaining domains (or leave
+                    // the rest of the order's items unprovisioned).
+                    $failures[] = "Domain {$domain['domain_name']}: {$e->getMessage()}";
+                    $activity->log('admin', $this->adminId, 'domain.registration_failed', 'domain', (int) $domain['id'], "Domain registration threw an exception: {$e->getMessage()}", $this->adminIp);
                 }
             }
 

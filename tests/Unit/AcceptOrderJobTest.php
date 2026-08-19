@@ -13,13 +13,18 @@ use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database;
 use CodeVault\Database\Migrator;
+use CodeVault\Domains\DomainPricingRepository;
+use CodeVault\Domains\DomainRepository;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Mail\Mailer;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
+use CodeVault\Modules\RegistrarModule;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Provisioning\ServerGroupRepository;
 use CodeVault\Provisioning\ServerRepository;
+use CodeVault\Tests\Fixtures\FakeRegistrarModule;
+use CodeVault\Tests\Fixtures\ThrowingProvisioningModule;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use DateTimeImmutable;
 
@@ -93,6 +98,92 @@ final class AcceptOrderJobTest extends DatabaseTestCase
         ]);
 
         $this->adminId = (new AdminRepository($this->db))->create('ops', $this->adminEmail, 'secret123', 'Ops Admin', null);
+    }
+
+    /**
+     * Reproduction for "admin approves an order with service + domain, only
+     * the hosting account is provisioned — the domain is never registered
+     * until the admin registers it by hand". This is the exact scenario:
+     * one pending cPanel service + one pending domain on the same order,
+     * both driven through AcceptOrderJob::handle(). If this test goes red,
+     * the job's domain loop is where the bug lives.
+     */
+    public function test_handle_registers_a_pending_domain_alongside_a_service(): void
+    {
+        $container = \CodeVault\Support\App::container();
+
+        // A shared-hosting product aimed at a group with a real server, so the
+        // service leg provisions and activates. The "local" module just writes
+        // a file, which keeps the test off the network; the domain leg is what
+        // this test actually exercises.
+        $serverGroups = new ServerGroupRepository($this->db);
+        $serverGroupId = $serverGroups->create('Hosting Group');
+        (new ServerRepository($this->db))->create([
+            'server_group_id' => $serverGroupId,
+            'name' => 'Hosting Server',
+            'hostname' => 'srv.test.local',
+            'module_slug' => 'local',
+        ]);
+        $localStorageDir = sys_get_temp_dir() . '/codevault-acceptjob-prov-' . uniqid();
+        @mkdir($localStorageDir);
+        $modules = $container->make(ModuleManager::class);
+        $modules->register(ProvisioningModule::class, 'local', new \CodeVault\Provisioning\LocalProvisioningModule($localStorageDir));
+
+        $groups = new ProductGroupRepository($this->db);
+        $productId = $this->products->create([
+            'product_group_id' => $groups->create('Hosting', null),
+            'server_group_id' => $serverGroupId,
+            'name' => 'Shared Hosting',
+            'autosetup' => 'on_accept',
+        ]);
+
+        // A registrable TLD (autosetup != off, so acceptance must register it).
+        $domainPricing = new DomainPricingRepository($this->db);
+        $domainPricing->save([
+            'tld' => '.test',
+            'registrar_slug' => 'fake',
+            'register_price' => 10.0,
+            'transfer_price' => 10.0,
+            'renew_price' => 10.0,
+            'autosetup_registration' => 'payment',
+        ]);
+
+        // Wire a scriptable registrar module in under the same slug the
+        // domain row carries, so DomainService resolves it.
+        $fakeRegistrar = new FakeRegistrarModule();
+        $modules->register(RegistrarModule::class, 'fake', $fakeRegistrar);
+
+        // The order, exactly as checkout leaves it for an on_accept product:
+        // a pending service and a pending domain sharing order_id.
+        $orderId = $this->insertOrder();
+        $this->insertService($orderId, $productId);
+        (new DomainRepository($this->db))->create([
+            'client_id' => $this->clientId,
+            'order_id' => $orderId,
+            'domain_name' => 'example.test',
+            'tld' => 'test',
+            'registrar_slug' => 'fake',
+            'status' => 'pending',
+            'next_due_date' => (new DateTimeImmutable('+1 year'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 10.0,
+        ]);
+
+        (new AcceptOrderJob($orderId, $this->adminId, '203.0.113.10'))->handle();
+
+        $service = $this->db->selectOne('SELECT * FROM services WHERE order_id = ?', [$orderId]);
+        $this->assertSame('active', $service['status'], 'AcceptOrderJob must still provision the service');
+
+        $domain = $this->db->selectOne('SELECT * FROM domains WHERE order_id = ?', [$orderId]);
+        $this->assertNotNull($domain, 'the pending domain must be attached to the order');
+        $this->assertSame('active', $domain['status'], 'AcceptOrderJob must register a pending domain on the same order');
+        $this->assertNotEmpty($domain['registration_date'], 'a successful registration stamps the registration date');
+        $this->assertNotEmpty($fakeRegistrar->lastCall('register'), 'DomainService must call the registrar module');
+
+        // The summary email must claim full success (no domain failure).
+        $summaryMail = $this->sentTo('Acceptance Completed');
+        $this->assertCount(1, $summaryMail);
+        $this->assertStringContainsString('All services and domains were provisioned successfully.', $summaryMail[0]['html']);
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -194,5 +285,81 @@ final class AcceptOrderJobTest extends DatabaseTestCase
         $this->assertCount(1, $summaryMail);
         $this->assertStringContainsString('could not be provisioned', $summaryMail[0]['html']);
         $this->assertStringContainsString('No active server available in the assigned server group', $summaryMail[0]['html']);
+    }
+
+    /**
+     * Regression for "admin approves an order; only the hosting account is
+     * processed, the domain is never registered". Before the per-item
+     * try/catch hardening, a service module THROWING an exception (instead
+     * of returning a result) aborted handle() entirely — the domain loop
+     * never ran and the domain stayed pending forever. Every invoice item
+     * must be attempted even when one of them explodes.
+     */
+    public function test_handle_still_registers_the_domain_when_a_service_module_throws(): void
+    {
+        $container = \CodeVault\Support\App::container();
+
+        // A hosting product on a server group whose module throws on create().
+        $serverGroups = new ServerGroupRepository($this->db);
+        $serverGroupId = $serverGroups->create('Exploding Group');
+        (new ServerRepository($this->db))->create([
+            'server_group_id' => $serverGroupId,
+            'name' => 'Exploding Server',
+            'hostname' => 'boom.test.local',
+            'module_slug' => 'throwing',
+        ]);
+        $throwing = new ThrowingProvisioningModule();
+        $modules = $container->make(ModuleManager::class);
+        $modules->register(ProvisioningModule::class, 'throwing', $throwing);
+
+        $groups = new ProductGroupRepository($this->db);
+        $productId = $this->products->create([
+            'product_group_id' => $groups->create('Hosting', null),
+            'server_group_id' => $serverGroupId,
+            'name' => 'Boom Hosting',
+            'autosetup' => 'on_accept',
+        ]);
+
+        (new DomainPricingRepository($this->db))->save([
+            'tld' => '.test',
+            'registrar_slug' => 'fake',
+            'register_price' => 10.0,
+            'transfer_price' => 10.0,
+            'renew_price' => 10.0,
+            'autosetup_registration' => 'payment',
+        ]);
+        $fakeRegistrar = new FakeRegistrarModule();
+        $modules->register(RegistrarModule::class, 'fake', $fakeRegistrar);
+
+        $orderId = $this->insertOrder();
+        $this->insertService($orderId, $productId);
+        (new DomainRepository($this->db))->create([
+            'client_id' => $this->clientId,
+            'order_id' => $orderId,
+            'domain_name' => 'boom.test',
+            'tld' => 'test',
+            'registrar_slug' => 'fake',
+            'status' => 'pending',
+            'next_due_date' => (new DateTimeImmutable('+1 year'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 10.0,
+        ]);
+
+        (new AcceptOrderJob($orderId, $this->adminId, '203.0.113.10'))->handle();
+
+        // The throwing service is reported as a failure — not silently swallowed.
+        $failed = $this->db->selectOne("SELECT * FROM activity_log WHERE action = 'service.provisioning_failed'");
+        $this->assertNotNull($failed);
+        $this->assertStringContainsString('threw an exception', $failed['description']);
+
+        // …but the domain on the SAME order is still registered.
+        $domain = $this->db->selectOne('SELECT * FROM domains WHERE order_id = ?', [$orderId]);
+        $this->assertSame('active', $domain['status'], 'a throwing service must not skip the domain loop');
+        $this->assertNotEmpty($fakeRegistrar->lastCall('register'));
+
+        $summaryMail = $this->sentTo('Acceptance Completed');
+        $this->assertCount(1, $summaryMail);
+        $this->assertStringContainsString('could not be provisioned', $summaryMail[0]['html']);
+        $this->assertStringContainsString('WHM API call exploded', $summaryMail[0]['html']);
     }
 }
