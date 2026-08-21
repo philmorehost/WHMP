@@ -113,11 +113,17 @@ final class ServiceController
             ['client' => true, 'product' => true, 'domain' => true, 'cycle' => true, 'amount' => true, 'status' => true]
         );
 
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['client' => 'c.last_name', 'product' => 's.product_name', 'domain' => 's.domain', 'cycle' => 's.billing_cycle', 'amount' => 's.amount', 'status' => 's.status']
+        );
+
         return $this->render('billing.services-index', [
-            'results' => $this->services->paginate($status !== '' ? $status : null, $page, 20, $search, $filters),
+            'results' => $this->services->paginate($status !== '' ? $status : null, $page, 20, $search, $filters, $sort),
             'statusFilter' => $status,
             'search' => $search,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => false],
                 ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],

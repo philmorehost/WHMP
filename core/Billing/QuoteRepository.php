@@ -82,9 +82,10 @@ final class QuoteRepository
      * Paginated, per-column-filterable quote list for the admin Quotes page.
      *
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(int $page = 1, int $perPage = 15, array $filters = []): array
+    public function paginate(int $page = 1, int $perPage = 15, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -101,6 +102,19 @@ final class QuoteRepository
 
         $where = $filterWhere === '' ? '' : 'WHERE ' . $filterWhere;
 
+        $sortable = [
+            'id'          => 'q.id',
+            'client'      => 'c.last_name',
+            'subject'     => 'q.subject',
+            'total'       => 'q.total',
+            'status'      => 'q.status',
+            'valid_until' => 'q.valid_until',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY q.id DESC';
+        }
+
         $total = (int) ($this->db->selectOne(
             "SELECT COUNT(*) AS c FROM quotes q JOIN clients c ON c.id = q.client_id {$where}",
             $bindings
@@ -113,7 +127,7 @@ final class QuoteRepository
             JOIN clients c ON c.id = q.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
-            ORDER BY q.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

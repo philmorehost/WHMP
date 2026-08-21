@@ -38,12 +38,18 @@ final class ServerController
 
         // The status column is a boolean (active 0/1) — the repo maps the
         // 'active'/'disabled' filter values to the stored flag.
-        $results = $this->servers->paginate($page, 20, $filters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['name' => 's.name', 'hostname' => 's.hostname', 'module' => 's.module_slug', 'group' => 'g.name', 'status' => 's.active']
+        );
+
+        $results = $this->servers->paginate($page, 20, $filters, $sort);
 
         return $this->render('provisioning.servers-index', [
             'results' => $results,
             'servers' => $results['data'],
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => true, 'key' => 'name', 'label' => 'Name', 'type' => 'text', 'placeholder' => 'Server name'],
                 ['filterable' => true, 'key' => 'hostname', 'label' => 'Hostname', 'type' => 'text', 'placeholder' => 'Hostname'],

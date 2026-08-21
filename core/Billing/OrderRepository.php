@@ -50,7 +50,7 @@ final class OrderRepository
      * @param array<string, string> $filters
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 15, array $filters = []): array
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 15, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -78,6 +78,19 @@ final class OrderRepository
 
         $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
 
+        // WHMCS-style sortable columns; a null/unsortable sort keeps the
+        // default newest-first ordering.
+        $sortable = [
+            'id'     => 'o.id',
+            'client' => 'c.last_name',
+            'total'  => 'o.total',
+            'status' => 'o.status',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY o.id DESC';
+        }
+
         $total = (int) ($this->db->selectOne(
             "SELECT COUNT(*) AS c FROM orders o JOIN clients c ON c.id = o.client_id {$where}",
             $bindings
@@ -90,7 +103,7 @@ final class OrderRepository
             JOIN clients c ON c.id = o.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(o.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
-            ORDER BY o.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

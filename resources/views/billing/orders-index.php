@@ -280,6 +280,7 @@
             'action' => '/admin/orders',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? ''],
+            'sort' => $sort ?? null,
             'activeCount' => count($filters ?? []),
         ]) ?>
     </div>
@@ -300,10 +301,10 @@
             <table class="admin-orders-table" id="orders-table">
                 <thead>
                     <tr>
-                        <th data-col-filter="orders-filter" data-col-filter-key="id">Order ID</th>
-                        <th data-col-filter="orders-filter" data-col-filter-key="client">Client</th>
-                        <th data-col-filter="orders-filter" data-col-filter-key="total" style="text-align:right;">Total</th>
-                        <th data-col-filter="orders-filter" data-col-filter-key="status">Status</th>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'id', 'label' => 'Order ID', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'total', 'label' => 'Total', 'align' => 'right', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
                         <th style="width:140px;">Actions</th>
                     </tr>
                     <?= $view->partial('partials.table-filter-row', [
@@ -358,6 +359,7 @@
             'action' => '/admin/orders',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? ''],
+            'sort' => $sort ?? null,
             'label' => 'orders',
         ]) ?>
     <?php endif; ?>

@@ -82,9 +82,10 @@ final class CreditNoteRepository
      * Paginated, per-column-filterable credit-note list for the admin page.
      *
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(int $page = 1, int $perPage = 15, array $filters = []): array
+    public function paginate(int $page = 1, int $perPage = 15, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -101,6 +102,19 @@ final class CreditNoteRepository
 
         $where = $filterWhere === '' ? '' : 'WHERE ' . $filterWhere;
 
+        $sortable = [
+            'id'      => 'cn.id',
+            'client'  => 'c.last_name',
+            'reason'  => 'cn.reason',
+            'total'   => 'cn.total',
+            'invoice' => 'cn.invoice_id',
+            'issued'  => 'cn.created_at',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY cn.id DESC';
+        }
+
         $total = (int) ($this->db->selectOne(
             "SELECT COUNT(*) AS c FROM credit_notes cn JOIN clients c ON c.id = cn.client_id {$where}",
             $bindings
@@ -113,7 +127,7 @@ final class CreditNoteRepository
             JOIN clients c ON c.id = cn.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
-            ORDER BY cn.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

@@ -96,9 +96,10 @@ final class TicketRepository
     /**
      * @param array{status?: string, departmentId?: int, assignedAdminId?: int} $filters
      * @param array<string, string> $columnFilters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(array $filters = [], int $page = 1, int $perPage = 20, array $columnFilters = []): array
+    public function paginate(array $filters = [], int $page = 1, int $perPage = 20, array $columnFilters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -138,6 +139,29 @@ final class TicketRepository
 
         $whereSql = $where !== [] ? 'WHERE ' . implode(' AND ', $where) : '';
 
+        $sortable = [
+            'id'         => 't.id',
+            'client'     => 'c.last_name',
+            'subject'    => 't.subject',
+            'department' => 'd.name',
+            'priority'   => 't.priority',
+            'status'     => 't.status',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = <<<'SQL'
+            ORDER BY 
+              CASE t.status
+                WHEN 'open' THEN 1
+                WHEN 'customer-reply' THEN 2
+                WHEN 'answered' THEN 3
+                ELSE 4
+              END ASC, 
+              t.priority = 'high' DESC, 
+              t.updated_at DESC
+            SQL;
+        }
+
         $totalRow = $this->db->selectOne(
             "SELECT COUNT(*) AS c FROM tickets t JOIN departments d ON d.id = t.department_id LEFT JOIN clients c ON c.id = t.client_id {$whereSql}",
             $bindings
@@ -152,15 +176,7 @@ final class TicketRepository
             LEFT JOIN admins a ON a.id = t.assigned_admin_id
             LEFT JOIN clients c ON c.id = t.client_id
             {$whereSql}
-            ORDER BY 
-              CASE t.status
-                WHEN 'open' THEN 1
-                WHEN 'customer-reply' THEN 2
-                WHEN 'answered' THEN 3
-                ELSE 4
-              END ASC, 
-              t.priority = 'high' DESC, 
-              t.updated_at DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

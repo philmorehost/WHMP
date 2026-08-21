@@ -76,9 +76,10 @@ final class ServiceRepository
      */
     /**
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, string $search = '', array $filters = []): array
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, string $search = '', array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -123,6 +124,19 @@ final class ServiceRepository
 
         $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
 
+        $sortable = [
+            'client'  => 'c.last_name',
+            'product' => 's.product_name',
+            'domain'  => 's.domain',
+            'cycle'   => 's.billing_cycle',
+            'amount'  => 's.amount',
+            'status'  => 's.status',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY s.id DESC';
+        }
+
         // The COUNT has to join clients too, or a search on a client field
         // would filter the rows but leave the total (and page count) wrong.
         $total = (int) ($this->db->selectOne(
@@ -137,7 +151,7 @@ final class ServiceRepository
             JOIN clients c ON c.id = s.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
-            ORDER BY s.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

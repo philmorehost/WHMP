@@ -72,10 +72,16 @@ final class AdminInvoiceController
             ['id' => true, 'client' => true, 'total' => true, 'due_date' => true, 'status' => true]
         );
 
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => 'i.id', 'client' => 'c.last_name', 'total' => 'i.total', 'due_date' => 'i.due_date', 'status' => 'i.status']
+        );
+
         return $this->render('billing.invoices-index', [
-            'results' => $this->invoices->paginate($status !== '' ? $status : null, $page, 20, $filters),
+            'results' => $this->invoices->paginate($status !== '' ? $status : null, $page, 20, $filters, $sort),
             'statusFilter' => $status,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => false],
                 ['filterable' => true, 'key' => 'id', 'label' => 'Invoice #', 'type' => 'number', 'placeholder' => 'e.g. 3545'],

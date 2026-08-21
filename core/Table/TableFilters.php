@@ -5,18 +5,21 @@ declare(strict_types=1);
 namespace CodeVault\Table;
 
 /**
- * Shared wire-format + SQL helpers for the admin "filter by table column"
- * feature (see the filter row under each admin table header).
+ * Shared wire-format + SQL helpers for the admin table columns feature:
+ * click-to-sort headers (WHMCS-style A-Z / 1-0) plus the per-column filter
+ * row (see the filter row under each admin table header).
  *
- * Filter state travels in the query string as `filters[key]=value` — one key
- * per table column, whitelisted per page by the repository that owns the SQL.
- * Every layer uses the same helpers so a filter entered in one column stays
- * active across pagination, status tabs and the free-text search box:
+ * Filter state travels in the query string as `filters[key]=value`; sort
+ * state as `sort=column&dir=asc|desc` — both whitelisted per page by the
+ * repository that owns the SQL. Every layer uses the same helpers so a sort
+ * or filter entered in one column stays active across pagination, status
+ * tabs and the free-text search box:
  *
- *   - controllers read + sanitise `filters[]` via fromQuery()
- *   - repositories build the WHERE clause via where() against a column map
- *   - views render the bound filter inputs and the pagination links that
- *     preserve the active filters via query()/hidden()
+ *   - controllers read + sanitise `filters[]` via fromQuery() and the sort
+ *     via sortFromQuery()
+ *   - repositories build WHERE via where() and ORDER BY via orderBy()
+ *   - views render the bound filter inputs, sortable headers, and the
+ *     pagination links that preserve the active filters/sort via query()
  */
 final class TableFilters
 {
@@ -126,14 +129,56 @@ final class TableFilters
     }
 
     /**
+     * Read + whitelist the current sort from the query bag.
+     *
+     * `sort` names a column in $sortable; `dir` is 'asc' or 'desc' (default
+     * 'asc'). Returns null when there's no sort or the column isn't sortable.
+     *
+     * @param array<string, mixed> $query
+     * @param array<string, string> $sortable key => SQL ORDER BY expression
+     * @return array{column: string, dir: string}|null
+     */
+    public static function sortFromQuery(array $query, array $sortable): ?array
+    {
+        $column = trim((string) ($query['sort'] ?? ''));
+
+        if ($column === '' || !isset($sortable[$column])) {
+            return null;
+        }
+
+        $dir = strtolower(trim((string) ($query['dir'] ?? 'asc')));
+
+        return ['column' => $column, 'dir' => $dir === 'desc' ? 'desc' : 'asc'];
+    }
+
+    /**
+     * Build the ORDER BY fragment for a whitelisted sort, or '' when there is
+     * none / the column isn't sortable (the caller keeps its default order).
+     *
+     * @param array<string, string> $sortable key => SQL ORDER BY expression
+     * @param array{column: string, dir: string}|null $sort
+     */
+    public static function orderBy(array $sortable, ?array $sort): string
+    {
+        if ($sort === null || !isset($sortable[$sort['column']])) {
+            return '';
+        }
+
+        $dir = ($sort['dir'] ?? 'asc') === 'desc' ? 'DESC' : 'ASC';
+
+        return 'ORDER BY ' . $sortable[$sort['column']] . ' ' . $dir;
+    }
+
+    /**
      * Build a query-string fragment (leading '?') for links, preserving the
-     * active filters plus any extra params (status tabs, search box…), with
-     * an optional page override.
+     * active filters, the current sort, and any extra params (status tabs,
+     * search box…), with an optional page override.
      *
      * @param array<string, string> $filters
      * @param array<string, string> $extra
+     * @param array{column: string, dir: string}|null $sort
      */
-    public static function query(array $filters, array $extra = [], ?int $page = null): string
+    public static function query(array $filters, array $extra = [], ?int $page = null, ?array $sort = null): string
     {
         $parts = [];
 
@@ -147,6 +192,11 @@ final class TableFilters
             }
         }
 
+        if ($sort !== null) {
+            $parts[] = 'sort=' . rawurlencode($sort['column']);
+            $parts[] = 'dir=' . rawurlencode($sort['dir']);
+        }
+
         if ($page !== null) {
             $parts[] = 'page=' . max(1, $page);
         }
@@ -155,12 +205,14 @@ final class TableFilters
     }
 
     /**
-     * Hidden inputs preserving filters + extra params, for GET filter forms.
+     * Hidden inputs preserving filters, extra params and the sort, for GET
+     * filter forms (so submitting a filter doesn't drop the active sort).
      *
      * @param array<string, string> $filters
      * @param array<string, string> $extra
+     * @param array{column: string, dir: string}|null $sort
      */
-    public static function hidden(array $filters, array $extra = []): string
+    public static function hidden(array $filters, array $extra = [], ?array $sort = null): string
     {
         $out = '';
 
@@ -172,6 +224,11 @@ final class TableFilters
             if ($value !== '' && $value !== null) {
                 $out .= '<input type="hidden" name="' . self::h($key) . '" value="' . self::h((string) $value) . '">';
             }
+        }
+
+        if ($sort !== null) {
+            $out .= '<input type="hidden" name="sort" value="' . self::h($sort['column']) . '">';
+            $out .= '<input type="hidden" name="dir" value="' . self::h($sort['dir']) . '">';
         }
 
         return $out;

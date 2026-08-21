@@ -220,6 +220,7 @@
             'action' => '/admin/credit-notes',
             'filters' => $filters ?? [],
             'preserve' => [],
+            'sort' => $sort ?? null,
             'activeCount' => count($filters ?? []),
         ]) ?>
     </div>
@@ -238,12 +239,12 @@
             <table class="admin-cn-list-table" id="credit-notes-table">
                 <thead>
                     <tr>
-                        <th data-col-filter="credit-notes-filter" data-col-filter-key="id">Credit Note ID</th>
-                        <th data-col-filter="credit-notes-filter" data-col-filter-key="client">Client</th>
-                        <th data-col-filter="credit-notes-filter" data-col-filter-key="reason">Reason</th>
-                        <th data-col-filter="credit-notes-filter" data-col-filter-key="total" style="text-align:right;">Total</th>
-                        <th data-col-filter="credit-notes-filter" data-col-filter-key="invoice">Related Invoice</th>
-                        <th data-col-filter="credit-notes-filter" data-col-filter-key="issued">Issued</th>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'id', 'label' => 'Credit Note ID', 'action' => '/admin/credit-notes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/credit-notes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'reason', 'label' => 'Reason', 'action' => '/admin/credit-notes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'total', 'label' => 'Total', 'align' => 'right', 'action' => '/admin/credit-notes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'invoice', 'label' => 'Related Invoice', 'action' => '/admin/credit-notes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'issued', 'label' => 'Issued', 'action' => '/admin/credit-notes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
                         <th style="width:80px;"></th>
                     </tr>
                     <?= $view->partial('partials.table-filter-row', [
@@ -280,6 +281,7 @@
             'action' => '/admin/credit-notes',
             'filters' => $filters ?? [],
             'preserve' => [],
+            'sort' => $sort ?? null,
             'label' => 'credit notes',
         ]) ?>
     <?php endif; ?>

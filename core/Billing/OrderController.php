@@ -52,12 +52,18 @@ final class OrderController
             ['id' => true, 'client' => true, 'total' => true, 'status' => true]
         );
 
-        $results = $this->orders->paginate($status !== '' ? $status : null, $page, 15, $filters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => 'o.id', 'client' => 'c.last_name', 'total' => 'o.total', 'status' => 'o.status']
+        );
+
+        $results = $this->orders->paginate($status !== '' ? $status : null, $page, 15, $filters, $sort);
 
         return $this->render('billing.orders-index', [
             'results' => $results,
             'statusFilter' => $status,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => true, 'key' => 'id', 'label' => 'Order ID', 'type' => 'number', 'placeholder' => 'e.g. 13'],
                 ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],

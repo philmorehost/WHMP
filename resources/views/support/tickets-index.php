@@ -392,6 +392,7 @@ $ticketClientLabel = static function (array $t): string {
             'action' => '/admin/tickets',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')],
+            'sort' => $sort ?? null,
             'activeCount' => count($filters ?? []),
         ]) ?>
     </div>
@@ -434,12 +435,12 @@ $ticketClientLabel = static function (array $t): string {
                 <thead>
                     <tr>
                         <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-ticket-checkbox]" aria-label="Select all tickets" style="cursor:pointer;"></th>
-                        <th data-col-filter="tickets-filter" data-col-filter-key="id">Ticket ID</th>
-                        <th data-col-filter="tickets-filter" data-col-filter-key="client">Client</th>
-                        <th data-col-filter="tickets-filter" data-col-filter-key="subject">Subject</th>
-                        <th data-col-filter="tickets-filter" data-col-filter-key="department">Department</th>
-                        <th data-col-filter="tickets-filter" data-col-filter-key="priority">Priority</th>
-                        <th data-col-filter="tickets-filter" data-col-filter-key="status">Status</th>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'id', 'label' => 'Ticket ID', 'action' => '/admin/tickets', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/tickets', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'subject', 'label' => 'Subject', 'action' => '/admin/tickets', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'department', 'label' => 'Department', 'action' => '/admin/tickets', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'priority', 'label' => 'Priority', 'action' => '/admin/tickets', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/tickets', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')], 'sort' => $sort ?? null]) ?>
                         <th>Assigned To</th>
                         <th>Last Reply</th>
                         <th style="width: 80px;"></th>
@@ -501,6 +502,7 @@ $ticketClientLabel = static function (array $t): string {
             'action' => '/admin/tickets',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? '', 'department_id' => (string) ($departmentFilter ?? '')],
+            'sort' => $sort ?? null,
             'label' => 'tickets',
         ]) ?>
     <?php endif; ?>

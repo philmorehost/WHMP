@@ -31,9 +31,10 @@ final class ServerRepository
      * Paginated, per-column-filterable server list for the admin Servers page.
      *
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(int $page = 1, int $perPage = 20, array $filters = []): array
+    public function paginate(int $page = 1, int $perPage = 20, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -54,6 +55,18 @@ final class ServerRepository
 
         $where = $filterWhere === '' ? '' : 'WHERE ' . $filterWhere;
 
+        $sortable = [
+            'name'     => 's.name',
+            'hostname' => 's.hostname',
+            'module'   => 's.module_slug',
+            'group'    => 'g.name',
+            'status'   => 's.active',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY s.name';
+        }
+
         $total = (int) ($this->db->selectOne(
             "SELECT COUNT(*) AS c FROM servers s LEFT JOIN server_groups g ON g.id = s.server_group_id {$where}",
             $bindings
@@ -65,7 +78,7 @@ final class ServerRepository
             FROM servers s
             LEFT JOIN server_groups g ON g.id = s.server_group_id
             {$where}
-            ORDER BY s.name
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

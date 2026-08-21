@@ -16,9 +16,11 @@ final class ClientRepository
 
     /**
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(string $search = '', int $page = 1, int $perPage = 20, array $filters = []): array
+    public function paginate(string $search = '', int $page = 1, int $perPage = 20, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -49,6 +51,19 @@ final class ClientRepository
 
         $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
 
+        $sortable = [
+            'name'    => 'c.last_name',
+            'email'   => 'c.email',
+            'company' => 'c.company_name',
+            'group'   => 'g.name',
+            'status'  => 'c.status',
+            'joined'  => 'c.created_at',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY c.id DESC';
+        }
+
         $total = (int) ($this->db->selectOne(
             "SELECT COUNT(*) AS c FROM clients c LEFT JOIN client_groups g ON g.id = c.client_group_id {$where}",
             $bindings
@@ -62,7 +77,7 @@ final class ClientRepository
             FROM clients c
             LEFT JOIN client_groups g ON g.id = c.client_group_id
             {$where}
-            ORDER BY c.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

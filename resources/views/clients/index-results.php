@@ -2,6 +2,7 @@
 /** @var array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int} $results */
 /** @var string $search */
 /** @var array<string, string> $filters */
+/** @var array{column: string, dir: string}|null $sort */
 /** @var array<int, array<string, mixed>> $filterColumns */
 $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
 ?>
@@ -13,6 +14,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
         'action' => '/admin/clients',
         'filters' => $filters ?? [],
         'preserve' => ['q' => $search ?? ''],
+        'sort' => $sort ?? null,
         'activeCount' => count($filters ?? []),
     ]) ?>
 </div>
@@ -37,12 +39,12 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                     <thead>
                         <tr>
                             <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-clients" aria-label="Select all clients"></th>
-                            <th data-col-filter="clients-filter" data-col-filter-key="name">Name / Email</th>
-                            <th data-col-filter="clients-filter" data-col-filter-key="company">Company</th>
-                            <th data-col-filter="clients-filter" data-col-filter-key="group">Group</th>
-                            <th data-col-filter="clients-filter" data-col-filter-key="status">Status</th>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'name', 'label' => 'Name / Email', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'company', 'label' => 'Company', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'group', 'label' => 'Group', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <th>Services</th>
-                            <th>Joined</th>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'joined', 'label' => 'Joined', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <th style="width: 140px; text-align: center;">Actions</th>
                         </tr>
                         <?= $view->partial('partials.table-filter-row', [
@@ -101,6 +103,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                 'action' => '/admin/clients',
                 'filters' => $filters ?? [],
                 'preserve' => ['q' => $search ?? ''],
+                'sort' => $sort ?? null,
                 'label' => 'clients',
             ]) ?>
         <?php endif; ?>

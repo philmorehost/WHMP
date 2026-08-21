@@ -344,6 +344,7 @@ $pendingCount = 0;
             'action' => '/admin/services',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''],
+            'sort' => $sort ?? null,
             'activeCount' => count($filters ?? []),
         ]) ?>
     </div>
@@ -368,13 +369,13 @@ $pendingCount = 0;
                     <thead>
                         <tr>
                             <th style="width: 40px;"><input type="checkbox" data-select-all-trigger="[data-service-checkbox]" style="cursor:pointer;"></th>
-                            <th data-col-filter="services-filter" data-col-filter-key="client">Client</th>
-                            <th data-col-filter="services-filter" data-col-filter-key="product">Product</th>
-                            <th data-col-filter="services-filter" data-col-filter-key="domain">Domain</th>
-                            <th data-col-filter="services-filter" data-col-filter-key="cycle">Cycle</th>
-                            <th data-col-filter="services-filter" data-col-filter-key="amount">Amount</th>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/services', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'product', 'label' => 'Product', 'action' => '/admin/services', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'domain', 'label' => 'Domain', 'action' => '/admin/services', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'cycle', 'label' => 'Cycle', 'action' => '/admin/services', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'action' => '/admin/services', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <th>Next Due</th>
-                            <th data-col-filter="services-filter" data-col-filter-key="status">Status</th>
+                            <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/services', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <th style="width: 140px; text-align: right;">Action</th>
                         </tr>
                         <?= $view->partial('partials.table-filter-row', [
@@ -450,6 +451,7 @@ $pendingCount = 0;
             'action' => '/admin/services',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? '', 'q' => $search ?? ''],
+            'sort' => $sort ?? null,
             'label' => 'services',
         ]) ?>
     <?php endif; ?>

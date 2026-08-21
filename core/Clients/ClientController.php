@@ -62,7 +62,12 @@ final class ClientController
             ['id' => true, 'name' => true, 'email' => true, 'company' => true, 'group' => true, 'status' => true]
         );
 
-        $results = $this->clients->paginate($search, $page, 20, $filters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['name' => 'c.last_name', 'email' => 'c.email', 'company' => 'c.company_name', 'group' => 'g.name', 'status' => 'c.status', 'joined' => 'c.created_at']
+        );
+
+        $results = $this->clients->paginate($search, $page, 20, $filters, $sort);
 
         $filterColumns = [
             ['filterable' => false],
@@ -88,6 +93,7 @@ final class ClientController
                 'results' => $results,
                 'search' => $search,
                 'filters' => $filters,
+                'sort' => $sort,
                 'filterColumns' => $filterColumns,
             ]));
         }
@@ -96,6 +102,7 @@ final class ClientController
             'results' => $results,
             'search' => $search,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => $filterColumns,
         ]);
     }

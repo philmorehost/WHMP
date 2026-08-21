@@ -232,4 +232,113 @@ final class AdminTableFilterTest extends DatabaseTestCase
         $this->assertStringContainsString('status=pending', $pagination);
         $this->assertStringContainsString('page=2', $pagination);
     }
+
+    public function test_sort_from_query_whitelists_column_and_direction(): void
+    {
+        // Valid column + explicit direction.
+        $parsed = TableFilters::sortFromQuery(
+            ['sort' => 'total', 'dir' => 'desc'],
+            ['id' => 'o.id', 'client' => 'c.last_name', 'total' => 'o.total', 'status' => 'o.status']
+        );
+        $this->assertSame(['column' => 'total', 'dir' => 'desc'], $parsed);
+
+        // Missing direction defaults to asc.
+        $asc = TableFilters::sortFromQuery(
+            ['sort' => 'client'],
+            ['id' => 'o.id', 'client' => 'c.last_name', 'total' => 'o.total', 'status' => 'o.status']
+        );
+        $this->assertSame(['column' => 'client', 'dir' => 'asc'], $asc);
+
+        // Unknown column -> no sort.
+        $bogus = TableFilters::sortFromQuery(
+            ['sort' => 'hacked`; DROP TABLE orders; --', 'dir' => 'asc'],
+            ['id' => 'o.id']
+        );
+        $this->assertNull($bogus);
+
+        // Missing sort param -> no sort.
+        $this->assertNull(TableFilters::sortFromQuery(['page' => '2'], ['id' => 'o.id']));
+    }
+
+    public function test_order_by_builds_whitelisted_fragment_only(): void
+    {
+        $sortable = ['id' => 'o.id', 'client' => 'c.last_name', 'total' => 'o.total', 'status' => 'o.status'];
+
+        $this->assertSame('ORDER BY o.total ASC', TableFilters::orderBy($sortable, ['column' => 'total', 'dir' => 'asc']));
+        $this->assertSame('ORDER BY c.last_name DESC', TableFilters::orderBy($sortable, ['column' => 'client', 'dir' => 'desc']));
+        // Unknown direction coerces to ASC.
+        $this->assertSame('ORDER BY o.id ASC', TableFilters::orderBy($sortable, ['column' => 'id', 'dir' => 'sideways']));
+        // Unknown column / no sort -> empty (caller keeps its default order).
+        $this->assertSame('', TableFilters::orderBy($sortable, ['column' => 'nope', 'dir' => 'asc']));
+        $this->assertSame('', TableFilters::orderBy($sortable, null));
+    }
+
+    public function test_sorts_orders_ascending_and_descending_by_total(): void
+    {
+        $alice = $this->insertClient('alice@example.test', 'Alice', 'Adams');
+        $bob = $this->insertClient('bob@example.test', 'Bob', 'Brown');
+        $this->insertOrder($alice, 100.0, 'active');
+        $this->insertOrder($bob, 50.0, 'active');
+        $this->insertOrder($alice, 200.0, 'active');
+
+        $asc = $this->orders->paginate(null, 1, 15, [], ['column' => 'total', 'dir' => 'asc']);
+        $this->assertSame(3, $asc['total']);
+        $this->assertSame([50.0, 100.0, 200.0], array_map(static fn (array $r) => (float) $r['total'], $asc['data']));
+
+        $desc = $this->orders->paginate(null, 1, 15, [], ['column' => 'total', 'dir' => 'desc']);
+        $this->assertSame([200.0, 100.0, 50.0], array_map(static fn (array $r) => (float) $r['total'], $desc['data']));
+    }
+
+    public function test_sort_unknown_column_falls_back_to_default_order(): void
+    {
+        $alice = $this->insertClient('alice@example.test', 'Alice', 'Adams');
+        $this->insertOrder($alice, 10.0, 'active', '2026-01-01 00:00:00');
+        $this->insertOrder($alice, 20.0, 'active', '2026-01-02 00:00:00');
+
+        // Default is newest first (id DESC) — the bogus sort must not change that.
+        $result = $this->orders->paginate(null, 1, 15, [], ['column' => 'hacker', 'dir' => 'asc']);
+        $ids = array_map(static fn (array $r) => (int) $r['id'], $result['data']);
+        $expectedDesc = $ids;
+        rsort($expectedDesc);
+        $this->assertSame($expectedDesc, $ids);
+    }
+
+    public function test_query_string_includes_sort_and_preserves_it(): void
+    {
+        $q = TableFilters::query(['status' => 'active'], [], 1, ['column' => 'total', 'dir' => 'desc']);
+        $this->assertStringContainsString('filters[status]=active', $q);
+        $this->assertStringContainsString('sort=total', $q);
+        $this->assertStringContainsString('dir=desc', $q);
+        $this->assertStringContainsString('page=1', $q);
+
+        $noSort = TableFilters::query(['status' => 'active'], [], 1, null);
+        $this->assertStringNotContainsString('sort=', $noSort);
+        $this->assertStringNotContainsString('dir=', $noSort);
+    }
+
+    public function test_header_sort_partial_renders_sort_link_and_preserves_filter(): void
+    {
+        new \CodeVault\Kernel(dirname(__DIR__, 2));
+
+        $view = new View(dirname(__DIR__, 2) . '/resources/views');
+        $out = $view->partial('partials.table-header-sort', [
+            'key' => 'total',
+            'label' => 'Total',
+            'align' => 'right',
+            'action' => '/admin/orders',
+            'filters' => ['status' => 'active'],
+            'preserve' => ['q' => 'bob'],
+            'sort' => ['column' => 'total', 'dir' => 'asc'],
+        ]);
+
+        // First click asc -> next click flips to desc.
+        $this->assertStringContainsString('dir=desc', $out);
+        $this->assertStringContainsString('sort=total', $out);
+        // Active filters + search are preserved in the sort link.
+        $this->assertStringContainsString('filters[status]=active', $out);
+        $this->assertStringContainsString('q=bob', $out);
+        // Ascending indicator is shown on the active column.
+        $this->assertStringContainsString('▲', $out);
+        $this->assertStringContainsString('table-sort-link is-active', $out);
+    }
 }

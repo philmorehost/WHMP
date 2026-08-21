@@ -42,12 +42,18 @@ final class CreditNoteController
             ['id' => true, 'client' => true, 'reason' => true, 'total' => true, 'invoice' => true, 'issued' => true]
         );
 
-        $results = $this->creditNotes->paginate($page, 15, $filters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => 'cn.id', 'client' => 'c.last_name', 'reason' => 'cn.reason', 'total' => 'cn.total', 'invoice' => 'cn.invoice_id', 'issued' => 'cn.created_at']
+        );
+
+        $results = $this->creditNotes->paginate($page, 15, $filters, $sort);
 
         return $this->render('billing.credit-notes-index', [
             'creditNotes' => $results['data'],
             'results' => $results,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => true, 'key' => 'id', 'label' => 'Credit Note ID', 'type' => 'number', 'placeholder' => 'e.g. 3'],
                 ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],

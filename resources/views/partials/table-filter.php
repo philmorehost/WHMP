@@ -53,11 +53,12 @@ th[data-col-filter] { cursor: pointer; }
 
 <form method="get" action="<?= e($action) ?>" class="table-filter-form" id="<?= e($formId) ?>" data-filter-form>
     <input type="hidden" name="page" value="1">
-    <?php // Only preserve the extra params (status tabs, search box). The
-          // column filters themselves come from the visible filter-row
-          // inputs (bound to this form via the form="" attribute), so they
-          // must NOT be repeated as hidden inputs here or the URL doubles up. ?>
-    <?= \CodeVault\Table\TableFilters::hidden([], $preserve) ?>
+    <?php // Only preserve the extra params (status tabs, search box) + the
+          // active sort. The column filters themselves come from the visible
+          // filter-row inputs (bound to this form via the form="" attribute),
+          // so they must NOT be repeated as hidden inputs here or the URL
+          // doubles up. ?>
+    <?= \CodeVault\Table\TableFilters::hidden([], $preserve, $sort ?? null) ?>
 </form>
 
 <button type="button" class="table-filter-toggle<?= $activeCount > 0 ? ' is-active' : '' ?>" data-filter-toggle="<?= e($formId) ?>" title="Show / hide column filters">

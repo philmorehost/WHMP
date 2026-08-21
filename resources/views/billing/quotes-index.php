@@ -257,6 +257,7 @@ $badgeClass = static fn (string $status): string => match ($status) {
             'action' => '/admin/quotes',
             'filters' => $filters ?? [],
             'preserve' => [],
+            'sort' => $sort ?? null,
             'activeCount' => count($filters ?? []),
         ]) ?>
     </div>
@@ -275,12 +276,12 @@ $badgeClass = static fn (string $status): string => match ($status) {
             <table class="admin-quotes-table" id="quotes-table">
                 <thead>
                     <tr>
-                        <th data-col-filter="quotes-filter" data-col-filter-key="id">Quote ID</th>
-                        <th data-col-filter="quotes-filter" data-col-filter-key="client">Client</th>
-                        <th data-col-filter="quotes-filter" data-col-filter-key="subject">Subject</th>
-                        <th data-col-filter="quotes-filter" data-col-filter-key="total" style="text-align:right;">Total</th>
-                        <th data-col-filter="quotes-filter" data-col-filter-key="status">Status</th>
-                        <th data-col-filter="quotes-filter" data-col-filter-key="valid_until">Valid Until</th>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'id', 'label' => 'Quote ID', 'action' => '/admin/quotes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/quotes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'subject', 'label' => 'Subject', 'action' => '/admin/quotes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'total', 'label' => 'Total', 'align' => 'right', 'action' => '/admin/quotes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/quotes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'valid_until', 'label' => 'Valid Until', 'action' => '/admin/quotes', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
                         <th style="width:80px;"></th>
                     </tr>
                     <?= $view->partial('partials.table-filter-row', [
@@ -317,6 +318,7 @@ $badgeClass = static fn (string $status): string => match ($status) {
             'action' => '/admin/quotes',
             'filters' => $filters ?? [],
             'preserve' => [],
+            'sort' => $sort ?? null,
             'label' => 'quotes',
         ]) ?>
     <?php endif; ?>

@@ -42,12 +42,18 @@ final class QuoteController
             ['id' => true, 'client' => true, 'subject' => true, 'total' => true, 'status' => true, 'valid_until' => true]
         );
 
-        $results = $this->quotes->paginate($page, 15, $filters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => 'q.id', 'client' => 'c.last_name', 'subject' => 'q.subject', 'total' => 'q.total', 'status' => 'q.status', 'valid_until' => 'q.valid_until']
+        );
+
+        $results = $this->quotes->paginate($page, 15, $filters, $sort);
 
         return $this->render('billing.quotes-index', [
             'quotes' => $results['data'],
             'results' => $results,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => true, 'key' => 'id', 'label' => 'Quote ID', 'type' => 'number', 'placeholder' => 'e.g. 5'],
                 ['filterable' => true, 'key' => 'client', 'label' => 'Client', 'type' => 'text', 'placeholder' => 'Name or email'],

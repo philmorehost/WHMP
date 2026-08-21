@@ -453,6 +453,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
             'action' => '/admin/invoices',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? ''],
+            'sort' => $sort ?? null,
             'activeCount' => count($filters ?? []),
         ]) ?>
     </div>
@@ -488,11 +489,11 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                 <thead>
                     <tr>
                         <th style="width:36px;"><input type="checkbox" data-select-all-trigger="[data-invoice-checkbox]" aria-label="Select all invoices" style="cursor:pointer;"></th>
-                        <th data-col-filter="invoices-filter" data-col-filter-key="id">Invoice #</th>
-                        <th data-col-filter="invoices-filter" data-col-filter-key="client">Client</th>
-                        <th data-col-filter="invoices-filter" data-col-filter-key="total">Total</th>
-                        <th data-col-filter="invoices-filter" data-col-filter-key="due_date">Due Date</th>
-                        <th data-col-filter="invoices-filter" data-col-filter-key="status">Status</th>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'id', 'label' => 'Invoice #', 'action' => '/admin/invoices', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/invoices', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'total', 'label' => 'Total', 'align' => 'right', 'action' => '/admin/invoices', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'due_date', 'label' => 'Due Date', 'action' => '/admin/invoices', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/invoices', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
                         <th style="width: 80px;"></th>
                     </tr>
                     <?= $view->partial('partials.table-filter-row', [
@@ -555,6 +556,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
             'action' => '/admin/invoices',
             'filters' => $filters ?? [],
             'preserve' => ['status' => $statusFilter ?? ''],
+            'sort' => $sort ?? null,
             'label' => 'invoices',
         ]) ?>
     <?php endif; ?>

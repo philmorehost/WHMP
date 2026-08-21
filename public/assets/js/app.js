@@ -47,41 +47,21 @@
         form.submit();
     }
 
-    // "⚙ Filters" toggle: reveal/hide the whole filter row.
+    // "⚙ Filters" toggle: reveal/hide the whole filter row. Column headers
+    // themselves are sort links (WHMCS-style A-Z / 1-0) — no JS needed for
+    // them, the browser follows the anchor with sort=column&dir=asc|desc.
     document.addEventListener('click', function (event) {
         var toggle = event.target.closest('[data-filter-toggle]');
-        if (toggle) {
-            var row = document.getElementById('filter-row-' + toggle.getAttribute('data-filter-toggle'));
-            if (!row) { return; }
-            var showingAll = !row.classList.contains('is-expanded');
-            row.classList.toggle('is-expanded', showingAll);
-            toggle.classList.add('is-active');
-            row.querySelectorAll('.table-filter-cell').forEach(function (cell) {
-                cell.classList.toggle('is-hidden', !showingAll);
-            });
-            event.preventDefault();
-            return;
-        }
-
-        // Clicking a filterable column header reveals + focuses that column's
-        // input in the filter row.
-        var th = event.target.closest('[data-col-filter]');
-        if (!th) { return; }
-        if (event.target.closest('input, select, button, a, label')) { return; }
-        var rowEl = document.getElementById('filter-row-' + th.getAttribute('data-col-filter'));
-        if (!rowEl) { return; }
-        var key = th.getAttribute('data-col-filter-key');
-        rowEl.classList.add('is-expanded');
-        var tgl = document.querySelector('[data-filter-toggle="' + th.getAttribute('data-col-filter') + '"]');
-        if (tgl) { tgl.classList.add('is-active'); }
-        var cell = rowEl.querySelector('[data-filter-cell="' + key + '"]');
-        if (cell) { cell.classList.remove('is-hidden'); }
-        var input = rowEl.querySelector('[data-filter-input="' + key + '"]');
-        if (input) {
-            input.focus();
-            // .select() only exists on text-like inputs, not <select>.
-            if (typeof input.select === 'function') { input.select(); }
-        }
+        if (!toggle) { return; }
+        var row = document.getElementById('filter-row-' + toggle.getAttribute('data-filter-toggle'));
+        if (!row) { return; }
+        var showingAll = !row.classList.contains('is-expanded');
+        row.classList.toggle('is-expanded', showingAll);
+        toggle.classList.add('is-active');
+        row.querySelectorAll('.table-filter-cell').forEach(function (cell) {
+            cell.classList.toggle('is-hidden', !showingAll);
+        });
+        event.preventDefault();
     });
 
     // Enter in a text filter input applies the filter.

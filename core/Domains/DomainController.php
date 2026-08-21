@@ -50,13 +50,19 @@ final class DomainController
             ['domain' => true, 'client' => true, 'tld' => true, 'registrar' => true, 'expiry' => true, 'status' => true]
         );
 
-        $results = $this->domains->paginate($status !== '' ? $status : null, $page, 15, $filters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['domain' => 'd.domain_name', 'client' => 'c.last_name', 'registrar' => 'd.registrar_slug', 'expiry' => 'd.expiry_date', 'status' => 'd.status']
+        );
+
+        $results = $this->domains->paginate($status !== '' ? $status : null, $page, 15, $filters, $sort);
 
         return $this->render('domains.index', [
             'results' => $results,
             'domains' => $results['data'],
             'statusFilter' => $status,
             'filters' => $filters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => false],
                 ['filterable' => true, 'key' => 'domain', 'label' => 'Domain', 'type' => 'text', 'placeholder' => 'e.g. example.com.ng'],

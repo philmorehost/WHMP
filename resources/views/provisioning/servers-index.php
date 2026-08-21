@@ -247,6 +247,7 @@
                 'action' => '/admin/servers',
                 'filters' => $filters ?? [],
                 'preserve' => [],
+                'sort' => $sort ?? null,
                 'activeCount' => count($filters ?? []),
             ]) ?>
         </div>
@@ -255,11 +256,11 @@
         <table class="admin-srv-table" id="servers-table">
             <thead>
                 <tr>
-                    <th data-col-filter="servers-filter" data-col-filter-key="name">Name</th>
-                    <th data-col-filter="servers-filter" data-col-filter-key="hostname">Hostname</th>
-                    <th data-col-filter="servers-filter" data-col-filter-key="module">Module</th>
-                    <th data-col-filter="servers-filter" data-col-filter-key="group">Group</th>
-                    <th data-col-filter="servers-filter" data-col-filter-key="status">Status</th>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'name', 'label' => 'Name', 'action' => '/admin/servers', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'hostname', 'label' => 'Hostname', 'action' => '/admin/servers', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'module', 'label' => 'Module', 'action' => '/admin/servers', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'group', 'label' => 'Group', 'action' => '/admin/servers', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/servers', 'filters' => $filters ?? [], 'preserve' => [], 'sort' => $sort ?? null]) ?>
                     <th style="width:300px;">Actions</th>
                 </tr>
                 <?= $view->partial('partials.table-filter-row', [
@@ -311,6 +312,7 @@
             'action' => '/admin/servers',
             'filters' => $filters ?? [],
             'preserve' => [],
+            'sort' => $sort ?? null,
             'label' => 'servers',
         ]) ?>
     <?php endif; ?>

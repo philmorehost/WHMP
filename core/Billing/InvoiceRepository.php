@@ -56,9 +56,10 @@ final class InvoiceRepository
      */
     /**
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, array $filters = []): array
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 20, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -87,6 +88,18 @@ final class InvoiceRepository
 
         $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
 
+        $sortable = [
+            'id'       => 'i.id',
+            'client'   => 'c.last_name',
+            'total'    => 'i.total',
+            'due_date' => 'i.due_date',
+            'status'   => 'i.status',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = 'ORDER BY i.id DESC';
+        }
+
         $total = (int) ($this->db->selectOne("SELECT COUNT(*) AS c FROM invoices i JOIN clients c ON c.id = i.client_id {$where}", $bindings)['c'] ?? 0);
 
         // currency_id IS NULL covers two different histories: an invoice
@@ -110,7 +123,7 @@ final class InvoiceRepository
             JOIN clients c ON c.id = i.client_id
             LEFT JOIN currencies curr ON curr.id = COALESCE(i.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
             {$where}
-            ORDER BY i.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

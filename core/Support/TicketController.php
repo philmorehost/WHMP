@@ -150,7 +150,12 @@ final class TicketController
             ['id' => true, 'client' => true, 'subject' => true, 'department' => true, 'priority' => true, 'status' => true]
         );
 
-        $pagination = $this->tickets->paginate($filters, $page, 20, $columnFilters);
+        $sort = \CodeVault\Table\TableFilters::sortFromQuery(
+            is_array($request->query()) ? $request->query() : [],
+            ['id' => 't.id', 'client' => 'c.last_name', 'subject' => 't.subject', 'department' => 'd.name', 'priority' => 't.priority', 'status' => 't.status']
+        );
+
+        $pagination = $this->tickets->paginate($filters, $page, 20, $columnFilters, $sort);
 
         return $this->render('support.tickets-index', [
             'tickets' => $pagination['data'],
@@ -159,6 +164,7 @@ final class TicketController
             'statusFilter' => $status,
             'departmentFilter' => $departmentId,
             'filters' => $columnFilters,
+            'sort' => $sort,
             'filterColumns' => [
                 ['filterable' => false],
                 ['filterable' => true, 'key' => 'id', 'label' => 'Ticket ID', 'type' => 'number', 'placeholder' => 'e.g. 12'],

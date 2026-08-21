@@ -11,6 +11,7 @@
  *   @var string $action   page URL without query (e.g. '/admin/orders')
  *   @var array<string, string> $filters
  *   @var array<string, string> $preserve
+ *   @var array{column: string, dir: string}|null $sort
  *   @var string|null $label  optional label for the "N total" text (default 'items')
  */
 ?>
@@ -18,6 +19,7 @@
 $totalPages = (int) ceil(($results['total'] ?? 0) / max(1, (int) ($results['perPage'] ?? 20)));
 $currentPage = max(1, (int) ($results['page'] ?? 1));
 $label = $label ?? 'items';
+$sort = $sort ?? null;
 ?>
 <style>
 .table-pagination {
@@ -43,12 +45,12 @@ $label = $label ?? 'items';
     </div>
     <div class="table-pagination__controls">
         <?php if ($currentPage > 1): ?>
-            <a class="table-pagination__link" href="<?= e($action . \CodeVault\Table\TableFilters::query($filters, $preserve, $currentPage - 1)) ?>">← Previous</a>
+            <a class="table-pagination__link" href="<?= e($action . \CodeVault\Table\TableFilters::query($filters, $preserve, $currentPage - 1, $sort)) ?>">← Previous</a>
         <?php else: ?>
             <span class="table-pagination__link is-disabled">← Previous</span>
         <?php endif; ?>
         <?php if ($currentPage < $totalPages): ?>
-            <a class="table-pagination__link" href="<?= e($action . \CodeVault\Table\TableFilters::query($filters, $preserve, $currentPage + 1)) ?>">Next →</a>
+            <a class="table-pagination__link" href="<?= e($action . \CodeVault\Table\TableFilters::query($filters, $preserve, $currentPage + 1, $sort)) ?>">Next →</a>
         <?php else: ?>
             <span class="table-pagination__link is-disabled">Next →</span>
         <?php endif; ?>

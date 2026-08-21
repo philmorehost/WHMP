@@ -96,9 +96,10 @@ final class DomainRepository
      * Paginated, per-column-filterable domain list for the admin Domains page.
      *
      * @param array<string, string> $filters sanitised `filters[]` bag (see Table\TableFilters)
+     * @param array{column: string, dir: string}|null $sort
      * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}
      */
-    public function paginate(?string $status = null, int $page = 1, int $perPage = 15, array $filters = []): array
+    public function paginate(?string $status = null, int $page = 1, int $perPage = 15, array $filters = [], ?array $sort = null): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(100, $perPage));
@@ -128,6 +129,25 @@ final class DomainRepository
 
         $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
 
+        $sortable = [
+            'domain'    => 'd.domain_name',
+            'client'    => 'c.last_name',
+            'registrar' => 'd.registrar_slug',
+            'expiry'    => 'd.expiry_date',
+            'status'    => 'd.status',
+        ];
+        $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
+        if ($orderBy === '') {
+            $orderBy = <<<'SQL'
+            ORDER BY CASE
+                WHEN d.status = 'active' THEN 1
+                WHEN d.status = 'pending' THEN 2
+                WHEN d.status = 'expired' THEN 3
+                ELSE 4
+            END, d.id DESC
+            SQL;
+        }
+
         $total = (int) ($this->db->selectOne(
             "SELECT COUNT(*) AS c FROM domains d JOIN clients c ON c.id = d.client_id {$where}",
             $bindings
@@ -139,12 +159,7 @@ final class DomainRepository
             FROM domains d
             JOIN clients c ON c.id = d.client_id
             {$where}
-            ORDER BY CASE
-                WHEN d.status = 'active' THEN 1
-                WHEN d.status = 'pending' THEN 2
-                WHEN d.status = 'expired' THEN 3
-                ELSE 4
-            END, d.id DESC
+            {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
             SQL,
             $bindings

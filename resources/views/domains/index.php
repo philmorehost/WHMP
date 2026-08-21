@@ -183,6 +183,7 @@
                 'action' => '/admin/domains',
                 'filters' => $filters ?? [],
                 'preserve' => ['status' => $statusFilter ?? ''],
+                'sort' => $sort ?? null,
                 'activeCount' => count($filters ?? []),
             ]) ?>
         </div>
@@ -190,11 +191,11 @@
             <thead>
                 <tr>
                     <th style="width:38px;text-align:center;"><input type="checkbox" id="selectAllCheckbox" data-select-all=".domain-select-checkbox" title="Select all domains"></th>
-                    <th data-col-filter="domains-filter" data-col-filter-key="domain">Domain</th>
-                    <th data-col-filter="domains-filter" data-col-filter-key="client">Client</th>
-                    <th data-col-filter="domains-filter" data-col-filter-key="registrar">Registrar</th>
-                    <th data-col-filter="domains-filter" data-col-filter-key="expiry">Expiry</th>
-                    <th data-col-filter="domains-filter" data-col-filter-key="status">Status</th>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'domain', 'label' => 'Domain', 'action' => '/admin/domains', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/domains', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'registrar', 'label' => 'Registrar', 'action' => '/admin/domains', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'expiry', 'label' => 'Expiry', 'action' => '/admin/domains', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                    <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/domains', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
                     <th></th>
                 </tr>
                 <?= $view->partial('partials.table-filter-row', [
@@ -236,6 +237,7 @@
                 'action' => '/admin/domains',
                 'filters' => $filters ?? [],
                 'preserve' => ['status' => $statusFilter ?? ''],
+                'sort' => $sort ?? null,
                 'label' => 'domains',
             ]) ?>
         <?php endif; ?>
