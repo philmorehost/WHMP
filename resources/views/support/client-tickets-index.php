@@ -352,7 +352,7 @@
                         default => 'ticket-filter-open'
                     };
                 ?>
-                <div class="ticket-card <?= $filterClass ?> ticket-filter-all">
+                <div class="ticket-card <?= $filterClass ?> ticket-filter-all" style="cursor:pointer;" data-open-url="/client/tickets/<?= (int) $ticket['id'] ?>">
                     <div class="ticket-card__header">
                         <h3 class="ticket-card__id">#<?= (int) $ticket['id'] ?></h3>
                         <div class="ticket-card__status">

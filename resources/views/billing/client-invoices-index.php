@@ -459,7 +459,7 @@ $statusFilter = $statusFilter ?? '';
         <div id="invoices-container-grid">
             <div class="invoices-grid" id="invoices-list">
                 <?php foreach ($invoices as $invoice): ?>
-                    <div class="invoice-card" style="<?= $invoice['status'] === 'unpaid' ? 'border-left: 4px solid #ef4444;' : ($invoice['status'] === 'cancelled' ? 'border-left: 4px solid #6b7280;' : 'border-left: 4px solid #10b981;') ?>">
+                    <div class="invoice-card" style="cursor:pointer;<?= $invoice['status'] === 'unpaid' ? 'border-left: 4px solid #ef4444;' : ($invoice['status'] === 'cancelled' ? 'border-left: 4px solid #6b7280;' : 'border-left: 4px solid #10b981;') ?>" data-open-url="/client/invoices/<?= (int) $invoice['id'] ?>">
                         <div class="invoice-card__header">
                             <h3 class="invoice-card__number">INV-<?= (int) $invoice['id'] ?></h3>
                             <div class="invoice-card__status">
@@ -515,7 +515,7 @@ $statusFilter = $statusFilter ?? '';
                     </thead>
                     <tbody id="invoices-table-body">
                         <?php foreach ($invoices as $invoice): ?>
-                            <tr style="border-bottom: 1px solid var(--cv-border-default);">
+                            <tr style="border-bottom: 1px solid var(--cv-border-default); cursor:pointer;" data-open-url="/client/invoices/<?= (int) $invoice['id'] ?>">
                                 <td style="padding: 14px 16px; text-align: center;">
                                     <?php if ($invoice['status'] === 'unpaid'): ?>
                                         <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 16px; height: 16px;">

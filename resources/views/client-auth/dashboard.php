@@ -459,8 +459,8 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                     </thead>
                     <tbody>
                         <?php foreach ($unpaidInvoices as $inv): ?>
-                        <tr>
-                            <td><strong>INV-<?= (int)$inv['id'] ?></strong></td>
+                        <tr style="cursor:pointer;" data-open-url="/client/invoices/<?= (int)$inv['id'] ?>">
+                            <td><a href="/client/invoices/<?= (int)$inv['id'] ?>" style="color:inherit;text-decoration:none;"><strong>INV-<?= (int)$inv['id'] ?></strong></a></td>
                             <td><?= e((string)($inv['due_date'] ?? '')) ?></td>
                             <?php // Unlocked invoices fall back to this client's currency, not the system default. ?>
                             <td class="t-amt"><?= e($currencyService->formatDocument((float)$inv['total'], $inv['currency_id'] !== null ? (int)$inv['currency_id'] : null, (float)($inv['currency_rate'] ?? 1.0), $currency)) ?></td>
@@ -494,7 +494,7 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                     <tbody>
                         <?php foreach ($activeServices as $svc): ?>
                         <?php $svcUrl = '/client/services/' . (int) $svc['id']; ?>
-                        <tr style="cursor:pointer;" onclick="location.href='<?= e($svcUrl) ?>'">
+                        <tr style="cursor:pointer;" data-open-url="<?= e($svcUrl) ?>">
                             <td>
                                 <strong><a href="<?= e($svcUrl) ?>" style="color:inherit;text-decoration:none;"><?= e((string)$svc['product_name']) ?></a></strong>
                                 <?php $dom = $svc['domain'] ?? $svc['hostname'] ?? ''; if ($dom !== ''): ?>
@@ -566,7 +566,7 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                                 else                                     $ul = date('M j, Y', $ts2);
                             }
                         ?>
-                        <tr style="cursor:pointer;" onclick="location.href='/client/tickets/<?= (int)$t['id'] ?>'">
+                        <tr style="cursor:pointer;" data-open-url="/client/tickets/<?= (int)$t['id'] ?>">
                             <td><a href="/client/tickets/<?= (int)$t['id'] ?>" style="color:inherit;text-decoration:none;"><?= e((string)($t['subject'] ?? 'Ticket')) ?></a></td>
                             <td><span class="dbd-badge <?= $bc ?>"><?= $bl ?></span></td>
                             <td style="color:var(--cv-text-secondary);font-size:.825rem;white-space:nowrap;"><?= $ul ?></td>

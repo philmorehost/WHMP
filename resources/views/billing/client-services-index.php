@@ -288,7 +288,8 @@
     <?php else: ?>
         <div class="services-grid" id="services-list">
             <?php foreach ($services as $service): ?>
-                <div class="service-card" style="<?= str_contains($service['product_name'] ?? '', 'Email') ? 'border-left: 4px solid #10b981;' : '' ?>">
+                <?php $svcUrl = '/client/services/' . (int) $service['id']; ?>
+                <div class="service-card" style="cursor:pointer;<?= str_contains($service['product_name'] ?? '', 'Email') ? 'border-left: 4px solid #10b981;' : '' ?>" data-open-url="<?= e($svcUrl) ?>">
                     <div class="service-card__header">
                         <h3 class="service-card__name"><?= e($service['product_name']) ?></h3>
                         <div class="service-card__status">
@@ -322,7 +323,7 @@
                     </div>
 
                     <div class="service-card__footer">
-                        <a class="service-card__cta" href="/client/services/<?= (int) $service['id'] ?>">Manage Service →</a>
+                        <a class="service-card__cta" href="<?= e($svcUrl) ?>">Manage Service →</a>
                     </div>
                 </div>
             <?php endforeach; ?>

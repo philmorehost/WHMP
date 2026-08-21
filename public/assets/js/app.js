@@ -18,6 +18,19 @@
         }
     });
 
+    // Open the item when the client clicks anywhere on its row/card
+    // (WHMCS-style: service → manage, invoice → view/pay, ticket → open).
+    // The element carries data-open-url; nested interactive controls (links,
+    // buttons, checkboxes, selects, textareas) are left to handle themselves,
+    // so the invoice "Cancel"/checkbox and any inner links keep working.
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest ? event.target.closest('[data-open-url]') : null;
+        if (!trigger) { return; }
+        if (event.target.closest('a, button, input, select, textarea, label')) { return; }
+        var url = trigger.getAttribute('data-open-url');
+        if (url) { window.location.href = url; }
+    });
+
     // Insert a <select>'s chosen value into a target field on change (e.g.
     // the canned-reply picker filling the ticket reply box).
     document.addEventListener('change', function (event) {
