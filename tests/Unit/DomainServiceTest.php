@@ -120,6 +120,32 @@ final class DomainServiceTest extends DatabaseTestCase
     }
 
     /**
+     * Regression: registering a private nameserver / DNS record used to throw
+     * "Return value must be of type int, string returned" under
+     * declare(strict_types=1). Database::insert() returns the id as a string,
+     * but DomainRepository::addChildNameserver()/addDnsRecord() declared `: int`
+     * without casting — so the client-facing "add private nameserver" and DNS
+     * pages 500'd. The repo now casts, and the ids must surface as ints.
+     */
+    public function test_add_child_nameserver_and_dns_record_return_int_ids(): void
+    {
+        $domainId = $this->createPendingDomain('glue.test');
+        $this->service->register($domainId, 1);
+
+        $ns = $this->service->addChildNameserver($domainId, 'ns1.glue.test', '192.0.2.10');
+        $this->assertTrue($ns['success']);
+        $this->assertIsInt($ns['id'], 'addChildNameserver must return an int id (was a TypeError)');
+
+        $dns = $this->service->addDnsRecord($domainId, 'A', 'www', '192.0.2.10');
+        $this->assertTrue($dns['success']);
+        $this->assertIsInt($dns['id'], 'addDnsRecord must return an int id (was a TypeError)');
+
+        // Both rows actually persisted.
+        $this->assertCount(1, $this->domains->getChildNameservers($domainId));
+        $this->assertCount(1, $this->domains->getDnsRecords($domainId));
+    }
+
+    /**
      * The grace/redemption check reads domain_pricing directly. It crashed in
      * production — "Call to a member function selectOne() on null" — because
      * DomainService had no Database dependency, taking down the whole

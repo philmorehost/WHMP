@@ -334,7 +334,7 @@ final class DomainRepository
     public function addChildNameserver(int $domainId, string $hostname, string $ip): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-        return $this->db->insert(
+        return (int) $this->db->insert(
             'INSERT INTO domain_child_nameservers (domain_id, hostname, ip_address, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             [$domainId, $hostname, $ip, $now, $now]
         );
@@ -360,7 +360,7 @@ final class DomainRepository
     public function addDnsRecord(int $domainId, string $type, string $name, string $content, int $priority = 10, int $ttl = 3600): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-        return $this->db->insert(
+        return (int) $this->db->insert(
             'INSERT INTO domain_dns_records (domain_id, type, name, content, priority, ttl, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [$domainId, strtoupper($type), $name, $content, $priority, $ttl, $now, $now]
         );
