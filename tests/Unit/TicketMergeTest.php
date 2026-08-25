@@ -146,4 +146,47 @@ final class TicketMergeTest extends DatabaseTestCase
         $this->assertTrue($result['success']);
         $this->assertTrue($result['crossClient']);
     }
+
+    public function test_resolve_merge_target_returns_the_ticket_itself_when_not_merged(): void
+    {
+        $ticketId = $this->openTicket(null, 'anon@example.test', 'Solo ticket');
+
+        $resolved = $this->service->resolveMergeTarget($this->tickets->find($ticketId));
+
+        $this->assertNotNull($resolved);
+        $this->assertSame($ticketId, (int) $resolved['id']);
+    }
+
+    public function test_resolve_merge_target_follows_the_chain_to_the_terminal_ticket(): void
+    {
+        $ticketA = $this->openTicket(null, 'anon@example.test', 'A ticket');
+        $ticketB = $this->openTicket(null, 'anon@example.test', 'B ticket');
+        $ticketC = $this->openTicket(null, 'anon@example.test', 'C ticket');
+
+        // A → B → C (a chain created directly, since merge() also relocates
+        // replies and closes the source).
+        $this->tickets->setMergedInto($ticketA, $ticketB);
+        $this->tickets->setMergedInto($ticketB, $ticketC);
+
+        $resolved = $this->service->resolveMergeTarget($this->tickets->find($ticketA));
+
+        $this->assertNotNull($resolved);
+        $this->assertSame($ticketC, (int) $resolved['id']);
+    }
+
+    public function test_resolve_merge_target_returns_null_on_a_cycle_to_stop_a_redirect_loop(): void
+    {
+        $ticketA = $this->openTicket(null, 'anon@example.test', 'A ticket');
+        $ticketB = $this->openTicket(null, 'anon@example.test', 'B ticket');
+
+        // A → B → A. merge() would never create this, but corrupt data from a
+        // bad import / direct SQL can. The resolver must detect the cycle and
+        // return null so the caller renders the ticket instead of redirecting
+        // back and forth forever (which times out the origin → Cloudflare 522).
+        $this->tickets->setMergedInto($ticketA, $ticketB);
+        $this->tickets->setMergedInto($ticketB, $ticketA);
+
+        $this->assertNull($this->service->resolveMergeTarget($this->tickets->find($ticketA)));
+        $this->assertNull($this->service->resolveMergeTarget($this->tickets->find($ticketB)));
+    }
 }

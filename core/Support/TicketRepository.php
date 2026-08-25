@@ -197,13 +197,15 @@ final class TicketRepository
      * Number of non-closed tickets raised from a sender email (case-
      * insensitive). The mail-piping flood guard uses this to stop one
      * address — a bounce loop or an abuser — from opening unbounded
-     * tickets.
+     * tickets. Emails are stored lowercased (see create()), so the plain
+     * indexed equality below hits idx_tickets_email instead of wrapping
+     * the column in LOWER(), which would force a full scan on large tables.
      */
     public function countOpenByEmail(string $email): int
     {
         $row = $this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM tickets WHERE status != 'closed' AND LOWER(email) = LOWER(?)",
-            [$email]
+            "SELECT COUNT(*) AS c FROM tickets WHERE status != 'closed' AND email = ?",
+            [strtolower(trim($email))]
         );
 
         return (int) ($row['c'] ?? 0);
@@ -264,7 +266,9 @@ final class TicketRepository
             'INSERT INTO tickets (client_id, email, department_id, subject, status, priority, last_reply_at, last_reply_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $fields['client_id'] ?? null,
-                $fields['email'],
+                // Emails are stored lowercased so sender lookups (the mail-
+                // piping flood guard) can use the email index.
+                strtolower(trim((string) ($fields['email'] ?? ''))),
                 $fields['department_id'],
                 $fields['subject'],
                 $fields['status'] ?? 'open',

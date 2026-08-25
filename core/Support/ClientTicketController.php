@@ -109,19 +109,25 @@ final class ClientTicketController
         }
 
         if ($ticket['merged_into_id'] !== null) {
-            $target = $this->tickets->find((int) $ticket['merged_into_id']);
+            // resolveMergeTarget() follows the whole chain with a cycle
+            // guard — a corrupt merged_into_id loop (A → B → A from a bad
+            // import / direct SQL) would otherwise bounce the client between
+            // tickets forever until the origin times out (Cloudflare 522).
+            $target = $this->ticketService->resolveMergeTarget($ticket);
             $client = $this->guard->currentClient();
 
             // The normal case: merged into another ticket of this same
             // client's — send them straight there, same as the admin side.
-            if ($target !== null && (int) $target['client_id'] === (int) $client['id']) {
+            if ($target !== null && (int) $target['id'] !== (int) $ticket['id'] && (int) $target['client_id'] === (int) $client['id']) {
                 return Response::redirect("/client/tickets/{$target['id']}");
             }
 
             // A cross-client merge: the target belongs to someone else, so
             // redirecting there would leak another client's ticket. Show
             // this ticket's own (now-empty, closed) shell with a plain
-            // explanation instead.
+            // explanation instead. A null target (cycle / dangling
+            // merged_into_id) falls into the same safe shell rather than
+            // redirecting into a loop.
             return $this->page('support.client-ticket-show', [
                 'ticket' => $ticket,
                 'replies' => [],

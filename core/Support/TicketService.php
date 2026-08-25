@@ -82,6 +82,53 @@ final class TicketService
     }
 
     /**
+     * Follows a ticket's merged_into_id chain to its final target, guarding
+     * against cycles / corrupt data.
+     *
+     * The show() pages redirect a merged ticket to its target. A single hop
+     * is safe because merge() rejects already-merged source and target — but
+     * a cycle can still slip in through direct SQL or a bad import (A → B,
+     * B → A), and a naive one-hop redirect would then bounce forever between
+     * the two pages until the server times out (a Cloudflare 522). This walks
+     * the chain with a depth cap and a seen-set; on a cycle it returns null
+     * and the caller renders the ticket directly instead of redirecting.
+     *
+     * @return array<string, mixed>|null the terminal ticket, or null on a
+     *         cycle / missing target / chain deeper than $maxHops
+     */
+    public function resolveMergeTarget(array $ticket, int $maxHops = 10): ?array
+    {
+        $seen = [];
+        $current = $ticket;
+
+        for ($i = 0; $i < $maxHops; $i++) {
+            $targetId = $current['merged_into_id'];
+
+            if ($targetId === null) {
+                return $current;
+            }
+
+            $id = (int) $current['id'];
+
+            if (isset($seen[$id])) {
+                return null; // cycle — A → B → A
+            }
+
+            $seen[$id] = true;
+
+            $target = $this->tickets->find((int) $targetId);
+
+            if ($target === null) {
+                return null; // dangling merged_into_id
+            }
+
+            $current = $target;
+        }
+
+        return null; // chain too deep — assume corrupt
+    }
+
+    /**
      * Merges $sourceId into $targetId: every reply and attachment moves onto
      * the target (a private note marks where they came from), and the
      * source is closed and left pointing at its merge target — rather than

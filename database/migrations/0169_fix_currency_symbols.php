@@ -20,19 +20,23 @@ declare(strict_types=1);
 return [
     'up' => [
         // The proper naira sign U+20A6 (₦), UTF-8 bytes E2 82 A6.
+        // BINARY on the column side avoids an illegal-mix-of-collations
+        // error when the stored column uses utf8mb4_general_ci but the
+        // CONVERT()ed literal is utf8mb4_unicode_ci (MySQL 1267) — which
+        // otherwise leaves this migration permanently stuck.
         <<<'SQL'
         UPDATE currencies SET symbol = CONVERT(0xE282A6 USING utf8mb4), updated_at = NOW()
-        WHERE code = 'NGN' AND symbol <> CONVERT(0xE282A6 USING utf8mb4)
+        WHERE code = 'NGN' AND BINARY symbol <> CONVERT(0xE282A6 USING utf8mb4)
         SQL,
         // The proper euro sign U+20AC (€), UTF-8 bytes E2 82 AC.
         <<<'SQL'
         UPDATE currencies SET symbol = CONVERT(0xE282AC USING utf8mb4), updated_at = NOW()
-        WHERE code = 'EUR' AND symbol <> CONVERT(0xE282AC USING utf8mb4)
+        WHERE code = 'EUR' AND BINARY symbol <> CONVERT(0xE282AC USING utf8mb4)
         SQL,
         // The dollar sign (defensive — any non-"$" value would be data rot).
         <<<'SQL'
         UPDATE currencies SET symbol = '$', updated_at = NOW()
-        WHERE code = 'USD' AND symbol <> '$'
+        WHERE code = 'USD' AND BINARY symbol <> '$'
         SQL,
     ],
 ];

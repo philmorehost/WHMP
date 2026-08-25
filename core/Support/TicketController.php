@@ -211,9 +211,19 @@ final class TicketController
 
         // Merged away — the conversation now lives on the target ticket, so
         // a stale link/bookmark to this id should land there, not on an
-        // empty, closed shell of a ticket.
+        // empty, closed shell of a ticket. resolveMergeTarget() follows the
+        // chain with a cycle guard so a corrupt merged_into_id loop (A → B →
+        // A from a bad import / direct SQL) can't send the browser into an
+        // infinite redirect that times out the origin (Cloudflare 522).
         if ($ticket['merged_into_id'] !== null) {
-            return Response::redirect('/admin/tickets/' . (int) $ticket['merged_into_id']);
+            $resolved = $this->ticketService->resolveMergeTarget($ticket);
+
+            if ($resolved !== null && (int) $resolved['id'] !== (int) $ticket['id']) {
+                return Response::redirect('/admin/tickets/' . (int) $resolved['id']);
+            }
+
+            // Cycle / dangling target — fall through and render this ticket
+            // directly rather than redirecting into a loop.
         }
 
         $mergeConfirmTargetId = $request->query('merge_confirm_target') !== null ? (int) $request->query('merge_confirm_target') : null;
