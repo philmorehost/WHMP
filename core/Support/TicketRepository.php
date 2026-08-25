@@ -194,6 +194,36 @@ final class TicketRepository
     }
 
     /**
+     * Number of non-closed tickets raised from a sender email (case-
+     * insensitive). The mail-piping flood guard uses this to stop one
+     * address — a bounce loop or an abuser — from opening unbounded
+     * tickets.
+     */
+    public function countOpenByEmail(string $email): int
+    {
+        $row = $this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM tickets WHERE status != 'closed' AND LOWER(email) = LOWER(?)",
+            [$email]
+        );
+
+        return (int) ($row['c'] ?? 0);
+    }
+
+    /**
+     * Number of non-closed tickets for a client account. Guards the client
+     * ticket form so one account can't flood the admin queue.
+     */
+    public function countOpenByClient(int $clientId): int
+    {
+        $row = $this->db->selectOne(
+            "SELECT COUNT(*) AS c FROM tickets WHERE status != 'closed' AND client_id = ?",
+            [$clientId]
+        );
+
+        return (int) ($row['c'] ?? 0);
+    }
+
+    /**
      * Tickets awaiting an admin reply for longer than N minutes (blueprint
      * §4.4 "escalation rules, SLA priority").
      *

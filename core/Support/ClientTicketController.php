@@ -11,6 +11,14 @@ use CodeVault\View;
 
 final class ClientTicketController
 {
+    /**
+     * Max open (non-closed) tickets a single client account may hold before
+     * the client ticket form refuses to open another — stops one account
+     * flooding the admin queue while still letting real support requests
+     * through.
+     */
+    private const MAX_OPEN_TICKETS_PER_CLIENT = 5;
+
     public function __construct(
         private readonly ClientAuthGuard $guard,
         private readonly View $view,
@@ -46,6 +54,8 @@ final class ClientTicketController
 
         return $this->page('support.client-ticket-create', [
             'departments' => $this->departments->all(),
+            'limitReached' => $request->query('limit') === '1',
+            'maxOpenTickets' => self::MAX_OPEN_TICKETS_PER_CLIENT,
         ]);
     }
 
@@ -55,6 +65,12 @@ final class ClientTicketController
 
         if ($client === null) {
             return Response::redirect('/client/login');
+        }
+
+        // Flood guard: cap open tickets per client account so a single
+        // account can't keep opening tickets and bury the admin queue.
+        if ($this->tickets->countOpenByClient((int) $client['id']) >= self::MAX_OPEN_TICKETS_PER_CLIENT) {
+            return Response::redirect('/client/tickets/create?limit=1');
         }
 
         $departmentId = (int) $request->input('department_id', 0);

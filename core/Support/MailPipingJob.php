@@ -17,6 +17,14 @@ use CodeVault\Settings\SettingsRepository;
  */
 final class MailPipingJob implements CronJob
 {
+    /**
+     * How many open (non-closed) tickets a single sender may hold before the
+     * piping job stops opening new ones from that address — stops one sender
+     * (or a script) from flooding the admin queue. Overridable per-install
+     * via the `mail_piping.max_open_per_sender` setting.
+     */
+    private const DEFAULT_MAX_OPEN_PER_SENDER = 5;
+
     public function __construct(
         private readonly MailboxClient $mailbox,
         private readonly SettingsRepository $settings,
@@ -77,6 +85,16 @@ final class MailPipingJob implements CronJob
             return;
         }
 
+        // Bounce / auto-reply / delivery-failure messages are never support
+        // requests. Before the blocked-sender check, because a Mailer-Daemon
+        // address varies by host and wouldn't necessarily be on the list —
+        // turning each failed outbound email's bounce into a fresh "open"
+        // ticket is exactly how the admin queue floods. Skipped and marked
+        // seen upstream so the sweep doesn't re-process it.
+        if ($this->isBounceMessage($message)) {
+            return;
+        }
+
         // Blocked senders (bounce loops, spam, wrong-party mail) are skipped
         // entirely — no ticket, no reply — but still marked seen upstream so
         // the same message isn't re-processed on the next sweep.
@@ -100,6 +118,15 @@ final class MailPipingJob implements CronJob
             return;
         }
 
+        // Flood guard: cap the number of open tickets one sender can hold so
+        // a single address (or an automated loop) can't keep opening new
+        // tickets. Replying to an existing tagged ticket is unaffected — only
+        // brand-new ticket creation is gated.
+        $maxOpenPerSender = max(1, (int) $this->settings->get('mail_piping.max_open_per_sender', (string) self::DEFAULT_MAX_OPEN_PER_SENDER));
+        if ($this->tickets->countOpenByEmail($fromEmail) >= $maxOpenPerSender) {
+            return;
+        }
+
         $client = $this->clients->findByEmail($fromEmail);
         $subject = $message['subject'] !== '' ? $message['subject'] : '(no subject)';
 
@@ -111,6 +138,54 @@ final class MailPipingJob implements CronJob
             $fromEmail,
             $message['body']
         );
+    }
+
+    /**
+     * Whether a piped message is an automated delivery-status / bounce /
+     * auto-reply rather than a real support request. Bounces are sent by the
+     * mail server itself (Mailer-Daemon / postmaster) or carry an obvious
+     * delivery-failure subject; auto-replies (out-of-office etc.) likewise
+     * never need a ticket.
+     *
+     * @param array{uid: int, from: string, to: string, subject: string, body: string} $message
+     */
+    private function isBounceMessage(array $message): bool
+    {
+        $from = strtolower($this->extractEmail($message['from']));
+        $local = $from;
+        $at = strpos($local, '@');
+        if ($at !== false) {
+            $local = substr($local, 0, $at);
+        }
+        $local = trim($local);
+
+        if (in_array($local, [
+            'mailer-daemon', 'postmaster', 'root', 'noreply', 'no-reply',
+            'do-not-reply', 'donotreply', 'auto-reply', 'autoreply', 'mdaemon',
+        ], true)) {
+            return true;
+        }
+
+        $subject = strtolower(trim((string) $message['subject']));
+        foreach ([
+            'mail delivery failed',
+            'delivery status notification (failure)',
+            'undelivered mail returned to sender',
+            'delivery has failed',
+            'message delivery failure',
+            'returned mail:',
+            'returned to sender',
+            'failure notice',
+            'auto reply:',
+            'autoreply:',
+            'out of office',
+        ] as $marker) {
+            if (str_contains($subject, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @return array<string, mixed>|null */

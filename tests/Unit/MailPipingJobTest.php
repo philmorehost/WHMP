@@ -198,4 +198,89 @@ final class MailPipingJobTest extends DatabaseTestCase
         $this->assertCount(1, $this->replies->forTicket($ticketId, includePrivate: false));
         $this->assertSame([14], $mailbox->markedSeen);
     }
+
+    public function test_bounce_message_not_preblocked_still_does_not_create_a_ticket(): void
+    {
+        // The exact case seen in production: a Mailer-Daemon delivery-failure
+        // that was NOT on the blocklist used to become a brand-new open ticket
+        // on every sweep. It must be skipped even without a blocklist entry.
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 20, 'from' => 'Mailer-Daemon@whiterider.pmhserver.name.ng', 'to' => 'support@example.test', 'subject' => 'Mail delivery failed: returning message to sender', 'body' => 'The recipient address is invalid.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $this->assertSame([], $this->tickets->all());
+        $this->assertSame([20], $mailbox->markedSeen);
+    }
+
+    public function test_delivery_failure_subject_from_any_sender_is_skipped(): void
+    {
+        // Bounce detection keys off the subject too, not just the local part —
+        // some hosts send delivery-status notices from generic addresses.
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 21, 'from' => 'root@host.example.test', 'to' => 'support@example.test', 'subject' => 'Delivery Status Notification (Failure)', 'body' => 'Undeliverable.'],
+            ['uid' => 22, 'from' => 'jane@example.com', 'to' => 'support@example.test', 'subject' => 'Help with my invoice', 'body' => 'Real request.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $tickets = $this->tickets->all();
+        $this->assertCount(1, $tickets);
+        $this->assertSame('jane@example.com', $tickets[0]['email']);
+        $this->assertSame([21, 22], $mailbox->markedSeen);
+    }
+
+    public function test_sender_over_open_ticket_cap_does_not_open_a_new_ticket(): void
+    {
+        $this->settings->set('mail_piping.max_open_per_sender', '3');
+
+        for ($i = 1; $i <= 3; $i++) {
+            $this->ticketService->open(null, 'flood@example.com', $this->departmentId, "Ticket {$i}", 'Flood', "Message {$i}.");
+        }
+
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 30, 'from' => 'flood@example.com', 'to' => 'support@example.test', 'subject' => 'Fourth ticket', 'body' => 'Another one.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $this->assertCount(3, $this->tickets->all());
+        $this->assertSame([30], $mailbox->markedSeen);
+    }
+
+    public function test_sender_at_cap_but_replying_to_an_existing_ticket_still_appends(): void
+    {
+        // The per-sender cap only gates NEW ticket creation — a reply to an
+        // existing tagged ticket is always allowed.
+        $this->settings->set('mail_piping.max_open_per_sender', '1');
+
+        $ticketId = $this->ticketService->open(null, 'jane@example.com', $this->departmentId, 'Original', 'Jane', 'First.');
+
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 31, 'from' => 'jane@example.com', 'to' => 'support@example.test', 'subject' => "Re: Original [Ticket #{$ticketId}]", 'body' => 'Following up.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $this->assertCount(1, $this->tickets->all());
+        $this->assertCount(2, $this->replies->forTicket($ticketId, includePrivate: false));
+        $this->assertSame([31], $mailbox->markedSeen);
+    }
+
+    public function test_sender_below_open_ticket_cap_still_opens_a_ticket(): void
+    {
+        $this->settings->set('mail_piping.max_open_per_sender', '5');
+
+        $this->ticketService->open(null, 'jane@example.com', $this->departmentId, 'Existing', 'Jane', 'First.');
+
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 32, 'from' => 'jane@example.com', 'to' => 'support@example.test', 'subject' => 'New subject', 'body' => 'A new request.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $this->assertCount(2, $this->tickets->all());
+        $this->assertSame([32], $mailbox->markedSeen);
+    }
 }
