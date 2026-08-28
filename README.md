@@ -33,7 +33,11 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 ## Background jobs
 
 - `php bin/cron.php` — the single system cron entry point. Point one real OS cron job at this, e.g. `* * * * * php /path/to/bin/cron.php >> storage/cron.log 2>&1`. It runs every registered job (recurring billing, dunning, domain renewal/sync, ticket escalation/auto-close, mail piping, daily backup, renewal reminders, system integrity check) — each on its own `frequencyMinutes()` schedule, skipped if not yet due.
-- `php bin/queue-worker.php` — processes the async queue (email sending, etc.) when `QUEUE_DRIVER=redis`. Not needed when running on the `sync` fallback (jobs run inline).
+- `php bin/queue-worker.php` — processes the async queue when `QUEUE_DRIVER=redis`. **Run one supervised process per queue you use** (a worker polls a single queue):
+  - `php bin/queue-worker.php default` — drains the order-acceptance queue (`AcceptOrderJob`). **This is what registers domains at the registrar and provisions services when an admin accepts an order.** If it isn't running, accepted orders sit in Redis and domains never reach the registrar.
+  - `php bin/queue-worker.php email` — sends outbound email.
+  
+  Not needed when running on the `sync` fallback (jobs run inline). If you rely on the cron instead of a worker, set `QUEUE_CRON_DRAIN=1` in `.env` to drain up to 25 `default`-queue jobs per cron tick — do **not** enable it when a dedicated worker is also running (a job could be processed twice).
 
 ## Environment variables (`.env`)
 
@@ -44,6 +48,7 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 | `DB_*` | MariaDB/MySQL connection. |
 | `REDIS_*` | Optional — sessions/queue/cache silently fall back to file/sync/in-memory if Redis is unreachable or `ext-redis` isn't loaded. |
 | `SESSION_DRIVER`, `QUEUE_DRIVER`, `CACHE_DRIVER` | `redis` or anything else (falls back). |
+| `QUEUE_CRON_DRAIN` | `1` = cron also drains the `default` (order-acceptance) queue as a fallback when no dedicated worker runs. Keep unset/`0` if a `queue-worker.php` process is running. |
 | `DEEPSEEK_API_KEY` | Powers the AI features (ticket reply suggestions, fraud triage, Ask AI, AI-assisted KB search). All of them fail open — a missing key or API error never blocks the underlying flow, it just skips the AI step. |
 
 ## Directory map

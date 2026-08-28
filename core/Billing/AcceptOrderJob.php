@@ -7,6 +7,7 @@ namespace CodeVault\Billing;
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AdminRepository;
 use CodeVault\Catalog\ProductRepository;
+use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Domains\DomainPricingRepository;
 use CodeVault\Domains\DomainRepository;
@@ -74,9 +75,13 @@ final class AcceptOrderJob implements Job
         $domainService = $c->make(DomainService::class);
         /** @var DomainPricingRepository $domainPricing */
         $domainPricing = $c->make(DomainPricingRepository::class);
+        /** @var ClientRepository $clients */
+        $clients = $c->make(ClientRepository::class);
 
         /** @var array<int, string> $failures */
         $failures = [];
+        /** @var array<int, string> $successes */
+        $successes = [];
 
         try {
             foreach ($services->forOrder($this->orderId) as $service) {
@@ -165,13 +170,38 @@ final class AcceptOrderJob implements Job
                     if (!$result['success']) {
                         $failures[] = "Domain {$domain['domain_name']}: {$result['message']}";
                         $activity->log('admin', $this->adminId, 'domain.registration_failed', 'domain', (int) $domain['id'], "Domain registration failed: {$result['message']}", $this->adminIp);
+                        // Every admin is told the EXACT registrar/API reason so
+                        // they can diagnose without opening the domain page.
+                        $this->notifyDomainRegistrationFailed($domain, (string) $result['message'], $this->orderId);
+
+                        continue;
                     }
+
+                    // Success: tell the client (with their next renewal date)
+                    // and confirm to every admin. Re-read the domain because
+                    // register() just stamped registration_date/expiry_date
+                    // (= next renewal date) onto it.
+                    $fresh = $domainRepo->find((int) $domain['id']) ?? $domain;
+                    $renewalDate = (string) ($fresh['expiry_date'] ?? '');
+                    $successes[] = "Domain {$fresh['domain_name']}: registered" . ($renewalDate !== '' ? ", renews on {$renewalDate}" : '');
+                    $activity->log('admin', $this->adminId, 'domain.registered', 'domain', (int) $domain['id'], "Registered domain \"{$fresh['domain_name']}\"", $this->adminIp);
+                    $this->notifyClientDomainRegistered($fresh, $clients, $this->orderId);
+                    $this->notifyAdmins('admin_domain_registered', [
+                        'domain_name' => (string) $fresh['domain_name'],
+                        'registrar' => (string) ($fresh['registrar_slug'] ?? ''),
+                        'order_id' => (string) $this->orderId,
+                        'registration_date' => (string) ($fresh['registration_date'] ?? ''),
+                        'renewal_date' => $renewalDate,
+                        'domain_url' => rtrim((string) $c->make(Config::class)->env('APP_URL', 'http://localhost'), '/') . '/admin/domains/' . (int) $fresh['id'],
+                        'company_name' => brand_name(),
+                    ]);
                 } catch (Throwable $e) {
                     // Same hardening as the service loop: a registrar module
                     // throwing must not stop the remaining domains (or leave
                     // the rest of the order's items unprovisioned).
                     $failures[] = "Domain {$domain['domain_name']}: {$e->getMessage()}";
                     $activity->log('admin', $this->adminId, 'domain.registration_failed', 'domain', (int) $domain['id'], "Domain registration threw an exception: {$e->getMessage()}", $this->adminIp);
+                    $this->notifyDomainRegistrationFailed($domain, $e->getMessage(), $this->orderId);
                 }
             }
 
@@ -180,7 +210,7 @@ final class AcceptOrderJob implements Job
 
             $this->notifyAdmins('order_acceptance_completed', [
                 'order_id' => (string) $this->orderId,
-                'summary' => $this->summaryHtml($failures),
+                'summary' => $this->summaryHtml($failures, $successes),
                 'order_url' => rtrim((string) $c->make(Config::class)->env('APP_URL', 'http://localhost'), '/') . "/admin/orders/{$this->orderId}",
                 'company_name' => brand_name(),
             ]);
@@ -212,11 +242,26 @@ final class AcceptOrderJob implements Job
         return ($product['autosetup'] ?? 'payment') === 'off';
     }
 
-    /** @param array<int, string> $failures */
-    private function summaryHtml(array $failures): string
+    /**
+     * @param array<int, string> $failures
+     * @param array<int, string> $successes
+     */
+    private function summaryHtml(array $failures, array $successes = []): string
     {
+        $html = '';
+
+        // Successful domain registrations are listed so the admin sees each
+        // domain's status (with its renewal date) in the same email.
+        if ($successes !== []) {
+            $html .= '<p><strong>Successfully registered:</strong></p><ul>';
+            foreach ($successes as $success) {
+                $html .= '<li>' . htmlspecialchars($success, ENT_QUOTES, 'UTF-8') . '</li>';
+            }
+            $html .= '</ul>';
+        }
+
         if ($failures === []) {
-            return '<p>All services and domains were provisioned successfully.</p>';
+            return $html . '<p>All services and domains were provisioned successfully.</p>';
         }
 
         $lines = '';
@@ -224,7 +269,67 @@ final class AcceptOrderJob implements Job
             $lines .= '<li>' . htmlspecialchars($failure, ENT_QUOTES, 'UTF-8') . '</li>';
         }
 
-        return '<p>Some items could not be provisioned — the exact reasons are below. Retry them from the relevant service/domain pages:</p><ul>' . $lines . '</ul>';
+        return $html . '<p>Some items could not be provisioned — the exact reasons are below. Retry them from the relevant service/domain pages:</p><ul>' . $lines . '</ul>';
+    }
+
+    /**
+     * Tell the client their domain is live and when it renews. Best-effort:
+     * a mail failure must never fail the job that just registered the domain.
+     *
+     * @param array<string, mixed> $domain
+     */
+    private function notifyClientDomainRegistered(array $domain, ClientRepository $clients, int $orderId): void
+    {
+        try {
+            $c = App::container();
+            /** @var EmailDispatcher $mail */
+            $mail = $c->make(EmailDispatcher::class);
+            /** @var Config $config */
+            $config = $c->make(Config::class);
+
+            $client = $clients->find((int) $domain['client_id']);
+            $clientEmail = (string) ($client['email'] ?? '');
+
+            if ($clientEmail === '') {
+                return;
+            }
+
+            $appUrl = rtrim((string) $config->env('APP_URL', 'http://localhost'), '/');
+
+            $mail->sendTemplate('domain_registered', $clientEmail, [
+                'first_name' => (string) ($client['first_name'] ?? ''),
+                'domain_name' => (string) $domain['domain_name'],
+                'registrar' => (string) ($domain['registrar_slug'] ?? ''),
+                'registration_date' => (string) ($domain['registration_date'] ?? ''),
+                'renewal_date' => (string) ($domain['expiry_date'] ?? ''),
+                'client_domains_url' => $appUrl . '/client/domains',
+                'company_name' => brand_name(),
+            ], (int) ($client['id'] ?? $domain['client_id']));
+        } catch (Throwable) {
+            // Never let a notification failure undo the registration.
+        }
+    }
+
+    /**
+     * Tell every admin a domain registration failed, with the EXACT
+     * registrar/API reason and a link to retry. Best-effort.
+     *
+     * @param array<string, mixed> $domain
+     */
+    private function notifyDomainRegistrationFailed(array $domain, string $error, int $orderId): void
+    {
+        $c = App::container();
+        /** @var Config $config */
+        $config = $c->make(Config::class);
+
+        $this->notifyAdmins('admin_domain_registration_failed', [
+            'domain_name' => (string) $domain['domain_name'],
+            'registrar' => (string) ($domain['registrar_slug'] ?? ''),
+            'order_id' => (string) $orderId,
+            'error' => $error,
+            'domain_url' => rtrim((string) $config->env('APP_URL', 'http://localhost'), '/') . '/admin/domains/' . (int) $domain['id'],
+            'company_name' => brand_name(),
+        ]);
     }
 
     /** @param array<string, string> $variables */

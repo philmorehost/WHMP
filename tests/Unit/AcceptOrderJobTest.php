@@ -362,4 +362,101 @@ final class AcceptOrderJobTest extends DatabaseTestCase
         $this->assertStringContainsString('could not be provisioned', $summaryMail[0]['html']);
         $this->assertStringContainsString('WHM API call exploded', $summaryMail[0]['html']);
     }
+
+    public function test_client_receives_domain_registered_email_with_renewal_date_on_success(): void
+    {
+        $container = \CodeVault\Support\App::container();
+        $modules = $container->make(ModuleManager::class);
+        $fakeRegistrar = new FakeRegistrarModule();
+        // Fixed expiry so the renewal date in the email is deterministic.
+        $fakeRegistrar->respond('register', ['success' => true, 'message' => 'OK', 'expiryDate' => '2030-01-15']);
+        $modules->register(RegistrarModule::class, 'fake', $fakeRegistrar);
+
+        (new DomainPricingRepository($this->db))->save([
+            'tld' => '.test',
+            'registrar_slug' => 'fake',
+            'register_price' => 10.0,
+            'transfer_price' => 10.0,
+            'renew_price' => 10.0,
+            'autosetup_registration' => 'payment',
+        ]);
+
+        $orderId = $this->insertOrder();
+        (new DomainRepository($this->db))->create([
+            'client_id' => $this->clientId,
+            'order_id' => $orderId,
+            'domain_name' => 'clientmail.test',
+            'tld' => 'test',
+            'registrar_slug' => 'fake',
+            'status' => 'pending',
+            'next_due_date' => (new DateTimeImmutable('+1 year'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 10.0,
+        ]);
+
+        (new AcceptOrderJob($orderId, $this->adminId, '203.0.113.10'))->handle();
+
+        // The domain row was activated with the registrar's expiry.
+        $domain = $this->db->selectOne("SELECT * FROM domains WHERE domain_name = 'clientmail.test'");
+        $this->assertSame('active', $domain['status']);
+        $this->assertSame('2030-01-15', $domain['expiry_date']);
+
+        // The client is emailed with the next renewal date.
+        $clientMails = array_values(array_filter($this->sentMails, static fn (array $m) => $m['to'] === 'acceptee@example.test'));
+        $this->assertNotEmpty($clientMails, 'the client must be emailed about their registered domain');
+        $this->assertStringContainsString('Has Been Registered', $clientMails[0]['subject']);
+        $this->assertStringContainsString('clientmail.test', $clientMails[0]['html']);
+        $this->assertStringContainsString('2030-01-15', $clientMails[0]['html'], 'the email must carry the next renewal date');
+
+        // The admin is told the registration succeeded, with the renewal date.
+        $adminMails = array_values(array_filter($this->sentMails, static fn (array $m) => str_contains($m['subject'], 'Domain Registered:')));
+        $this->assertCount(1, $adminMails);
+        $this->assertStringContainsString('clientmail.test', $adminMails[0]['html']);
+        $this->assertStringContainsString('2030-01-15', $adminMails[0]['html']);
+    }
+
+    public function test_admin_receives_exact_registrar_error_email_when_domain_registration_fails(): void
+    {
+        $container = \CodeVault\Support\App::container();
+        $modules = $container->make(ModuleManager::class);
+        $fakeRegistrar = new FakeRegistrarModule();
+        $fakeRegistrar->respond('register', ['success' => false, 'message' => 'Payment failed: insufficient balance at registrar']);
+        $modules->register(RegistrarModule::class, 'fake', $fakeRegistrar);
+
+        (new DomainPricingRepository($this->db))->save([
+            'tld' => '.test',
+            'registrar_slug' => 'fake',
+            'register_price' => 10.0,
+            'transfer_price' => 10.0,
+            'renew_price' => 10.0,
+            'autosetup_registration' => 'payment',
+        ]);
+
+        $orderId = $this->insertOrder();
+        (new DomainRepository($this->db))->create([
+            'client_id' => $this->clientId,
+            'order_id' => $orderId,
+            'domain_name' => 'failme.test',
+            'tld' => 'test',
+            'registrar_slug' => 'fake',
+            'status' => 'pending',
+            'next_due_date' => (new DateTimeImmutable('+1 year'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 10.0,
+        ]);
+
+        (new AcceptOrderJob($orderId, $this->adminId, '203.0.113.10'))->handle();
+
+        // The domain stays pending — not activated, not emailed to the client.
+        $domain = $this->db->selectOne("SELECT * FROM domains WHERE domain_name = 'failme.test'");
+        $this->assertSame('pending', $domain['status']);
+        $clientMails = array_values(array_filter($this->sentMails, static fn (array $m) => $m['to'] === 'acceptee@example.test'));
+        $this->assertSame([], $clientMails, 'a failed registration must not email the client');
+
+        // Every admin gets the exact registrar/API error.
+        $adminMails = array_values(array_filter($this->sentMails, static fn (array $m) => str_contains($m['subject'], 'Domain Registration Failed')));
+        $this->assertCount(1, $adminMails);
+        $this->assertStringContainsString('failme.test', $adminMails[0]['html']);
+        $this->assertStringContainsString('Payment failed: insufficient balance at registrar', $adminMails[0]['html']);
+    }
 }

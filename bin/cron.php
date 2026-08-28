@@ -12,6 +12,10 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use CodeVault\Backup\BackupCronJob;
 use CodeVault\Cart\AbandonedCartJob;
+use CodeVault\Config;
+use CodeVault\Queue\QueueInterface;
+use CodeVault\Queue\RedisQueue;
+use CodeVault\Queue\Worker;
 use CodeVault\Billing\AutoChargeJob;
 use CodeVault\Billing\BillableItemInvoicingJob;
 use CodeVault\Billing\DunningJob;
@@ -125,4 +129,20 @@ foreach ($results as $job => $result) {
 
 if ($results === []) {
     fwrite($out, sprintf("[%s] no jobs registered\n", date('Y-m-d H:i:s')));
+}
+
+// Opt-in safety net for order acceptance: AcceptOrderJob lives on the
+// 'default' queue, which normally needs a dedicated worker process
+// (php bin/queue-worker.php). If no worker is running, accepted orders sit
+// in Redis and their domains are never registered. Set QUEUE_CRON_DRAIN=1
+// in .env ONLY when you rely on the cron instead of the worker — running
+// BOTH would let the same job be processed twice. Defaults to off.
+if ($kernel->container->make(Config::class)->env('QUEUE_CRON_DRAIN', '0') === '1') {
+    /** @var QueueInterface $queue */
+    $queue = $kernel->container->make(QueueInterface::class);
+
+    if ($queue instanceof RedisQueue) {
+        $drained = (new Worker($queue, 'default'))->run(25);
+        fwrite($out, sprintf("[%s] default queue drained %d job(s)\n", date('Y-m-d H:i:s'), $drained));
+    }
 }
