@@ -32,6 +32,26 @@ try {
         $unreadNotifications = $container->make(\CodeVault\Notifications\ClientNotificationRepository::class)->unreadCount((int) $notificationsClient['id']);
     }
 } catch (\Throwable $e) {}
+
+// Currency switcher — resolved here rather than threaded through every
+// controller that renders this layout, same reasoning as $categories
+// above. Store/cart pages still pass their own $currencies /
+// $selectedCurrency (that wins); everywhere else the effective display
+// currency (session choice > client preference > default) is resolved so
+// the switcher is consistent across every client page — including the
+// client dashboard, which previously rendered without one.
+if ($currencies === null || $selectedCurrency === null) {
+    try {
+        $currencyRepo = $container->make(\CodeVault\Billing\CurrencyRepository::class);
+        $currencyService = $container->make(\CodeVault\Billing\CurrencyService::class);
+        $currencySelection = $container->make(\CodeVault\Billing\CurrencySelection::class);
+        $currencies = $currencyRepo->all();
+        $selectedCurrency = $currencyService->resolveEffective($notificationsClient, $currencySelection->get());
+    } catch (\Throwable) {
+        $currencies = [];
+        $selectedCurrency = null;
+    }
+}
 ?>
 <header class="cv-topbar" style="position:relative;display:flex;align-items:center;justify-content:space-between;padding:var(--cv-space-4) var(--cv-space-6);border-bottom:1px solid var(--cv-border-default);">
     <a href="/client/dashboard" style="text-decoration:none; color:inherit; display:flex;align-items:center;gap:var(--cv-space-2);flex-shrink:0;font-weight:bold;">

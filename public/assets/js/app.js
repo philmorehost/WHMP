@@ -1665,6 +1665,122 @@
         }
     });
 
+    // Client dashboard domain register/transfer widget (#dbd-domain-widget).
+    // Register mode is "name + TLD dropdown"; transfer mode is a full domain
+    // (no TLD select). Both get a debounced live availability/price check
+    // against the same registrar-backed endpoint the standalone register page
+    // uses (/domains/availability), and submit navigates to the full
+    // register or transfer page with the domain prefilled.
+    (function () {
+        var widget = document.getElementById('dbd-domain-widget');
+        if (!widget) { return; }
+
+        var modeEls = widget.querySelectorAll('[data-dbd-domain-mode]');
+        var form = widget.querySelector('[data-dbd-domain-form]');
+        var nameInput = widget.querySelector('[data-dbd-domain-name]');
+        var tldSelect = widget.querySelector('[data-dbd-domain-tld]');
+        var tldDivider = widget.querySelector('[data-dbd-tld-divider]');
+        var submitBtn = widget.querySelector('[data-dbd-domain-submit]');
+        var resultEl = widget.querySelector('[data-dbd-domain-result]');
+        if (!form || !nameInput || !tldSelect || !submitBtn || !resultEl) { return; }
+
+        var currentMode = 'register';
+        var timer = null;
+
+        function domainFromInput() {
+            var raw = nameInput.value.trim().toLowerCase();
+            if (raw === '') { return ''; }
+            if (currentMode === 'transfer') { return raw; }
+            // Register: strip anything from the first dot (so typing the full
+            // domain doesn't append the TLD twice), then add the TLD.
+            var dot = raw.indexOf('.');
+            var nameOnly = dot !== -1 ? raw.substring(0, dot) : raw;
+            return nameOnly + tldSelect.value;
+        }
+
+        function renderMode(mode) {
+            currentMode = mode;
+            modeEls.forEach(function (el) {
+                var active = el.getAttribute('data-dbd-domain-mode') === mode;
+                el.classList.toggle('is-active', active);
+                el.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            var isRegister = mode === 'register';
+            tldSelect.style.display = isRegister ? '' : 'none';
+            if (tldDivider) { tldDivider.style.display = isRegister ? '' : 'none'; }
+            nameInput.placeholder = isRegister ? 'yourbusiness' : 'yourbusiness.com';
+            submitBtn.textContent = isRegister ? 'Search' : 'Transfer';
+            check();
+        }
+
+        function check() {
+            var domain = domainFromInput();
+            if (domain === '' || domain.indexOf('.') === -1) {
+                resultEl.textContent = '';
+                resultEl.className = 'dbd-domain__result';
+                return;
+            }
+            resultEl.textContent = 'Checking availability…';
+            resultEl.className = 'dbd-domain__result is-checking';
+            fetch('/domains/availability?domain=' + encodeURIComponent(domain), {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.checked) {
+                    resultEl.textContent = data.message || 'Could not check availability.';
+                    resultEl.className = 'dbd-domain__result is-error';
+                } else if (data.available) {
+                    var price = currentMode === 'transfer' ? data.formatted_transfer_price : data.formatted_price;
+                    resultEl.textContent = domain + ' is available · ' + price + '/yr';
+                    resultEl.className = 'dbd-domain__result is-ok';
+                } else {
+                    resultEl.textContent = domain + ' is already taken';
+                    resultEl.className = 'dbd-domain__result is-error';
+                }
+            })
+            .catch(function () {
+                resultEl.textContent = 'Could not check availability.';
+                resultEl.className = 'dbd-domain__result is-error';
+            });
+        }
+
+        modeEls.forEach(function (el) {
+            el.addEventListener('click', function () {
+                renderMode(el.getAttribute('data-dbd-domain-mode'));
+            });
+        });
+
+        nameInput.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(check, 450);
+        });
+
+        tldSelect.addEventListener('change', check);
+
+        // Featured-TLD chips: jump to register mode and pre-select the TLD.
+        widget.querySelectorAll('[data-dbd-featured-tld]').forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                renderMode('register');
+                tldSelect.value = chip.getAttribute('data-dbd-featured-tld');
+                nameInput.focus();
+                check();
+            });
+        });
+
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            var domain = domainFromInput();
+            if (domain === '' || domain.indexOf('.') === -1) {
+                resultEl.textContent = 'Enter a valid domain name.';
+                resultEl.className = 'dbd-domain__result is-error';
+                return;
+            }
+            var base = currentMode === 'transfer' ? '/domains/transfer' : '/domains/register';
+            window.location.href = base + '?domain=' + encodeURIComponent(domain);
+        });
+    })();
+
     // Product group delete flow (catalog/group-migrate-delete.php) — the
     // migrate/delete_all radios show/hide the target-group select and
     // toggle whether it's required.

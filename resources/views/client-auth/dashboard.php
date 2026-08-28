@@ -425,14 +425,8 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
     </a>
 </div>
 
-<!-- DOMAIN SEARCH -->
-<div class="dbd-domain">
-    <h2>Find Your New Domain Name</h2>
-    <form method="get" action="/domains/register">
-        <input type="text" name="domain" placeholder="Enter the domain you want to register (e.g. mywebsite.com)">
-        <button type="submit">Search</button>
-    </form>
-</div>
+<!-- DOMAIN REGISTER / TRANSFER (shared widget — also on the pre-login page) -->
+<?= $view->partial('partials.domain-lookup') ?>
 
 <!-- MAIN 2-COL GRID -->
 <div class="dbd-grid">
