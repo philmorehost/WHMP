@@ -20,6 +20,7 @@ use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
 use CodeVault\Billing\CurrencyService;
+use CodeVault\Billing\RecurringInvoiceRepository;
 use CodeVault\Domains\DomainRepository;
 use Throwable;
 
@@ -46,7 +47,8 @@ final class ClientController
         private readonly \CodeVault\Support\DepartmentRepository $departments,
         private readonly \CodeVault\Support\TicketRepository $tickets,
         private readonly \CodeVault\Support\TicketReplyRepository $ticketReplies,
-        private readonly DomainRepository $domains
+        private readonly DomainRepository $domains,
+        private readonly RecurringInvoiceRepository $recurringInvoices
     ) {
     }
 
@@ -260,6 +262,7 @@ final class ClientController
             'activity' => $this->activity->forSubject('client', (int) $client['id']),
             'services' => $this->services->forClient((int) $client['id']),
             'domains' => $this->domains->forClient((int) $client['id']),
+            'recurringInvoices' => $this->recurringInvoices->forClient((int) $client['id']),
             'invoices' => $billingPagination['data'],
             'billingPagination' => $billingPagination,
             'creditBalance' => $this->credit->balance((int) $client['id']),

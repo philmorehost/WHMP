@@ -5,6 +5,7 @@
 /** @var array<int, array<string, mixed>> $activity */
 /** @var array<int, array<string, mixed>> $services */
 /** @var array<int, array<string, mixed>> $domains */
+/** @var array<int, array<string, mixed>> $recurringInvoices */
 /** @var array<int, array<string, mixed>> $invoices */
 /** @var float $creditBalance */
 /** @var array<int, array<string, mixed>> $creditLedger */
@@ -513,6 +514,116 @@ $id = (int) $client['id'];
         </div>
     </div>
 <?php elseif ($tab === 'billing'): ?>
+    <?php
+    // Build the "expiring / due soon" list for the warning banner (7-day window,
+    // including already-overdue items). Covers hosting services, domains, and
+    // recurring custom invoices.
+    $expiringSoon = [];
+    $nowTs = time();
+    $WARN_WINDOW_DAYS = 7;
+    foreach (($domains ?? []) as $domain) {
+        $expiry = (string) ($domain['expiry_date'] ?? '');
+        if ($expiry === '') {
+            continue;
+        }
+        $d = (int) ((strtotime($expiry) - $nowTs) / 86400);
+        if ($d <= $WARN_WINDOW_DAYS) {
+            $expiringSoon[] = [
+                'type' => 'Domain',
+                'label' => (string) ($domain['domain_name'] ?? ''),
+                'date' => $expiry,
+                'days' => $d,
+                'amount' => (float) ($domain['amount'] ?? 0),
+                'url' => '/admin/domains/' . (int) $domain['id'],
+            ];
+        }
+    }
+    foreach ($services as $service) {
+        $due = (string) ($service['next_due_date'] ?? '');
+        if ($due === '') {
+            continue;
+        }
+        $d = (int) ((strtotime($due) - $nowTs) / 86400);
+        if ($d <= $WARN_WINDOW_DAYS) {
+            $isHostnameService = in_array((string) ($service['product_type'] ?? ''), ['vps', 'dedicated'], true);
+            $label = trim((string) ($isHostnameService ? ($service['hostname'] ?? '') : ($service['domain'] ?? '')));
+            if ($label === '') {
+                $label = trim((string) ($isHostnameService ? ($service['domain'] ?? '') : ($service['hostname'] ?? '')));
+            }
+            $serviceName = (string) ($service['product_name'] ?? '');
+            if ($serviceName === '') {
+                $serviceName = 'Service';
+            }
+            $expiringSoon[] = [
+                'type' => 'Service',
+                'label' => $serviceName . ($label !== '' ? ' — ' . $label : ''),
+                'date' => $due,
+                'days' => $d,
+                'amount' => (float) ($service['amount'] ?? 0),
+                'url' => '/admin/services/' . (int) $service['id'],
+            ];
+        }
+    }
+    foreach (($recurringInvoices ?? []) as $ri) {
+        if (($ri['status'] ?? '') !== 'active') {
+            continue;
+        }
+        $due = (string) ($ri['next_due_date'] ?? '');
+        if ($due === '') {
+            continue;
+        }
+        $d = (int) ((strtotime($due) - $nowTs) / 86400);
+        if ($d <= $WARN_WINDOW_DAYS) {
+            $riItems = is_array($ri['items'] ?? null) ? $ri['items'] : [];
+            $riLabel = count($riItems) === 1
+                ? (string) ($riItems[0]['description'] ?? 'Line item')
+                : 'Recurring invoice (' . count($riItems) . ' line items)';
+            $expiringSoon[] = [
+                'type' => 'Recurring Invoice',
+                'label' => '#' . (int) $ri['id'] . ' — ' . $riLabel,
+                'date' => $due,
+                'days' => $d,
+                'amount' => (float) ($ri['amount'] ?? 0),
+                'url' => '/admin/recurring-invoices',
+            ];
+        }
+    }
+    usort($expiringSoon, fn ($a, $b) => $a['days'] <=> $b['days']);
+    $hasOverdue = false;
+    foreach ($expiringSoon as $item) {
+        if ($item['days'] < 0) {
+            $hasOverdue = true;
+            break;
+        }
+    }
+    ?>
+    <?php if ($expiringSoon !== []): ?>
+    <div class="admin-detail-card" style="margin-bottom:24px; border:1px solid <?= $hasOverdue ? 'rgba(220,38,38,.45)' : 'rgba(217,119,6,.4)' ?>; background:<?= $hasOverdue ? 'rgba(220,38,38,.06)' : 'rgba(217,119,6,.07)' ?>;">
+        <h2 class="admin-detail-card__title" style="color:<?= $hasOverdue ? '#dc2626' : '#d97706' ?>;">⚠️ Expiring / Due Soon (next 7 days)</h2>
+        <div class="admin-detail-card__body" style="padding:0;">
+            <div style="overflow-x:auto;">
+                <table class="admin-detail-table">
+                    <thead><tr><th>Type</th><th>Item</th><th>Date</th><th>Time Left</th><th>Amount</th><th style="width:110px;">Action</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($expiringSoon as $item): ?>
+                        <tr>
+                            <td><span class="admin-detail-badge"><?= e($item['type']) ?></span></td>
+                            <td><strong><?= e($item['label']) ?></strong></td>
+                            <td><?= e($item['date']) ?></td>
+                            <td style="color:<?= $item['days'] < 0 ? '#dc2626' : ($item['days'] <= 3 ? '#d97706' : 'var(--cv-text-primary)') ?>; font-weight:700;">
+                                <?= $item['days'] < 0 ? 'Overdue by ' . abs($item['days']) . 'd' : ($item['days'] === 0 ? 'Due today' : 'In ' . $item['days'] . 'd') ?>
+                            </td>
+                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($serviceMoney($item['amount'])) ?></td>
+                            <td><a class="admin-detail-btn admin-detail-btn--secondary" href="<?= e($item['url']) ?>" style="padding:6px 12px; font-size:.75rem;">Manage</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="admin-detail-card" style="margin-bottom:24px;">
         <h2 class="admin-detail-card__title">🖥️ Services</h2>
         <div class="admin-detail-card__body" style="padding:0;">
