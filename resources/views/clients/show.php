@@ -4,6 +4,7 @@
 /** @var array<int, array<string, mixed>> $contacts */
 /** @var array<int, array<string, mixed>> $activity */
 /** @var array<int, array<string, mixed>> $services */
+/** @var array<int, array<string, mixed>> $domains */
 /** @var array<int, array<string, mixed>> $invoices */
 /** @var float $creditBalance */
 /** @var array<int, array<string, mixed>> $creditLedger */
@@ -445,6 +446,10 @@ $id = (int) $client['id'];
                     <span style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Active Services</span>
                     <span style="font-size:1.25rem; font-weight:800; color:var(--cv-color-brand-500);"><?= count(array_filter($services, fn ($s) => $s['status'] === 'active')) ?></span>
                 </div>
+                <div>
+                    <span style="display:block; font-size:.8rem; font-weight:700; color:var(--cv-text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Active Domains</span>
+                    <span style="font-size:1.25rem; font-weight:800; color:var(--cv-color-brand-500);"><?= count(array_filter($domains ?? [], fn ($d) => $d['status'] === 'active')) ?></span>
+                </div>
             </div>
         </div>
     </div>
@@ -538,6 +543,56 @@ $id = (int) $client['id'];
                     <?php endforeach; ?>
                     <?php if ($services === []): ?>
                         <tr><td colspan="7" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No services yet.</td></tr>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-detail-card" style="margin-bottom:24px;">
+        <h2 class="admin-detail-card__title">🌐 Domains</h2>
+        <div class="admin-detail-card__body" style="padding:0;">
+            <div style="overflow-x:auto;">
+                <table class="admin-detail-table">
+                    <thead><tr><th>Domain</th><th>Registrar</th><th>Registered</th><th>Expiry / Renewal</th><th>Next Due</th><th>Amount</th><th>Auto-Renew</th><th>Status</th><th style="width:100px;">Action</th></tr></thead>
+                    <tbody>
+                    <?php foreach (($domains ?? []) as $domain): ?>
+                        <?php
+                        $expiry = (string) ($domain['expiry_date'] ?? '');
+                        $daysToExpiry = $expiry !== '' ? (int) ((strtotime($expiry) - time()) / 86400) : null;
+                        // Highlight an at-risk domain: expired, or expiring soon.
+                        $expiryAtRisk = $daysToExpiry !== null && $daysToExpiry <= 30;
+                        $expiryColor = $daysToExpiry !== null && $daysToExpiry < 0
+                            ? '#dc2626'
+                            : ($expiryAtRisk ? '#d97706' : 'var(--cv-text-primary)');
+                        $statusClass = match ($domain['status'] ?? '') {
+                            'active' => 'admin-detail-badge--active',
+                            'expired' => 'admin-detail-badge--unpaid',
+                            default => '',
+                        };
+                        ?>
+                        <tr>
+                            <td><strong><?= e((string) ($domain['domain_name'] ?? '')) ?></strong></td>
+                            <td><?= e((string) ($domain['registrar_slug'] ?? '—')) ?></td>
+                            <td><?= e((string) ($domain['registration_date'] ?? '—')) ?></td>
+                            <td style="color:<?= $expiryColor ?>; font-weight:<?= $expiryAtRisk ? '700' : '400' ?>;">
+                                <?= e($expiry !== '' ? $expiry : '—') ?>
+                                <?php if ($expiryAtRisk): ?>
+                                    <span style="display:block; font-size:.72rem; color:<?= $expiryColor ?>;">
+                                        <?= $daysToExpiry < 0 ? 'Expired ' . abs($daysToExpiry) . 'd ago' : 'Expires in ' . $daysToExpiry . 'd' ?>
+                                    </span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= e((string) ($domain['next_due_date'] ?? '—')) ?></td>
+                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($serviceMoney((float) ($domain['amount'] ?? 0))) ?></td>
+                            <td><?= !empty($domain['auto_renew']) ? '✔' : '—' ?></td>
+                            <td><span class="admin-detail-badge <?= $statusClass ?>"><?= e((string) ($domain['status'] ?? '')) ?></span></td>
+                            <td><a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/domains/<?= (int) $domain['id'] ?>" style="padding:6px 12px; font-size:.75rem;">Manage</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (($domains ?? []) === []): ?>
+                        <tr><td colspan="9" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No domains yet.</td></tr>
                     <?php endif; ?>
                     </tbody>
                 </table>
