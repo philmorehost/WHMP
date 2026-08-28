@@ -520,4 +520,20 @@ final class DomainServiceTest extends DatabaseTestCase
         $stored = json_decode((string) $domain['contact_data'], true);
         $this->assertSame('Custom Name', $stored['name'], 'falls back to the passed custom contact');
     }
+
+    public function test_register_passes_the_registrant_contact_to_the_registrar(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('register', ['success' => true, 'message' => 'ok', 'expiryDate' => '2030-01-01']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('contactonreg.test');
+
+        $service->register($domainId, 1);
+
+        $registerParams = $fake->lastCall('register');
+        $contacts = $registerParams['contacts'] ?? [];
+        $this->assertSame('Domain Owner', $contacts['name'], 'falls back to the owning client as the registrant');
+        $this->assertSame('Domain', $contacts['first_name']);
+        $this->assertSame('Owner', $contacts['last_name']);
+        $this->assertSame('domainowner@example.test', $contacts['email']);
+    }
 }

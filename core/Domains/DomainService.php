@@ -167,6 +167,17 @@ final class DomainService
             ? array_values(array_filter($storedNameservers, static fn ($ns) => trim((string) $ns) !== ''))
             : [];
 
+        // Send the registrant/WHOIS contact so the registrar can complete the
+        // registration. Upperlink (and Namecheap) reject an order with a
+        // "Request validation error" when no contact is supplied. Prefer the
+        // per-domain registrant chosen on the contact page (contact_data),
+        // falling back to the owning client's own account details.
+        $contact = $this->decodeContact($domain['contact_data'] ?? null);
+        if ($contact === []) {
+            $contact = $this->contactFromClient($client ?? []);
+        }
+        $contact = $this->expandContactForRegistrar($contact);
+
         $result = $module->register([
             'domain' => $domain['domain_name'],
             'years' => $years,
@@ -175,6 +186,7 @@ final class DomainService
             'client' => $client ?? [],
             'registrarClientId' => $client['registrar_client_id'] ?? null,
             'nameservers' => $nameservers,
+            'contacts' => $contact,
         ]);
 
         if (!$result['success']) {
@@ -661,6 +673,32 @@ final class DomainService
         $decoded = json_decode($raw, true);
 
         return is_array($decoded) ? $this->normalizeContact($decoded) : [];
+    }
+
+    /**
+     * Normalise a registrant contact into the flat field set registrar
+     * register() calls read (Namecheap wants first_name/last_name rather than
+     * one combined name; Upperlink/others accept the flat WHOIS fields) and
+     * guarantee every key exists so the API never sees a missing field.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, string>
+     */
+    private function expandContactForRegistrar(array $contact): array
+    {
+        $fullName = trim((string) ($contact['name'] ?? ''));
+
+        if (empty($contact['first_name'] ?? '') && $fullName !== '') {
+            $parts = preg_split('/\s+/', $fullName, 2) ?: [];
+            $contact['first_name'] = $parts[0] ?? '';
+            $contact['last_name'] = $parts[1] ?? '';
+        }
+
+        foreach (['name', 'first_name', 'last_name', 'email', 'company_name', 'address1', 'city', 'state', 'postcode', 'country', 'phone'] as $key) {
+            $contact[$key] ??= '';
+        }
+
+        return array_map('strval', $contact);
     }
 
     /** Reconciles local status/expiry with the registrar's record of truth. */
