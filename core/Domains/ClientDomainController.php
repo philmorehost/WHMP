@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Domains;
 
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Clients\ClientContactRepository;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\View;
@@ -22,7 +23,8 @@ final class ClientDomainController
         private readonly ClientAuthGuard $guard,
         private readonly View $view,
         private readonly DomainRepository $domains,
-        private readonly DomainService $domainService
+        private readonly DomainService $domainService,
+        private readonly ClientContactRepository $contacts
     ) {
     }
 
@@ -48,14 +50,91 @@ final class ClientDomainController
         }
 
         $id = (int) $domain['id'];
+        $client = $this->guard->currentClient();
+
         return $this->page('domains.client-show', [
             'domain' => $domain,
             'eppCode' => null,
             'childNameservers' => $this->domainService->getChildNameservers($id),
             'dnsRecords' => $this->domainService->getDnsRecords($id),
+            // The registrant contact shown here is the LOCAL copy (no registrar
+            // round-trip on page load); it's pushed to the registrar on save.
+            'clientContacts' => $this->contacts->forClient((int) $client['id']),
+            'registrantContact' => json_decode((string) ($domain['contact_data'] ?? '[]'), true) ?: [],
+            'registrantContactId' => (int) ($domain['contact_id'] ?? 0),
             'msg' => $request->query('msg'),
             'error' => $request->query('error'),
         ]);
+    }
+
+    /**
+     * WHMCS-style per-domain registrant contact: pick a saved client contact
+     * (registered "on behalf of" someone/org) or enter a custom one. The
+     * choice is persisted on the domain and pushed to the registrar when
+     * possible.
+     */
+    public function saveContact(Request $request, array $params): Response
+    {
+        $domain = $this->ownedDomain($params);
+
+        if ($domain === null) {
+            return $this->deniedOrNotFound();
+        }
+
+        $client = $this->guard->currentClient();
+        $id = (int) $domain['id'];
+        $clientId = (int) $client['id'];
+
+        // A single registrant-source select drives this: '' = custom contact
+        // (the fields below), '-1' = the client's own account details, N = one
+        // of the client's saved contacts (registered "on behalf of").
+        $rawContactId = (string) $request->input('contact_id', '');
+        $contactId = null;
+
+        if ($rawContactId === '-1') {
+            // Registrant = the client's own account details.
+            $contact = $this->domainService->contactFromClient($client);
+        } elseif ($rawContactId !== '' && (int) $rawContactId > 0) {
+            // Registrant = one of the client's saved contacts.
+            $contactId = (int) $rawContactId;
+            $saved = $this->contacts->find($contactId);
+            if ($saved === null || (int) $saved['client_id'] !== $clientId) {
+                return Response::redirect("/client/domains/{$id}?error=" . urlencode('That saved contact could not be found.'));
+            }
+            $contact = $this->domainService->contactFromClientContact($saved);
+        } else {
+            // Registrant = a custom contact entered here ("on behalf of").
+            $contact = $this->contactFromRequest($request);
+
+            // Optionally keep it as a reusable saved contact.
+            if ((bool) $request->input('save_to_contacts', 0)) {
+                $contactId = $this->contacts->create($clientId, (string) ($contact['name'] ?? ''), (string) ($contact['email'] ?? ''), [], $contact);
+            }
+        }
+
+        $result = $this->domainService->saveContactInfo($id, $contact, $contactId);
+
+        if ($result['success']) {
+            return Response::redirect("/client/domains/{$id}?msg=" . urlencode((string) ($result['message'] ?? 'Registrant contact saved.')));
+        }
+
+        return Response::redirect("/client/domains/{$id}?error=" . urlencode((string) $result['message']));
+    }
+
+    /** @return array<string, string> */
+    private function contactFromRequest(Request $request): array
+    {
+        return [
+            'name' => trim((string) $request->input('name', '')),
+            'email' => trim((string) $request->input('email', '')),
+            'company_name' => trim((string) $request->input('company_name', '')),
+            'address1' => trim((string) $request->input('address1', '')),
+            'city' => trim((string) $request->input('city', '')),
+            'state' => trim((string) $request->input('state', '')),
+            'postcode' => trim((string) $request->input('postcode', '')),
+            'country' => trim((string) $request->input('country', '')),
+            'phone' => trim((string) $request->input('phone', '')),
+        ];
     }
 
     public function toggleLock(Request $request, array $params): Response

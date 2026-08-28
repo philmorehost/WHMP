@@ -920,6 +920,7 @@ class Kernel
                 $c->make(ClientRepository::class),
                 $c->make(Database::class),
                 $c->make(ActivityLogger::class),
+                $c->make(ClientContactRepository::class),
             );
         });
 

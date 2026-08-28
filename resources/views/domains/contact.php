@@ -5,6 +5,9 @@
 /** @var string|null $fetchError */
 /** @var string $contactSource */
 /** @var string|null $notice */
+/** @var int $contactId */
+/** @var array<int, array<string, mixed>> $clientContacts */
+/** @var array<string, mixed> $clientAccountContact */
 /** @var string $msg */
 /** @var string $saveError */
 $id = (int) $domain['id'];
@@ -53,7 +56,24 @@ $formContact = $formContact ?? $contact;
 
 <div class="cv-card">
     <h2 class="cv-card__title" style="font-size:var(--cv-text-md);">Save Contact Info</h2>
-    <form method="post" action="/admin/domains/<?= $id ?>/contact" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--cv-space-3);max-width:40rem;"><?= csrf_field() ?>
+    <div class="cv-field" style="max-width:40rem; margin-bottom:var(--cv-space-4);">
+        <label class="cv-label" style="display:block; margin-bottom:6px; font-weight:600;">
+            Registrant — on whose behalf is this domain registered?
+        </label>
+        <select class="cv-select" name="contact_id" data-contact-source form="contact-form" style="width:100%;">
+            <option value="" <?= $contactId > 0 || $contactId === -1 ? '' : 'selected' ?>>Custom contact (enter below)</option>
+            <option value="-1" <?= $contactId === -1 ? 'selected' : '' ?>>Client account details</option>
+            <?php foreach ($clientContacts as $cc): ?>
+                <option value="<?= (int) $cc['id'] ?>" <?= $contactId === (int) $cc['id'] ? 'selected' : '' ?>>
+                    <?= e((string) $cc['name']) ?> &lt;<?= e((string) $cc['email']) ?>&gt;
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:6px;">
+            Pick a saved contact when the domain belongs to a company/third party. Choose "Custom contact" to type one here.
+        </p>
+    </div>
+    <form id="contact-form" method="post" action="/admin/domains/<?= $id ?>/contact" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--cv-space-3);max-width:40rem;" data-contact-custom><?= csrf_field() ?>
         <div class="cv-field">
             <label class="cv-label">Full Name</label>
             <input class="cv-input" name="name" value="<?= e((string) ($formContact['name'] ?? '')) ?>" required>

@@ -31,7 +31,8 @@ final class DomainService
         // renew() reads grace/redemption windows straight from domain_pricing;
         // there is no repository for that lookup yet.
         private readonly Database $db,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly \CodeVault\Clients\ClientContactRepository $contacts
     ) {
     }
 
@@ -472,6 +473,7 @@ final class DomainService
                 'success' => true,
                 'contacts' => $result['contacts'],
                 'formContact' => $normalized,
+                'contactId' => (int) ($domain['contact_id'] ?? 0),
                 'source' => 'registrar',
                 'message' => $result['message'] ?? '',
             ];
@@ -491,11 +493,16 @@ final class DomainService
             ? 'The registrar returned no contact details for this domain — showing the locally stored contact instead.'
             : ($result['message'] ?? 'Could not load the contact from the registrar.');
 
-        return ['success' => true, 'contacts' => $local, 'formContact' => $local, 'source' => 'local', 'notice' => $notice];
+        return ['success' => true, 'contacts' => $local, 'formContact' => $local, 'contactId' => (int) ($domain['contact_id'] ?? 0), 'source' => 'local', 'notice' => $notice];
     }
 
-    /** @param array<string, mixed> $contact */
-    public function saveContactInfo(int $domainId, array $contact): array
+    /**
+     * @param array<string, mixed> $contact
+     * @param int|null $contactId the id of one of the client's saved contacts
+     *        to use as the registrant ("on behalf of"), or null for a custom
+     *        contact carried in $contact.
+     */
+    public function saveContactInfo(int $domainId, array $contact, ?int $contactId = null): array
     {
         [$domain, $module, $config, $error] = $this->context($domainId);
 
@@ -504,11 +511,30 @@ final class DomainService
         }
 
         $client = $this->clients->find((int) $domain['client_id']);
+        $resolvedContactId = null;
+
+        // A linked saved contact wins: resolve its full WHOIS details and use
+        // them as the registrant (falling back to $contact for any field the
+        // saved contact hasn't filled in).
+        if ($contactId !== null && $client !== null) {
+            $saved = $this->contacts->find($contactId);
+            if ($saved !== null && (int) $saved['client_id'] === (int) $client['id']) {
+                $resolved = $this->contactFromClientContact($saved);
+                foreach ($contact as $key => $value) {
+                    if (empty($resolved[$key] ?? '')) {
+                        $resolved[$key] = $value;
+                    }
+                }
+                $contact = $resolved;
+                $resolvedContactId = (int) $saved['id'];
+            }
+        }
 
         // Always persist the edit locally first — a registrar that rejects the
         // push (domain not in the reseller account) must never lose the admin's
         // work; the local copy is what the contact page falls back to.
         $this->domains->updateContactData($domainId, $this->normalizeContact($contact));
+        $this->domains->updateContactRef($domainId, $resolvedContactId);
 
         $result = $module->saveContactInfo([
             'domain' => $domain['domain_name'],
@@ -588,7 +614,7 @@ final class DomainService
      * @param array<string, mixed> $client
      * @return array<string, string>
      */
-    private function contactFromClient(array $client): array
+    public function contactFromClient(array $client): array
     {
         return [
             'name' => trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? '')),
@@ -600,6 +626,28 @@ final class DomainService
             'postcode' => (string) ($client['postcode'] ?? ''),
             'country' => (string) ($client['country'] ?? ''),
             'phone' => (string) ($client['phone'] ?? ''),
+        ];
+    }
+
+    /**
+     * Map a saved client contact (sub-account) onto the registrant form — used
+     * when a domain is registered on behalf of that contact.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, string>
+     */
+    public function contactFromClientContact(array $contact): array
+    {
+        return [
+            'name' => (string) ($contact['name'] ?? ''),
+            'email' => (string) ($contact['email'] ?? ''),
+            'company_name' => (string) ($contact['company_name'] ?? ''),
+            'address1' => (string) ($contact['address1'] ?? ''),
+            'city' => (string) ($contact['city'] ?? ''),
+            'state' => (string) ($contact['state'] ?? ''),
+            'postcode' => (string) ($contact['postcode'] ?? ''),
+            'country' => (string) ($contact['country'] ?? ''),
+            'phone' => (string) ($contact['phone'] ?? ''),
         ];
     }
 

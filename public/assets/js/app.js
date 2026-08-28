@@ -42,6 +42,26 @@
         }
     });
 
+    // Domain registrant contact source (admin domain contact page + client
+    // domain detail): choosing a saved contact or the account hides the
+    // custom-contact fields; "Custom contact" reveals them.
+    function contactSourceToggle(select) {
+        var form = select.closest('form');
+        var custom = select.closest('[data-contact-custom]') || (form ? form.querySelector('[data-contact-custom]') : null);
+        if (!custom) { return; }
+        // value '' = custom contact; '-1' = account; 'N' = saved contact.
+        custom.style.display = (select.value === '') ? '' : 'none';
+    }
+    document.addEventListener('change', function (event) {
+        var select = event.target.closest('[data-contact-source]');
+        if (select) { contactSourceToggle(select); }
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('[data-contact-source]').forEach(function (select) {
+            contactSourceToggle(select);
+        });
+    });
+
     // Admin table column filters (partials/table-filter.php + table-filter-row).
     // These are DELEGATED listeners, not inline scripts, so they keep working
     // on pages whose results table is swapped in later via innerHTML (the

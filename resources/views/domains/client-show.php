@@ -2,6 +2,11 @@
 /** @var array<string, mixed> $domain */
 /** @var string|null $eppCode */
 /** @var string|null $eppError */
+/** @var array<int, array<string, mixed>> $clientContacts */
+/** @var array<string, mixed> $registrantContact */
+/** @var int $registrantContactId */
+/** @var string|null $msg */
+/** @var string|null $error */
 $id = (int) $domain['id'];
 $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
 ?>
@@ -341,6 +346,7 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
         <button type="button" class="domain-tab active" data-tab-target="overview">📋 Overview</button>
         <button type="button" class="domain-tab" data-tab-target="nameservers">🔗 Nameservers</button>
         <button type="button" class="domain-tab" data-tab-target="dns">🔍 DNS Records</button>
+        <button type="button" class="domain-tab" data-tab-target="contact">👤 Registrant Contact</button>
         <button type="button" class="domain-tab" data-tab-target="advanced">⚙️ Advanced</button>
     </div>
 
@@ -551,6 +557,88 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
                     </div>
                 </div>
                 <button class="action-btn" type="submit" style="margin-top: 20px;">✚ Add Private Nameserver</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- TAB 5: REGISTRANT CONTACT -->
+    <div id="contact" class="domain-tab-content">
+        <div class="domain-tab-card">
+            <h2 style="font-family: 'Hanken Grotesk', sans-serif; font-size: 1.5rem; font-weight: 800; margin: 0 0 8px 0;">Registrant Contact</h2>
+            <p style="color: var(--cv-text-secondary); margin-bottom: 24px;">
+                Choose who this domain is registered on behalf of — yourself, a company, or a third party. This becomes the domain's WHOIS/registrant contact.
+            </p>
+
+            <?php if (!empty($msg)): ?>
+                <div class="alert-success"><?= e($msg) ?></div>
+            <?php endif; ?>
+            <?php if (!empty($error)): ?>
+                <div class="alert-error"><?= e($error) ?></div>
+            <?php endif; ?>
+
+            <form method="post" action="/client/domains/<?= $id ?>/contact">
+                <?= csrf_field() ?>
+
+                <div class="cv-field" style="margin-bottom: 24px;">
+                    <label class="cv-label">Registrant</label>
+                    <select class="cv-input" name="contact_id" data-contact-source style="width: 100%; max-width: 30rem;">
+                        <option value="" <?= $registrantContactId > 0 || $registrantContactId === -1 ? '' : 'selected' ?>>Custom contact (enter details below)</option>
+                        <option value="-1" <?= $registrantContactId === -1 ? 'selected' : '' ?>>My account details</option>
+                        <?php foreach (($clientContacts ?? []) as $cc): ?>
+                            <option value="<?= (int) $cc['id'] ?>" <?= $registrantContactId === (int) $cc['id'] ? 'selected' : '' ?>>
+                                <?= e((string) $cc['name']) ?> &lt;<?= e((string) $cc['email']) ?>&gt;
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div data-contact-custom>
+                    <div class="form-grid">
+                        <div class="cv-field">
+                            <label class="cv-label">Full Name</label>
+                            <input class="cv-input" name="name" value="<?= e((string) ($registrantContact['name'] ?? '')) ?>" required>
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">Email</label>
+                            <input class="cv-input" type="email" name="email" value="<?= e((string) ($registrantContact['email'] ?? '')) ?>" required>
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">Company Name</label>
+                            <input class="cv-input" name="company_name" value="<?= e((string) ($registrantContact['company_name'] ?? '')) ?>" placeholder="Optional">
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">Phone</label>
+                            <input class="cv-input" name="phone" value="<?= e((string) ($registrantContact['phone'] ?? '')) ?>" placeholder="+234...">
+                        </div>
+                        <div class="cv-field" style="grid-column: span 2;">
+                            <label class="cv-label">Address</label>
+                            <input class="cv-input" name="address1" value="<?= e((string) ($registrantContact['address1'] ?? '')) ?>">
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">City</label>
+                            <input class="cv-input" name="city" value="<?= e((string) ($registrantContact['city'] ?? '')) ?>">
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">State</label>
+                            <input class="cv-input" name="state" value="<?= e((string) ($registrantContact['state'] ?? '')) ?>">
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">Postcode</label>
+                            <input class="cv-input" name="postcode" value="<?= e((string) ($registrantContact['postcode'] ?? '')) ?>">
+                        </div>
+                        <div class="cv-field">
+                            <label class="cv-label">Country</label>
+                            <input class="cv-input" name="country" value="<?= e((string) ($registrantContact['country'] ?? '')) ?>" placeholder="NG">
+                        </div>
+                    </div>
+
+                    <label style="display: flex; align-items: center; gap: 8px; margin: 16px 0; color: var(--cv-text-secondary); font-size: .9rem; cursor: pointer;">
+                        <input type="checkbox" name="save_to_contacts" value="1">
+                        Save this custom contact to my saved contacts so I can reuse it on other domains.
+                    </label>
+                </div>
+
+                <button class="action-btn" type="submit" style="margin-top: 20px;">💾 Save Registrant Contact</button>
             </form>
         </div>
     </div>

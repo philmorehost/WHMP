@@ -302,6 +302,15 @@ final class DomainRepository
         );
     }
 
+    /** Link (or unlink) the domain to one of the client's saved contacts. */
+    public function updateContactRef(int $id, ?int $contactId): void
+    {
+        $this->db->update(
+            'UPDATE domains SET contact_id = ?, updated_at = ? WHERE id = ?',
+            [$contactId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function updateNameservers(int $id, array $nameservers): void
     {
         $this->db->update(

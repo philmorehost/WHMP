@@ -110,7 +110,7 @@ final class ExistingOrderTest extends DatabaseTestCase
         $hooks = new HookDispatcher();
         $modules = new ModuleManager($hooks);
         $modules->register(RegistrarModule::class, 'local', $localModule);
-        $this->domainService = new DomainService(new DomainRepository($this->db), $registrars, $modules, $hooks, $this->clients, $this->db, new ActivityLogger($this->db));
+        $this->domainService = new DomainService(new DomainRepository($this->db), $registrars, $modules, $hooks, $this->clients, $this->db, new ActivityLogger($this->db), new \CodeVault\Clients\ClientContactRepository($this->db));
     }
 
     protected function tearDown(): void

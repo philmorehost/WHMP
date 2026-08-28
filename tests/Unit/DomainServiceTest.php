@@ -43,7 +43,7 @@ final class DomainServiceTest extends DatabaseTestCase
         $modules->register(RegistrarModule::class, 'local', $localModule);
 
         $clients = new ClientRepository($this->db);
-        $this->service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients, $this->db, new ActivityLogger($this->db));
+        $this->service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients, $this->db, new ActivityLogger($this->db), new \CodeVault\Clients\ClientContactRepository($this->db));
 
         $this->clientId = $clients->create([
             'email' => 'domainowner@example.test',
@@ -324,7 +324,7 @@ final class DomainServiceTest extends DatabaseTestCase
         });
         $modules = new ModuleManager($hooks);
         $modules->register(RegistrarModule::class, 'local', new LocalRegistrarModule($this->localStorageDir));
-        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, new ClientRepository($this->db), $this->db, new ActivityLogger($this->db));
+        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, new ClientRepository($this->db), $this->db, new ActivityLogger($this->db), new \CodeVault\Clients\ClientContactRepository($this->db));
 
         $domainId = $this->createPendingDomain('hooktest.test');
         $service->register($domainId, 1);
@@ -340,7 +340,7 @@ final class DomainServiceTest extends DatabaseTestCase
         $fake = new FakeRegistrarModule();
         $modules->register(RegistrarModule::class, 'fake', $fake);
         $clients = new ClientRepository($this->db);
-        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients, $this->db, new ActivityLogger($this->db));
+        $service = new DomainService($this->domains, $this->registrars, $modules, $hooks, $clients, $this->db, new ActivityLogger($this->db), new \CodeVault\Clients\ClientContactRepository($this->db));
 
         return [$service, $fake];
     }
@@ -460,5 +460,64 @@ final class DomainServiceTest extends DatabaseTestCase
         $stored = json_decode((string) $domain['contact_data'], true);
         $this->assertSame('Jane Doe', $stored['name']);
         $this->assertSame('jane@example.test', $stored['email']);
+    }
+
+    public function test_save_contact_info_with_a_saved_client_contact_links_it_and_uses_its_details(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('saveContactInfo', ['success' => true, 'message' => 'ok']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('savedcontact.test');
+
+        $contacts = new \CodeVault\Clients\ClientContactRepository($this->db);
+        $ccId = $contacts->create($this->clientId, 'Jane Doe', 'jane@example.test', [], [
+            'company_name' => 'Jane Co',
+            'address1' => '1 Main St',
+            'city' => 'Lagos',
+            'state' => 'Lagos',
+            'postcode' => '100001',
+            'country' => 'NG',
+            'phone' => '+2341',
+        ]);
+
+        $result = $service->saveContactInfo($domainId, [], $ccId);
+
+        $this->assertTrue($result['success']);
+
+        $domain = $this->domains->find($domainId);
+        $this->assertSame($ccId, (int) $domain['contact_id'], 'the domain must link to the saved contact');
+        $stored = json_decode((string) $domain['contact_data'], true);
+        $this->assertSame('Jane Doe', $stored['name']);
+        $this->assertSame('Jane Co', $stored['company_name']);
+        $this->assertSame('NG', $stored['country']);
+        $this->assertSame('+2341', $stored['phone']);
+
+        // The registrar receives the saved contact's details as the WHOIS.
+        $saveParams = $fake->lastCall('saveContactInfo');
+        $this->assertSame('Jane Doe', $saveParams['contacts']['name']);
+        $this->assertSame('Jane Co', $saveParams['contacts']['company_name']);
+    }
+
+    public function test_save_contact_info_rejects_a_contact_id_from_another_client(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('saveContactInfo', ['success' => true, 'message' => 'ok']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('othercontact.test');
+
+        $otherClient = (new ClientRepository($this->db))->create([
+            'email' => 'other@example.test',
+            'password' => 'x',
+            'first_name' => 'Other',
+            'last_name' => 'Guy',
+        ]);
+        $contacts = new \CodeVault\Clients\ClientContactRepository($this->db);
+        $ccId = $contacts->create($otherClient, 'Other Person', 'other.person@example.test');
+
+        $result = $service->saveContactInfo($domainId, ['name' => 'Custom Name', 'email' => 'custom@example.test'], $ccId);
+
+        $this->assertTrue($result['success']);
+        $domain = $this->domains->find($domainId);
+        $this->assertNull($domain['contact_id'], 'a contact belonging to another client must not be linked');
+        $stored = json_decode((string) $domain['contact_data'], true);
+        $this->assertSame('Custom Name', $stored['name'], 'falls back to the passed custom contact');
     }
 }

@@ -17,6 +17,7 @@ $router->post('/domains/transfer/add-to-cart', [DomainRegistrationController::cl
 
 $router->get('/client/domains', [ClientDomainController::class, 'index']);
 $router->get('/client/domains/{id}', [ClientDomainController::class, 'show']);
+$router->post('/client/domains/{id}/contact', [ClientDomainController::class, 'saveContact']);
 $router->post('/client/domains/{id}/lock', [ClientDomainController::class, 'toggleLock']);
 $router->post('/client/domains/{id}/id-protection', [ClientDomainController::class, 'toggleIdProtection']);
 $router->post('/client/domains/{id}/nameservers', [ClientDomainController::class, 'saveNameservers']);

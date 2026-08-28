@@ -7,6 +7,7 @@ namespace CodeVault\Domains;
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Billing\CurrencyService;
+use CodeVault\Clients\ClientContactRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -27,7 +28,8 @@ final class DomainController
         private readonly DomainPricingRepository $domainPricing,
         private readonly DomainSettings $domainSettings,
         private readonly WhoisService $whoisService,
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly ClientContactRepository $clientContacts
     ) {
     }
 
@@ -628,6 +630,8 @@ final class DomainController
 
         $result = $this->domainService->getContactInfo($id);
 
+        $client = $this->clients->find((int) $domain['client_id']);
+
         return $this->render('domains.contact', [
             'domain' => $domain,
             'contact' => $result['contacts'] ?? [],
@@ -637,6 +641,10 @@ final class DomainController
             // (with $notice carrying why).
             'contactSource' => (string) ($result['source'] ?? 'registrar'),
             'notice' => $result['notice'] ?? null,
+            'contactId' => (int) ($result['contactId'] ?? (int) ($domain['contact_id'] ?? 0)),
+            // Saved contacts the admin can assign as this domain's registrant.
+            'clientContacts' => $this->clientContacts->forClient((int) $domain['client_id']),
+            'clientAccountContact' => $client !== null ? $this->domainService->contactFromClient($client) : [],
             'msg' => (string) $request->query('msg', ''),
             'saveError' => (string) $request->query('saved_error', ''),
         ]);
@@ -661,7 +669,21 @@ final class DomainController
             'phone' => trim((string) $request->input('phone', '')),
         ];
 
-        $result = $this->domainService->saveContactInfo($id, $contact);
+        // A single registrant-source select drives this: '' = custom contact
+        // (the fields below), '-1' = the client's account details, N = one of
+        // the client's saved contacts (resolved inside saveContactInfo).
+        $rawContactId = (string) $request->input('contact_id', '');
+        $contactId = null;
+
+        if ($rawContactId === '-1') {
+            $client = $this->clients->find((int) $this->domains->find($id)['client_id']);
+            $contact = $client !== null ? $this->domainService->contactFromClient($client) : $contact;
+        } elseif ($rawContactId !== '' && (int) $rawContactId > 0) {
+            $contactId = (int) $rawContactId;
+            $contact = [];
+        }
+
+        $result = $this->domainService->saveContactInfo($id, $contact, $contactId);
 
         $this->activity->log(
             'admin',
