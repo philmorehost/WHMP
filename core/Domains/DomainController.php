@@ -632,6 +632,13 @@ final class DomainController
             'domain' => $domain,
             'contact' => $result['contacts'] ?? [],
             'fetchError' => $result['success'] ? null : ($result['message'] ?? null),
+            // 'registrar' when the contact came back from the registrar API,
+            // 'local' when it fell back to the locally stored / client copy
+            // (with $notice carrying why).
+            'contactSource' => (string) ($result['source'] ?? 'registrar'),
+            'notice' => $result['notice'] ?? null,
+            'msg' => (string) $request->query('msg', ''),
+            'saveError' => (string) $request->query('saved_error', ''),
         ]);
     }
 
@@ -666,7 +673,13 @@ final class DomainController
             $request->ip()
         );
 
-        return Response::redirect("/admin/domains/{$id}/contact");
+        if ($result['success']) {
+            return Response::redirect("/admin/domains/{$id}/contact?msg=" . urlencode((string) ($result['message'] ?? 'Contact info saved.')));
+        }
+
+        // The edit was kept locally but the registrar rejected the push — the
+        // contact page must show exactly why.
+        return Response::redirect("/admin/domains/{$id}/contact?saved_error=" . urlencode((string) ($result['message'] ?? 'Could not save contact info to the registrar.')));
     }
 
     private function action(Request $request, array $params, callable $action, string $logAction): Response

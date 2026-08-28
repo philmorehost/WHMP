@@ -74,6 +74,22 @@ h1, h2, h3, h4, h5, h6 {
 .cv-field-error { color: var(--cv-color-danger-500); font-size: var(--cv-text-xs); }
 .cv-field-success { color: var(--cv-color-success-600); font-size: var(--cv-text-xs); }
 
+/* --- Alerts ---------------------------------------------------------- */
+.cv-alert {
+    padding: var(--cv-space-3) var(--cv-space-4);
+    border: 1px solid var(--cv-border-default);
+    border-left-width: 4px;
+    border-radius: var(--cv-radius-sm);
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    font-size: var(--cv-text-sm);
+    line-height: 1.5;
+}
+.cv-alert--success { border-left-color: var(--cv-color-success-500); background: color-mix(in srgb, var(--cv-color-success-500) 8%, var(--cv-bg-surface)); }
+.cv-alert--error { border-left-color: var(--cv-color-danger-500); background: color-mix(in srgb, var(--cv-color-danger-500) 8%, var(--cv-bg-surface)); }
+.cv-alert--warning { border-left-color: var(--cv-color-warning-500); background: color-mix(in srgb, var(--cv-color-warning-500) 8%, var(--cv-bg-surface)); }
+.cv-alert--neutral { border-left-color: var(--cv-text-tertiary); }
+
 /* --- Cards ---------------------------------------------------------- */
 .cv-card {
     background: var(--cv-bg-surface);

@@ -456,11 +456,42 @@ final class DomainService
             'client' => $client ?? [],
         ]);
 
-        if (($result['success'] ?? false) && isset($result['registrarContactId'])) {
-            $this->domains->updateContactId($domainId, (string) $result['registrarContactId']);
+        // Registrar round-trip succeeded and returned a contact — that's the
+        // source of truth; display it verbatim (field names vary by registrar)
+        // and cache a normalised copy locally for the form pre-fill and for
+        // future fallbacks (plus capture any registrar contact id).
+        if (($result['success'] ?? false) && !empty($result['contacts'])) {
+            $normalized = $this->normalizeContact($result['contacts']);
+            $this->domains->updateContactData($domainId, $normalized);
+
+            if (isset($result['registrarContactId'])) {
+                $this->domains->updateContactId($domainId, (string) $result['registrarContactId']);
+            }
+
+            return [
+                'success' => true,
+                'contacts' => $result['contacts'],
+                'formContact' => $normalized,
+                'source' => 'registrar',
+                'message' => $result['message'] ?? '',
+            ];
         }
 
-        return $result;
+        // The registrar couldn't provide a contact (domain not in the reseller
+        // account, IP whitelist, empty response). Fall back to the locally
+        // stored copy, or seed it from the owning client so the admin still
+        // sees a usable, pre-fillable form instead of a blank one.
+        $local = $this->decodeContact($domain['contact_data'] ?? null);
+        if ($local === []) {
+            $local = $this->contactFromClient($client ?? []);
+        }
+        $this->domains->updateContactData($domainId, $local);
+
+        $notice = $result['success']
+            ? 'The registrar returned no contact details for this domain — showing the locally stored contact instead.'
+            : ($result['message'] ?? 'Could not load the contact from the registrar.');
+
+        return ['success' => true, 'contacts' => $local, 'formContact' => $local, 'source' => 'local', 'notice' => $notice];
     }
 
     /** @param array<string, mixed> $contact */
@@ -473,6 +504,11 @@ final class DomainService
         }
 
         $client = $this->clients->find((int) $domain['client_id']);
+
+        // Always persist the edit locally first — a registrar that rejects the
+        // push (domain not in the reseller account) must never lose the admin's
+        // work; the local copy is what the contact page falls back to.
+        $this->domains->updateContactData($domainId, $this->normalizeContact($contact));
 
         $result = $module->saveContactInfo([
             'domain' => $domain['domain_name'],
@@ -495,7 +531,88 @@ final class DomainService
             $this->domains->updateContactId($domainId, (string) $result['registrarContactId']);
         }
 
-        return $result;
+        if ($result['success']) {
+            return $result;
+        }
+
+        // Be honest with the admin: the edit is saved locally, but the
+        // registrar rejected it — surface the EXACT reason and the likely fix.
+        $message = trim((string) ($result['message'] ?? 'Unknown registrar error.'));
+        $message .= " Your changes were saved locally, but NOT pushed to the registrar ({$domain['registrar_slug']}). "
+            . 'This usually means the domain is not in your reseller account — register it via the API or contact the registrar to link it.';
+
+        return ['success' => false, 'message' => $message];
+    }
+
+    /**
+     * Map a registrar's arbitrary contact response onto the admin form's
+     * field names so the page can both display it and pre-fill the editor.
+     *
+     * @param array<string, mixed> $raw
+     * @return array<string, string>
+     */
+    private function normalizeContact(array $raw): array
+    {
+        $aliases = [
+            'name' => ['name', 'registrantName', 'fullname', 'firstname'],
+            'email' => ['email', 'registrantEmail', 'emailaddress'],
+            'company_name' => ['company_name', 'company', 'organisation', 'organization'],
+            'address1' => ['address1', 'address', 'registrantaddress', 'street'],
+            'city' => ['city', 'registrantcity', 'town'],
+            'state' => ['state', 'registrantstate', 'province', 'region'],
+            'postcode' => ['postcode', 'zip', 'postalcode', 'zipcode', 'registrantpostalcode'],
+            'country' => ['country', 'countrycode', 'country_code'],
+            'phone' => ['phone', 'telephone', 'phoneNumber', 'phoneno'],
+        ];
+
+        $out = [];
+
+        foreach ($aliases as $field => $keys) {
+            $out[$field] = '';
+            foreach ($keys as $key) {
+                if (isset($raw[$key]) && trim((string) $raw[$key]) !== '') {
+                    $out[$field] = trim((string) $raw[$key]);
+                    break;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Seed a domain's contact from the owning client's stored details — the
+     * registrant on every freshly-registered domain is the client, so this is
+     * the correct default for a domain whose registrar can't be reached.
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, string>
+     */
+    private function contactFromClient(array $client): array
+    {
+        return [
+            'name' => trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? '')),
+            'email' => (string) ($client['email'] ?? ''),
+            'company_name' => (string) ($client['company_name'] ?? ''),
+            'address1' => (string) ($client['address1'] ?? ''),
+            'city' => (string) ($client['city'] ?? ''),
+            'state' => (string) ($client['state'] ?? ''),
+            'postcode' => (string) ($client['postcode'] ?? ''),
+            'country' => (string) ($client['country'] ?? ''),
+            'phone' => (string) ($client['phone'] ?? ''),
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function decodeContact(mixed $raw): array
+    {
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $this->normalizeContact($decoded) : [];
     }
 
     /** Reconciles local status/expiry with the registrar's record of truth. */

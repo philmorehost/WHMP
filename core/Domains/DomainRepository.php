@@ -294,6 +294,14 @@ final class DomainRepository
         );
     }
 
+    public function updateContactData(int $id, array $contact): void
+    {
+        $this->db->update(
+            'UPDATE domains SET contact_data = ?, updated_at = ? WHERE id = ?',
+            [json_encode($contact), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
     public function updateNameservers(int $id, array $nameservers): void
     {
         $this->db->update(

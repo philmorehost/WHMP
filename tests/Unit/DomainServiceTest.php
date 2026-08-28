@@ -425,4 +425,40 @@ final class DomainServiceTest extends DatabaseTestCase
         $client = (new ClientRepository($this->db))->find($this->clientId);
         $this->assertSame('777', $client['registrar_client_id']);
     }
+
+    public function test_get_contact_info_falls_back_to_client_data_when_the_registrar_cannot_find_the_domain(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $domainId = $this->createPendingDomainForFakeRegistrar('notinaccount.test');
+        // Reproduction of Upperlink's real error for a manually-registered
+        // domain that never made it into the reseller account.
+        $fake->respond('getContactInfo', ['success' => false, 'message' => 'Provided domain has not been found in reseller account']);
+
+        $result = $service->getContactInfo($domainId);
+
+        $this->assertTrue($result['success'], 'contact view must stay usable when the registrar rejects the lookup');
+        $this->assertSame('local', $result['source']);
+        $this->assertStringContainsString('reseller account', $result['notice']);
+        $this->assertSame('Domain Owner', $result['contacts']['name'], 'falls back to the owning client as the registrant');
+        $this->assertSame('domainowner@example.test', $result['contacts']['email']);
+    }
+
+    public function test_save_contact_info_keeps_the_edit_locally_when_the_registrar_rejects_the_push(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $domainId = $this->createPendingDomainForFakeRegistrar('rejectedpush.test');
+        $fake->respond('saveContactInfo', ['success' => false, 'message' => 'Provided domain has not been found in reseller account']);
+
+        $result = $service->saveContactInfo($domainId, ['name' => 'Jane Doe', 'email' => 'jane@example.test']);
+
+        $this->assertFalse($result['success'], 'a registrar rejection must still be reported as a failure');
+        $this->assertStringContainsString('not been found in reseller account', $result['message']);
+        $this->assertStringContainsString('saved locally', $result['message']);
+
+        // The admin's edit must never be lost even though the registrar said no.
+        $domain = $this->domains->find($domainId);
+        $stored = json_decode((string) $domain['contact_data'], true);
+        $this->assertSame('Jane Doe', $stored['name']);
+        $this->assertSame('jane@example.test', $stored['email']);
+    }
 }
