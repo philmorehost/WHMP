@@ -29,7 +29,8 @@ final class AdminInvoiceController
         private readonly CurrencyService $currency,
         private readonly SettingsRepository $settings,
         private readonly CurrencyRepository $currencies,
-        private readonly InvoiceReminderService $reminders
+        private readonly InvoiceReminderService $reminders,
+        private readonly RecurringInvoiceService $recurringInvoices
     ) {
     }
 
@@ -115,8 +116,25 @@ final class AdminInvoiceController
         return $this->render('billing.invoice-create', [
             'clients' => $this->clients->all(),
             'error' => null,
-            'old' => ['client_id' => '', 'due_in_days' => 7, 'items' => []],
+            'billingCycles' => $this->recurringCycles(),
+            'old' => [
+                'client_id' => '',
+                'due_in_days' => 7,
+                'items' => [],
+                'is_recurring' => false,
+                'billing_cycle' => 'monthly',
+                'next_due_date' => '',
+            ],
         ]);
+    }
+
+    /** @return array<string, string> recurring cycles (excludes one-time) key => label */
+    private function recurringCycles(): array
+    {
+        $labels = \CodeVault\Catalog\BillingCycle::labels();
+        unset($labels[\CodeVault\Catalog\BillingCycle::ONE_TIME]);
+
+        return $labels;
     }
 
     /**
@@ -179,6 +197,43 @@ final class AdminInvoiceController
         $clientCurrency = $this->currency->resolveForClient($client);
         $defaultCurrency = $this->currencies->default();
         $currencyId = (int) $clientCurrency['id'] === (int) $defaultCurrency['id'] ? null : (int) $clientCurrency['id'];
+
+        $isRecurring = (bool) $request->input('is_recurring', false);
+
+        // A recurring invoice raises the first invoice now and auto-repeats
+        // the same line items each billing cycle (RecurringInvoiceJob).
+        if ($isRecurring) {
+            $billingCycle = trim((string) $request->input('billing_cycle', ''));
+
+            if (!array_key_exists($billingCycle, $this->recurringCycles())) {
+                return $this->createError($request, 'Select a valid billing cycle for the recurring invoice.');
+            }
+
+            $nextDueDate = trim((string) $request->input('next_due_date', ''));
+
+            $result = $this->recurringInvoices->createFromAdmin(
+                $clientId,
+                $items,
+                $billingCycle,
+                $dueInDays,
+                $currencyId,
+                1.0,
+                (int) $this->guard->currentAdmin()['id'],
+                $nextDueDate !== '' ? $nextDueDate : null
+            );
+
+            $this->activity->log(
+                'admin',
+                (int) $this->guard->currentAdmin()['id'],
+                'recurring_invoice.created',
+                'invoice',
+                $result['invoice_id'],
+                "Created recurring invoice #{$result['recurring_id']} for client #{$clientId} (cycle: {$billingCycle}) — first invoice #{$result['invoice_id']}",
+                $request->ip()
+            );
+
+            return Response::redirect('/admin/recurring-invoices?created=' . $result['recurring_id']);
+        }
 
         $invoiceId = $this->invoices->createFromItems(
             $clientId,
@@ -405,6 +460,7 @@ final class AdminInvoiceController
         return $this->render('billing.invoice-create', [
             'clients' => $this->clients->all(),
             'error' => $message,
+            'billingCycles' => $this->recurringCycles(),
             'old' => [
                 'client_id' => (string) $request->input('client_id', ''),
                 'due_in_days' => (int) $request->input('due_in_days', 7),
@@ -413,6 +469,9 @@ final class AdminInvoiceController
                     (array) $request->input('item_description', []),
                     (array) $request->input('item_amount', [])
                 ),
+                'is_recurring' => (bool) $request->input('is_recurring', false),
+                'billing_cycle' => (string) $request->input('billing_cycle', 'monthly'),
+                'next_due_date' => (string) $request->input('next_due_date', ''),
             ],
         ]);
     }

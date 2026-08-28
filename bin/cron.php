@@ -18,6 +18,8 @@ use CodeVault\Billing\DunningJob;
 use CodeVault\Billing\QuoteExpiryJob;
 use CodeVault\Billing\RecurringBillingJob;
 use CodeVault\Billing\RecurringBillingService;
+use CodeVault\Billing\RecurringInvoiceJob;
+use CodeVault\Billing\RecurringInvoiceService;
 use CodeVault\Billing\RenewalReminderJob;
 use CodeVault\Cron\CronActivityReportJob;
 use CodeVault\Cron\CronRunRepository;
@@ -55,6 +57,9 @@ $hooks = $kernel->container->make(HookDispatcher::class);
 if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register(new IntegrityCheckJob($kernel->container->make(IntegrityManager::class)));
     $scheduler->register(new RecurringBillingJob($kernel->container->make(RecurringBillingService::class)));
+    // Standalone recurring invoices (admin "make this invoice recur") —
+    // runs after the service/domain renewal sweep, once a day.
+    $scheduler->register(new RecurringInvoiceJob($kernel->container->make(RecurringInvoiceService::class)));
     // Auto-charge runs before dunning so successfully-charged invoices are
     // already paid and never trigger an overdue notice.
     $scheduler->register($kernel->container->make(AutoChargeJob::class));

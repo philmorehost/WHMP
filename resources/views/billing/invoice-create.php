@@ -1,7 +1,8 @@
 <?php
 /** @var array<int, array<string, mixed>> $clients */
 /** @var string|null $error */
-/** @var array{client_id: string|int, due_in_days: int, items: array<int, array{description: string, amount: string}>} $old */
+/** @var array<string, string> $billingCycles */
+/** @var array{client_id: string|int, due_in_days: int, items: array<int, array{description: string, amount: string}>, is_recurring: bool, billing_cycle: string, next_due_date: string} $old */
 
 // Always render a few blank rows so there's something to type into; the
 // controller ignores rows left empty.
@@ -59,6 +60,47 @@ while (count($rows) < 3) {
         </div>
 
         <button type="button" class="cv-btn cv-btn--secondary" data-add-invoice-item style="margin-bottom:var(--cv-space-3);">+ Add line item</button>
+
+        <!-- Optional recurring billing (WHMCS-style): raise the same line
+             items again every cycle until paused/cancelled. -->
+        <div style="margin-bottom:var(--cv-space-3);padding:var(--cv-space-3);border:1px solid var(--cv-border-default);border-radius:8px;">
+            <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                <input type="checkbox" name="is_recurring" value="1" id="invoice-recurring" <?= !empty($old['is_recurring']) ? 'checked' : '' ?>>
+                Make this a recurring invoice
+            </label>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin:var(--cv-space-1) 0 0 var(--cv-space-6);">
+                The first invoice is created now; the same line items are re-invoiced automatically each
+                cycle until you pause or cancel it.
+            </p>
+
+            <div id="recurring-options" style="display:<?= !empty($old['is_recurring']) ? 'grid' : 'none' ?>;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--cv-space-3);margin-top:var(--cv-space-3);">
+                <div class="cv-field">
+                    <label class="cv-label" for="invoice-cycle">Billing cycle</label>
+                    <select class="cv-select" name="billing_cycle" id="invoice-cycle">
+                        <?php foreach (($billingCycles ?? []) as $cycleKey => $cycleLabel): ?>
+                            <option value="<?= e($cycleKey) ?>" <?= ($old['billing_cycle'] ?? 'monthly') === $cycleKey ? 'selected' : '' ?>><?= e($cycleLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="cv-field">
+                    <label class="cv-label" for="invoice-next-due">Next invoice date</label>
+                    <input class="cv-input" type="date" name="next_due_date" id="invoice-next-due" value="<?= e((string) ($old['next_due_date'] ?? '')) ?>">
+                    <span style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">Leave blank for one cycle from today.</span>
+                </div>
+            </div>
+        </div>
+
+        <script nonce="<?= csp_nonce() ?>">
+            document.addEventListener('DOMContentLoaded', function () {
+                var toggle = document.getElementById('invoice-recurring');
+                var options = document.getElementById('recurring-options');
+                if (toggle && options) {
+                    toggle.addEventListener('change', function () {
+                        options.style.display = toggle.checked ? 'grid' : 'none';
+                    });
+                }
+            });
+        </script>
 
         <div style="border-top:1px solid var(--cv-border-default);padding-top:var(--cv-space-3);display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
             <button class="cv-btn cv-btn--primary" type="submit">Generate Invoice</button>

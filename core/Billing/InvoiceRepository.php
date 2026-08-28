@@ -528,15 +528,18 @@ final class InvoiceRepository
      *
      * @param array<int, array{description: string, amount: float}> $items
      */
-    public function createFromItems(int $clientId, array $items, ?int $currencyId, float $currencyRate, ?int $orderId = null, int $dueInDays = 0): int
+    public function createFromItems(int $clientId, array $items, ?int $currencyId, float $currencyRate, ?int $orderId = null, int $dueInDays = 0, ?int $recurringInvoiceId = null, ?string $dueDate = null): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $subtotal = round(array_sum(array_column($items, 'amount')), 2);
-        $dueDate = (new DateTimeImmutable("+{$dueInDays} days"))->format('Y-m-d');
+        // An explicit due date (used by recurring-invoice generation, where
+        // the invoice is due the day its cycle comes due) wins over the
+        // today + dueInDays default.
+        $dueDate ??= (new DateTimeImmutable("+{$dueInDays} days"))->format('Y-m-d');
 
         $invoiceId = (int) $this->db->insert(
-            'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$clientId, $orderId, 'unpaid', $subtotal, 0.0, $subtotal, $currencyId, $currencyRate, $dueDate, $now, $now]
+            'INSERT INTO invoices (client_id, order_id, recurring_invoice_id, status, subtotal, tax_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$clientId, $orderId, $recurringInvoiceId, 'unpaid', $subtotal, 0.0, $subtotal, $currencyId, $currencyRate, $dueDate, $now, $now]
         );
 
         foreach ($items as $item) {

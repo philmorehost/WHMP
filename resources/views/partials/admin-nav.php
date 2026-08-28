@@ -18,6 +18,7 @@ $groups = [
         '/admin/import/invoices' => 'Import Invoices',
         '/admin/import/transactions' => 'Import Transactions',
         '/admin/quotes' => 'Quotes',
+        '/admin/recurring-invoices' => 'Recurring Invoices',
         '/admin/credit-notes' => 'Credit Notes',
         '/admin/billable-items' => 'Billable Items',
         '/admin/gateways' => 'Payment Gateways',

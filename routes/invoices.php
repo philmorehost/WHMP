@@ -5,6 +5,7 @@ declare(strict_types=1);
 use CodeVault\Billing\AdminInvoiceController;
 use CodeVault\Billing\ClientInvoiceController;
 use CodeVault\Billing\PaymentCallbackController;
+use CodeVault\Billing\RecurringInvoiceController;
 
 /** @var CodeVault\Router $router */
 
@@ -31,6 +32,8 @@ $router->get('/admin/invoices', [AdminInvoiceController::class, 'index']);
 $router->get('/admin/invoices/create', [AdminInvoiceController::class, 'createForm']);
 $router->post('/admin/invoices/create', [AdminInvoiceController::class, 'store']);
 $router->post('/admin/invoices/bulk-cancel', [AdminInvoiceController::class, 'bulkCancel']);
+$router->get('/admin/recurring-invoices', [RecurringInvoiceController::class, 'index']);
+$router->post('/admin/recurring-invoices/{id}/status', [RecurringInvoiceController::class, 'setStatus']);
 $router->post('/admin/invoices/mark-zero-paid', [AdminInvoiceController::class, 'markZeroValuePaid']);
 $router->post('/admin/invoices/bulk-remind', [AdminInvoiceController::class, 'bulkSendReminders']);
 $router->get('/admin/invoices/{id}', [AdminInvoiceController::class, 'show']);
