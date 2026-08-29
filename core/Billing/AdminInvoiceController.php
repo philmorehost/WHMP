@@ -7,6 +7,8 @@ namespace CodeVault\Billing;
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Clients\ClientRepository;
+use CodeVault\Config;
+use CodeVault\Mail\EmailDispatcher;
 use CodeVault\Pdf\InvoicePdfBuilder;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -30,7 +32,9 @@ final class AdminInvoiceController
         private readonly SettingsRepository $settings,
         private readonly CurrencyRepository $currencies,
         private readonly InvoiceReminderService $reminders,
-        private readonly RecurringInvoiceService $recurringInvoices
+        private readonly RecurringInvoiceService $recurringInvoices,
+        private readonly EmailDispatcher $mail,
+        private readonly Config $config
     ) {
     }
 
@@ -124,6 +128,8 @@ final class AdminInvoiceController
                 'is_recurring' => false,
                 'billing_cycle' => 'monthly',
                 'next_due_date' => '',
+                'send_invoice_email' => true,
+                'send_receipt_email' => false,
             ],
         ]);
     }
@@ -200,6 +206,15 @@ final class AdminInvoiceController
 
         $isRecurring = (bool) $request->input('is_recurring', false);
 
+        // Whether to notify the client after creation — the admin decides per
+        // invoice if it's emailed to the client and/or a payment receipt is
+        // sent as well. Unchecked boxes aren't submitted, so both default to
+        // FALSE here (an absent checkbox means the admin turned it off); the
+        // create-form's first load shows invoice-email ON by default, but the
+        // controller only sends when the box was actually checked.
+        $sendInvoiceEmail = (bool) $request->input('send_invoice_email', false);
+        $sendReceiptEmail = (bool) $request->input('send_receipt_email', false);
+
         // A recurring invoice raises the first invoice now and auto-repeats
         // the same line items each billing cycle (RecurringInvoiceJob).
         if ($isRecurring) {
@@ -232,6 +247,8 @@ final class AdminInvoiceController
                 $request->ip()
             );
 
+            $this->notifyClientOnInvoice($client, (int) $result['invoice_id'], $sendInvoiceEmail, $sendReceiptEmail);
+
             return Response::redirect('/admin/recurring-invoices?created=' . $result['recurring_id']);
         }
 
@@ -254,7 +271,65 @@ final class AdminInvoiceController
             $request->ip()
         );
 
+        $this->notifyClientOnInvoice($client, $invoiceId, $sendInvoiceEmail, $sendReceiptEmail);
+
         return Response::redirect("/admin/invoices/{$invoiceId}");
+    }
+
+    /**
+     * Emails the client the invoice and/or a payment receipt, per the admin's
+     * choice on the Generate Invoice form. Best-effort — a mail failure must
+     * never undo an already-created invoice.
+     *
+     * @param array<string, mixed> $client
+     */
+    private function notifyClientOnInvoice(array $client, int $invoiceId, bool $sendInvoiceEmail, bool $sendReceiptEmail): void
+    {
+        if (!$sendInvoiceEmail && !$sendReceiptEmail) {
+            return;
+        }
+
+        $email = trim((string) ($client['email'] ?? ''));
+
+        if ($email === '') {
+            return;
+        }
+
+        try {
+            $invoice = $this->invoices->find($invoiceId);
+
+            if ($invoice === null) {
+                return;
+            }
+
+            $clientCurrency = $this->currency->resolveForClient($client);
+            $formattedTotal = $this->currency->formatDocument(
+                (float) $invoice['total'],
+                $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null,
+                (float) ($invoice['currency_rate'] ?? 1.0),
+                $clientCurrency
+            );
+
+            $variables = [
+                'first_name' => (string) ($client['first_name'] ?? ''),
+                'invoice_id' => (string) $invoiceId,
+                'invoice_total' => $formattedTotal,
+                'due_date' => (string) ($invoice['due_date'] ?? ''),
+                'paid_date' => (new \DateTimeImmutable())->format('Y-m-d'),
+                'invoice_url' => rtrim((string) $this->config->env('APP_URL', ''), '/') . "/client/invoices/{$invoiceId}",
+                'company_name' => brand_name(),
+            ];
+
+            if ($sendInvoiceEmail) {
+                $this->mail->sendTemplate('invoice_created', $email, $variables, (int) $client['id']);
+            }
+
+            if ($sendReceiptEmail) {
+                $this->mail->sendTemplate('payment_receipt', $email, $variables, (int) $client['id']);
+            }
+        } catch (\Throwable) {
+            // A failed notification must never undo the created invoice.
+        }
     }
 
     /**
@@ -472,6 +547,8 @@ final class AdminInvoiceController
                 'is_recurring' => (bool) $request->input('is_recurring', false),
                 'billing_cycle' => (string) $request->input('billing_cycle', 'monthly'),
                 'next_due_date' => (string) $request->input('next_due_date', ''),
+                'send_invoice_email' => (bool) $request->input('send_invoice_email', false),
+                'send_receipt_email' => (bool) $request->input('send_receipt_email', false),
             ],
         ]);
     }

@@ -2,7 +2,7 @@
 /** @var array<int, array<string, mixed>> $clients */
 /** @var string|null $error */
 /** @var array<string, string> $billingCycles */
-/** @var array{client_id: string|int, due_in_days: int, items: array<int, array{description: string, amount: string}>, is_recurring: bool, billing_cycle: string, next_due_date: string} $old */
+/** @var array{client_id: string|int, due_in_days: int, items: array<int, array{description: string, amount: string}>, is_recurring: bool, billing_cycle: string, next_due_date: string, send_invoice_email: bool, send_receipt_email: bool} $old */
 
 // Always render a few blank rows so there's something to type into; the
 // controller ignores rows left empty.
@@ -101,6 +101,23 @@ while (count($rows) < 3) {
                 }
             });
         </script>
+
+        <!-- Notifications: the admin decides whether the client is emailed the
+             invoice and/or a payment receipt when it's generated. -->
+        <div style="margin-bottom:var(--cv-space-3);padding:var(--cv-space-3);border:1px solid var(--cv-border-default);border-radius:8px;">
+            <h3 style="font-size:var(--cv-text-base);margin:0 0 var(--cv-space-2);">📧 Notify the client</h3>
+            <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;margin-bottom:var(--cv-space-2);">
+                <input type="checkbox" name="send_invoice_email" value="1" id="invoice-email-client" <?= !empty($old['send_invoice_email']) ? 'checked' : '' ?>>
+                Email the invoice to the client
+            </label>
+            <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                <input type="checkbox" name="send_receipt_email" value="1" id="invoice-email-receipt" <?= !empty($old['send_receipt_email']) ? 'checked' : '' ?>>
+                Also email a payment receipt to the client
+            </label>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin:var(--cv-space-1) 0 0 var(--cv-space-6);">
+                Uncheck both to create the invoice silently — you can still share it manually from the invoice page.
+            </p>
+        </div>
 
         <div style="border-top:1px solid var(--cv-border-default);padding-top:var(--cv-space-3);display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
             <button class="cv-btn cv-btn--primary" type="submit">Generate Invoice</button>
