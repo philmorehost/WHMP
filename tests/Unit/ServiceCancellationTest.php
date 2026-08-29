@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Tests\Unit;
 
+use CodeVault\Auth\AdminRepository;
 use CodeVault\Billing\CancellationRequestRepository;
 use CodeVault\Billing\CancellationCronJob;
 use CodeVault\Billing\InvoiceRepository;
@@ -36,6 +37,7 @@ final class ServiceCancellationTest extends DatabaseTestCase
     private int $clientId;
     private int $productId;
     private int $serverId;
+    private int $adminId;
 
     protected function setUp(): void
     {
@@ -64,11 +66,12 @@ final class ServiceCancellationTest extends DatabaseTestCase
             'first_name' => 'Cancel',
             'last_name' => 'Test',
         ]);
+        $this->adminId = (new AdminRepository($this->db))->create('ops', 'ops@example.test', 'secret123', 'Ops Admin', null);
 
         $productGroups = new ProductGroupRepository($this->db);
-        $groupId = $productGroups->create(['name' => 'Test Group']);
+        $groupId = $productGroups->create('Test Group', null);
 
-        $sgId = $this->serverGroups->create(['name' => 'Group 1']);
+        $sgId = $this->serverGroups->create('Group 1');
         $this->serverId = $this->servers->create([
             'server_group_id' => $sgId,
             'name' => 'Server 1',
@@ -113,23 +116,47 @@ final class ServiceCancellationTest extends DatabaseTestCase
 
     public function test_cron_processes_due_cancellation_requests(): void
     {
+        new \CodeVault\Kernel(dirname(__DIR__, 2));
+        $container = \CodeVault\Support\App::container();
+        $container->instance(\CodeVault\Database::class, $this->db);
+        $sink = [];
+        $container->instance(\CodeVault\Mail\Mailer::class, new class ($sink) implements \CodeVault\Mail\Mailer {
+            /** @param array<int, array{to: string, subject: string, html: string}> $sink */
+            public function __construct(private array &$sink)
+            {
+            }
+
+            public function send(string $to, string $subject, string $html): void
+            {
+                $this->sink[] = ['to' => $to, 'subject' => $subject, 'html' => $html];
+            }
+        });
+
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = (new DateTimeImmutable())->format('Y-m-d');
-        
+
         $serviceId = (int) $this->db->insert(
             'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, server_id, username, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [$this->clientId, $this->productId, 'VPS Plan A', 'monthly', 10.00, 'active', $today, $this->serverId, 'user123', $now, $now]
         );
 
-        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'No longer need it');
+        // A due-date request whose scheduled date has arrived.
+        $requestId = $this->cancellations->createRequest($serviceId, 'due_date', 'No longer need it', null, $today);
 
-        $cron = new CancellationCronJob($this->cancellations, $this->services, $this->provisioning, $this->activity);
-        $cron->handle();
+        $service = new \CodeVault\Billing\CancellationRequestService(
+            $this->cancellations,
+            $this->services,
+            $container->make(\CodeVault\Mail\EmailDispatcher::class),
+            $this->db
+        );
+        // Only APPROVED due-date requests are processed by the cron.
+        $approval = $service->approveCancellation($requestId, $this->adminId);
+        $this->assertTrue($approval['success']);
+        $this->assertSame('approved', $approval['status']);
 
-        $service = $this->services->find($serviceId);
-        $this->assertSame('cancelled', $service['status']);
+        (new CancellationCronJob($service))->handle();
 
-        $request = $this->cancellations->find($requestId);
-        $this->assertSame('processed', $request['status']);
+        $this->assertSame('cancelled', $this->services->find($serviceId)['status']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
     }
 }

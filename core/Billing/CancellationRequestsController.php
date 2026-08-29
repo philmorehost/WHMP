@@ -28,6 +28,7 @@ final class CancellationRequestsController
         $client = $this->clientGuard->currentClient();
         if (!$client) return Response::redirect('/client/login');
 
+
         $service = $this->services->find($id);
         if (!$service || (int) $service['client_id'] !== (int) $client['id']) {
             return Response::html('Service not found', 404);
@@ -54,34 +55,63 @@ final class CancellationRequestsController
     public function adminIndex(Request $request): Response
     {
         $admin = $this->adminGuard->current();
-        if (!$admin) return Response::redirect('/admin/login');
+        if (!$admin) return Response::redirect('/login');
 
         $status = (string) $request->query('status', 'pending');
-        $requests = $this->cancellations->findByStatus($status);
 
-        return Response::html($this->view->render('pages.admin-cancellations', [
+        if (!in_array($status, ['pending', 'approved', 'rejected', 'completed'], true)) {
+            $status = 'pending';
+        }
+
+        $requests = $this->cancellations->findByStatus($status);
+        $notice = (string) $request->query('notice', '');
+
+        $content = $this->view->render('pages.admin-cancellations', [
             'requests' => $requests,
-            'status' => $status
+            'status' => $status,
+            'counts' => $this->cancellations->counts(),
+            'notice' => $notice,
+        ]);
+
+        return Response::html($this->view->render('layouts.admin', [
+            'title' => 'CodeVault Admin — Cancellations',
+            'content' => $content,
         ]));
     }
 
     public function adminApprove(Request $request, array $params): Response
     {
         $admin = $this->adminGuard->current();
-        if (!$admin) return Response::redirect('/admin/login');
+        if (!$admin) return Response::redirect('/login');
 
         $id = (int) $params['id'];
         $notes = (string) $request->input('notes', '');
 
-        $this->service->approveCancellation($id, (int) $admin['id'], $notes);
+        $result = $this->service->approveCancellation($id, (int) $admin['id'], $notes);
 
-        return Response::redirect('/admin/cancellations?notice=approved');
+        $status = $result['status'] ?? 'approved';
+        $message = urlencode($result['message'] ?? 'Cancellation approved.');
+
+        return Response::redirect("/admin/cancellations?status={$status}&notice={$message}");
+    }
+
+    /** Explicitly mark an approved request completed (service already cancelled). */
+    public function adminComplete(Request $request, array $params): Response
+    {
+        $admin = $this->adminGuard->current();
+        if (!$admin) return Response::redirect('/login');
+
+        $result = $this->service->markCompleted((int) $params['id']);
+
+        return Response::redirect(
+            '/admin/cancellations?status=' . ($result['status'] ?? 'completed') . '&notice=' . urlencode($result['message'] ?? 'Marked completed.')
+        );
     }
 
     public function adminReject(Request $request, array $params): Response
     {
         $admin = $this->adminGuard->current();
-        if (!$admin) return Response::redirect('/admin/login');
+        if (!$admin) return Response::redirect('/login');
 
         $id = (int) $params['id'];
         $notes = trim((string) $request->input('notes', ''));
@@ -92,6 +122,6 @@ final class CancellationRequestsController
 
         $this->service->rejectCancellation($id, (int) $admin['id'], $notes);
 
-        return Response::redirect('/admin/cancellations?notice=rejected');
+        return Response::redirect('/admin/cancellations?status=rejected&notice=' . urlencode('Cancellation request rejected.'));
     }
 }

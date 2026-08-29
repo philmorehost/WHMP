@@ -24,6 +24,7 @@ $router->post('/admin/services/{id}/status', [ServiceController::class, 'setStat
 
 $router->get('/admin/cancellations', [CancellationRequestsController::class, 'adminIndex']);
 $router->post('/admin/cancellations/{id}/approve', [CancellationRequestsController::class, 'adminApprove']);
+$router->post('/admin/cancellations/{id}/complete', [CancellationRequestsController::class, 'adminComplete']);
 $router->post('/admin/cancellations/{id}/reject', [CancellationRequestsController::class, 'adminReject']);
 
 $router->post('/client/services/{id}/cancel-request', [CancellationRequestsController::class, 'clientCreate']);

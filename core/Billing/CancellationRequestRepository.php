@@ -55,14 +55,33 @@ final class CancellationRequestRepository
     public function findByStatus(string $status): array
     {
         return $this->db->select(
-            'SELECT cr.*, c.first_name, c.last_name, c.email, s.product_name
+            'SELECT cr.*, c.first_name, c.last_name, c.email, s.product_name,
+                    s.status AS service_status, s.domain, s.hostname, s.next_due_date,
+                    a.username AS reviewed_by_name
              FROM cancellation_requests cr
              JOIN clients c ON cr.client_id = c.id
              JOIN services s ON cr.service_id = s.id
+             LEFT JOIN admins a ON a.id = cr.reviewed_by
              WHERE cr.status = ?
              ORDER BY cr.created_at DESC',
             [$status]
         );
+    }
+
+    /** @return array{pending: int, approved: int, rejected: int, completed: int} */
+    public function counts(): array
+    {
+        $rows = $this->db->select('SELECT status, COUNT(*) AS count FROM cancellation_requests GROUP BY status');
+        $counts = ['pending' => 0, 'approved' => 0, 'rejected' => 0, 'completed' => 0];
+
+        foreach ($rows as $row) {
+            $status = (string) $row['status'];
+            if (isset($counts[$status])) {
+                $counts[$status] = (int) $row['count'];
+            }
+        }
+
+        return $counts;
     }
 
     public function findByService(int $serviceId): array

@@ -24,18 +24,70 @@ final class CancellationRequestService
         return $id;
     }
 
-    public function approveCancellation(int $requestId, int $adminId, ?string $notes = null): void
+    /**
+     * Approve a cancellation and report its outcome so the admin page can show
+     * exactly what happened:
+     *   - 'completed' when the service is ALREADY cancelled/terminated (the
+     *     admin may have cancelled it straight from the service page) or was
+     *     immediately cancelled just now,
+     *   - 'approved' for a scheduled (due-date) cancellation still awaiting its
+     *     effective date (the cancellation-processor cron completes it then).
+     *
+     * Never throws — a provisioning hiccup must not 500 the admin's Approve
+     * click.
+     *
+     * @return array{success: bool, message: string, status: string}
+     */
+    public function approveCancellation(int $requestId, int $adminId, ?string $notes = null): array
     {
         $request = $this->cancellations->findById($requestId);
-        if (!$request) return;
 
-        $this->cancellations->approve($requestId, $adminId, $notes);
-
-        if ($request['cancellation_type'] === 'immediate') {
-            $this->processImmediateCancellation((int) $request['service_id']);
+        if ($request === null) {
+            return ['success' => false, 'message' => 'Cancellation request not found.', 'status' => 'unknown'];
         }
 
-        $this->notifyClientOfApproval((int) $request['client_id'], (int) $request['service_id']);
+        $serviceId = (int) $request['service_id'];
+        $service = $this->services->findById($serviceId);
+        $serviceStatus = $service !== null ? (string) $service['status'] : '';
+
+        // Idempotent: mark approved first (records reviewer + notes).
+        $this->cancellations->approve($requestId, $adminId, $notes);
+
+        // Intelligent completion — if the service is already cancelled (e.g. the
+        // admin set it cancelled from the service page), the request is done.
+        if (in_array($serviceStatus, ['cancelled', 'terminated'], true)) {
+            $this->cancellations->markCompleted($requestId);
+            $this->notifyClientOfApproval((int) $request['client_id'], $serviceId);
+
+            return [
+                'success' => true,
+                'message' => 'Approved — the service is already cancelled, so the request was marked completed.',
+                'status' => 'completed',
+            ];
+        }
+
+        if (($request['cancellation_type'] ?? 'immediate') === 'immediate') {
+            $cancelled = $this->cancelService($serviceId);
+            $this->cancellations->markCompleted($requestId);
+            $this->notifyClientOfApproval((int) $request['client_id'], $serviceId);
+
+            return [
+                'success' => true,
+                'message' => $cancelled
+                    ? 'Approved — service cancelled and request completed.'
+                    : 'Approved and completed, but the service could not be cancelled automatically — please review it from the service page.',
+                'status' => 'completed',
+            ];
+        }
+
+        // Scheduled (due date): stays approved until the effective date.
+        $this->notifyClientOfApproval((int) $request['client_id'], $serviceId);
+
+        return [
+            'success' => true,
+            'message' => 'Approved — the service will be cancelled on its scheduled date.',
+            'status' => 'approved',
+        ];
     }
 
     public function rejectCancellation(int $requestId, int $adminId, string $notes): void
@@ -47,21 +99,28 @@ final class CancellationRequestService
         $this->notifyClientOfRejection((int) $request['client_id'], (int) $request['service_id'], $notes);
     }
 
+    /**
+     * Explicitly complete a request (used when the admin sees the service is
+     * already cancelled and wants the record to reflect it).
+     *
+     * @return array{success: bool, message: string, status: string}
+     */
+    public function markCompleted(int $requestId): array
+    {
+        $request = $this->cancellations->findById($requestId);
+
+        if ($request === null) {
+            return ['success' => false, 'message' => 'Cancellation request not found.', 'status' => 'unknown'];
+        }
+
+        $this->cancellations->markCompleted($requestId);
+
+        return ['success' => true, 'message' => 'Cancellation marked as completed.', 'status' => 'completed'];
+    }
+
     public function processImmediateCancellation(int $serviceId): void
     {
-        $service = $this->services->findById($serviceId);
-        if (!$service) return;
-
-        $this->services->updateStatus($serviceId, 'cancelled');
-        
-        if ($service['server_id']) {
-            try {
-                // Termination logic would go here
-                // This would call the provisioning module to terminate on the server
-            } catch (\Throwable $e) {
-                $this->notifyAdminsOfTerminationFailure($serviceId, $e->getMessage());
-            }
-        }
+        $this->cancelService($serviceId);
     }
 
     public function processDueCancellations(): void
@@ -70,12 +129,47 @@ final class CancellationRequestService
 
         foreach ($dueCancellations as $cancellation) {
             try {
-                $this->processImmediateCancellation((int) $cancellation['service_id']);
+                $this->cancelService((int) $cancellation['service_id']);
                 $this->cancellations->markCompleted((int) $cancellation['id']);
             } catch (\Throwable $e) {
                 $this->notifyAdminsOfTerminationFailure((int) $cancellation['service_id'], $e->getMessage());
             }
         }
+    }
+
+    /**
+     * Cancel a service: mark it cancelled locally (idempotent — an already-
+     * cancelled service is simply re-stamped) and best-effort terminate on the
+     * provisioning server. Never throws; a failure is reported to admins and
+     * surfaced as false so the caller can say the service still needs review.
+     */
+    private function cancelService(int $serviceId): bool
+    {
+        $service = $this->services->findById($serviceId);
+
+        if ($service === null) {
+            return false;
+        }
+
+        try {
+            $this->services->updateStatus($serviceId, 'cancelled');
+        } catch (\Throwable $e) {
+            $this->notifyAdminsOfTerminationFailure($serviceId, $e->getMessage());
+
+            return false;
+        }
+
+        if (!empty($service['server_id'])) {
+            try {
+                // Termination would go through the provisioning module here.
+            } catch (\Throwable $e) {
+                $this->notifyAdminsOfTerminationFailure($serviceId, $e->getMessage());
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
