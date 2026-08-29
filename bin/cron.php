@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+use CodeVault\Ai\AiSystemHealthJob;
 use CodeVault\Backup\BackupCronJob;
 use CodeVault\Cart\AbandonedCartJob;
 use CodeVault\Config;
@@ -104,6 +105,18 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     // Registered last so its 24h window already includes everything the jobs
     // above just recorded on this tick.
     $scheduler->register($kernel->container->make(CronActivityReportJob::class));
+
+    // Weekly AI-assisted system health scan: gathers cron + PHP errors from
+    // the last 7 days, has the AI analyse them and propose an implementation
+    // plan, and emails the admin. Fails open to the raw error log if the AI
+    // key is missing.
+    $scheduler->register($kernel->container->make(AiSystemHealthJob::class));
+
+    // Weekly AI-assisted system health scan: gathers cron + PHP errors from
+    // the last 7 days, has the AI analyse them and propose an implementation
+    // plan, and emails the admin. Fails open to the raw error log if the AI
+    // key is missing.
+    $scheduler->register($kernel->container->make(AiSystemHealthJob::class));
 
     // Reporting sink + the admin's configured daily automation time. Both are
     // attached here rather than injected, so the scheduler still works on a
