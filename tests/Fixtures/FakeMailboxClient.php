@@ -36,4 +36,13 @@ final class FakeMailboxClient implements MailboxClient
     {
         $this->markedSeen[] = $uid;
     }
+
+    /** @var array{ok: bool, message: string}|null */
+    public ?array $testResult = null;
+
+    /** @param array{host: string, port: int, encryption: string, username: string, password: string, validate_cert?: bool} $config */
+    public function testConnection(array $config): array
+    {
+        return $this->testResult ?? ['ok' => true, 'message' => 'Connected and authenticated successfully.'];
+    }
 }

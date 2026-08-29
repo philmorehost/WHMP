@@ -16,7 +16,8 @@ final class MailPipingSettingsController
     public function __construct(
         private readonly AuthGuard $guard,
         private readonly View $view,
-        private readonly SettingsRepository $settings
+        private readonly SettingsRepository $settings,
+        private readonly MailboxClient $mailbox
     ) {
     }
 
@@ -32,6 +33,7 @@ final class MailPipingSettingsController
             'port' => $this->settings->get('mail_piping.port', '993'),
             'encryption' => $this->settings->get('mail_piping.encryption', 'ssl'),
             'username' => $this->settings->get('mail_piping.username', ''),
+            'validate_cert' => $this->settings->get('mail_piping.validate_cert', '0') === '1',
         ]);
     }
 
@@ -46,6 +48,7 @@ final class MailPipingSettingsController
         $this->settings->set('mail_piping.port', trim((string) $request->input('port', '993')));
         $this->settings->set('mail_piping.encryption', trim((string) $request->input('encryption', 'ssl')));
         $this->settings->set('mail_piping.username', trim((string) $request->input('username', '')));
+        $this->settings->set('mail_piping.validate_cert', (string) $request->input('validate_cert', '') === '1' ? '1' : '0');
 
         $password = (string) $request->input('password', '');
 
@@ -54,6 +57,36 @@ final class MailPipingSettingsController
         }
 
         return Response::redirect('/admin/mail-piping');
+    }
+
+    /**
+     * AJAX endpoint for the "Test connection" button. Uses the currently
+     * SAVED settings so the admin can validate what the cron job will
+     * actually use (password included, since it is stored on save).
+     */
+    public function test(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $config = [
+            'host' => (string) $this->settings->get('mail_piping.host', ''),
+            'port' => (int) $this->settings->get('mail_piping.port', '993'),
+            'encryption' => (string) $this->settings->get('mail_piping.encryption', 'ssl'),
+            'username' => (string) $this->settings->get('mail_piping.username', ''),
+            'password' => (string) $this->settings->get('mail_piping.password', ''),
+            'validate_cert' => $this->settings->get('mail_piping.validate_cert', '0') === '1',
+        ];
+
+        if ($config['host'] === '' || $config['username'] === '' || $config['password'] === '') {
+            return Response::json([
+                'success' => false,
+                'message' => 'Save the mailbox details first — host, username and password are all required.',
+            ], 422);
+        }
+
+        return Response::json($this->mailbox->testConnection($config));
     }
 
     private function requirePermission(): ?Response

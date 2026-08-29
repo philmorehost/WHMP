@@ -64,7 +64,7 @@ final class MailPipingJob implements CronJob
         }
     }
 
-    /** @return array{host: string, port: int, encryption: string, username: string, password: string} */
+    /** @return array{host: string, port: int, encryption: string, username: string, password: string, validate_cert: bool} */
     private function config(): array
     {
         return [
@@ -73,6 +73,7 @@ final class MailPipingJob implements CronJob
             'encryption' => (string) $this->settings->get('mail_piping.encryption', 'ssl'),
             'username' => (string) $this->settings->get('mail_piping.username', ''),
             'password' => (string) $this->settings->get('mail_piping.password', ''),
+            'validate_cert' => $this->settings->get('mail_piping.validate_cert', '0') === '1',
         ];
     }
 

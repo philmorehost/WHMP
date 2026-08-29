@@ -4,6 +4,7 @@
 /** @var string $port */
 /** @var string $encryption */
 /** @var string $username */
+/** @var bool $validate_cert */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Mail Piping</h1>
@@ -40,6 +41,23 @@
             <label class="cv-label">Password (leave blank to keep current)</label>
             <input class="cv-input" type="password" name="password">
         </div>
+        <div class="cv-field">
+            <label style="display:flex;align-items:center;gap:var(--cv-space-1);">
+                <input type="checkbox" name="validate_cert" value="1" <?= $validate_cert ? 'checked' : '' ?>> Validate SSL certificate
+            </label>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin:4px 0 0;">
+                Leave unchecked on cPanel/shared hosting — many mail servers present an untrusted certificate, which makes IMAP report
+                "[CLOSED] IMAP connection broken (authenticate)" even with correct credentials. Unchecking skips certificate validation.
+            </p>
+        </div>
         <button class="cv-btn" type="submit">Save</button>
     </form>
+
+    <hr style="border:none;border-top:1px solid var(--cv-border-default);margin:var(--cv-space-4) 0;">
+
+    <div>
+        <button class="cv-btn" type="button" id="mailpiping-test" data-token="<?= e(csrf_token()) ?>">🔌 Test Connection</button>
+        <span id="mailpiping-test-result" style="margin-left:var(--cv-space-2);font-size:var(--cv-text-sm);"></span>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:6px;">Tests the <em>saved</em> settings — save the form first, then click Test.</p>
+    </div>
 </div>

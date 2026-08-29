@@ -2962,9 +2962,11 @@
             body.set('_token', smtpTestButton.getAttribute('data-token') || '');
             body.set('to', to);
 
+            // Explicit Content-Type — see the mail-piping test button: without
+            // it PHP never populates $_POST and the CSRF token arrives empty.
             fetch('/admin/settings/general/test-send', {
                 method: 'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
                 body: body.toString(),
             })
             .then(function (r) { return r.json(); })
@@ -2984,6 +2986,52 @@
             .then(function () {
                 smtpTestButton.disabled = false;
                 smtpTestButton.textContent = '📨 Send Test Email';
+            });
+        });
+    }
+
+    // Mail Piping "Test Connection": posts to /admin/mail-piping/test and
+    // surfaces the IMAP auth/connect result inline so an admin can confirm the
+    // mailbox settings (especially the [CLOSED] authenticate failure) without
+    // waiting for the next 5-minute cron sweep.
+    var mailPipingTestButton = document.getElementById('mailpiping-test');
+    if (mailPipingTestButton) {
+        var mailPipingTestResult = document.getElementById('mailpiping-test-result');
+
+        mailPipingTestButton.addEventListener('click', function() {
+            mailPipingTestButton.disabled = true;
+            mailPipingTestButton.textContent = 'Testing…';
+            mailPipingTestResult.textContent = '';
+            mailPipingTestResult.style.color = '';
+
+            var body = new URLSearchParams();
+            body.set('_token', mailPipingTestButton.getAttribute('data-token') || '');
+
+            // Explicit Content-Type: some browsers don't auto-set it for a
+            // URLSearchParams body, and without it PHP never populates $_POST
+            // so the CSRF token above arrives empty (403).
+            fetch('/admin/mail-piping/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+                body: body.toString(),
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data || !data.ok) {
+                    mailPipingTestResult.textContent = (data && data.message) || 'Connection test failed.';
+                    mailPipingTestResult.style.color = 'var(--cv-danger, #dc2626)';
+                    return;
+                }
+                mailPipingTestResult.textContent = data.message || 'Connected and authenticated successfully.';
+                mailPipingTestResult.style.color = '#16a34a';
+            })
+            .catch(function () {
+                mailPipingTestResult.textContent = 'Could not reach the server to run the test.';
+                mailPipingTestResult.style.color = 'var(--cv-danger, #dc2626)';
+            })
+            .then(function () {
+                mailPipingTestButton.disabled = false;
+                mailPipingTestButton.textContent = '🔌 Test Connection';
             });
         });
     }

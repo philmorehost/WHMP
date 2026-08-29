@@ -12,6 +12,15 @@ use RuntimeException;
  * error rather than a fatal "undefined function" when it's missing.
  * MailPipingJob's cron run catches per-job errors, so a missing
  * extension shows up as a failed job, not a crashed cron process.
+ *
+ * Connection flags explained:
+ *  - `/norsh` — never fall back to an rsh/ssh subprocess for the connection.
+ *  - `/novalidate-cert` — cPanel/shared-hosting mail servers commonly present
+ *    a certificate the server's CA bundle does not trust. Without this flag
+ *    the TLS handshake fails silently and IMAP reports "[CLOSED] IMAP
+ *    connection broken (authenticate)" even when the credentials are correct.
+ *    It is applied unless the admin explicitly opts in to strict validation
+ *    (`validate_cert = true`).
  */
 final class ImapMailboxClient implements MailboxClient
 {
@@ -49,24 +58,73 @@ final class ImapMailboxClient implements MailboxClient
         }
     }
 
-    /** @param array{host: string, port: int, encryption: string, username: string, password: string} $config */
-    private function connect(array $config): \IMAP\Connection
+    public function testConnection(array $config): array
     {
-        if (!extension_loaded('imap')) {
-            throw new RuntimeException('The PHP imap extension is not installed or enabled.');
-        }
+        try {
+            $stream = $this->connect($config);
+            imap_close($stream);
 
+            return ['ok' => true, 'message' => 'Connected and authenticated successfully.'];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * The mailbox connection string, exposed separately so the flag-building
+     * logic is unit-testable without the (optional) imap extension.
+     *
+     * @param array{host: string, port: int, encryption: string, username: string, password: string, validate_cert?: bool} $config
+     */
+    public static function mailboxString(array $config): string
+    {
         $flags = match ($config['encryption']) {
             'ssl' => '/imap/ssl',
             'tls' => '/imap/tls',
             default => '/imap/notls',
         };
 
-        $mailbox = "{{$config['host']}:{$config['port']}{$flags}}INBOX";
-        $stream = imap_open($mailbox, $config['username'], $config['password']);
+        if (empty($config['validate_cert'])) {
+            $flags .= '/novalidate-cert';
+        }
+
+        return "{{$config['host']}:{$config['port']}{$flags}/norsh}INBOX";
+    }
+
+    /** @param array{host: string, port: int, encryption: string, username: string, password: string, validate_cert?: bool} $config */
+    private function connect(array $config): \IMAP\Connection
+    {
+        if (!extension_loaded('imap')) {
+            throw new RuntimeException('The PHP imap extension is not installed or enabled.');
+        }
+
+        $mailbox = self::mailboxString($config);
+
+        // One retry: "[CLOSED] IMAP connection broken (authenticate)" is
+        // frequently a transient TLS/socket hiccup rather than bad
+        // credentials, so reconnect once after a short pause before failing.
+        $attempts = 0;
+        $stream = false;
+        $lastError = '';
+
+        while ($stream === false && $attempts < 2) {
+            $attempts++;
+            $stream = @imap_open($mailbox, $config['username'], $config['password']);
+            $lastError = (string) (imap_last_error() ?: '');
+
+            if ($stream === false && $attempts < 2) {
+                usleep(250000);
+            }
+        }
 
         if ($stream === false) {
-            throw new RuntimeException('Could not connect to mailbox: ' . imap_last_error());
+            throw new RuntimeException(sprintf(
+                'Could not connect to mailbox %s:%d as "%s": %s',
+                $config['host'],
+                $config['port'],
+                $config['username'],
+                $lastError !== '' ? $lastError : 'unknown IMAP error'
+            ));
         }
 
         return $stream;

@@ -62,6 +62,7 @@ $router->get('/status', [PublicStatusController::class, 'index']);
 
 $router->get('/admin/mail-piping', [MailPipingSettingsController::class, 'index']);
 $router->post('/admin/mail-piping', [MailPipingSettingsController::class, 'store']);
+$router->post('/admin/mail-piping/test', [MailPipingSettingsController::class, 'test']);
 
 $router->get('/client/tickets', [ClientTicketController::class, 'index']);
 $router->get('/client/tickets/create', [ClientTicketController::class, 'create']);

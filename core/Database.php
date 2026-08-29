@@ -31,16 +31,31 @@ class Database
         if ($this->pdo === null) {
             $dsn = "mysql:host={$this->host};port={$this->port};dbname={$this->database};charset={$this->charset}";
 
-            try {
-                $this->pdo = new PDO($dsn, $this->username, $this->password, [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false,
-                ]);
-            } catch (\PDOException $e) {
-                // Log connection details for debugging
-                error_log("Database connection failed: host={$this->host}, port={$this->port}, database={$this->database}, user={$this->username}");
-                throw $e;
+            // MySQL restarts / brief outages should not instantly fatal the
+            // whole request (that produced repeated "Can't connect to local
+            // MySQL server through socket ... (111)" outages). Retry a couple
+            // of times with short backoff; a genuine outage still surfaces as
+            // a PDOException (logged), just after a ~600ms grace period.
+            $attempts = 0;
+
+            while ($this->pdo === null) {
+                try {
+                    $this->pdo = new PDO($dsn, $this->username, $this->password, [
+                        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                        PDO::ATTR_EMULATE_PREPARES => false,
+                    ]);
+                } catch (\PDOException $e) {
+                    $attempts++;
+
+                    if ($attempts >= 3) {
+                        // Log connection details for debugging
+                        error_log("Database connection failed: host={$this->host}, port={$this->port}, database={$this->database}, user={$this->username}");
+                        throw $e;
+                    }
+
+                    usleep(200000 * $attempts);
+                }
             }
         }
 
