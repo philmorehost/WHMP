@@ -127,6 +127,33 @@ final class OrderRepository
         );
     }
 
+    /** @return array<string, mixed>|null */
+    public function findById(int $id): ?array
+    {
+        return $this->find($id);
+    }
+
+    /**
+     * A client's own orders (newest first) — powers the client "My Orders"
+     * page where a pending/ongoing order can be cancelled from the portal.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function forClient(int $clientId): array
+    {
+        return $this->db->select(
+            <<<'SQL'
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.code AS currency_code, cu.symbol AS currency_symbol
+            FROM orders o
+            JOIN clients c ON c.id = o.client_id
+            LEFT JOIN currencies cu ON cu.id = COALESCE(o.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
+            WHERE o.client_id = ?
+            ORDER BY o.id DESC
+            SQL,
+            [$clientId]
+        );
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function items(int $orderId): array
     {

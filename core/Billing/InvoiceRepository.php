@@ -20,6 +20,22 @@ final class InvoiceRepository
         return $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$id]);
     }
 
+    /** @return array<string, mixed>|null */
+    public function findById(int $id): ?array
+    {
+        return $this->find($id);
+    }
+
+    /**
+     * The invoice an order raised (orders have at most one invoice).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findByOrder(int $orderId): ?array
+    {
+        return $this->db->selectOne('SELECT * FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$orderId]);
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function items(int $invoiceId): array
     {

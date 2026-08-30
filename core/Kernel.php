@@ -592,7 +592,8 @@ class Kernel
             return new OrderCancellationService(
                 $c->make(OrderRepository::class),
                 $c->make(EmailDispatcher::class),
-                $c->make(Database::class)
+                $c->make(Database::class),
+                $c->make(InvoiceRepository::class)
             );
         });
 
@@ -792,7 +793,10 @@ class Kernel
                 $c->make(CancellationRequestRepository::class),
                 $c->make(ServiceRepository::class),
                 $c->make(EmailDispatcher::class),
-                $c->make(Database::class)
+                $c->make(Database::class),
+                $c->make(InvoiceRepository::class),
+                $c->make(ServerRepository::class),
+                $c->make(ProvisioningService::class)
             );
         });
 
@@ -1320,9 +1324,20 @@ class Kernel
                         $client = $this->container->make(\CodeVault\Clients\ClientRepository::class)->find((int) $invoice['client_id']);
                         $adminRepo = $this->container->make(\CodeVault\Auth\AdminRepository::class);
                         $dispatcher = $this->container->make(\CodeVault\Mail\EmailDispatcher::class);
+                        $currencyService = $this->container->make(\CodeVault\Billing\CurrencyService::class);
 
                         $clientName = $client ? trim(($client['first_name'] ?? '') . ' ' . ($client['last_name'] ?? '')) : 'Client';
                         $clientEmail = $client['email'] ?? '';
+
+                        // Format the invoice total in the client's actual
+                        // currency (locked currency, then client preference)
+                        // so the admin email never reports a bare "$" figure.
+                        $formattedTotal = $currencyService->formatDocument(
+                            (float) $invoice['total'],
+                            $invoice['currency_id'] !== null ? (int) $invoice['currency_id'] : null,
+                            (float) ($invoice['currency_rate'] ?? 1.0),
+                            $client !== null ? $currencyService->resolveForClient($client) : null
+                        );
 
                         foreach ($adminRepo->all() as $admin) {
                             if (!empty($admin['email'])) {
@@ -1330,7 +1345,7 @@ class Kernel
                                     'order_id' => (string) $orderId,
                                     'client_name' => $clientName,
                                     'client_email' => $clientEmail,
-                                    'order_total' => number_format((float) $invoice['total'], 2),
+                                    'order_total' => $formattedTotal,
                                     'company_name' => 'CodeVault',
                                 ]);
                             }

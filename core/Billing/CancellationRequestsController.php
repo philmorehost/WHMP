@@ -41,12 +41,12 @@ final class CancellationRequestsController
         }
         $cancelDate = (string) $request->input('cancel_date', '');
 
-        $this->service->requestCancellation(
+        $this->service->clientRequestsCancellation(
             $id,
             (int) $client['id'],
             $type,
             $reason,
-            $type === 'due_date' ? $cancelDate : null
+            $type === 'due_date' && $cancelDate !== '' ? $cancelDate : null
         );
 
         return Response::redirect("/client/services/{$id}?msg=" . urlencode("Cancellation request submitted successfully."));

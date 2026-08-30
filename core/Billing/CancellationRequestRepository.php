@@ -14,10 +14,25 @@ final class CancellationRequestRepository
 
     public function create(int $serviceId, int $clientId, string $type, string $reason, ?string $cancelDate = null): int
     {
+        // Normalise the caller's mode into the stored enum. `cancellation_type`
+        // is ('immediate','due_date'); 'end_of_period' is an end-of-term
+        // request and is stored as a due_date cancellation at the end of the
+        // current billing period. The caller's raw mode is preserved in the
+        // separate `type` column.
+        //
+        // (Also fixes a long-standing bind-order bug: the VALUES list used to
+        // be [$type, $reason, $cancelDate] against columns (cancellation_type,
+        // cancel_date, reason), so the reason landed in cancel_date and the
+        // date landed in reason.)
+        $cancellationType = $type === 'immediate' ? 'immediate' : 'due_date';
+        // The separate `type` column is enum ('immediate','end_of_period') —
+        // normalise the caller's 'due_date' into that vocabulary too.
+        $typeColumn = $type === 'immediate' ? 'immediate' : 'end_of_period';
+
         return (int) $this->db->insert(
-            'INSERT INTO cancellation_requests (service_id, client_id, cancellation_type, cancel_date, reason, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
-            [$serviceId, $clientId, $type, $reason, $cancelDate]
+            'INSERT INTO cancellation_requests (service_id, client_id, cancellation_type, type, cancel_date, reason, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
+            [$serviceId, $clientId, $cancellationType, $typeColumn, $cancelDate, $reason]
         );
     }
 

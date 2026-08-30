@@ -6,22 +6,84 @@ namespace CodeVault\Billing;
 
 use CodeVault\Database;
 use CodeVault\Mail\EmailDispatcher;
+use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Provisioning\ServerRepository;
 
+/**
+ * Owns every cancellation path — client self-serve cancel, admin approval of
+ * a request, and the cron's end-of-period sweep — so the rules are enforced
+ * in one place:
+ *
+ *  - Cancelling a service cancels its unpaid invoices (the current invoice on
+ *    an immediate cancel; the renewal invoice on an end-of-period request).
+ *  - Shared-hosting control panels (cPanel/CyberPanel) are terminated on the
+ *    server via the provisioning module — immediately for an immediate
+ *    cancel, or when the end-of-period date arrives.
+ *  - VPS / dedicated servers have no API termination for now: the service is
+ *    marked cancelled per the mode and the client immediately stops seeing
+ *    its IPs/management in the portal.
+ *  - Every completed cancellation emails the admin a full report with the
+ *    service details.
+ */
 final class CancellationRequestService
 {
+    /** Control-panel modules that support real server-side termination. */
+    private const TERMINATABLE_MODULES = ['cpanel', 'cyberpanel'];
+
     public function __construct(
         private readonly CancellationRequestRepository $cancellations,
         private readonly ServiceRepository $services,
         private readonly EmailDispatcher $mail,
-        private readonly Database $db
+        private readonly Database $db,
+        private readonly InvoiceRepository $invoices,
+        private readonly ServerRepository $servers,
+        private readonly ProvisioningService $provisioning
     ) {
+    }
+
+    /**
+     * Client-side cancellation entry point.
+     *
+     *  - immediate → cancels the service now (terminating the server account
+     *    when the module supports it), cancels the unpaid invoices, notifies,
+     *    and returns 0 (no pending request is recorded for an instant cancel).
+     *  - due_date / end_of_period → records a pending request whose
+     *    cancellation_type is 'due_date' at the end of the current billing
+     *    period (or an explicit date), and cancels the renewal invoices so the
+     *    client is not billed again. The admin approves; the cron terminates
+     *    at the date.
+     *
+     * @return int the request id, or 0 when the cancellation was immediate
+     */
+    public function clientRequestsCancellation(int $serviceId, int $clientId, string $type, string $reason, ?string $cancelDate = null): int
+    {
+        $service = $this->services->findById($serviceId);
+
+        // Whichever mode, stop billing: cancel the service's unpaid invoices
+        // (current invoice for immediate, renewal invoice for end-of-period).
+        $this->invoices->cancelUnpaidForService($serviceId);
+
+        if ($type === 'immediate') {
+            $this->cancelService($serviceId);
+            $this->notifyClientOfApproval($clientId, $serviceId);
+            $this->notifyAdminsOfCancellationCompleted($serviceId, 'Immediate', 'completed', $reason);
+
+            return 0;
+        }
+
+        $effectiveDate = $cancelDate !== null && $cancelDate !== ''
+            ? $cancelDate
+            : (string) ($service['next_due_date'] ?? '');
+
+        $id = $this->cancellations->create($serviceId, $clientId, 'due_date', $reason, $effectiveDate);
+        $this->notifyAdminsOfCancellationRequest($serviceId, $id, 'Scheduled', $reason);
+
+        return $id;
     }
 
     public function requestCancellation(int $serviceId, int $clientId, string $type, string $reason, ?string $cancelDate = null): int
     {
-        $id = $this->cancellations->create($serviceId, $clientId, $type, $reason, $cancelDate);
-        $this->notifyAdminsOfCancellationRequest($serviceId, $id, $type, $reason);
-        return $id;
+        return $this->clientRequestsCancellation($serviceId, $clientId, $type, $reason, $cancelDate);
     }
 
     /**
@@ -49,15 +111,21 @@ final class CancellationRequestService
         $serviceId = (int) $request['service_id'];
         $service = $this->services->findById($serviceId);
         $serviceStatus = $service !== null ? (string) $service['status'] : '';
+        $clientId = (int) ($request['client_id'] ?? 0);
 
         // Idempotent: mark approved first (records reviewer + notes).
         $this->cancellations->approve($requestId, $adminId, $notes);
+
+        // Billing stops regardless of the mode — cancel the service's unpaid
+        // invoices (the renewal invoice for an end-of-period cancellation).
+        $this->invoices->cancelUnpaidForService($serviceId);
 
         // Intelligent completion — if the service is already cancelled (e.g. the
         // admin set it cancelled from the service page), the request is done.
         if (in_array($serviceStatus, ['cancelled', 'terminated'], true)) {
             $this->cancellations->markCompleted($requestId);
-            $this->notifyClientOfApproval((int) $request['client_id'], $serviceId);
+            $this->notifyClientOfApproval($clientId, $serviceId);
+            $this->notifyAdminsOfCancellationCompleted($serviceId, 'Immediate', 'completed', (string) ($request['reason'] ?? ''));
 
             return [
                 'success' => true,
@@ -69,7 +137,8 @@ final class CancellationRequestService
         if (($request['cancellation_type'] ?? 'immediate') === 'immediate') {
             $cancelled = $this->cancelService($serviceId);
             $this->cancellations->markCompleted($requestId);
-            $this->notifyClientOfApproval((int) $request['client_id'], $serviceId);
+            $this->notifyClientOfApproval($clientId, $serviceId);
+            $this->notifyAdminsOfCancellationCompleted($serviceId, 'Immediate', 'completed', (string) ($request['reason'] ?? ''));
 
             return [
                 'success' => true,
@@ -81,7 +150,8 @@ final class CancellationRequestService
         }
 
         // Scheduled (due date): stays approved until the effective date.
-        $this->notifyClientOfApproval((int) $request['client_id'], $serviceId);
+        $this->notifyClientOfApproval($clientId, $serviceId);
+        $this->notifyAdminsOfCancellationCompleted($serviceId, 'Scheduled', 'approved', (string) ($request['reason'] ?? ''));
 
         return [
             'success' => true,
@@ -114,12 +184,20 @@ final class CancellationRequestService
         }
 
         $this->cancellations->markCompleted($requestId);
+        $this->invoices->cancelUnpaidForService((int) $request['service_id']);
+        $this->notifyAdminsOfCancellationCompleted(
+            (int) $request['service_id'],
+            (string) ($request['cancellation_type'] ?? 'due_date') === 'immediate' ? 'Immediate' : 'Scheduled',
+            'completed',
+            (string) ($request['reason'] ?? '')
+        );
 
         return ['success' => true, 'message' => 'Cancellation marked as completed.', 'status' => 'completed'];
     }
 
     public function processImmediateCancellation(int $serviceId): void
     {
+        $this->invoices->cancelUnpaidForService($serviceId);
         $this->cancelService($serviceId);
     }
 
@@ -129,8 +207,15 @@ final class CancellationRequestService
 
         foreach ($dueCancellations as $cancellation) {
             try {
+                $this->invoices->cancelUnpaidForService((int) $cancellation['service_id']);
                 $this->cancelService((int) $cancellation['service_id']);
                 $this->cancellations->markCompleted((int) $cancellation['id']);
+                $this->notifyAdminsOfCancellationCompleted(
+                    (int) $cancellation['service_id'],
+                    'Scheduled',
+                    'completed',
+                    (string) ($cancellation['reason'] ?? '')
+                );
             } catch (\Throwable $e) {
                 $this->notifyAdminsOfTerminationFailure((int) $cancellation['service_id'], $e->getMessage());
             }
@@ -138,10 +223,12 @@ final class CancellationRequestService
     }
 
     /**
-     * Cancel a service: mark it cancelled locally (idempotent — an already-
-     * cancelled service is simply re-stamped) and best-effort terminate on the
-     * provisioning server. Never throws; a failure is reported to admins and
-     * surfaced as false so the caller can say the service still needs review.
+     * Cancel a service. Control-panel hosting (cPanel/CyberPanel) is
+     * terminated on the server through the provisioning module; VPS /
+     * dedicated / local services have no API termination for now and are
+     * simply marked cancelled. Never throws — a termination hiccup is
+     * reported to admins and surfaced as false (the service is still marked
+     * cancelled so billing stops).
      */
     private function cancelService(int $serviceId): bool
     {
@@ -149,6 +236,23 @@ final class CancellationRequestService
 
         if ($service === null) {
             return false;
+        }
+
+        if ($this->shouldTerminateViaModule($service)) {
+            try {
+                $result = $this->provisioning->terminate($serviceId);
+                $ok = (bool) ($result['success'] ?? false);
+
+                if (!$ok) {
+                    $this->notifyAdminsOfTerminationFailure($serviceId, (string) ($result['message'] ?? 'Unknown error'));
+                }
+
+                return $ok;
+            } catch (\Throwable $e) {
+                $this->notifyAdminsOfTerminationFailure($serviceId, $e->getMessage());
+
+                return false;
+            }
         }
 
         try {
@@ -159,17 +263,29 @@ final class CancellationRequestService
             return false;
         }
 
-        if (!empty($service['server_id'])) {
-            try {
-                // Termination would go through the provisioning module here.
-            } catch (\Throwable $e) {
-                $this->notifyAdminsOfTerminationFailure($serviceId, $e->getMessage());
+        return true;
+    }
 
-                return false;
-            }
+    /**
+     * Whether a service lives on a control-panel server whose module can
+     * terminate the account. VPS/dedicated modules (interserver-*, nocix-*)
+     * are intentionally excluded — there is no API automation for them yet.
+     *
+     * @param array<string, mixed>|null $service
+     */
+    private function shouldTerminateViaModule(?array $service): bool
+    {
+        if ($service === null || empty($service['server_id'])) {
+            return false;
         }
 
-        return true;
+        $server = $this->servers->find((int) $service['server_id']);
+
+        if ($server === null) {
+            return false;
+        }
+
+        return in_array((string) ($server['module_slug'] ?? ''), self::TERMINATABLE_MODULES, true);
     }
 
     /**
@@ -253,6 +369,57 @@ final class CancellationRequestService
             $this->sendPlainText(
                 'Service Termination Failed',
                 "Failed to terminate service: {$service['product_name']}\n\nError: {$errorMessage}\n\nPlease review manually in the admin dashboard.",
+                $email
+            );
+        }
+    }
+
+    /**
+     * Full cancellation report to every admin — includes the service details
+     * (product, id, domain/hostname, amount, cycle, mode, dates, reason) so
+     * the admin has everything without opening the dashboard.
+     */
+    private function notifyAdminsOfCancellationCompleted(int $serviceId, string $modeLabel, string $statusLabel, string $reason): void
+    {
+        $service = $this->services->findById($serviceId);
+        if ($service === null) {
+            return;
+        }
+
+        $client = $this->db->selectOne('SELECT first_name, last_name, email FROM clients WHERE id = ?', [(int) ($service['client_id'] ?? 0)]);
+        $clientName = $client ? trim(($client['first_name'] ?? '') . ' ' . ($client['last_name'] ?? '')) : 'Unknown client';
+        $clientEmail = (string) ($client['email'] ?? '');
+
+        $target = (string) ($service['domain'] ?? '') !== '' ? (string) $service['domain'] : (string) ($service['hostname'] ?? 'N/A');
+        $amount = (float) ($service['amount'] ?? 0.0);
+
+        $lines = [
+            'CANCELLATION REPORT',
+            '-------------------',
+            "Status: {$statusLabel}",
+            "Mode: {$modeLabel}",
+            '',
+            'SERVICE',
+            "  ID: #{$service['id']}",
+            "  Product: {$service['product_name']}",
+            "  Billing: " . (string) ($service['billing_cycle'] ?? 'N/A') . ' @ ' . number_format($amount, 2),
+            "  Domain/Hostname: {$target}",
+            "  Next due date: " . (string) ($service['next_due_date'] ?? 'N/A'),
+            "  Current status: " . (string) ($service['status'] ?? ''),
+            '',
+            'CLIENT',
+            "  {$clientName} <{$clientEmail}> (ID #" . (int) ($service['client_id'] ?? 0) . ')',
+            '',
+            'REASON',
+            '  ' . ($reason !== '' ? $reason : '(not provided)'),
+        ];
+
+        $body = implode("\n", $lines);
+
+        foreach ($this->adminEmails() as $email) {
+            $this->sendPlainText(
+                "Cancellation {$statusLabel} — {$service['product_name']} #{$service['id']}",
+                $body,
                 $email
             );
         }

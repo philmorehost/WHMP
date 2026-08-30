@@ -2990,6 +2990,23 @@
         });
     }
 
+    // Client "Cancel Order" modal (partials/cancel-order-modal.php): open /
+    // close via delegated listeners — the strict CSP blocks inline onclick,
+    // so the buttons expose data-cancel-order-open / data-cancel-order-close.
+    document.addEventListener('click', function (event) {
+        var open = event.target.closest('[data-cancel-order-open]');
+        if (open) {
+            var modalOpen = document.getElementById('cancel-order-modal');
+            if (modalOpen) { modalOpen.style.display = 'flex'; }
+            return;
+        }
+        var close = event.target.closest('[data-cancel-order-close]');
+        if (close) {
+            var modalClose = document.getElementById('cancel-order-modal');
+            if (modalClose) { modalClose.style.display = 'none'; }
+        }
+    });
+
     // Mail Piping "Test Connection": posts to /admin/mail-piping/test and
     // surfaces the IMAP auth/connect result inline so an admin can confirm the
     // mailbox settings (especially the [CLOSED] authenticate failure) without

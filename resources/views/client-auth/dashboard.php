@@ -418,6 +418,11 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
         <div class="dbd-stat__value <?= $ticketsCount > 0 ? 'dbd-stat__value--red' : '' ?>"><?= (int)$ticketsCount ?></div>
         <div class="dbd-stat__sub">Open Tickets</div>
     </a>
+    <a href="/client/orders" class="dbd-stat">
+        <div class="dbd-stat__label">ORDERS</div>
+        <div class="dbd-stat__value <?= $ordersCount > 0 ? 'dbd-stat__value--red' : '' ?>"><?= (int)$ordersCount ?></div>
+        <div class="dbd-stat__sub"><?= $ordersCount > 0 ? 'Pending Orders' : 'All Orders' ?></div>
+    </a>
     <a href="/client/wallet/add-funds" class="dbd-stat">
         <div class="dbd-stat__label">WALLET</div>
         <div class="dbd-stat__value dbd-stat__value--green"><?= $sym ?><?= number_format((float)$creditBalance, 2) ?></div>

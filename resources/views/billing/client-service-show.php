@@ -709,23 +709,34 @@ $cpanelTabs = [
                 // could reasonably have tried to configure DNS or firewall rules
                 // against them. An empty field says "not assigned"; it must never
                 // fill itself in with an example.
+                //
+                // Allocated IPs also disappear the moment a service is cancelled
+                // or terminated — a cancelled VPS/dedicated server's IPs must no
+                // longer be visible to the client.
+                $serviceGone = in_array((string) ($service['status'] ?? ''), ['cancelled', 'terminated'], true);
                 ?>
-                <div class="svc-info-label">Primary IP:</div>
-                <div class="svc-info-val">
-                    <?php if ($primaryIp !== ''): ?>
-                        <span class="svc-ip-badge"><?= e($primaryIp) ?></span>
-                    <?php else: ?>
-                        <span style="color:var(--cv-text-secondary);">Not assigned yet</span>
-                    <?php endif; ?>
-                </div>
-
-                <?php // Only render the row at all when there is something real to show. ?>
-                <?php if ($assignedIps !== []): ?>
-                    <div class="svc-info-label">Assigned IPs:</div>
+                <?php if (!$serviceGone): ?>
+                    <div class="svc-info-label">Primary IP:</div>
                     <div class="svc-info-val">
-                        <?php foreach ($assignedIps as $ip): ?>
-                            <span class="svc-ip-badge"><?= e($ip) ?></span>
-                        <?php endforeach; ?>
+                        <?php if ($primaryIp !== ''): ?>
+                            <span class="svc-ip-badge"><?= e($primaryIp) ?></span>
+                        <?php else: ?>
+                            <span style="color:var(--cv-text-secondary);">Not assigned yet</span>
+                        <?php endif; ?>
+                    </div>
+
+                    <?php // Only render the row at all when there is something real to show. ?>
+                    <?php if ($assignedIps !== []): ?>
+                        <div class="svc-info-label">Assigned IPs:</div>
+                        <div class="svc-info-val">
+                            <?php foreach ($assignedIps as $ip): ?>
+                                <span class="svc-ip-badge"><?= e($ip) ?></span>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                <?php else: ?>
+                    <div class="svc-info-val" style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                        IP addresses are no longer shown because this service is <?= e((string) ($service['status'] ?? '')) ?>.
                     </div>
                 <?php endif; ?>
             </div>

@@ -7,13 +7,20 @@ namespace CodeVault\Tests\Unit;
 use CodeVault\Auth\AdminRepository;
 use CodeVault\Billing\CancellationRequestRepository;
 use CodeVault\Billing\CancellationRequestService;
+use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\ServiceRepository;
 use CodeVault\Catalog\ProductGroupRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database;
 use CodeVault\Database\Migrator;
+use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Mail\Mailer;
+use CodeVault\Modules\ModuleManager;
+use CodeVault\Modules\ProvisioningModule;
+use CodeVault\Provisioning\LocalProvisioningModule;
+use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use DateTimeImmutable;
 
@@ -59,11 +66,21 @@ final class CancellationApprovalTest extends DatabaseTestCase
             }
         });
 
+        $servers = new ServerRepository($this->db);
+        $localModule = new LocalProvisioningModule(sys_get_temp_dir() . '/codevault-cancel-appr-' . uniqid());
+        $hooks = new HookDispatcher();
+        $modules = new ModuleManager($hooks);
+        $modules->register(ProvisioningModule::class, 'local', $localModule);
+        $provisioning = new ProvisioningService($this->services, new ProductRepository($this->db), $servers, $modules, $hooks);
+
         $this->service = new CancellationRequestService(
             $this->cancellations,
             $this->services,
             $container->make(\CodeVault\Mail\EmailDispatcher::class),
-            $this->db
+            $this->db,
+            new InvoiceRepository($this->db),
+            $servers,
+            $provisioning
         );
 
         $this->clientId = (new ClientRepository($this->db))->create([
@@ -81,13 +98,23 @@ final class CancellationApprovalTest extends DatabaseTestCase
         ]);
     }
 
-    private function createService(string $status): int
+    private function createService(string $status, ?string $nextDueDate = '2026-12-31'): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
             'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$this->clientId, $this->productId, 'Hosting Plan', 'monthly', 10.00, $status, '2026-12-31', $now, $now]
+            [$this->clientId, $this->productId, 'Hosting Plan', 'monthly', 10.00, $status, $nextDueDate, $now, $now]
+        );
+    }
+
+    private function createUnpaidInvoice(int $serviceId, float $amount = 10.0): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return (int) $this->db->insert(
+            'INSERT INTO invoices (client_id, service_id, status, subtotal, tax_amount, total, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$this->clientId, $serviceId, 'unpaid', $amount, 0.0, $amount, '2026-12-31', $now, $now]
         );
     }
 
@@ -131,5 +158,50 @@ final class CancellationApprovalTest extends DatabaseTestCase
         $this->assertSame('approved', $result['status']);
         $this->assertSame('active', $this->services->find($serviceId)['status']);
         $this->assertSame('approved', $this->cancellations->findById($requestId)['status']);
+    }
+
+    public function test_approve_cancels_unpaid_invoices_for_the_service(): void
+    {
+        $serviceId = $this->createService('active');
+        $invoiceId = $this->createUnpaidInvoice($serviceId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'immediate', 'Leaving');
+
+        $this->service->approveCancellation($requestId, $this->adminId);
+
+        $invoice = (new \CodeVault\Billing\InvoiceRepository($this->db))->find($invoiceId);
+        $this->assertSame('cancelled', $invoice['status']);
+    }
+
+    public function test_client_immediate_cancel_marks_service_and_cancels_invoices(): void
+    {
+        $serviceId = $this->createService('active');
+        $invoiceId = $this->createUnpaidInvoice($serviceId);
+
+        $this->service->clientRequestsCancellation($serviceId, $this->clientId, 'immediate', 'Leaving now');
+
+        $this->assertSame('cancelled', $this->services->find($serviceId)['status']);
+        $invoice = (new \CodeVault\Billing\InvoiceRepository($this->db))->find($invoiceId);
+        $this->assertSame('cancelled', $invoice['status']);
+    }
+
+    public function test_client_end_of_period_cancel_records_due_date_request_and_cancels_renewal(): void
+    {
+        $nextDue = (new DateTimeImmutable('+30 days'))->format('Y-m-d');
+        $serviceId = $this->createService('active', $nextDue);
+        $invoiceId = $this->createUnpaidInvoice($serviceId);
+
+        $requestId = $this->service->clientRequestsCancellation($serviceId, $this->clientId, 'end_of_period', 'Moving on');
+
+        $this->assertGreaterThan(0, $requestId);
+        $request = $this->cancellations->findById($requestId);
+        $this->assertSame('due_date', $request['cancellation_type']);
+        $this->assertSame('end_of_period', $request['type']);
+        $this->assertSame($nextDue, $request['cancel_date']);
+        $this->assertSame($this->clientId, (int) $request['client_id']);
+
+        // The renewal invoice is cancelled, the service stays active.
+        $invoice = (new \CodeVault\Billing\InvoiceRepository($this->db))->find($invoiceId);
+        $this->assertSame('cancelled', $invoice['status']);
+        $this->assertSame('active', $this->services->find($serviceId)['status']);
     }
 }

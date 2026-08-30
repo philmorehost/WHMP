@@ -50,6 +50,7 @@ final class ClientServiceController
         private readonly ServerRepository $servers,
         private readonly CurrencyService $currency,
         private readonly CancellationRequestRepository $cancellations,
+        private readonly CancellationRequestService $cancellationService,
         private readonly InvoiceRepository $invoices,
         private readonly ActivityLogger $activity,
         private readonly TicketService $tickets,
@@ -469,9 +470,11 @@ final class ClientServiceController
         $reason = trim((string) $request->input('reason', ''));
 
         if ($type === 'immediate') {
-            $this->provisioning->terminate((int) $service['id']);
-            $this->services->cancel((int) $service['id']);
-            $this->invoices->cancelUnpaidForService((int) $service['id']);
+            // Cancels the unpaid invoices, marks the service cancelled (and
+            // terminates the cPanel/CyberPanel account on the server when the
+            // module supports it), and emails the admin a full report. VPS /
+            // dedicated services are just marked cancelled — no API automation.
+            $this->cancellationService->clientRequestsCancellation((int) $service['id'], (int) $client['id'], 'immediate', $reason);
 
             $this->activity->log(
                 'client',
@@ -483,8 +486,10 @@ final class ClientServiceController
                 $request->ip()
             );
         } else {
-            $this->cancellations->createRequest((int) $service['id'], $type, $reason, (int) $client['id']);
-            $this->invoices->cancelUnpaidForService((int) $service['id']);
+            // End of period: record a due-date request at the end of the
+            // billing period and cancel the renewal invoices. The admin
+            // approves it; the cron terminates the service at the date.
+            $this->cancellationService->clientRequestsCancellation((int) $service['id'], (int) $client['id'], 'end_of_period', $reason);
 
             $this->activity->log(
                 'client',

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use CodeVault\Billing\ServiceController;
 use CodeVault\Billing\CancellationRequestsController;
 use CodeVault\Billing\ClientCancellationController;
+use CodeVault\Billing\ClientOrderController;
 
 /** @var CodeVault\Router $router */
 
@@ -33,6 +34,8 @@ $router->post('/client/services/{id}/cancel-request', [CancellationRequestsContr
 // alongside the rest of the client service routes. `reinstall` and `rdns`
 // used to be declared in both files.
 
+$router->get('/client/orders', [ClientOrderController::class, 'index']);
+$router->get('/client/orders/{id}', [ClientOrderController::class, 'show']);
 $router->post('/client/orders/{id}/cancel', [ClientCancellationController::class, 'cancelOrder']);
 
 // NOTE: /client/invoices/{id}/cancel is deliberately NOT registered here.

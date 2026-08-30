@@ -12,7 +12,8 @@ final class OrderCancellationService
     public function __construct(
         private readonly OrderRepository $orders,
         private readonly EmailDispatcher $mail,
-        private readonly Database $db
+        private readonly Database $db,
+        private readonly InvoiceRepository $invoices
     ) {
     }
 
@@ -23,14 +24,24 @@ final class OrderCancellationService
             return false;
         }
 
-        if (in_array($order['status'], ['cancelled', 'completed'])) {
+        if (in_array($order['status'], ['cancelled', 'completed'], true)) {
             return false;
         }
 
+        // Mark the order cancelled (the canonical status the admin Orders page
+        // filters on) alongside the is_cancelled audit flag.
+        $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $this->db->update(
-            'UPDATE orders SET is_cancelled = 1, cancelled_at = NOW(), cancellation_reason = ? WHERE id = ?',
-            [$reason, $orderId]
+            'UPDATE orders SET status = ?, is_cancelled = 1, cancelled_at = ?, cancellation_reason = ? WHERE id = ?',
+            ['cancelled', $now, $reason, $orderId]
         );
+
+        // Cancel the invoice the order raised (only if still unpaid) so the
+        // client is never billed for an order they cancelled.
+        $invoice = $this->invoices->findByOrder($orderId);
+        if ($invoice !== null && ($invoice['status'] ?? '') === 'unpaid') {
+            $this->invoices->markCancelled((int) $invoice['id']);
+        }
 
         $client = $this->db->selectOne('SELECT email, first_name FROM clients WHERE id = ?', [$clientId]);
         $this->notifyAdminOfCancellation($orderId, $client);

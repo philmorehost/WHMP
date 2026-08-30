@@ -213,7 +213,7 @@ final class CheckoutService
         }
 
         if ($hasPendingApproval) {
-            $this->notifyAdminsOfPendingApproval($orderId, $client, $priced['total']);
+            $this->notifyAdminsOfPendingApproval($orderId, $client, $priced['total'], $effectiveCurrency);
         }
 
         $this->hooks->fire(HookPoints::ORDER_PLACED, ['orderId' => $orderId, 'clientId' => $clientId]);
@@ -232,7 +232,7 @@ final class CheckoutService
         return \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainRepository::class);
     }
 
-    private function notifyAdminsOfPendingApproval(int $orderId, ?array $client, float $orderTotal): void
+    private function notifyAdminsOfPendingApproval(int $orderId, ?array $client, float $orderTotal, array $effectiveCurrency): void
     {
         try {
             $container = \CodeVault\Support\App::container();
@@ -244,6 +244,11 @@ final class CheckoutService
             $clientName = $client ? trim(($client['first_name'] ?? '') . ' ' . ($client['last_name'] ?? '')) : 'Client';
             $clientEmail = $client['email'] ?? '';
 
+            // $orderTotal is already converted to the client's currency at
+            // checkout (convertPriced) — format it with that currency's symbol
+            // so the admin email reports ₦/€/$ correctly instead of a bare "$".
+            $formattedTotal = ($effectiveCurrency['symbol'] ?? '$') . number_format($orderTotal, 2);
+
             $admins = $adminRepo->all();
             foreach ($admins as $admin) {
                 if (!empty($admin['email'])) {
@@ -251,7 +256,7 @@ final class CheckoutService
                         'order_id' => (string) $orderId,
                         'client_name' => $clientName,
                         'client_email' => $clientEmail,
-                        'order_total' => number_format($orderTotal, 2),
+                        'order_total' => $formattedTotal,
                         'company_name' => brand_name(),
                     ]);
                 }

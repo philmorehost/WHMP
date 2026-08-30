@@ -72,6 +72,7 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
     $domainsCount = (int) ($db->selectOne("SELECT COUNT(*) AS c FROM domains WHERE client_id = ? AND status = 'active'", [$clientId])['c'] ?? 0);
     $invoicesCount = (int) ($db->selectOne("SELECT COUNT(*) AS c FROM invoices WHERE client_id = ? AND status = 'unpaid'", [$clientId])['c'] ?? 0);
     $ticketsCount = (int) ($db->selectOne("SELECT COUNT(*) AS c FROM tickets WHERE client_id = ? AND status IN ('open', 'customer-reply', 'on-hold')", [$clientId])['c'] ?? 0);
+    $ordersCount = (int) ($db->selectOne("SELECT COUNT(*) AS c FROM orders WHERE client_id = ? AND status = 'pending'", [$clientId])['c'] ?? 0);
 
     // Fetch unpaid invoices
     $unpaidInvoices = $db->select("SELECT * FROM invoices WHERE client_id = ? AND status = 'unpaid' ORDER BY created_at DESC LIMIT 5", [$clientId]);
@@ -100,6 +101,7 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
         'domainsCount' => $domainsCount,
         'invoicesCount' => $invoicesCount,
         'ticketsCount' => $ticketsCount,
+        'ordersCount' => $ordersCount,
         'unpaidInvoices' => $unpaidInvoices,
         'activeServices' => $activeServices,
         'recentTickets' => $recentTickets,

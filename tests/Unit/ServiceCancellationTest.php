@@ -147,7 +147,10 @@ final class ServiceCancellationTest extends DatabaseTestCase
             $this->cancellations,
             $this->services,
             $container->make(\CodeVault\Mail\EmailDispatcher::class),
-            $this->db
+            $this->db,
+            new \CodeVault\Billing\InvoiceRepository($this->db),
+            $this->servers,
+            $this->provisioning
         );
         // Only APPROVED due-date requests are processed by the cron.
         $approval = $service->approveCancellation($requestId, $this->adminId);
