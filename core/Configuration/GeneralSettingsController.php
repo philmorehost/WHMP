@@ -33,6 +33,7 @@ final class GeneralSettingsController
             'companyName' => $this->settings->get('company.name', ''),
             'companyEmail' => $this->settings->get('company.email', ''),
             'companyDept' => $this->settings->get('company.billing_dept', ''),
+            'whatsappNumber' => $this->settings->get('company.whatsapp', ''),
             'lateFeePercentage' => $this->settings->get('billing.late_fee_percentage', '5.00'),
             'lateFeeGraceDays' => $this->settings->get('billing.late_fee_grace_days', '0'),
             'autoCancelUnpaidDays' => $this->settings->get('billing.auto_cancel_unpaid_days', '0'),
@@ -83,6 +84,7 @@ final class GeneralSettingsController
         $this->settings->set('company.name', trim((string) $request->input('company_name', '')));
         $this->settings->set('company.email', trim((string) $request->input('company_email', '')));
         $this->settings->set('company.billing_dept', trim((string) $request->input('company_billing_dept', '')));
+        $this->settings->set('company.whatsapp', trim((string) $request->input('whatsapp_number', '')));
 
         $this->settings->set('billing.late_fee_percentage', (string) max(0.0, (float) $request->input('late_fee_percentage', 5.0)));
 

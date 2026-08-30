@@ -41,6 +41,9 @@ $router->get('/', function (Request $request, array $params, Container $containe
     $seo = $container->make(SeoTags::class);
     /** @var CodeVault\Database $db */
     $db = $container->make(CodeVault\Database::class);
+    /** @var \CodeVault\Settings\SettingsRepository $settings */
+    $settings = $container->make(\CodeVault\Settings\SettingsRepository::class);
+    $whatsappNumber = trim((string) $settings->get('company.whatsapp', ''));
 
     $groups = $db->select("SELECT * FROM product_groups ORDER BY id ASC");
     $productGroups = [];
@@ -78,6 +81,7 @@ $router->get('/', function (Request $request, array $params, Container $containe
 
     $content = $view->render('pages.home', [
         'productGroups' => $productGroups,
+        'whatsappNumber' => $whatsappNumber,
     ]);
 
     return Response::html($view->render('layouts.client', [
@@ -94,6 +98,9 @@ $router->get('/deals', function (Request $request, array $params, Container $con
     $view = $container->make(View::class);
     /** @var CodeVault\Database $db */
     $db = $container->make(CodeVault\Database::class);
+    /** @var \CodeVault\Settings\SettingsRepository $settings */
+    $settings = $container->make(\CodeVault\Settings\SettingsRepository::class);
+    $whatsappNumber = trim((string) $settings->get('company.whatsapp', ''));
 
     $promotions = $db->select("
         SELECT * FROM promotions 
@@ -105,6 +112,7 @@ $router->get('/deals', function (Request $request, array $params, Container $con
 
     $content = $view->render('pages.deals', [
         'promotions' => $promotions,
+        'whatsappNumber' => $whatsappNumber,
     ]);
 
     return Response::html($view->render('layouts.client', [

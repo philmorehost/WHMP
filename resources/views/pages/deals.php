@@ -1,6 +1,9 @@
 <?php
 /** @var CodeVault\View $view */
 /** @var array<int, array<string, mixed>> $promotions */
+/** @var string $whatsappNumber admin-configured WhatsApp number (international, no +) */
+$whatsappNumber ??= '';
+$whatsappHref = $whatsappNumber !== '' ? 'https://wa.me/' . preg_replace('/\D/', '', $whatsappNumber) : '';
 ?>
 <div class="home-layout-wrapper">
     <!-- Left Sidebar (Lagom2 style) -->
@@ -40,14 +43,16 @@
                     <span style="font-size: 0.8em; color: var(--cv-text-secondary);">&gt;</span>
                 </a>
             </li>
-            <li>
-                <a href="https://wa.me/xxx" target="_blank" style="display: flex; align-items: center; padding: var(--cv-space-3) var(--cv-space-4); color: var(--cv-text-primary); text-decoration: none; font-weight: 600; font-size: var(--cv-text-sm); transition: background var(--cv-transition-fast);" onmouseover="this.style.background='var(--cv-bg-surface-sunken)'" onmouseout="this.style.background='transparent'">
-                    <span style="display: flex; align-items: center; gap: var(--cv-space-3);">
-                        <span style="font-size: 1.1rem;">📞</span>
-                        <span>WhatsApp</span>
-                    </span>
-                </a>
-            </li>
+            <?php if ($whatsappHref !== ''): ?>
+                <li>
+                    <a href="<?= e($whatsappHref) ?>" target="_blank" rel="noopener" style="display: flex; align-items: center; padding: var(--cv-space-3) var(--cv-space-4); color: var(--cv-text-primary); text-decoration: none; font-weight: 600; font-size: var(--cv-text-sm); transition: background var(--cv-transition-fast);" onmouseover="this.style.background='var(--cv-bg-surface-sunken)'" onmouseout="this.style.background='transparent'">
+                        <span style="display: flex; align-items: center; gap: var(--cv-space-3);">
+                            <span style="font-size: 1.1rem;">📞</span>
+                            <span>WhatsApp</span>
+                        </span>
+                    </a>
+                </li>
+            <?php endif; ?>
         </ul>
     </div>
 

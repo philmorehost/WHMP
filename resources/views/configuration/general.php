@@ -45,6 +45,14 @@
                 <input class="cv-input" type="text" name="company_billing_dept" value="<?= e($companyDept ?? '') ?>" placeholder="Payments Dept.">
                 <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Department name shown under company name on invoices.</span>
             </div>
+
+            <div class="cv-field">
+                <label class="cv-label">WhatsApp Number</label>
+                <input class="cv-input" type="text" name="whatsapp_number" value="<?= e($whatsappNumber ?? '') ?>" placeholder="e.g. 2348012345678">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">
+                    International format without "+" — linked as <code>https://wa.me/&lt;number&gt;</code> on the website home page, Deals page, and the storefront sidebar.
+                </span>
+            </div>
         </div>
 
         <!-- Localisation Card -->

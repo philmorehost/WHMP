@@ -2990,6 +2990,28 @@
         });
     }
 
+    // Home page product-category tabs (pages/home.php): each [data-home-tab]
+    // button reveals its matching [data-home-panel], one at a time. Delegated
+    // so it works under the strict CSP (no inline handlers).
+    document.addEventListener('click', function (event) {
+        var tab = event.target.closest('[data-home-tab]');
+        if (!tab) return;
+
+        var idx = tab.getAttribute('data-home-tab');
+        var tabList = tab.parentElement;
+        var tabs = tabList.querySelectorAll('[data-home-tab]');
+        for (var i = 0; i < tabs.length; i++) {
+            var active = tabs[i] === tab;
+            tabs[i].classList.toggle('is-active', active);
+            tabs[i].setAttribute('aria-selected', active ? 'true' : 'false');
+        }
+
+        var panels = document.querySelectorAll('[data-home-panel]');
+        for (var j = 0; j < panels.length; j++) {
+            panels[j].hidden = panels[j].getAttribute('data-home-panel') !== idx;
+        }
+    });
+
     // Client "Cancel Order" modal (partials/cancel-order-modal.php): open /
     // close via delegated listeners — the strict CSP blocks inline onclick,
     // so the buttons expose data-cancel-order-open / data-cancel-order-close.
