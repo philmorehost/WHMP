@@ -223,19 +223,6 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
     transform: translateY(-1px);
 }
 
-/* ====== Domain Search Banner ====== */
-.dbd-domain {
-    background: linear-gradient(135deg, #1e3a5f 0%, #2d1b69 100%);
-    border-radius: 14px;
-    padding: 32px 40px;
-    margin-bottom: 24px;
-}
-.dbd-domain h2 { color: #fff; font-family: 'Hanken Grotesk', sans-serif; font-size: 1.5rem; font-weight: 800; margin: 0 0 20px 0; text-align: center; }
-.dbd-domain form { display: flex; gap: 10px; max-width: 680px; margin: 0 auto; }
-.dbd-domain input { flex: 1; background: rgba(255,255,255,.95); border: none; border-radius: 8px; padding: 14px 18px; font-size: .95rem; color: #111; outline: none; min-width: 0; }
-.dbd-domain button { background: #f59e0b; color: #1a1a2e; border: none; border-radius: 8px; padding: 14px 28px; font-weight: 700; font-size: .95rem; cursor: pointer; white-space: nowrap; transition: background .2s; }
-.dbd-domain button:hover { background: #d97706; }
-
 /* ====== 2-Column Main Grid ====== */
 .dbd-grid {
     display: grid;
@@ -430,7 +417,9 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
     </a>
 </div>
 
-<!-- DOMAIN REGISTER / TRANSFER (shared widget — also on the pre-login page) -->
+<!-- Domain register/transfer lookup — the client index page (dashboard),
+     where the client's services are listed. Theme-adaptive, so it reads
+     correctly in both light and dark themes. -->
 <?= $view->partial('partials.domain-lookup') ?>
 
 <!-- MAIN 2-COL GRID -->

@@ -3,10 +3,6 @@
 /** @var bool $resetSuccess */
 $resetSuccess ??= false;
 ?>
-<!-- Domain register/transfer lookup — the client-area landing hero, so a
-     visitor can search/register/transfer a domain before (or without)
-     logging in, WHMCS-style. -->
-<?= $view->partial('partials.domain-lookup') ?>
 
 <div class="cv-card" style="max-width:26rem;margin:var(--cv-space-6) auto var(--cv-space-8);">
     <h1 class="cv-card__title">Client Login</h1>
