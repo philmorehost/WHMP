@@ -223,6 +223,16 @@ final class ClientAuthController
             return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
 
+        // The address submitted here is the recipient of the OTP email, and
+        // registration is reachable without any login — so it must be a real,
+        // single email address before it is used. Without this check a crafted
+        // value (e.g. containing CR/LF) would flow straight into the mail
+        // transport, which the SMTP layer now also refuses to send (see
+        // SmtpMailer::assertSafeAddress) — defence in depth at both ends.
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return $this->page('client-auth.register', ['error' => 'Enter a valid email address.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+        }
+
         if (strlen($securityPin) < 4) {
             return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
@@ -246,8 +256,22 @@ final class ClientAuthController
             return $this->finishRegistration($pending, $request->ip());
         }
 
+        // Registration, the OTP resend and both password-reset endpoints are
+        // all reachable with no login, so each is throttled — a cooldown per
+        // address and a cap per IP — so the app's own mail transport cannot
+        // be scripted into sending bulk email. See
+        // ClientRegistrationOtpRepository::cooldownRemaining()/tooManyIssuesFromIp().
+        if ($this->registrationOtps->cooldownRemaining($email) > 0 || $this->registrationOtps->tooManyIssuesFromIp($request->ip())) {
+            return $this->page('client-auth.register', [
+                'error' => 'Too many verification codes have been requested. Please wait a little while and try again.',
+                'refCode' => $refCode,
+                'googleUser' => $googleUser,
+                'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+            ]);
+        }
+
         $this->session->set(self::PENDING_REGISTRATION_SESSION_KEY, $pending);
-        $this->sendRegistrationOtp($email, $firstName);
+        $this->sendRegistrationOtp($email, $firstName, $request->ip());
 
         return Response::redirect('/client/register/verify');
     }
@@ -296,7 +320,20 @@ final class ClientAuthController
             return Response::redirect('/client/register');
         }
 
-        $this->sendRegistrationOtp($pending['email'], $pending['firstName']);
+        $email = (string) $pending['email'];
+
+        // Same no-login throttle as register(): this endpoint re-sends an
+        // email on every hit, so without a cooldown it is a one-line loop for
+        // flooding a single inbox.
+        if ($this->registrationOtps->cooldownRemaining($email) > 0 || $this->registrationOtps->tooManyIssuesFromIp($request->ip())) {
+            return $this->page('client-auth.register-verify', [
+                'email' => $email,
+                'error' => 'A verification code was sent very recently. Please wait a moment before requesting another one.',
+                'resent' => false,
+            ]);
+        }
+
+        $this->sendRegistrationOtp($email, (string) $pending['firstName'], $request->ip());
 
         return Response::redirect('/client/register/verify?resent=1');
     }
@@ -338,9 +375,9 @@ final class ClientAuthController
         return Response::redirect('/client/dashboard');
     }
 
-    private function sendRegistrationOtp(string $email, string $firstName): void
+    private function sendRegistrationOtp(string $email, string $firstName, string $ip): void
     {
-        $code = $this->registrationOtps->issue($email);
+        $code = $this->registrationOtps->issue($email, $ip);
 
         $this->mail->sendTemplate('client_registration_otp', $email, [
             'first_name' => $firstName !== '' ? $firstName : 'there',
@@ -404,7 +441,11 @@ final class ClientAuthController
         $email = trim((string) $request->input('email', ''));
         $client = $email !== '' ? $this->clients->findByEmail($email) : null;
 
-        if ($client !== null) {
+        // Public + one email per call: only issue/send when the account has
+        // not just had a reset link (see PasswordResetTokenRepository::
+        // recentlyIssued()). The response stays identical either way so the
+        // anti-enumeration property is preserved.
+        if ($client !== null && !$this->resetTokens->recentlyIssued(self::RESET_ACCOUNT_TYPE, (int) $client['id'])) {
             $issued = $this->resetToken->generate();
             $this->resetTokens->issue(self::RESET_ACCOUNT_TYPE, (int) $client['id'], $issued['hash']);
 

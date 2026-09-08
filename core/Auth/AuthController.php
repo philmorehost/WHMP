@@ -187,7 +187,11 @@ final class AuthController
         $email = trim((string) $request->input('email', ''));
         $admin = $email !== '' ? $this->admins->findByEmail($email) : null;
 
-        if ($admin !== null) {
+        // Public + one email per call: only issue/send when the account has
+        // not just had a reset link (see PasswordResetTokenRepository::
+        // recentlyIssued()). The response stays identical either way so the
+        // anti-enumeration property is preserved.
+        if ($admin !== null && !$this->resetTokens->recentlyIssued(self::RESET_ACCOUNT_TYPE, (int) $admin['id'])) {
             $issued = $this->resetToken->generate();
             $this->resetTokens->issue(self::RESET_ACCOUNT_TYPE, (int) $admin['id'], $issued['hash']);
 

@@ -60,6 +60,24 @@ final class PasswordResetTokenRepository
     }
 
     /**
+     * True when a reset link was issued to this account within the last
+     * $withinSeconds. The forgot-password handlers are public (no login) and
+     * send one real email per call, so without this cooldown a scripted
+     * caller could email-bomb any known client/admin address with branded
+     * reset mail through the app's own transport.
+     */
+    public function recentlyIssued(string $accountType, int $accountId, int $withinSeconds = 60): bool
+    {
+        $row = $this->db->selectOne(
+            'SELECT created_at FROM password_reset_tokens WHERE account_type = ? AND account_id = ? ORDER BY created_at DESC LIMIT 1',
+            [$accountType, $accountId]
+        );
+
+        return $row !== null && $row['created_at'] !== null
+            && (time() - (int) strtotime((string) $row['created_at'])) < $withinSeconds;
+    }
+
+    /**
      * Expired-but-never-consumed tokens (the link was never clicked)
      * otherwise sit in the table forever — findValid() filters them out at
      * read time, but nothing ever deletes them. Used by DataPruningJob.

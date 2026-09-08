@@ -18,6 +18,16 @@ final class SmtpMailer implements Mailer
 
     public function send(string $to, string $subject, string $html): void
     {
+        // ── Address hygiene (security) ─────────────────────────────────────
+        // The recipient must be one bare, well-formed address with no CR/LF.
+        // A crafted value such as `a@b.com>\r\nRCPT TO: <c@d.com>` would
+        // otherwise be written verbatim into the SMTP dialogue, injecting
+        // extra `RCPT TO` lines and turning a single message into a bulk send
+        // to many recipients — an unauthenticated way to use this app's own
+        // SMTP connection as an open relay (the registration OTP and
+        // password-reset flows are reachable without any login).
+        $to = $this->assertSafeAddress($to, 'recipient');
+
         $host = (string) ($this->settings->get('smtp.host') ?: $this->config->env('SMTP_HOST', ''));
         $port = (int) ($this->settings->get('smtp.port') ?: $this->config->env('SMTP_PORT', '25'));
         $username = (string) ($this->settings->get('smtp.user') ?: $this->config->env('SMTP_USER', ''));
@@ -26,6 +36,12 @@ final class SmtpMailer implements Mailer
         $defaultHost = $_SERVER['HTTP_HOST'] ?? 'philmorehost.com';
         $fromEmail = (string) ($this->settings->get('smtp.from_email') ?: $this->config->env('SMTP_FROM_EMAIL', 'noreply@' . $defaultHost));
         $fromName = (string) ($this->settings->get('smtp.from_name') ?: $this->config->env('SMTP_FROM_NAME', 'PhilmoreHost Support'));
+
+        // Same hygiene for the envelope/header From address: it is normally
+        // admin-configured, but it still flows into `MAIL FROM:` and the
+        // `From:`/`Reply-To:` headers verbatim, so a stray newline in a saved
+        // setting would corrupt the whole protocol exchange.
+        $fromEmail = $this->assertSafeAddress($fromEmail, 'From');
 
         // No silent PHP mail() fallback.
         //
@@ -144,6 +160,28 @@ final class SmtpMailer implements Mailer
         $this->writeCommand($socket, "QUIT", '221');
 
         fclose($socket);
+    }
+
+    /**
+     * Returns the address only when it is a single, bare, well-formed email
+     * address free of CR/LF; otherwise throws. Enforcing this at the transport
+     * (rather than trusting every caller to validate) makes the SMTP dialogue
+     * immune to command/header injection — the envelope's `RCPT TO:` line and
+     * the message's `To:` header are both built from this value verbatim.
+     */
+    private function assertSafeAddress(string $address, string $label): string
+    {
+        $address = trim($address);
+
+        if ($address === '' || preg_match('/[\r\n]/', $address) === 1) {
+            throw new Exception("Refusing to send: {$label} address contains a line break.");
+        }
+
+        if (filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+            throw new Exception("Refusing to send: invalid {$label} email address.");
+        }
+
+        return $address;
     }
 
     /**
