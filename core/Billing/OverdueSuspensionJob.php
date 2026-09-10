@@ -68,18 +68,19 @@ final class OverdueSuspensionJob implements CronJob, ReportsCronStats
     private function suspendOne(array $service): bool
     {
         $serviceId = (int) $service['id'];
+        $reason = 'Overdue invoice — unpaid past the ' . $this->policy->suspensionGraceDays() . '-day grace period.';
 
         // Nothing was ever provisioned remotely (manual product, imported
         // record, provisioning never ran), so there's no panel account to
         // disable — locking it locally is the whole of the suspension.
         if ($service['server_id'] === null) {
-            $this->services->suspend($serviceId);
+            $this->services->suspend($serviceId, $reason);
 
             return true;
         }
 
         try {
-            $result = $this->provisioning->suspend($serviceId);
+            $result = $this->provisioning->suspend($serviceId, $reason);
         } catch (Throwable) {
             return false;
         }

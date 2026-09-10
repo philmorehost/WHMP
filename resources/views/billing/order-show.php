@@ -2,6 +2,7 @@
 /** @var array<string, mixed> $order */
 /** @var array<int, array<string, mixed>> $items */
 /** @var array<int, array<string, mixed>> $servicesByProduct */
+/** @var array<int, array<string, mixed>> $domains */
 /** @var string|null $msg */
 ?>
 <style>
@@ -293,7 +294,17 @@
                     // The service checkout created for this product carries the
                     // domain (shared hosting, domain registrations) or hostname
                     // (VPS, dedicated) worth showing next to the line item.
-                    $service = $servicesByProduct[(int) $item['product_id']] ?? null;
+                    //
+                    // One service is consumed per item: the same product can
+                    // appear on multiple lines (e.g. two hosting accounts),
+                    // and they were created in the same order the lines were
+                    // inserted, so pairing them off in order shows each line
+                    // its own domain rather than every line showing the last
+                    // one created.
+                    $itemProductId = (int) $item['product_id'];
+                    $service = !empty($servicesByProduct[$itemProductId])
+                        ? array_shift($servicesByProduct[$itemProductId])
+                        : null;
                     $domainOrHost = '';
                     if ($service !== null) {
                         $domainOrHost = trim((string) ($service['hostname'] ?? ''));
@@ -316,3 +327,47 @@
         </div>
     </div>
 </div>
+
+<!-- Domains on this order -->
+<?php if (!empty($domains)): ?>
+<div class="admin-order-card" style="margin-top:24px;">
+    <h2 class="admin-order-card__title">🌐 Domains</h2>
+    <div class="admin-order-card__body" style="padding:0;">
+        <div style="overflow-x:auto;">
+            <table class="admin-order-table">
+                <thead><tr><th>Domain</th><th>TLD</th><th>Registrar</th><th>Status</th><th style="text-align:right;">Price</th></tr></thead>
+                <tbody>
+                <?php foreach ($domains as $domain): ?>
+                    <?php
+                    // Same locked-rate rule as the item table above: NULL
+                    // currency_id means the amount is already in the base
+                    // currency (never re-convert); a locked order multiplies
+                    // its stored amount by the checkout-time rate.
+                    $domainStatus = (string) ($domain['status'] ?? 'pending');
+                    $domainAmount = round((float) ($domain['amount'] ?? 0) * $orderRate, 2);
+                    ?>
+                    <tr>
+                        <td><strong><?= e((string) $domain['domain_name']) ?></strong></td>
+                        <td><?= e((string) ($domain['tld'] ?? '—')) ?></td>
+                        <td><?= e((string) ($domain['registrar_slug'] ?? '—')) ?></td>
+                        <td>
+                            <?php if ($domainStatus === 'active'): ?>
+                                <span class="admin-badge admin-badge--active">Active</span>
+                            <?php elseif ($domainStatus === 'suspended'): ?>
+                                <span class="admin-badge admin-badge--suspended">Suspended</span>
+                            <?php else: ?>
+                                <span class="admin-badge admin-badge--pending"><?= e(ucfirst($domainStatus)) ?></span>
+                                <?php if ($domainStatus === 'pending'): ?>
+                                    <div style="margin-top:6px;font-size:.72rem;color:var(--cv-text-secondary);">Will be registered when this order is accepted.</div>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:right;"><?= e($order['currency_symbol'] ?? '$') ?><?= number_format($domainAmount, 2) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<?php endif; ?>

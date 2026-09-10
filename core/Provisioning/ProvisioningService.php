@@ -99,12 +99,12 @@ final class ProvisioningService
         return ['success' => true, 'message' => $result['message']];
     }
 
-    public function suspend(int $serviceId): array
+    public function suspend(int $serviceId, ?string $reason = null): array
     {
         return $this->transition(
             $serviceId,
             fn (ProvisioningModule $m, array $p) => $m->suspend($p),
-            fn (int $id) => $this->services->suspend($id),
+            fn (int $id) => $this->services->suspend($id, $reason),
             HookPoints::AFTER_MODULE_SUSPEND,
             'suspended'
         );

@@ -299,9 +299,9 @@ final class ServiceRepository
         $this->setStatus($id, 'active');
     }
 
-    public function suspend(int $id): void
+    public function suspend(int $id, ?string $reason = null): void
     {
-        $this->setStatus($id, 'suspended');
+        $this->setStatus($id, 'suspended', $reason);
     }
 
     public function unsuspend(int $id): void
@@ -325,9 +325,9 @@ final class ServiceRepository
         return $this->find($id);
     }
 
-    public function updateStatus(int $id, string $status): void
+    public function updateStatus(int $id, string $status, ?string $reason = null): void
     {
-        $this->setStatus($id, $status);
+        $this->setStatus($id, $status, $reason);
     }
 
     public function assignServer(int $id, int $serverId, string $username): void
@@ -361,11 +361,28 @@ final class ServiceRepository
         );
     }
 
-    private function setStatus(int $id, string $status): void
+    private function setStatus(int $id, string $status, ?string $reason = null): void
     {
+        $this->ensureSchema();
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        if ($status === 'suspended') {
+            $reason = $reason !== null ? trim($reason) : '';
+
+            $this->db->update(
+                'UPDATE services SET status = ?, suspension_reason = ?, updated_at = ? WHERE id = ?',
+                [$status, $reason !== '' ? $reason : null, $now, $id]
+            );
+
+            return;
+        }
+
+        // Any non-suspended status retires the reason, so a stale "overdue"
+        // note can never linger on a reactivated service.
         $this->db->update(
-            'UPDATE services SET status = ?, updated_at = ? WHERE id = ?',
-            [$status, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+            'UPDATE services SET status = ?, suspension_reason = NULL, updated_at = ? WHERE id = ?',
+            [$status, $now, $id]
         );
     }
 
@@ -497,6 +514,11 @@ final class ServiceRepository
         // but not yet the column.
         try {
             $this->db->statement('ALTER TABLE services ADD COLUMN details_sent_at DATETIME NULL AFTER password');
+        } catch (\Throwable) {}
+        // Migration 0179. The reason a service was suspended — shown on the
+        // admin Services list and on the service page. Same defensive shape.
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN suspension_reason VARCHAR(255) NULL AFTER status');
         } catch (\Throwable) {}
     }
 

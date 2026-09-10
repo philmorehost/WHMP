@@ -256,6 +256,14 @@ $isCpanelSharedHosting ??= false;
             </div>
         <?php endif; ?>
 
+        <?php $suspensionReason = trim((string) ($service['suspension_reason'] ?? '')); ?>
+        <?php if ($service['status'] === 'suspended'): ?>
+            <div class="admin-service-error" style="margin-top:24px;">
+                🛑 <strong>Suspended</strong><?= $suspensionReason !== '' ? ': ' . e($suspensionReason) : ' — no reason recorded.' ?>
+                <div style="margin-top:6px;font-size:.8rem;opacity:.85;">Unsuspending the service (or paying the overdue invoice) clears this reason automatically.</div>
+            </div>
+        <?php endif; ?>
+
         <div class="admin-service-actions">
             <?php if ($service['status'] === 'pending'): ?>
                 <form method="post" action="/admin/services/<?= $id ?>/retry-provisioning"><?= csrf_field() ?>
@@ -313,6 +321,9 @@ $isCpanelSharedHosting ??= false;
                         <option value="<?= e($value) ?>" <?= $service['status'] === $value ? 'selected' : '' ?>><?= e($label) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <input name="suspension_reason" class="cv-input" style="width:auto;min-width:260px;"
+                       placeholder="Reason (used when setting Suspended)"
+                       value="<?= e($suspensionReason) ?>">
                 <button class="admin-service-btn admin-service-btn--primary" type="submit"
                         data-confirm="Change this service's status? This updates WHMP only — it does not start, stop or terminate anything on the server.">💾 Apply Status</button>
             </form>

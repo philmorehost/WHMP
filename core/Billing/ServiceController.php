@@ -472,7 +472,16 @@ final class ServiceController
 
     public function suspend(Request $request, array $params): Response
     {
-        return $this->transition($request, $params, fn (int $id) => $this->provisioning->suspend($id), 'service.suspended');
+        // Optional admin-supplied reason; a plain one-click Suspend still
+        // records a sane default so the Services list never shows a bare
+        // "Suspended" with no explanation.
+        $reason = trim((string) $request->input('reason', ''));
+
+        if ($reason === '') {
+            $reason = 'Suspended by admin.';
+        }
+
+        return $this->transition($request, $params, fn (int $id) => $this->provisioning->suspend($id, $reason), 'service.suspended');
     }
 
     public function unsuspend(Request $request, array $params): Response
@@ -531,7 +540,17 @@ final class ServiceController
             return Response::redirect("/admin/services/{$id}");
         }
 
-        $this->services->updateStatus($id, $status);
+        // Capture the reason the admin typed for a manual suspension (the
+        // manual status form only uses it for the Suspended option), and
+        // clear it for every other status so a reactivated service never
+        // keeps showing why it was once suspended.
+        $suspensionReason = trim((string) $request->input('suspension_reason', ''));
+
+        if ($status === 'suspended' && $suspensionReason === '') {
+            $suspensionReason = 'Suspended by admin.';
+        }
+
+        $this->services->updateStatus($id, $status, $status === 'suspended' ? $suspensionReason : null);
 
         // Clear any stale provisioning error once the service is live — it
         // would otherwise keep showing the module failure that manual setup

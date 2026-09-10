@@ -6,6 +6,7 @@ namespace CodeVault\Billing;
 
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Domains\DomainRepository;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 use CodeVault\Queue\QueueInterface;
@@ -94,16 +95,27 @@ final class OrderController
         // Per-product lookup for the order page's "Domain / Hostname" column:
         // each order item's product maps to the service checkout created for
         // it, whose `domain` (shared hosting / domain registrations) or
-        // `hostname` (VPS / dedicated) is the detail worth showing.
+        // `hostname` (VPS / dedicated) is the detail worth showing. Kept as a
+        // list per product and consumed in order by the view, so an order
+        // with two lines of the same product shows each line's own domain
+        // instead of both lines showing the last service created.
         $servicesByProduct = [];
         foreach ($this->services->forOrder((int) $order['id']) as $service) {
-            $servicesByProduct[(int) $service['product_id']] = $service;
+            $servicesByProduct[(int) $service['product_id']][] = $service;
         }
+
+        // Domains the client bought on this order — standalone (riding the
+        // hidden carrier product) or attached to a hosting line. Shown
+        // explicitly on the order page so the admin can see exactly what will
+        // be registered when the order is accepted; otherwise a pending
+        // domain is only implied by a column on an item row.
+        $domains = App::container()->make(DomainRepository::class)->forOrder((int) $order['id']);
 
         return $this->render('billing.order-show', [
             'order' => $order,
             'items' => $this->orders->items((int) $order['id']),
             'servicesByProduct' => $servicesByProduct,
+            'domains' => $domains,
             'msg' => $request->query('msg') !== null ? (string) $request->query('msg') : null,
         ]);
     }

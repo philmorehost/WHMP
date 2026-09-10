@@ -425,6 +425,12 @@ $pendingCount = 0;
                                     <span class="admin-badge admin-badge--active">Active</span>
                                 <?php elseif ($service['status'] === 'suspended'): ?>
                                     <span class="admin-badge admin-badge--suspended">Suspended</span>
+                                    <?php $suspensionReason = trim((string) ($service['suspension_reason'] ?? '')); ?>
+                                    <?php if ($suspensionReason !== ''): ?>
+                                        <div title="<?= e($suspensionReason) ?>" style="margin-top:6px;font-size:.72rem;color:#b91c1c;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                            ⚠️ <?= e($suspensionReason) ?>
+                                        </div>
+                                    <?php endif; ?>
                                 <?php elseif ($service['status'] === 'pending'): ?>
                                     <span class="admin-badge admin-badge--pending">Pending</span>
                                 <?php else: ?>
