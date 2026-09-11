@@ -170,10 +170,36 @@ final class OrderRepository
 
     public function cancel(int $id): void
     {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
         $this->db->update(
-            'UPDATE orders SET status = ?, updated_at = ? WHERE id = ?',
-            ['cancelled', (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+            'UPDATE orders SET status = ?, is_cancelled = 1, cancelled_at = ?, updated_at = ? WHERE id = ?',
+            ['cancelled', $now, $now, $id]
         );
+    }
+
+    /**
+     * Puts a cancelled order back to pending. Only a cancelled order is
+     * touched (an already-pending/active one is left alone) and the return
+     * value says whether anything changed. The cancellation audit columns are
+     * cleared so the order no longer reads as cancelled anywhere.
+     *
+     * Like invoices, a cancellation can be recorded in the `status` column
+     * (the admin Cancel button) or the older `is_cancelled` audit flag
+     * (OrderCancellationService, which also set status), so both are matched
+     * and cleared. The caller reactivates the order's invoice separately.
+     */
+    public function reactivate(int $id): bool
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $affected = $this->db->update(
+            "UPDATE orders SET status = 'pending', is_cancelled = 0, cancelled_at = NULL, cancellation_reason = NULL, updated_at = ?
+              WHERE id = ? AND (status = 'cancelled' OR is_cancelled = 1)",
+            [$now, $id]
+        );
+
+        return $affected > 0;
     }
 
     /** @param array<int, string> $reasons */

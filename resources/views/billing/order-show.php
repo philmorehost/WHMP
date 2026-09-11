@@ -267,6 +267,16 @@
                     <button class="admin-order-btn admin-order-btn--danger" type="submit">✕ Cancel</button>
                 </form>
             <?php endif; ?>
+            <?php if ($order['status'] === 'cancelled' || !empty($order['is_cancelled'])): ?>
+                <?php
+                // Reactivating the order also reinstates its invoice, so the
+                // admin doesn't have to reactivate the two separately.
+                ?>
+                <form method="post" action="/admin/orders/<?= (int) $order['id'] ?>/reactivate"
+                      data-confirm="Reactivate this cancelled order? It goes back to pending and its invoice is set back to unpaid so it can be billed again."><?= csrf_field() ?>
+                    <button class="admin-order-btn admin-order-btn--primary" type="submit">♻️ Reactivate Order</button>
+                </form>
+            <?php endif; ?>
             <form method="post" action="/admin/orders/<?= (int) $order['id'] ?>/delete" data-confirm="Delete order ORD-<?= (int) $order['id'] ?>? This cannot be undone."><?= csrf_field() ?>
                 <button class="admin-order-btn admin-order-btn--danger" type="submit">🗑️ Delete Order</button>
             </form>

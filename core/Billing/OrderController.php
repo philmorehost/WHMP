@@ -33,7 +33,8 @@ final class OrderController
         private readonly OrderRepository $orders,
         private readonly ServiceRepository $services,
         private readonly HookDispatcher $hooks,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly InvoiceRepository $invoices
     ) {
     }
 
@@ -169,6 +170,50 @@ final class OrderController
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'order.cancelled', 'order', $id, "Cancelled order #{$id}", $request->ip());
 
         return Response::redirect("/admin/orders/{$id}");
+    }
+
+    /**
+     * Puts a cancelled order back to pending and — so the admin doesn't have
+     * to reactivate the invoice separately — brings the order's invoice back
+     * to unpaid at the same time.
+     *
+     * If the invoice was already reactivated, reactivate() is a no-op for it
+     * and only the order changes; either way the order ends up pending with a
+     * payable invoice against it, ready to be accepted again.
+     */
+    public function reactivate(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+
+        if ($this->orders->find($id) === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        if (!$this->orders->reactivate($id)) {
+            return Response::redirect("/admin/orders/{$id}?msg=" . urlencode('Only a cancelled order can be reactivated.'));
+        }
+
+        $adminId = (int) $this->guard->currentAdmin()['id'];
+        $this->activity->log('admin', $adminId, 'order.reactivated', 'order', $id, "Reactivated cancelled order #{$id} (set back to pending)", $request->ip());
+
+        // Bring the order's invoice back with it so the client is billed for
+        // the reinstated order. No-op when the invoice is already unpaid —
+        // that's the case where the admin reactivated the invoice first.
+        $invoice = $this->invoices->findByOrder($id);
+        $invoiceNote = '';
+
+        if ($invoice !== null && $this->invoices->reactivate((int) $invoice['id'])) {
+            $this->activity->log('admin', $adminId, 'invoice.status_changed', 'invoice', (int) $invoice['id'], "Reactivated invoice #{$invoice['id']} with order #{$id}", $request->ip());
+            $invoiceNote = ' Its invoice INV-' . (int) $invoice['id'] . ' was also set back to unpaid.';
+        } elseif ($invoice !== null && (string) ($invoice['status'] ?? '') === 'unpaid') {
+            $invoiceNote = ' Its invoice INV-' . (int) $invoice['id'] . ' was already unpaid.';
+        }
+
+        return Response::redirect("/admin/orders/{$id}?msg=" . urlencode('Order reactivated — it is pending again.' . $invoiceNote));
     }
 
     public function destroy(Request $request, array $params): Response

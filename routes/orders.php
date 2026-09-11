@@ -13,4 +13,5 @@ $router->post('/admin/orders', [AdminOrderController::class, 'store']);
 $router->get('/admin/orders/{id}', [OrderController::class, 'show']);
 $router->post('/admin/orders/{id}/accept', [OrderController::class, 'accept']);
 $router->post('/admin/orders/{id}/cancel', [OrderController::class, 'cancel']);
+$router->post('/admin/orders/{id}/reactivate', [OrderController::class, 'reactivate']);
 $router->post('/admin/orders/{id}/delete', [OrderController::class, 'destroy']);
