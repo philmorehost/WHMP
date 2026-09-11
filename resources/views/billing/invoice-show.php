@@ -253,6 +253,16 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
     </div>
 <?php endif; ?>
 
+<?php if (($statusChanged ?? null) !== null): ?>
+    <div class="admin-invoice-message admin-invoice-message--success">
+        ✅ Invoice status changed to <strong><?= e((string) $statusChanged) ?></strong><?= $statusChanged === 'unpaid' ? ' — it is outstanding again and can be paid.' : '.' ?>
+    </div>
+<?php elseif (!empty($statusError)): ?>
+    <div class="admin-invoice-message admin-invoice-message--error">
+        ⚠️ <?= e((string) $statusError) ?>
+    </div>
+<?php endif; ?>
+
 <?php if (!empty($editSaved)): ?>
     <div class="admin-invoice-message admin-invoice-message--success">
         ✅ Invoice updated.
@@ -314,6 +324,17 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
                 </form>
                 <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/cancel"><?= csrf_field() ?>
                     <button class="admin-invoice-btn admin-invoice-btn--danger" type="submit">✕ Cancel</button>
+                </form>
+            <?php endif; ?>
+            <?php if ($invoice['status'] === 'cancelled'): ?>
+                <?php
+                // A client who cancelled and then changed their mind: put the
+                // invoice back to Unpaid instead of raising a brand-new one.
+                ?>
+                <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/status"
+                      data-confirm="Reactivate this cancelled invoice and set it back to Unpaid so it can be paid again?"><?= csrf_field() ?>
+                    <input type="hidden" name="status" value="unpaid">
+                    <button class="admin-invoice-btn admin-invoice-btn--primary" type="submit">♻️ Reactivate (set to Unpaid)</button>
                 </form>
             <?php endif; ?>
             <a class="admin-invoice-btn admin-invoice-btn--secondary" href="/admin/invoices/<?= (int) $invoice['id'] ?>/pdf" target="_blank">📥 Download PDF</a>

@@ -196,6 +196,23 @@ final class InvoiceRepository
         );
     }
 
+    /**
+     * Moves a cancelled invoice back to unpaid so it can be billed again —
+     * the "customer changed their mind and wants the invoice reinstated"
+     * case. Only a cancelled invoice is touched (an unpaid/paid/refunded one
+     * is left alone), and the return value says whether anything changed.
+     * paid_at is cleared because the invoice is once again outstanding.
+     */
+    public function reactivate(int $id): bool
+    {
+        $affected = $this->db->update(
+            "UPDATE invoices SET status = 'unpaid', paid_at = NULL, updated_at = ? WHERE id = ? AND status = 'cancelled'",
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+
+        return $affected > 0;
+    }
+
     public function cancelUnpaidForService(int $serviceId): void
     {
         $this->db->update(

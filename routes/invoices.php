@@ -44,6 +44,7 @@ $router->get('/admin/invoices/{id}', [AdminInvoiceController::class, 'show']);
 $router->get('/admin/invoices/{id}/pdf', [AdminInvoiceController::class, 'downloadPdf']);
 $router->post('/admin/invoices/{id}/mark-paid', [AdminInvoiceController::class, 'markPaid']);
 $router->post('/admin/invoices/{id}/cancel', [AdminInvoiceController::class, 'cancel']);
+$router->post('/admin/invoices/{id}/status', [AdminInvoiceController::class, 'setStatus']);
 $router->post('/admin/invoices/{id}/refund', [AdminInvoiceController::class, 'refund']);
 $router->post('/admin/invoices/{id}/send-reminder', [AdminInvoiceController::class, 'sendReminder']);
 $router->post('/admin/invoices/{id}/items', [AdminInvoiceController::class, 'updateItems']);
