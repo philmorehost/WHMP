@@ -190,23 +190,34 @@ final class InvoiceRepository
 
     public function markCancelled(int $id): void
     {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
         $this->db->update(
-            'UPDATE invoices SET status = ?, updated_at = ? WHERE id = ?',
-            ['cancelled', (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+            'UPDATE invoices SET status = ?, is_cancelled = 1, cancelled_at = ?, updated_at = ? WHERE id = ?',
+            ['cancelled', $now, $now, $id]
         );
     }
 
     /**
      * Moves a cancelled invoice back to unpaid so it can be billed again —
      * the "customer changed their mind and wants the invoice reinstated"
-     * case. Only a cancelled invoice is touched (an unpaid/paid/refunded one
-     * is left alone), and the return value says whether anything changed.
-     * paid_at is cleared because the invoice is once again outstanding.
+     * case.
+     *
+     * A cancellation can be stored two ways in this codebase: the `status`
+     * column (the admin/client cancel actions) and the older `is_cancelled`
+     * audit flag (InvoiceCancellationService, which never touched status).
+     * Both are recognised and cleared here, so an invoice cancelled before
+     * the two were kept in sync can still be reactivated. Only a cancelled
+     * row is touched; an unpaid/paid/refunded invoice is left alone and the
+     * return value says whether anything changed. paid_at is cleared because
+     * the invoice is once again outstanding.
      */
     public function reactivate(int $id): bool
     {
         $affected = $this->db->update(
-            "UPDATE invoices SET status = 'unpaid', paid_at = NULL, updated_at = ? WHERE id = ? AND status = 'cancelled'",
+            "UPDATE invoices
+                SET status = 'unpaid', paid_at = NULL, is_cancelled = 0, cancelled_at = NULL, cancellation_reason = NULL, updated_at = ?
+              WHERE id = ? AND (status = 'cancelled' OR is_cancelled = 1)",
             [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
 
@@ -215,9 +226,11 @@ final class InvoiceRepository
 
     public function cancelUnpaidForService(int $serviceId): void
     {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
         $this->db->update(
-            "UPDATE invoices SET status = 'cancelled', updated_at = ? WHERE service_id = ? AND status = 'unpaid'",
-            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $serviceId]
+            "UPDATE invoices SET status = 'cancelled', is_cancelled = 1, cancelled_at = ?, updated_at = ? WHERE service_id = ? AND status = 'unpaid'",
+            [$now, $now, $serviceId]
         );
     }
 
@@ -241,10 +254,11 @@ final class InvoiceRepository
         }
 
         $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return $this->db->update(
-            "UPDATE invoices SET status = 'cancelled', updated_at = ? WHERE status = 'unpaid' AND id IN ({$placeholders})",
-            array_merge([(new DateTimeImmutable())->format('Y-m-d H:i:s')], $ids)
+            "UPDATE invoices SET status = 'cancelled', is_cancelled = 1, cancelled_at = ?, updated_at = ? WHERE status = 'unpaid' AND id IN ({$placeholders})",
+            array_merge([$now, $now], $ids)
         );
     }
 

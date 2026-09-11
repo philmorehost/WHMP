@@ -302,9 +302,15 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
             <h1 class="admin-invoice-hero__title">Invoice INV-<?= (int) $invoice['id'] ?></h1>
             <p style="margin:8px 0 0 0; color:rgba(255,255,255,.7);">
                 Status:
-                <?php if ($invoice['status'] === 'paid'): ?>
+                <?php
+                // Recognise both cancellation representations: the status
+                // column, and the older is_cancelled flag set by
+                // InvoiceCancellationService (which left status 'unpaid').
+                $invoiceCancelled = $invoice['status'] === 'cancelled' || !empty($invoice['is_cancelled']);
+                ?>
+                <?php if ($invoice['status'] === 'paid' && !$invoiceCancelled): ?>
                     <span class="admin-invoice-badge admin-invoice-badge--paid">Paid</span>
-                <?php elseif ($invoice['status'] === 'cancelled'): ?>
+                <?php elseif ($invoiceCancelled): ?>
                     <span class="admin-invoice-badge admin-invoice-badge--cancelled">Cancelled</span>
                 <?php elseif ($invoice['status'] === 'refunded'): ?>
                     <span class="admin-invoice-badge admin-invoice-badge--refunded">Refunded</span>
@@ -314,7 +320,7 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
             </p>
         </div>
         <div class="admin-invoice-actions">
-            <?php if ($invoice['status'] === 'unpaid'): ?>
+            <?php if ($invoice['status'] === 'unpaid' && !$invoiceCancelled): ?>
                 <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/mark-paid"><?= csrf_field() ?>
                     <button class="admin-invoice-btn admin-invoice-btn--primary" type="submit">✓ Mark Paid</button>
                 </form>
@@ -326,10 +332,11 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
                     <button class="admin-invoice-btn admin-invoice-btn--danger" type="submit">✕ Cancel</button>
                 </form>
             <?php endif; ?>
-            <?php if ($invoice['status'] === 'cancelled'): ?>
+            <?php if ($invoiceCancelled): ?>
                 <?php
                 // A client who cancelled and then changed their mind: put the
                 // invoice back to Unpaid instead of raising a brand-new one.
+                // Covers both the status column and the is_cancelled flag.
                 ?>
                 <form method="post" action="/admin/invoices/<?= (int) $invoice['id'] ?>/status"
                       data-confirm="Reactivate this cancelled invoice and set it back to Unpaid so it can be paid again?"><?= csrf_field() ?>
@@ -363,9 +370,9 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
     </div>
 </div>
 
-<?php if ($invoice['status'] === 'unpaid'): ?>
+<?php if ($invoice['status'] === 'unpaid' && !$invoiceCancelled): ?>
     <?php
-    // Editing is limited to unpaid invoices: a paid one has a transaction
+    // Editing is limited to unpaid, non-cancelled invoices: a paid one has a transaction
     // recorded against it, so changing the amount would leave the ledger
     // disagreeing with the invoice. A credit note is the instrument for that.
     //

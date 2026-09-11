@@ -711,21 +711,13 @@ final class AdminInvoiceController
             return Response::redirect("/admin/invoices/{$id}?status_error=" . urlencode('Choose Unpaid or Cancelled.'));
         }
 
-        if ($target === $previous) {
-            return Response::redirect("/admin/invoices/{$id}");
-        }
+        // A cancellation can live in the status column OR the older
+        // is_cancelled audit flag (InvoiceCancellationService wrote only the
+        // latter, leaving status 'unpaid'), so an invoice cancelled before the
+        // two were unified still has to be recognised here.
+        $wasCancelled = $previous === 'cancelled' || !empty($invoice['is_cancelled']);
 
-        // Only these two transitions are meaningful here. Anything from a
-        // paid/refunded invoice is refused, so this can never silently
-        // un-pay a settled invoice.
-        $allowed = ($previous === 'cancelled' && $target === 'unpaid')
-            || ($previous === 'unpaid' && $target === 'cancelled');
-
-        if (!$allowed) {
-            return Response::redirect("/admin/invoices/{$id}?status_error=" . urlencode("A {$previous} invoice cannot be changed to {$target}."));
-        }
-
-        if ($target === 'unpaid') {
+        if ($target === 'unpaid' && $wasCancelled) {
             if (!$this->invoices->reactivate($id)) {
                 return Response::redirect("/admin/invoices/{$id}?status_error=" . urlencode('That invoice could not be reactivated.'));
             }
@@ -735,10 +727,20 @@ final class AdminInvoiceController
             return Response::redirect("/admin/invoices/{$id}?status_changed=unpaid");
         }
 
-        $this->invoices->markCancelled($id);
-        $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'invoice.status_changed', 'invoice', $id, "Cancelled invoice #{$id}", $request->ip());
+        if ($target === $previous) {
+            return Response::redirect("/admin/invoices/{$id}");
+        }
 
-        return Response::redirect("/admin/invoices/{$id}?status_changed=cancelled");
+        // Only unpaid -> cancelled remains. A paid/refunded invoice is never
+        // touched here, so this can't silently un-pay a settled invoice.
+        if ($target === 'cancelled' && $previous === 'unpaid') {
+            $this->invoices->markCancelled($id);
+            $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'invoice.status_changed', 'invoice', $id, "Cancelled invoice #{$id}", $request->ip());
+
+            return Response::redirect("/admin/invoices/{$id}?status_changed=cancelled");
+        }
+
+        return Response::redirect("/admin/invoices/{$id}?status_error=" . urlencode("A {$previous} invoice cannot be changed to {$target}."));
     }
 
     public function refund(Request $request, array $params): Response
