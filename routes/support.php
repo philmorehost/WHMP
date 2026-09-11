@@ -43,6 +43,9 @@ $router->post('/admin/departments/{id}/delete', [DepartmentController::class, 'd
 $router->post('/admin/departments/{id}/empty', [DepartmentController::class, 'purge']);
 
 $router->get('/admin/billable-items', [BillableItemController::class, 'index']);
+$router->post('/admin/billable-items/{id}', [BillableItemController::class, 'update']);
+$router->post('/admin/billable-items/{id}/cancel', [BillableItemController::class, 'cancel']);
+$router->post('/admin/billable-items/{id}/delete', [BillableItemController::class, 'destroy']);
 
 $router->get('/admin/canned-replies', [CannedReplyController::class, 'index']);
 $router->post('/admin/canned-replies', [CannedReplyController::class, 'store']);

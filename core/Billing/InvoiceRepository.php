@@ -166,6 +166,20 @@ final class InvoiceRepository
         );
     }
 
+    /**
+     * Every unpaid invoice id, newest first — backs the admin's
+     * "remind all unpaid" action so it reaches the whole unpaid set, not just
+     * the page currently on screen (a checkbox selection only spans one page).
+     *
+     * @return array<int, int>
+     */
+    public function unpaidIds(): array
+    {
+        $rows = $this->db->select("SELECT id FROM invoices WHERE status = 'unpaid' ORDER BY id DESC");
+
+        return array_map(static fn (array $row): int => (int) $row['id'], $rows);
+    }
+
     public function markPaid(int $id): int
     {
         return $this->db->update(

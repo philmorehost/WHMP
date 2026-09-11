@@ -16,6 +16,9 @@ $router->get('/client/invoices/{id}/pdf', [ClientInvoiceController::class, 'down
 $router->post('/client/invoices/{id}/apply-credit', [ClientInvoiceController::class, 'applyCredit']);
 $router->post('/client/invoices/{id}/cancel', [ClientInvoiceController::class, 'cancel']);
 
+// Pending ad-hoc charges the client can withdraw before they are invoiced.
+$router->post('/client/billable-items/{id}/cancel', [ClientInvoiceController::class, 'cancelBillable']);
+
 $router->get('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsForm']);
 $router->post('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsSubmit']);
 
@@ -36,6 +39,7 @@ $router->get('/admin/recurring-invoices', [RecurringInvoiceController::class, 'i
 $router->post('/admin/recurring-invoices/{id}/status', [RecurringInvoiceController::class, 'setStatus']);
 $router->post('/admin/invoices/mark-zero-paid', [AdminInvoiceController::class, 'markZeroValuePaid']);
 $router->post('/admin/invoices/bulk-remind', [AdminInvoiceController::class, 'bulkSendReminders']);
+$router->post('/admin/invoices/remind-all-unpaid', [AdminInvoiceController::class, 'remindAllUnpaid']);
 $router->get('/admin/invoices/{id}', [AdminInvoiceController::class, 'show']);
 $router->get('/admin/invoices/{id}/pdf', [AdminInvoiceController::class, 'downloadPdf']);
 $router->post('/admin/invoices/{id}/mark-paid', [AdminInvoiceController::class, 'markPaid']);

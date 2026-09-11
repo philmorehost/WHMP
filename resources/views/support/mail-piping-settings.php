@@ -5,6 +5,8 @@
 /** @var string $encryption */
 /** @var string $username */
 /** @var bool $validate_cert */
+/** @var array<int, array<string, mixed>> $admins */
+/** @var int $autoAssignAdminId */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Mail Piping</h1>
@@ -48,6 +50,21 @@
             <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin:4px 0 0;">
                 Leave unchecked on cPanel/shared hosting — many mail servers present an untrusted certificate, which makes IMAP report
                 "[CLOSED] IMAP connection broken (authenticate)" even with correct credentials. Unchecking skips certificate validation.
+            </p>
+        </div>
+        <div class="cv-field">
+            <label class="cv-label">Auto-assign new tickets to</label>
+            <select class="cv-input" name="auto_assign_admin_id">
+                <option value="0" <?= $autoAssignAdminId === 0 ? 'selected' : '' ?>>First available admin (automatic)</option>
+                <?php foreach ($admins as $admin): ?>
+                    <option value="<?= (int) $admin['id'] ?>" <?= $autoAssignAdminId === (int) $admin['id'] ? 'selected' : '' ?>>
+                        <?= e((string) $admin['display_name']) ?><?= !empty($admin['role_name']) ? ' — ' . e((string) $admin['role_name']) : '' ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin:4px 0 0;">
+                Every newly-opened ticket — including ones this piping script creates — is assigned to this staff member so it never sits
+                unassigned. "First available admin" prefers a super-admin, then any admin. Admins can always reassign a ticket manually.
             </p>
         </div>
         <button class="cv-btn" type="submit">Save</button>

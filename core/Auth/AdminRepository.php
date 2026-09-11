@@ -37,12 +37,42 @@ final class AdminRepository
     {
         return $this->db->select(
             <<<'SQL'
-            SELECT a.*, r.name AS role_name
+            SELECT a.*, r.name AS role_name, r.is_super_admin
             FROM admins a
             LEFT JOIN roles r ON r.id = a.role_id
             ORDER BY a.display_name
             SQL
         );
+    }
+
+    /**
+     * The staff member a newly-opened support ticket should be assigned to:
+     * the explicitly configured admin when one is set, otherwise the first
+     * super-admin, otherwise the first admin. Null only when no admins exist.
+     *
+     * Used by TicketService::open() so every creation path — the client
+     * portal, the admin client page and the mail-piping cron script — lands
+     * the ticket on someone's desk instead of sitting unassigned.
+     */
+    public function resolveDefaultAssigneeId(int $preferredId = 0): ?int
+    {
+        $admins = $this->all();
+
+        if ($preferredId > 0) {
+            foreach ($admins as $admin) {
+                if ((int) $admin['id'] === $preferredId) {
+                    return $preferredId;
+                }
+            }
+        }
+
+        foreach ($admins as $admin) {
+            if ((int) ($admin['is_super_admin'] ?? 0) === 1) {
+                return (int) $admin['id'];
+            }
+        }
+
+        return $admins === [] ? null : (int) $admins[0]['id'];
     }
 
     public function create(string $username, string $email, string $plainPassword, string $displayName, ?int $roleId): int

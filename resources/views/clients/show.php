@@ -712,7 +712,64 @@ $id = (int) $client['id'];
     </div>
 
     <div class="admin-detail-card" style="margin-bottom:24px;">
-        <h2 class="admin-detail-card__title">📄 Invoices</h2>
+        <h2 class="admin-detail-card__title">� Recurring Invoices</h2>
+        <div class="admin-detail-card__body" style="padding:0;">
+            <div style="overflow-x:auto;">
+                <table class="admin-detail-table">
+                    <thead><tr><th>#</th><th>Description</th><th>Cycle</th><th>Amount</th><th>Next Renewal</th><th>Status</th><th>Last Invoice</th><th style="width:110px;">Action</th></tr></thead>
+                    <tbody>
+                    <?php foreach (($recurringInvoices ?? []) as $ri): ?>
+                        <?php
+                        // A recurring_invoices row is a template the cron re-raises
+                        // each cycle; next_due_date is the day the NEXT invoice will
+                        // be generated. Surface it here so the admin can see when the
+                        // client is next billed without leaving the Billing tab.
+                        $riItems = is_array($ri['items'] ?? null) ? $ri['items'] : [];
+                        $riLabel = count($riItems) === 1
+                            ? (string) ($riItems[0]['description'] ?? 'Line item')
+                            : (count($riItems) . ' line item' . (count($riItems) === 1 ? '' : 's'));
+                        $riStatus = (string) ($ri['status'] ?? 'active');
+                        $riStatusClass = $riStatus === 'active' ? 'admin-detail-badge--active' : 'admin-detail-badge--unpaid';
+                        $riNext = (string) ($ri['next_due_date'] ?? '');
+                        $riDays = $riNext !== '' ? (int) ((strtotime($riNext) - time()) / 86400) : null;
+                        $riSoon = $riStatus === 'active' && $riDays !== null && $riDays <= 7;
+                        $riNextColor = $riSoon ? ($riDays < 0 ? '#dc2626' : '#d97706') : 'var(--cv-text-primary)';
+                        ?>
+                        <tr>
+                            <td>RI-<?= (int) $ri['id'] ?></td>
+                            <td><?= e($riLabel) ?></td>
+                            <td><?= e((string) ($ri['billing_cycle'] ?? '')) ?></td>
+                            <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($serviceMoney((float) ($ri['amount'] ?? 0))) ?></td>
+                            <td style="color:<?= $riNextColor ?>; font-weight:<?= $riSoon ? '700' : '400' ?>;">
+                                <?= e($riNext !== '' ? $riNext : '—') ?>
+                                <?php if ($riSoon): ?>
+                                    <span style="display:block; font-size:.72rem;">
+                                        <?= $riDays < 0 ? 'Overdue by ' . abs($riDays) . 'd' : ($riDays === 0 ? 'Due today' : 'In ' . $riDays . 'd') ?>
+                                    </span>
+                                <?php endif; ?>
+                            </td>
+                            <td><span class="admin-detail-badge <?= $riStatusClass ?>"><?= e($riStatus) ?></span></td>
+                            <td>
+                                <?php if (!empty($ri['last_invoice_id'])): ?>
+                                    <a href="/admin/invoices/<?= (int) $ri['last_invoice_id'] ?>">INV-<?= (int) $ri['last_invoice_id'] ?></a>
+                                <?php else: ?>
+                                    <span style="color:var(--cv-text-secondary);">—</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/recurring-invoices" style="padding:6px 12px; font-size:.75rem;">Manage</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (($recurringInvoices ?? []) === []): ?>
+                        <tr><td colspan="8" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No recurring invoices for this client.</td></tr>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-detail-card" style="margin-bottom:24px;">
+        <h2 class="admin-detail-card__title">�📄 Invoices</h2>
         <div class="admin-detail-card__body" style="padding:0;">
             <div style="overflow-x:auto;">
                 <table class="admin-detail-table">

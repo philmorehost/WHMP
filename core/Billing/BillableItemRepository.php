@@ -33,10 +33,30 @@ final class BillableItemRepository
         );
     }
 
-    /** @return array<int, array<string, mixed>> billable items not yet invoiced */
+    /** @return array<int, array<string, mixed>> pending billable items not yet invoiced */
     public function uninvoiced(): array
     {
-        return $this->db->select('SELECT * FROM billable_items WHERE invoice_id IS NULL');
+        return $this->db->select("SELECT * FROM billable_items WHERE invoice_id IS NULL AND status = 'pending'");
+    }
+
+    /** @return array<int, array<string, mixed>> a client's own billable items (newest first) */
+    public function forClient(int $clientId): array
+    {
+        return $this->db->select('SELECT * FROM billable_items WHERE client_id = ? ORDER BY id DESC', [$clientId]);
+    }
+
+    /**
+     * A client's still-pending charges — the rows the client area offers to
+     * cancel. Invoiced/cancelled items are history and are not shown there.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function pendingForClient(int $clientId): array
+    {
+        return $this->db->select(
+            "SELECT * FROM billable_items WHERE client_id = ? AND status = 'pending' ORDER BY id DESC",
+            [$clientId]
+        );
     }
 
     public function create(int $clientId, string $description, float $amount, ?string $sourceType = null, ?int $sourceId = null): int
@@ -49,10 +69,41 @@ final class BillableItemRepository
         );
     }
 
+    /** Edits a pending item's description/amount. No-op once invoiced or cancelled. */
+    public function update(int $id, string $description, float $amount): void
+    {
+        $this->db->update(
+            "UPDATE billable_items SET description = ?, amount = ?, updated_at = ? WHERE id = ? AND status = 'pending'",
+            [$description, $amount, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    /**
+     * Withdraws a pending item so the cron will never invoice it. Returns
+     * false when the item doesn't exist, is already invoiced, or is already
+     * cancelled — the caller reports that rather than pretending it worked.
+     */
+    public function cancel(int $id, string $by, ?string $reason = null): bool
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $affected = $this->db->update(
+            "UPDATE billable_items SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?, cancelled_reason = ?, updated_at = ? WHERE id = ? AND status = 'pending'",
+            [$now, $by, $reason !== null && trim($reason) !== '' ? trim($reason) : null, $now, $id]
+        );
+
+        return $affected > 0;
+    }
+
+    public function delete(int $id): void
+    {
+        $this->db->delete('DELETE FROM billable_items WHERE id = ?', [$id]);
+    }
+
     public function markInvoiced(int $id, int $invoiceId): void
     {
         $this->db->update(
-            'UPDATE billable_items SET invoice_id = ?, updated_at = ? WHERE id = ?',
+            "UPDATE billable_items SET invoice_id = ?, status = 'invoiced', updated_at = ? WHERE id = ?",
             [$invoiceId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         );
     }

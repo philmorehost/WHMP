@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Support;
 
+use CodeVault\Auth\AdminRepository;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -17,7 +18,8 @@ final class MailPipingSettingsController
         private readonly AuthGuard $guard,
         private readonly View $view,
         private readonly SettingsRepository $settings,
-        private readonly MailboxClient $mailbox
+        private readonly MailboxClient $mailbox,
+        private readonly AdminRepository $admins
     ) {
     }
 
@@ -34,6 +36,8 @@ final class MailPipingSettingsController
             'encryption' => $this->settings->get('mail_piping.encryption', 'ssl'),
             'username' => $this->settings->get('mail_piping.username', ''),
             'validate_cert' => $this->settings->get('mail_piping.validate_cert', '0') === '1',
+            'admins' => $this->admins->all(),
+            'autoAssignAdminId' => (int) ($this->settings->get('support.auto_assign_admin_id', '0') ?? '0'),
         ]);
     }
 
@@ -49,6 +53,11 @@ final class MailPipingSettingsController
         $this->settings->set('mail_piping.encryption', trim((string) $request->input('encryption', 'ssl')));
         $this->settings->set('mail_piping.username', trim((string) $request->input('username', '')));
         $this->settings->set('mail_piping.validate_cert', (string) $request->input('validate_cert', '') === '1' ? '1' : '0');
+
+        // Which staff member new tickets are auto-assigned to (including
+        // those created by this piping script): 0 = first available admin
+        // (super-admin preferred), >0 = that specific admin.
+        $this->settings->set('support.auto_assign_admin_id', (string) max(0, (int) $request->input('auto_assign_admin_id', 0)));
 
         $password = (string) $request->input('password', '');
 

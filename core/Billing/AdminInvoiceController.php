@@ -467,6 +467,33 @@ final class AdminInvoiceController
     }
 
     /**
+     * Emails a payment reminder for EVERY unpaid invoice in one action — the
+     * whole-install button. The selected-row bulk action above only reaches
+     * the checkboxes on the current page; this chases everyone at once.
+     * Idempotent per invoice (send() skips anything no longer unpaid).
+     */
+    public function remindAllUnpaid(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $result = $this->reminders->sendMany($this->invoices->unpaidIds());
+
+        $this->activity->log(
+            'admin',
+            (int) $this->guard->currentAdmin()['id'],
+            'invoice.bulk_reminders_sent',
+            'invoice',
+            null,
+            "Sent payment reminders for all unpaid invoices ({$result['sent']} sent, {$result['skipped']} skipped)",
+            $request->ip()
+        );
+
+        return Response::redirect('/admin/invoices?reminded=' . $result['sent'] . '&reminder_skipped=' . $result['skipped']);
+    }
+
+    /**
      * Settles every zero-value unpaid invoice in one action.
      *
      * Not driven by the row checkboxes on purpose: the list is paginated, so a

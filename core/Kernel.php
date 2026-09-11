@@ -1060,6 +1060,8 @@ class Kernel
                 $c->make(TicketReplyRepository::class),
                 $c->make(HookDispatcher::class),
                 $c->make(TicketAttachmentRepository::class),
+                $c->make(AdminRepository::class),
+                $c->make(\CodeVault\Settings\SettingsRepository::class),
             );
         });
 

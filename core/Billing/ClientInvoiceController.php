@@ -23,7 +23,8 @@ final class ClientInvoiceController
         private readonly CreditService $creditService,
         private readonly CurrencyService $currency,
         private readonly InvoicePdfBuilder $pdf,
-        private readonly SettingsRepository $settings
+        private readonly SettingsRepository $settings,
+        private readonly BillableItemRepository $billableItems
     ) {
     }
 
@@ -55,6 +56,11 @@ final class ClientInvoiceController
             // Used for invoices that never locked a currency, so they render
             // in this client's own currency rather than the system default.
             'clientCurrency' => $this->currency->resolveForClient($client),
+            // Ad-hoc charges not yet rolled into an invoice — the client may
+            // withdraw one here before it is billed.
+            'billableItems' => $this->billableItems->pendingForClient((int) $client['id']),
+            'billableCancelled' => $request->query('billable_cancelled') === '1',
+            'billableError' => $request->query('billable_error') === '1',
         ]);
     }
 
@@ -82,6 +88,34 @@ final class ClientInvoiceController
         );
 
         return ['data' => $data, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
+    /**
+     * A client withdrawing their own pending ad-hoc charge before it is
+     * invoiced. Scoped to the session client — an id belonging to anyone else
+     * is a 404, exactly like the other client invoice actions.
+     */
+    public function cancelBillable(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $id = (int) $params['id'];
+        $item = $this->billableItems->find($id);
+
+        if ($item === null || (int) $item['client_id'] !== (int) $client['id']) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        // cancel() only transitions a still-'pending' row, so a charge that has
+        // already been invoiced (or was already cancelled) can't be withdrawn —
+        // it stays on the invoice it was billed on.
+        $cancelled = $this->billableItems->cancel($id, 'client', 'Cancelled by client');
+
+        return Response::redirect('/client/invoices?' . ($cancelled ? 'billable_cancelled=1' : 'billable_error=1'));
     }
 
     public function show(Request $request, array $params): Response

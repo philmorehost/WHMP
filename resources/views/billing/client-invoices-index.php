@@ -416,6 +416,45 @@ $statusFilter = $statusFilter ?? '';
         <div class="invoices-hero__icon">📄</div>
     </div>
 
+    <?php if (!empty($billableCancelled)): ?>
+        <div style="max-width:1400px;margin:0 auto var(--cv-space-3);background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);color:#059669;padding:12px 16px;border-radius:8px;font-weight:600;">
+            Pending charge cancelled — it will not be invoiced.
+        </div>
+    <?php endif; ?>
+    <?php if (!empty($billableError)): ?>
+        <div style="max-width:1400px;margin:0 auto var(--cv-space-3);background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#b91c1c;padding:12px 16px;border-radius:8px;font-weight:600;">
+            That charge could not be cancelled — it may already have been invoiced.
+        </div>
+    <?php endif; ?>
+
+    <?php if (($billableItems ?? []) !== []): ?>
+    <!-- Pending ad-hoc charges the client may withdraw before they are billed. -->
+    <div style="max-width:1400px;margin:0 auto var(--cv-space-4);border:1px solid var(--cv-border-default);border-left:4px solid #f59e0b;border-radius:12px;background:var(--cv-bg-surface);padding:20px;">
+        <h2 style="margin:0 0 4px 0;font-size:1.1rem;">⏳ Pending Charges</h2>
+        <p style="margin:0 0 12px 0;color:var(--cv-text-secondary);font-size:.85rem;">
+            These charges are queued for your next invoice. If you are not ready for one, cancel it here before it is billed.
+        </p>
+        <div style="overflow-x:auto;">
+            <table class="cv-table" style="width:100%;">
+                <thead><tr><th>Description</th><th style="text-align:right;">Amount</th><th style="width:120px;text-align:right;">Action</th></tr></thead>
+                <tbody>
+                <?php foreach ($billableItems as $bi): ?>
+                    <tr>
+                        <td><?= e((string) $bi['description']) ?></td>
+                        <td style="text-align:right;font-family:'Monaco','Courier New',monospace;font-weight:700;">
+                            <?= e((string) ($clientCurrency['symbol'] ?? '$')) ?><?= number_format((float) $bi['amount'], 2) ?>
+                        </td>
+                        <td style="text-align:right;">
+                            <button type="submit" form="cancel-billable-<?= (int) $bi['id'] ?>" class="cv-btn cv-btn--secondary" style="padding:5px 12px;font-size:.75rem;">Cancel</button>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Status Filter Bar -->
     <div class="invoices-status-bar">
         <a href="/client/invoices" class="invoices-status-link <?= $statusFilter === '' ? 'active' : '' ?>">All Invoices</a>
@@ -634,6 +673,20 @@ $statusFilter = $statusFilter ?? '';
             <?= csrf_field() ?>
         </form>
     <?php endif; ?>
+<?php endforeach; ?>
+
+<?php
+// Pending-charge cancellation forms also live outside the mass-pay form (the
+// same HTML nested-form rule as the invoice cancel forms above). The Cancel
+// buttons reference these by id via the form attribute.
+?>
+<?php foreach (($billableItems ?? []) as $bi): ?>
+    <form id="cancel-billable-<?= (int) $bi['id'] ?>" method="post"
+          action="/client/billable-items/<?= (int) $bi['id'] ?>/cancel"
+          data-confirm="Cancel this pending charge — <?= e((string) $bi['description']) ?>? It will not be invoiced."
+          style="display:none;">
+        <?= csrf_field() ?>
+    </form>
 <?php endforeach; ?>
 
 <script nonce="<?= csp_nonce() ?>">

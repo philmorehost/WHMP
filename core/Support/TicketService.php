@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace CodeVault\Support;
 
+use CodeVault\Auth\AdminRepository;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
+use CodeVault\Settings\SettingsRepository;
 
 /**
  * The one place a ticket's status transitions happen (blueprint §4.4
@@ -20,7 +22,11 @@ final class TicketService
         private readonly TicketRepository $tickets,
         private readonly TicketReplyRepository $replies,
         private readonly HookDispatcher $hooks,
-        private readonly TicketAttachmentRepository $attachments
+        private readonly TicketAttachmentRepository $attachments,
+        // Optional so the many unit tests that build TicketService directly
+        // keep working; the container supplies them in production.
+        private readonly ?AdminRepository $admins = null,
+        private readonly ?SettingsRepository $settings = null
     ) {
     }
 
@@ -35,9 +41,42 @@ final class TicketService
         ]);
 
         $this->replies->create($ticketId, 'client', $clientId, $authorName, $message);
+
+        // Auto-assign the new ticket so it never sits in the queue unowned.
+        // Every creation path funnels through open() — the client portal, the
+        // admin "open ticket for client" action, and the mail-piping cron
+        // script — so one hook covers them all. Best-effort: a failure to
+        // assign must never stop the ticket from being opened.
+        $this->autoAssign($ticketId);
+
         $this->hooks->fire(HookPoints::TICKET_OPEN, ['ticketId' => $ticketId]);
 
         return $ticketId;
+    }
+
+    /**
+     * Assigns a just-opened ticket to the configured default assignee, or to
+     * the first super-admin / first admin when none is chosen. No-op when the
+     * admin/settings repositories were not supplied (unit tests that build
+     * TicketService directly) or when there are no admins at all.
+     */
+    private function autoAssign(int $ticketId): void
+    {
+        if ($this->admins === null || $this->settings === null) {
+            return;
+        }
+
+        try {
+            $adminId = $this->admins->resolveDefaultAssigneeId(
+                (int) ($this->settings->get('support.auto_assign_admin_id', '0') ?? '0')
+            );
+
+            if ($adminId !== null) {
+                $this->tickets->assign($ticketId, $adminId);
+            }
+        } catch (\Throwable) {
+            // Never let assignment break ticket creation.
+        }
     }
 
     public function reply(int $ticketId, string $authorType, ?int $authorId, string $authorName, string $message, bool $isPrivate = false): int

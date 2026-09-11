@@ -348,6 +348,10 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
         </a>
         <h1 class="admin-hero__title">Manage Invoices</h1>
         <a href="/admin/invoices/create" class="cv-btn cv-btn--primary" style="margin-top:var(--cv-space-2);display:inline-block;">+ Generate Invoice</a>
+        <form method="post" action="/admin/invoices/remind-all-unpaid" style="display:inline-block;margin-top:var(--cv-space-2);margin-left:8px;"
+              data-confirm="Email a payment reminder to EVERY client with an unpaid invoice? This covers all pages, not just the ones on screen."><?= csrf_field() ?>
+            <button type="submit" class="cv-btn cv-btn--secondary">✉️ Remind All Unpaid</button>
+        </form>
     </div>
 </div>
 
