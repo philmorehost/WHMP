@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use CodeVault\Billing\ClientRenewalController;
 use CodeVault\Domains\ClientDomainController;
 use CodeVault\Domains\DomainRegistrationController;
 
@@ -17,6 +18,7 @@ $router->post('/domains/transfer/add-to-cart', [DomainRegistrationController::cl
 
 $router->get('/client/domains', [ClientDomainController::class, 'index']);
 $router->get('/client/domains/{id}', [ClientDomainController::class, 'show']);
+$router->post('/client/domains/{id}/renew', [ClientRenewalController::class, 'domain']);
 $router->post('/client/domains/{id}/contact', [ClientDomainController::class, 'saveContact']);
 $router->post('/client/domains/{id}/lock', [ClientDomainController::class, 'toggleLock']);
 $router->post('/client/domains/{id}/id-protection', [ClientDomainController::class, 'toggleIdProtection']);

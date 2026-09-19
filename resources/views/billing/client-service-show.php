@@ -527,6 +527,13 @@ $cpanelTabs = [
                         </a>
                     <?php endif; ?>
 
+                    <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && (string) $service['billing_cycle'] !== 'one_time'): ?>
+                        <form method="post" action="/client/services/<?= $id ?>/renew" style="margin:0;" data-confirm="Renew this service now? A renewal invoice for the next billing period will be created and you'll be taken to it to pay.">
+                            <?= csrf_field() ?>
+                            <button class="svc-btn svc-btn--primary" type="submit">↻ Renew Now</button>
+                        </form>
+                    <?php endif; ?>
+
                     <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
                         <form method="post" action="/client/services/<?= $id ?>/cancel-request" style="margin:0;" data-confirm="Are you sure you want to request cancellation for this service?">
                             <?= csrf_field() ?>

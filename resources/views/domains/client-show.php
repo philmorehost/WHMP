@@ -398,6 +398,12 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
                     <?= csrf_field() ?>
                     <button class="action-btn" type="submit">🔐 Get EPP Code</button>
                 </form>
+                <?php if (in_array((string) $domain['status'], ['active', 'expired'], true) && (string) ($domain['next_due_date'] ?? '') !== ''): ?>
+                    <form method="post" action="/client/domains/<?= $id ?>/renew" style="margin: 0;" data-confirm="Renew this domain now? A renewal invoice for the next period will be created and you'll be taken to it to pay.">
+                        <?= csrf_field() ?>
+                        <button class="action-btn action-btn--secondary" type="submit">↻ Renew Now</button>
+                    </form>
+                <?php endif; ?>
             </div>
 
             <!-- EPP Code Display -->

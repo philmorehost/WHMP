@@ -179,4 +179,102 @@ final class RecurringBillingTest extends DatabaseTestCase
 
         $this->assertCount(1, $fired);
     }
+
+    /**
+     * Client-initiated renewal ("Renew Now"): a client may renew at any time,
+     * not only inside the cron's N-day window.
+     */
+    public function test_on_demand_renewal_creates_an_invoice_far_outside_the_cron_window(): void
+    {
+        // 90 days out: the sweep would not touch this for months, yet the
+        // client clicking Renew early still gets this cycle's invoice.
+        $dueDate = (new DateTimeImmutable('+90 days'))->format('Y-m-d');
+        $serviceId = $this->createService($dueDate, 'monthly');
+
+        $this->assertCount(0, $this->billing->generateDueInvoices(14));
+
+        $result = $this->billing->generateForService($serviceId);
+
+        $this->assertTrue($result['success']);
+        $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$result['invoiceId']]);
+        $this->assertSame('unpaid', $invoice['status']);
+        // Raised against the current due date, so paying it adds one cycle to
+        // the date the client already had rather than resetting from today.
+        $this->assertSame($dueDate, $invoice['due_date']);
+    }
+
+    public function test_clicking_renew_twice_reuses_the_same_invoice(): void
+    {
+        $serviceId = $this->createService((new DateTimeImmutable('+60 days'))->format('Y-m-d'), 'monthly');
+
+        $first = $this->billing->generateForService($serviceId);
+        $second = $this->billing->generateForService($serviceId);
+
+        $this->assertTrue($first['success']);
+        $this->assertTrue($second['success']);
+        $this->assertSame($first['invoiceId'], $second['invoiceId']);
+        $this->assertCount(1, $this->db->select('SELECT id FROM invoices WHERE service_id = ?', [$serviceId]));
+    }
+
+    public function test_paying_the_on_demand_invoice_rolls_the_due_date_forward_one_cycle(): void
+    {
+        $dueDate = (new DateTimeImmutable('+60 days'))->format('Y-m-d');
+        $serviceId = $this->createService($dueDate, 'monthly');
+
+        $result = $this->billing->generateForService($serviceId);
+        $this->assertTrue($result['success']);
+
+        // Raising the invoice must not move the date — only payment does.
+        $this->assertSame($dueDate, $this->services->find($serviceId)['next_due_date']);
+
+        // The exact path the InvoicePaid listener runs.
+        $renewal = new ServiceRenewalService(
+            $this->services,
+            new ProvisioningService(
+                $this->services,
+                new \CodeVault\Catalog\ProductRepository($this->db),
+                new ServerRepository($this->db),
+                new ModuleManager(new HookDispatcher()),
+                new HookDispatcher()
+            )
+        );
+
+        $this->assertTrue($renewal->renewPaidService($serviceId)['renewed']);
+        $this->assertSame(
+            ServiceRepository::nextCycleDate($dueDate, 'monthly'),
+            $this->services->find($serviceId)['next_due_date']
+        );
+    }
+
+    public function test_on_demand_renewal_refuses_a_cancelled_service(): void
+    {
+        $serviceId = $this->createService((new DateTimeImmutable('+30 days'))->format('Y-m-d'));
+        $this->services->updateStatus($serviceId, 'cancelled');
+
+        $result = $this->billing->generateForService($serviceId);
+
+        $this->assertFalse($result['success']);
+        $this->assertCount(0, $this->db->select('SELECT id FROM invoices WHERE service_id = ?', [$serviceId]));
+    }
+
+    public function test_on_demand_renewal_refuses_a_one_time_service(): void
+    {
+        $serviceId = $this->createService((new DateTimeImmutable('+30 days'))->format('Y-m-d'), 'one_time');
+
+        $result = $this->billing->generateForService($serviceId);
+
+        $this->assertFalse($result['success']);
+        $this->assertCount(0, $this->db->select('SELECT id FROM invoices WHERE service_id = ?', [$serviceId]));
+    }
+
+    public function test_on_demand_renewal_allows_a_suspended_service_to_be_renewed(): void
+    {
+        // The cron sweep skips suspended rows, but a client suspended for
+        // non-payment must be able to renew in order to pay — and paying is
+        // what lifts the suspension.
+        $serviceId = $this->createService((new DateTimeImmutable('+10 days'))->format('Y-m-d'));
+        $this->services->suspend($serviceId);
+
+        $this->assertTrue($this->billing->generateForService($serviceId)['success']);
+    }
 }

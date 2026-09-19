@@ -2,12 +2,16 @@
 
 declare(strict_types=1);
 
+use CodeVault\Billing\ClientRenewalController;
 use CodeVault\Billing\ClientServiceController;
 
 /** @var CodeVault\Router $router */
 
 $router->get('/client/services', [ClientServiceController::class, 'index']);
 $router->get('/client/services/{id}', [ClientServiceController::class, 'show']);
+// Client-initiated renewal: raises/reuses the cycle's renewal invoice and
+// redirects to it. The renewal itself happens on payment (InvoicePaid).
+$router->post('/client/services/{id}/renew', [ClientRenewalController::class, 'service']);
 $router->get('/client/services/{id}/upgrade', [ClientServiceController::class, 'upgradeForm']);
 $router->post('/client/services/{id}/upgrade', [ClientServiceController::class, 'upgrade']);
 $router->get('/client/services/{id}/addons', [ClientServiceController::class, 'addons']);

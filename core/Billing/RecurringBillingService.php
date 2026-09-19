@@ -75,6 +75,85 @@ final class RecurringBillingService
     }
 
     /**
+     * On-demand renewal invoice for a single service — the client-initiated
+     * "Renew Now" path, as opposed to the sweep generateDueInvoices() runs
+     * from cron.
+     *
+     * Deliberately not window-limited: a client may renew at any time before
+     * the due date, not just inside the N-day reminder window. The invoice is
+     * raised against the service's *current* next_due_date, so paying it
+     * rolls the cycle forward by exactly one billing period from the date the
+     * client already had rather than from today (ServiceRenewalService
+     * advances from the existing date — see its note on late payments).
+     *
+     * Idempotent, keyed the same way the cron guard is: a still-unpaid
+     * renewal invoice for the current due date is returned rather than
+     * duplicated, so a client clicking Renew twice lands on the invoice they
+     * already have instead of being billed twice for one cycle.
+     *
+     * Suspended services are allowed here (the cron sweep skips them): a
+     * client suspended for non-payment has to be able to renew to pay, and
+     * paying is what lifts the suspension.
+     *
+     * @return array{success: bool, invoiceId?: int, message?: string}
+     */
+    public function generateForService(int $serviceId): array
+    {
+        $service = $this->services->findById($serviceId);
+
+        if ($service === null) {
+            return ['success' => false, 'message' => 'That service could not be found.'];
+        }
+
+        $status = (string) ($service['status'] ?? '');
+
+        if (in_array($status, ['cancelled', 'terminated'], true)) {
+            return ['success' => false, 'message' => 'This service is ' . $status . ' and can no longer be renewed.'];
+        }
+
+        $cycle = (string) ($service['billing_cycle'] ?? '');
+        $dueDate = (string) ($service['next_due_date'] ?? '');
+
+        if ($dueDate === '' || $cycle === '' || $cycle === 'one_time') {
+            return ['success' => false, 'message' => 'This service does not renew on a recurring billing cycle.'];
+        }
+
+        $existing = $this->db->selectOne(
+            'SELECT id, status FROM invoices WHERE service_id = ? AND due_date = ? ORDER BY id DESC LIMIT 1',
+            [$serviceId, $dueDate]
+        );
+
+        if ($existing !== null) {
+            if ((string) $existing['status'] === 'unpaid') {
+                return ['success' => true, 'invoiceId' => (int) $existing['id']];
+            }
+
+            // A paid invoice for the *current* due date means the cycle is
+            // already settled but the date did not roll forward (e.g. the
+            // renewal step failed after payment). Never bill it again.
+            if ((string) $existing['status'] === 'paid') {
+                return ['success' => false, 'message' => 'This service has already been renewed for the current period.'];
+            }
+
+            // Cancelled/refunded: a dead invoice must not be resurrected — fall
+            // through and raise a fresh one for this cycle.
+        }
+
+        $client = $this->clients->find((int) $service['client_id']);
+
+        if ($client === null) {
+            return ['success' => false, 'message' => 'That service could not be found.'];
+        }
+
+        $taxResult = $this->tax->calculate($client, (float) $service['amount']);
+        $invoiceId = $this->createRenewalInvoice($service, $taxResult, $this->currency->denominateFor($client));
+
+        $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'serviceId' => $serviceId]);
+
+        return ['success' => true, 'invoiceId' => $invoiceId];
+    }
+
+    /**
      * @param array<string, mixed> $service
      * @param array{rate: float, name: string, amount: float} $tax
      * @param array{currency_id: int|null, currency_rate: float} $currencyLock

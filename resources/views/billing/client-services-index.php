@@ -184,6 +184,15 @@
     transform: translateX(2px);
     box-shadow: 0 8px 16px rgba(16,185,129,.3);
 }
+.service-card__cta--renew {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.service-card__cta--renew:hover {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    box-shadow: 0 8px 16px rgba(37,99,235,.3);
+}
 
 /* Empty State */
 .empty-state-services {
@@ -288,7 +297,15 @@
     <?php else: ?>
         <div class="services-grid" id="services-list">
             <?php foreach ($services as $service): ?>
-                <?php $svcUrl = '/client/services/' . (int) $service['id']; ?>
+                <?php
+                    $svcUrl = '/client/services/' . (int) $service['id'];
+                    // Anything closed, non-recurring, or with no renewal date
+                    // cannot be renewed, so it gets no Renew button rather
+                    // than one that leads to an error.
+                    $renewable = !in_array((string) $service['status'], ['cancelled', 'terminated'], true)
+                        && (string) $service['billing_cycle'] !== 'one_time'
+                        && (string) ($service['next_due_date'] ?? '') !== '';
+                ?>
                 <div class="service-card" style="cursor:pointer;<?= str_contains($service['product_name'] ?? '', 'Email') ? 'border-left: 4px solid #10b981;' : '' ?>" data-open-url="<?= e($svcUrl) ?>">
                     <div class="service-card__header">
                         <h3 class="service-card__name"><?= e($service['product_name']) ?></h3>
@@ -324,6 +341,12 @@
 
                     <div class="service-card__footer">
                         <a class="service-card__cta" href="<?= e($svcUrl) ?>">Manage Service →</a>
+                        <?php if ($renewable): ?>
+                            <form method="post" action="<?= e($svcUrl) ?>/renew" style="margin:0;flex:0 0 auto;">
+                                <?= csrf_field() ?>
+                                <button class="service-card__cta service-card__cta--renew" type="submit" title="Generate this cycle's renewal invoice and pay it">↻ Renew</button>
+                            </form>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>

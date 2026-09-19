@@ -296,6 +296,11 @@ final class ClientServiceControllerTest extends DatabaseTestCase
             fn (string $key, mixed $default = null) => $key === 'client_id' ? $clientId : $default
         );
 
+        // Every collaborator is passed explicitly, in constructor order. This
+        // list fell two arguments behind the controller (the cancellation
+        // service and the upgrade/add-on set) and every test in this class
+        // died in setUp() rather than testing anything — so keep it in step
+        // with ClientServiceController::__construct().
         return new ClientServiceController(
             new ClientAuthGuard($session, $this->clients),
             new View(dirname(__DIR__, 2) . '/resources/views'),
@@ -304,12 +309,90 @@ final class ClientServiceControllerTest extends DatabaseTestCase
             $this->servers,
             new CurrencyService(new CurrencyRepository($this->db)),
             new CancellationRequestRepository($this->db),
+            $this->cancellationService(),
             new InvoiceRepository($this->db),
             new ActivityLogger($this->db),
             $this->tickets,
             $this->departments,
             new AddonModuleRepository($this->db),
-            $this->db
+            $this->db,
+            $this->products,
+            new \CodeVault\Catalog\ProductPricingRepository($this->db),
+            $this->proration(),
+            new \CodeVault\Catalog\ProductAddonRepository($this->db),
+            $this->addonService()
+        );
+    }
+
+    /** Real CancellationRequestService — final, so it cannot be mocked. */
+    private function cancellationService(): \CodeVault\Billing\CancellationRequestService
+    {
+        $hooks = new HookDispatcher();
+
+        return new \CodeVault\Billing\CancellationRequestService(
+            new CancellationRequestRepository($this->db),
+            $this->services,
+            new \CodeVault\Mail\EmailDispatcher(
+                new \CodeVault\Mail\EmailTemplateRepository($this->db),
+                new \CodeVault\Mail\EmailLogRepository($this->db),
+                new \CodeVault\Queue\SyncQueue()
+            ),
+            $this->db,
+            new InvoiceRepository($this->db),
+            $this->servers,
+            $this->provisioning
+        );
+    }
+
+    /**
+     * Neither the upgrade engine nor the add-on engine is exercised by these
+     * tests (they only drive power/vnc/backup/rdns), but the controller needs
+     * real instances — both classes are final — so build them with the same
+     * collaborators the container wires.
+     */
+    private function proration(): \CodeVault\Billing\ProrationService
+    {
+        $hooks = new HookDispatcher();
+
+        return new \CodeVault\Billing\ProrationService(
+            $this->services,
+            $this->clients,
+            new \CodeVault\Billing\TaxCalculator(
+                new \CodeVault\Billing\TaxRuleRepository($this->db),
+                new \CodeVault\Billing\VatNumberValidator(),
+                new \CodeVault\Billing\TaxSettings(new \CodeVault\Settings\SettingsRepository($this->db))
+            ),
+            new \CodeVault\Billing\ClientCreditRepository($this->db),
+            new \CodeVault\Billing\CreditService(
+                new \CodeVault\Billing\ClientCreditRepository($this->db),
+                new InvoiceRepository($this->db),
+                new \CodeVault\Billing\TransactionRepository($this->db),
+                new \CodeVault\Billing\PaymentService(
+                    new InvoiceRepository($this->db),
+                    new \CodeVault\Billing\TransactionRepository($this->db),
+                    $hooks
+                ),
+                $hooks
+            ),
+            new CurrencyService(new CurrencyRepository($this->db)),
+            $this->db,
+            $hooks
+        );
+    }
+
+    private function addonService(): \CodeVault\Billing\ServiceAddonService
+    {
+        return new \CodeVault\Billing\ServiceAddonService(
+            $this->services,
+            $this->clients,
+            new \CodeVault\Billing\TaxCalculator(
+                new \CodeVault\Billing\TaxRuleRepository($this->db),
+                new \CodeVault\Billing\VatNumberValidator(),
+                new \CodeVault\Billing\TaxSettings(new \CodeVault\Settings\SettingsRepository($this->db))
+            ),
+            new CurrencyService(new CurrencyRepository($this->db)),
+            $this->db,
+            new HookDispatcher()
         );
     }
 }

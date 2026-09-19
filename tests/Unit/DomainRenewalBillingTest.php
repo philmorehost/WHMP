@@ -164,4 +164,118 @@ final class DomainRenewalBillingTest extends DatabaseTestCase
         // 25.00 catalog fee converted at 1490 -> 37,250.00
         $this->assertEqualsWithDelta(37250.00, (float) $redemptionItem['amount'], 0.01);
     }
+
+    /**
+     * Client-initiated renewal ("Renew Now"): a client may renew at any time,
+     * not only inside the cron's 30-day window.
+     */
+    public function test_on_demand_renewal_creates_an_invoice_far_outside_the_cron_window(): void
+    {
+        $dueDate = (new DateTimeImmutable('+200 days'))->format('Y-m-d');
+        $domainId = $this->createDomain($dueDate);
+
+        $this->assertCount(0, $this->billing->generateDueInvoices(30));
+
+        $result = $this->billing->generateForDomain($domainId);
+
+        $this->assertTrue($result['success']);
+        $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$result['invoiceId']]);
+        $this->assertSame('unpaid', $invoice['status']);
+        $this->assertSame($dueDate, $invoice['due_date']);
+    }
+
+    /**
+     * The cron sweep requires auto_renew = 1; a client renewing by hand must
+     * not — turning auto-renew off is precisely when they renew manually.
+     */
+    public function test_on_demand_renewal_works_when_auto_renew_is_off(): void
+    {
+        $domainId = $this->createDomain((new DateTimeImmutable('+45 days'))->format('Y-m-d'), autoRenew: false);
+
+        $this->assertCount(0, $this->billing->generateDueInvoices(30));
+        $this->assertTrue($this->billing->generateForDomain($domainId)['success']);
+    }
+
+    public function test_clicking_renew_twice_reuses_the_same_invoice(): void
+    {
+        $domainId = $this->createDomain((new DateTimeImmutable('+45 days'))->format('Y-m-d'));
+
+        $first = $this->billing->generateForDomain($domainId);
+        $second = $this->billing->generateForDomain($domainId);
+
+        $this->assertTrue($first['success']);
+        $this->assertSame($first['invoiceId'], $second['invoiceId']);
+        $this->assertCount(1, $this->db->select('SELECT id FROM invoices WHERE domain_id = ?', [$domainId]));
+    }
+
+    /**
+     * A domain past its combined grace + redemption window cannot be renewed
+     * at all, so the refusal must land *before* an invoice exists — otherwise
+     * the client pays for a renewal the registrar will reject.
+     */
+    public function test_on_demand_renewal_refuses_a_domain_past_grace_and_redemption(): void
+    {
+        (new \CodeVault\Domains\DomainPricingRepository($this->db))->save([
+            'tld' => '.test',
+            'registrar_slug' => 'local',
+            'register_price' => 10.00,
+            'transfer_price' => 10.00,
+            'renew_price' => 14.99,
+            'grace_period_days' => 10,
+            'redemption_period_days' => 20,
+            'redemption_fee' => 25.00,
+        ]);
+
+        // createDomain() leaves tld as stored by DomainRepository (no leading
+        // dot), which is the case the grace/redemption lookup must normalise.
+        $domainId = $this->domains->create([
+            'client_id' => $this->clientId,
+            'domain_name' => 'expired' . uniqid() . '.test',
+            'registrar_slug' => 'local',
+            'status' => 'active',
+            'next_due_date' => (new DateTimeImmutable('-40 days'))->format('Y-m-d'),
+            // 40 days past expiry > grace(10) + redemption(20) = 30.
+            'expiry_date' => (new DateTimeImmutable('-40 days'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 14.99,
+        ]);
+
+        $result = $this->billing->generateForDomain($domainId);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('grace period', (string) ($result['message'] ?? ''));
+        $this->assertCount(0, $this->db->select('SELECT id FROM invoices WHERE domain_id = ?', [$domainId]));
+    }
+
+    /**
+     * A domain inside its grace/redemption window can still be renewed, and
+     * the resolution of the TLD (stored without a dot on the domain, with one
+     * in domain_pricing) must not stop the renewal price being found.
+     */
+    public function test_on_demand_renewal_allows_a_domain_inside_grace(): void
+    {
+        (new \CodeVault\Domains\DomainPricingRepository($this->db))->save([
+            'tld' => '.test',
+            'registrar_slug' => 'local',
+            'register_price' => 10.00,
+            'transfer_price' => 10.00,
+            'renew_price' => 14.99,
+            'grace_period_days' => 30,
+            'redemption_period_days' => 30,
+            'redemption_fee' => 25.00,
+        ]);
+
+        $domainId = $this->domains->create([
+            'client_id' => $this->clientId,
+            'domain_name' => 'grace' . uniqid() . '.test',
+            'registrar_slug' => 'local',
+            'status' => 'active',
+            'next_due_date' => (new DateTimeImmutable('-5 days'))->format('Y-m-d'),
+            'expiry_date' => (new DateTimeImmutable('-5 days'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 14.99,
+        ]);
+
+        $this->assertTrue($this->billing->generateForDomain($domainId)['success']);
+    }
 }

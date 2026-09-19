@@ -200,6 +200,9 @@
     padding: 16px 24px;
     background: var(--cv-bg-surface-sunken);
     border-top: 1px solid var(--cv-border-default);
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 .domain-card__cta {
     background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -213,13 +216,22 @@
     text-decoration: none;
     display: inline-block;
     transition: all 0.2s;
-    width: 100%;
+    flex: 1 1 auto;
     text-align: center;
 }
 .domain-card__cta:hover {
     background: linear-gradient(135deg, #2563eb, #1d4ed8);
     transform: translateX(2px);
     box-shadow: 0 8px 16px rgba(37,99,235,.3);
+}
+.domain-card__cta--renew {
+    background: linear-gradient(135deg, #10b981, #059669);
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.domain-card__cta--renew:hover {
+    background: linear-gradient(135deg, #059669, #047857);
+    box-shadow: 0 8px 16px rgba(16,185,129,.3);
 }
 
 /* Empty State */
@@ -324,6 +336,11 @@
                 <?php
                     $isExpiring = !empty($domain['expiry_date']) && strtotime($domain['expiry_date']) < strtotime('+30 days');
                     $expiryClass = $isExpiring ? 'expiring' : 'active';
+                    // A domain still in the registrar's hands can be renewed;
+                    // pending/cancelled/terminated ones cannot, so they get no
+                    // button rather than one that leads to an error.
+                    $renewable = in_array((string) $domain['status'], ['active', 'expired'], true)
+                        && (string) ($domain['next_due_date'] ?? '') !== '';
                 ?>
                 <div class="domain-card domain-card-<?= $expiryClass ?>" style="<?= $isExpiring ? 'border-left: 4px solid #dc2626;' : '' ?>">
                     <div class="domain-card__header">
@@ -363,6 +380,12 @@
 
                     <div class="domain-card__footer">
                         <a class="domain-card__cta" href="/client/domains/<?= (int) $domain['id'] ?>">Manage Domain →</a>
+                        <?php if ($renewable): ?>
+                            <form method="post" action="/client/domains/<?= (int) $domain['id'] ?>/renew" style="margin:0;flex:0 0 auto;">
+                                <?= csrf_field() ?>
+                                <button class="domain-card__cta domain-card__cta--renew" type="submit" title="Generate this cycle's renewal invoice and pay it">↻ Renew</button>
+                            </form>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>

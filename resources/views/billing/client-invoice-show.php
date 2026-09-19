@@ -39,7 +39,15 @@ $companyDept ??= 'Payments Dept.';
         </div>
     </div>
 
-    <?php if ($paymentStatus === 'success'): ?>
+    <?php if ($paymentStatus === 'renewal'): ?>
+        <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); color: #1e40af; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; font-weight: 600;">
+            ↻ Your renewal invoice is ready.
+            <span style="display:block; font-weight:500; margin-top:4px; color:#1d4ed8;">
+                Paying online takes effect immediately — your service or domain renews as soon as the payment clears.
+                Paying by bank transfer does not: send the payment, then contact <?= e($companyDept) ?> so an admin can mark this invoice paid, and the renewal takes effect at that point.
+            </span>
+        </div>
+    <?php elseif ($paymentStatus === 'success'): ?>
         <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); color: #065f46; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; font-weight: 600;">
             ✓ Payment received — thank you.
         </div>
@@ -167,7 +175,7 @@ $companyDept ??= 'Payments Dept.';
                             <strong style="color:#111827; display:block; margin-bottom:6px;"><?= e($gateway['name']) ?></strong>
                             <?php $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: []; ?>
                             <p style="color:#4b5563; font-size:var(--cv-text-xs); white-space:pre-line; margin:0 0 var(--cv-space-3) 0; line-height:1.4;"><?= e($config['bank_details'] ?? 'Contact us for bank transfer details, then we will confirm your payment.') ?></p>
-                            <p style="color:#6b7280; font-size:var(--cv-text-2xs); margin:0;">Once transfer is made, contact support to confirm.</p>
+                            <p style="color:#6b7280; font-size:var(--cv-text-2xs); margin:0;">After transferring, contact <strong><?= e($companyDept) ?></strong> with your payment reference so an admin can mark this invoice paid. A renewal only takes effect once that confirmation is recorded.</p>
                         </div>
                     <?php else: ?>
                         <div style="border:1px solid #e5e7eb; border-radius:8px; padding:var(--cv-space-4); background:#f9fafb; display:flex; flex-direction:column; justify-content:space-between;">

@@ -110,6 +110,7 @@ final class ClientServiceUpgradeTest extends DatabaseTestCase
             new ServerRepository($this->db),
             $currency,
             new \CodeVault\Billing\CancellationRequestRepository($this->db),
+            $this->cancellationService(),
             new \CodeVault\Billing\InvoiceRepository($this->db),
             new \CodeVault\Activity\ActivityLogger($this->db),
             new TicketService(
@@ -142,6 +143,38 @@ final class ClientServiceUpgradeTest extends DatabaseTestCase
             new CurrencyService(new CurrencyRepository($this->db)),
             $this->db,
             new HookDispatcher()
+        );
+    }
+
+    /**
+     * ClientServiceController gained a CancellationRequestService argument
+     * after this test was written; the class is final, so it cannot be
+     * mocked — build the real one with the same collaborators the container
+     * wires. Without it every test here died in setUp() with a TypeError.
+     */
+    private function cancellationService(): \CodeVault\Billing\CancellationRequestService
+    {
+        $servers = new ServerRepository($this->db);
+        $hooks = new HookDispatcher();
+
+        return new \CodeVault\Billing\CancellationRequestService(
+            new \CodeVault\Billing\CancellationRequestRepository($this->db),
+            $this->services,
+            new \CodeVault\Mail\EmailDispatcher(
+                new \CodeVault\Mail\EmailTemplateRepository($this->db),
+                new \CodeVault\Mail\EmailLogRepository($this->db),
+                new \CodeVault\Queue\SyncQueue()
+            ),
+            $this->db,
+            new \CodeVault\Billing\InvoiceRepository($this->db),
+            $servers,
+            new ProvisioningService(
+                $this->services,
+                new ProductRepository($this->db),
+                $servers,
+                new \CodeVault\Modules\ModuleManager($hooks),
+                $hooks
+            )
         );
     }
 
