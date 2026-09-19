@@ -1,7 +1,7 @@
 <div id="cancel-order-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
     <div style="background:var(--cv-bg-surface);border-radius:12px;padding:32px;max-width:500px;width:90%;border:1px solid var(--cv-border-default);">
         <h2 style="font-size:1.25rem;font-weight:800;margin:0 0 16px;color:var(--cv-text-primary);">Cancel Order</h2>
-        <p style="color:var(--cv-text-secondary);margin:0 0 24px;">Are you sure you want to cancel this order? This action cannot be undone. The invoice raised for this order will also be cancelled.</p>
+        <p style="color:var(--cv-text-secondary);margin:0 0 24px;">Are you sure you want to cancel this order? This action cannot be undone. The invoice raised for this order, and any services or domains it raised, will also be cancelled.</p>
 
         <form method="post" action="/client/orders/<?= (int)$order['id'] ?>/cancel">
             <?= csrf_field() ?>

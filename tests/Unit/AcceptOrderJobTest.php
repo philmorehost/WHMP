@@ -23,6 +23,7 @@ use CodeVault\Modules\RegistrarModule;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Provisioning\ServerGroupRepository;
 use CodeVault\Provisioning\ServerRepository;
+use CodeVault\Tests\Fixtures\FakeProvisioningModule;
 use CodeVault\Tests\Fixtures\FakeRegistrarModule;
 use CodeVault\Tests\Fixtures\ThrowingProvisioningModule;
 use CodeVault\Tests\Support\DatabaseTestCase;
@@ -53,6 +54,16 @@ final class AcceptOrderJobTest extends DatabaseTestCase
         new \CodeVault\Kernel(dirname(__DIR__, 2));
         $container = \CodeVault\Support\App::container();
         $container->instance(Database::class, $this->db);
+
+        // The kernel eagerly resolves SettingsRepository against the
+        // application's configured database, which this environment has no
+        // grants for — every test in this class died in setUp() on an access
+        // error from AiSettings. Re-pin it (and therefore everything that
+        // reads settings, EmailDispatcher included) to the test database.
+        $container->instance(
+            \CodeVault\Settings\SettingsRepository::class,
+            new \CodeVault\Settings\SettingsRepository($this->db)
+        );
 
         (new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations'))->run();
 
@@ -184,6 +195,98 @@ final class AcceptOrderJobTest extends DatabaseTestCase
         $summaryMail = $this->sentTo('Acceptance Completed');
         $this->assertCount(1, $summaryMail);
         $this->assertStringContainsString('All services and domains were provisioned successfully.', $summaryMail[0]['html']);
+    }
+
+    /**
+     * Reactivating a cancelled order puts its services back to 'pending', so
+     * the admin accepts the order again. A service that was already
+     * provisioned once (it has a username on file) must NOT be handed to the
+     * module again — create() would make a second hosting account for the
+     * same customer. It is simply activated again instead.
+     */
+    public function test_handle_does_not_re_provision_an_already_created_service(): void
+    {
+        $container = \CodeVault\Support\App::container();
+
+        $serverGroups = new ServerGroupRepository($this->db);
+        $serverGroupId = $serverGroups->create('Reactivation Group');
+        $serverId = (new ServerRepository($this->db))->create([
+            'server_group_id' => $serverGroupId,
+            'name' => 'Reactivation Server',
+            'hostname' => 'react.test.local',
+            'module_slug' => 'fake',
+        ]);
+
+        $module = new FakeProvisioningModule();
+        $container->make(ModuleManager::class)->register(ProvisioningModule::class, 'fake', $module);
+
+        $groups = new ProductGroupRepository($this->db);
+        $productId = $this->products->create([
+            'product_group_id' => $groups->create('Hosting', null),
+            'server_group_id' => $serverGroupId,
+            'name' => 'Reactivated Hosting',
+            'autosetup' => 'on_accept',
+        ]);
+
+        // Exactly the state an order reactivation leaves behind: the service
+        // is pending again, but its account already exists on the server.
+        $orderId = $this->insertOrder();
+        $serviceId = $this->insertService($orderId, $productId);
+        $this->services->assignServer($serviceId, $serverId, 'existinguser');
+        $this->assertSame('pending', $this->services->find($serviceId)['status']);
+
+        (new AcceptOrderJob($orderId, $this->adminId, '203.0.113.10'))->handle();
+
+        $this->assertSame([], $module->createCalls, 'an already-provisioned service must never be created a second time');
+        $this->assertSame('active', $this->services->find($serviceId)['status'], 'the existing account is activated, not duplicated');
+
+        $logged = $this->db->selectOne(
+            "SELECT * FROM activity_log WHERE action = 'service.already_provisioned' AND subject_id = ?",
+            [$serviceId]
+        );
+        $this->assertNotNull($logged, 'the skip must be recorded so the admin can see why nothing was created');
+    }
+
+    /**
+     * The domain half of the same guard: a domain that an order reactivation
+     * put back to 'pending' but which the registrar already holds must be
+     * activated here, not registered a second time.
+     */
+    public function test_handle_does_not_re_register_an_already_registered_domain(): void
+    {
+        $container = \CodeVault\Support\App::container();
+
+        (new DomainPricingRepository($this->db))->save([
+            'tld' => '.test',
+            'registrar_slug' => 'fake',
+            'register_price' => 10.0,
+            'transfer_price' => 10.0,
+            'renew_price' => 10.0,
+            'autosetup_registration' => 'payment',
+        ]);
+
+        $fakeRegistrar = new FakeRegistrarModule();
+        $container->make(ModuleManager::class)->register(RegistrarModule::class, 'fake', $fakeRegistrar);
+
+        $orderId = $this->insertOrder();
+        $domainId = (new DomainRepository($this->db))->create([
+            'client_id' => $this->clientId,
+            'order_id' => $orderId,
+            'domain_name' => 'alreadyregistered.test',
+            'tld' => 'test',
+            'registrar_slug' => 'fake',
+            'status' => 'pending',
+            'next_due_date' => (new DateTimeImmutable('+1 year'))->format('Y-m-d'),
+            'auto_renew' => 1,
+            'amount' => 10.0,
+        ]);
+        // The registrar already holds this domain.
+        $this->db->update('UPDATE domains SET registrar_domain_id = ? WHERE id = ?', ['REG-123', $domainId]);
+
+        (new AcceptOrderJob($orderId, $this->adminId, '203.0.113.10'))->handle();
+
+        $this->assertNull($fakeRegistrar->lastCall('register'), 'an already-registered domain must not be registered again');
+        $this->assertSame('active', $this->db->selectOne('SELECT status FROM domains WHERE id = ?', [$domainId])['status']);
     }
 
     /** @return array<int, array<string, mixed>> */

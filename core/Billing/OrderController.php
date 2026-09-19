@@ -34,7 +34,7 @@ final class OrderController
         private readonly ServiceRepository $services,
         private readonly HookDispatcher $hooks,
         private readonly ActivityLogger $activity,
-        private readonly InvoiceRepository $invoices
+        private readonly OrderCancellationService $orderCancellation
     ) {
     }
 
@@ -165,21 +165,42 @@ final class OrderController
             $this->orders->stampFraudReviewer($id, (int) $this->guard->currentAdmin()['id']);
         }
 
-        $this->orders->cancel($id);
+        $reason = trim((string) $request->input('reason', ''));
+
+        if ($reason === '') {
+            $reason = 'Cancelled by admin';
+        }
+
+        // One cascade: the order, its unpaid invoice, and every
+        // service/domain the order created (OrderCancellationService). The
+        // admin used to cancel only the order, leaving a payable invoice and
+        // live services behind on a cancelled order.
+        $result = $this->orderCancellation->cancelOrder($id, $reason);
+
+        if (!$result['success']) {
+            $message = match ($result['reason']) {
+                'order-not-found' => 'That order could not be found.',
+                'already-cancelled' => 'That order is already cancelled.',
+                default => 'That order could not be cancelled.',
+            };
+
+            return Response::redirect("/admin/orders/{$id}?msg=" . urlencode($message));
+        }
+
         $this->hooks->fire(HookPoints::ORDER_CANCELLED, ['orderId' => $id]);
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'order.cancelled', 'order', $id, "Cancelled order #{$id}", $request->ip());
 
-        return Response::redirect("/admin/orders/{$id}");
+        return Response::redirect("/admin/orders/{$id}?msg=" . urlencode($this->cancellationSummary($result)));
     }
 
     /**
-     * Puts a cancelled order back to pending and — so the admin doesn't have
-     * to reactivate the invoice separately — brings the order's invoice back
-     * to unpaid at the same time.
+     * Puts a cancelled order back to pending and, in the same cascade,
+     * restores its invoice to unpaid and the services/domains the
+     * cancellation closed back to pending — so the order is whole again and
+     * the client can pay the invoice, or an admin can mark it paid.
      *
-     * If the invoice was already reactivated, reactivate() is a no-op for it
-     * and only the order changes; either way the order ends up pending with a
-     * payable invoice against it, ready to be accepted again.
+     * Everything runs through OrderCancellationService::reactivateOrder(),
+     * the exact inverse of the cancel path, so the two can't drift.
      */
     public function reactivate(Request $request, array $params): Response
     {
@@ -193,27 +214,61 @@ final class OrderController
             return Response::html('404 Not Found', 404);
         }
 
-        if (!$this->orders->reactivate($id)) {
+        $result = $this->orderCancellation->reactivateOrder($id);
+
+        if (!$result['success']) {
             return Response::redirect("/admin/orders/{$id}?msg=" . urlencode('Only a cancelled order can be reactivated.'));
         }
 
         $adminId = (int) $this->guard->currentAdmin()['id'];
         $this->activity->log('admin', $adminId, 'order.reactivated', 'order', $id, "Reactivated cancelled order #{$id} (set back to pending)", $request->ip());
 
-        // Bring the order's invoice back with it so the client is billed for
-        // the reinstated order. No-op when the invoice is already unpaid —
-        // that's the case where the admin reactivated the invoice first.
-        $invoice = $this->invoices->findByOrder($id);
-        $invoiceNote = '';
-
-        if ($invoice !== null && $this->invoices->reactivate((int) $invoice['id'])) {
-            $this->activity->log('admin', $adminId, 'invoice.status_changed', 'invoice', (int) $invoice['id'], "Reactivated invoice #{$invoice['id']} with order #{$id}", $request->ip());
-            $invoiceNote = ' Its invoice INV-' . (int) $invoice['id'] . ' was also set back to unpaid.';
-        } elseif ($invoice !== null && (string) ($invoice['status'] ?? '') === 'unpaid') {
-            $invoiceNote = ' Its invoice INV-' . (int) $invoice['id'] . ' was already unpaid.';
+        if ($result['invoiceReactivated'] && $result['invoiceId'] !== null) {
+            $this->activity->log('admin', $adminId, 'invoice.status_changed', 'invoice', $result['invoiceId'], "Reactivated invoice #{$result['invoiceId']} with order #{$id}", $request->ip());
         }
 
-        return Response::redirect("/admin/orders/{$id}?msg=" . urlencode('Order reactivated — it is pending again.' . $invoiceNote));
+        return Response::redirect("/admin/orders/{$id}?msg=" . urlencode($this->reactivationSummary($result)));
+    }
+
+    /**
+     * Human-readable outcome of a cancellation, including what happened to
+     * the invoice and how many services/domains were closed with it.
+     *
+     * @param array{invoiceId: int|null, invoiceCancelled: bool, services: int, domains: int} $result
+     */
+    private function cancellationSummary(array $result): string
+    {
+        $parts = ['Order cancelled.'];
+
+        if ($result['invoiceCancelled'] && $result['invoiceId'] !== null) {
+            $parts[] = 'Its unpaid invoice INV-' . $result['invoiceId'] . ' was cancelled with it.';
+        } elseif ($result['invoiceId'] !== null) {
+            $parts[] = 'Invoice INV-' . $result['invoiceId'] . ' was left as it is (it is not unpaid).';
+        }
+
+        ($result['services'] > 0) && $parts[] = $result['services'] . ' service(s) set to cancelled.';
+        ($result['domains'] > 0) && $parts[] = $result['domains'] . ' domain(s) set to cancelled.';
+
+        return implode(' ', $parts);
+    }
+
+    /**
+     * @param array{invoiceId: int|null, invoiceReactivated: bool, services: int, domains: int} $result
+     */
+    private function reactivationSummary(array $result): string
+    {
+        $parts = ['Order reactivated — it is pending again.'];
+
+        if ($result['invoiceReactivated'] && $result['invoiceId'] !== null) {
+            $parts[] = 'Its invoice INV-' . $result['invoiceId'] . ' was set back to unpaid.';
+        } elseif ($result['invoiceId'] !== null) {
+            $parts[] = 'Its invoice INV-' . $result['invoiceId'] . ' was already unpaid.';
+        }
+
+        ($result['services'] > 0) && $parts[] = $result['services'] . ' service(s) set back to pending — accept the order again to provision them.';
+        ($result['domains'] > 0) && $parts[] = $result['domains'] . ' domain(s) set back to pending.';
+
+        return implode(' ', $parts);
     }
 
     public function destroy(Request $request, array $params): Response

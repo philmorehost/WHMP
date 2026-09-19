@@ -593,7 +593,9 @@ class Kernel
                 $c->make(OrderRepository::class),
                 $c->make(EmailDispatcher::class),
                 $c->make(Database::class),
-                $c->make(InvoiceRepository::class)
+                $c->make(InvoiceRepository::class),
+                $c->make(ServiceRepository::class),
+                $c->make(DomainRepository::class)
             );
         });
 

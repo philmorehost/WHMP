@@ -37,6 +37,7 @@ $router->post('/client/services/{id}/cancel-request', [CancellationRequestsContr
 $router->get('/client/orders', [ClientOrderController::class, 'index']);
 $router->get('/client/orders/{id}', [ClientOrderController::class, 'show']);
 $router->post('/client/orders/{id}/cancel', [ClientCancellationController::class, 'cancelOrder']);
+$router->post('/client/orders/{id}/reactivate', [ClientCancellationController::class, 'reactivateOrder']);
 
 // NOTE: /client/invoices/{id}/cancel is deliberately NOT registered here.
 //

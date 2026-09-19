@@ -92,6 +92,48 @@ final class AcceptOrderJob implements Job
                     continue;
                 }
 
+                // A service put back to 'pending' by an order reactivation
+                // that already has a username on file has been provisioned
+                // once already (assignServer() writes both only after
+                // create() succeeds). Running create() again would make a
+                // second hosting account for the same service — activate the
+                // existing one instead.
+                if (trim((string) ($service['username'] ?? '')) !== '') {
+                    $services->activate((int) $service['id']);
+                    $activity->log(
+                        'admin',
+                        $this->adminId,
+                        'service.already_provisioned',
+                        'service',
+                        (int) $service['id'],
+                        "Order accepted; service #{$service['id']} already exists on the server as \"{$service['username']}\" and was not created again.",
+                        $this->adminIp
+                    );
+
+                    continue;
+                }
+
+                // A service put back to 'pending' by an order reactivation
+                // that already has a username on file has been provisioned
+                // once already (assignServer() writes both only after
+                // create() succeeds). Running create() again would make a
+                // second hosting account for the same service — activate the
+                // existing one instead.
+                if (trim((string) ($service['username'] ?? '')) !== '') {
+                    $services->activate((int) $service['id']);
+                    $activity->log(
+                        'admin',
+                        $this->adminId,
+                        'service.already_provisioned',
+                        'service',
+                        (int) $service['id'],
+                        "Order accepted; service #{$service['id']} already exists on the server as \"{$service['username']}\" and was not created again.",
+                        $this->adminIp
+                    );
+
+                    continue;
+                }
+
                 // Respect the product's own setup mode. "off" means the admin
                 // provisions this product by hand — the service simply stays
                 // pending until the admin sets it live from the service page.
@@ -143,6 +185,25 @@ final class AcceptOrderJob implements Job
 
             foreach ($domainRepo->forOrder($this->orderId) as $domain) {
                 if ($domain['status'] !== 'pending') {
+                    continue;
+                }
+
+                // Same rule as services: a domain re-pended by an order
+                // reactivation that already carries a registrar id is
+                // registered — sending it to the registrar again would be a
+                // duplicate registration.
+                if (trim((string) ($domain['registrar_domain_id'] ?? '')) !== '') {
+                    $domainRepo->setStatus((int) $domain['id'], 'active');
+                    $activity->log(
+                        'admin',
+                        $this->adminId,
+                        'domain.already_registered',
+                        'domain',
+                        (int) $domain['id'],
+                        "Order accepted; domain #{$domain['id']} ({$domain['domain_name']}) is already registered with the registrar and was not registered again.",
+                        $this->adminIp
+                    );
+
                     continue;
                 }
 
