@@ -76,6 +76,9 @@ final class OrderController
                     'cancelled' => 'Cancelled',
                     'fraud' => 'Fraud Review',
                 ]],
+                // Payment (derived from the order's invoice) is shown but not
+                // filtered — there is no single orders column behind it.
+                ['filterable' => false],
                 ['filterable' => false],
             ],
         ]);

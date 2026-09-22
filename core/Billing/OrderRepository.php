@@ -98,7 +98,14 @@ final class OrderRepository
 
         $data = $this->db->select(
             <<<SQL
-            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.code AS currency_code, cu.symbol AS currency_symbol
+            SELECT o.*, c.email AS client_email, c.first_name, c.last_name, cu.code AS currency_code, cu.symbol AS currency_symbol,
+                (SELECT i.id FROM invoices i WHERE i.order_id = o.id ORDER BY i.id DESC LIMIT 1) AS invoice_id,
+                (SELECT i.status FROM invoices i WHERE i.order_id = o.id ORDER BY i.id DESC LIMIT 1) AS invoice_status,
+                (SELECT i.paid_at FROM invoices i WHERE i.order_id = o.id ORDER BY i.id DESC LIMIT 1) AS invoice_paid_at,
+                (SELECT t.gateway_slug FROM transactions t
+                    WHERE t.invoice_id = (SELECT i2.id FROM invoices i2 WHERE i2.order_id = o.id ORDER BY i2.id DESC LIMIT 1)
+                      AND t.status = 'completed'
+                    ORDER BY t.id DESC LIMIT 1) AS payment_gateway
             FROM orders o
             JOIN clients c ON c.id = o.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(o.currency_id, c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))

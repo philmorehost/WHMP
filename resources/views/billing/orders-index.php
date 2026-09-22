@@ -305,6 +305,7 @@
                         <?= $view->partial('partials.table-header-sort', ['key' => 'client', 'label' => 'Client', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
                         <?= $view->partial('partials.table-header-sort', ['key' => 'total', 'label' => 'Total', 'align' => 'right', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
                         <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/orders', 'filters' => $filters ?? [], 'preserve' => ['status' => $statusFilter ?? ''], 'sort' => $sort ?? null]) ?>
+                        <th>Payment</th>
                         <th style="width:140px;">Actions</th>
                     </tr>
                     <?= $view->partial('partials.table-filter-row', [
@@ -339,6 +340,35 @@
                                 <span class="admin-orders-badge admin-orders-badge--fraud">Fraud</span>
                             <?php else: ?>
                                 <span class="admin-orders-badge admin-orders-badge--pending">Pending</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php
+                            // Payment comes from the order's invoice, not the
+                            // order's own status: an order can be 'pending'
+                            // (awaiting acceptance) yet already paid online.
+                            $invId = $order['invoice_id'] !== null ? (int) $order['invoice_id'] : null;
+                            $invStatus = (string) ($order['invoice_status'] ?? '');
+                            $gateway = trim((string) ($order['payment_gateway'] ?? ''));
+                            ?>
+                            <?php if ($invId === null): ?>
+                                <span style="color:var(--cv-text-secondary);">—</span>
+                            <?php elseif ($invStatus === 'paid'): ?>
+                                <span class="admin-orders-badge admin-orders-badge--active">✅ Paid</span>
+                                <div style="font-size:.72rem;color:var(--cv-text-secondary);margin-top:4px;">
+                                    <?php if ($gateway !== ''): ?><?= e($gateway === 'manual' ? 'Manual' : ucfirst($gateway)) ?><?php endif; ?>
+                                    <?php if (!empty($order['invoice_paid_at'])): ?><?= $gateway !== '' ? ' · ' : '' ?><?= e(substr((string) $order['invoice_paid_at'], 0, 10)) ?><?php endif; ?>
+                                    <a href="/admin/invoices/<?= $invId ?>">INV-<?= $invId ?></a>
+                                </div>
+                            <?php elseif ($invStatus === 'refunded'): ?>
+                                <span class="admin-orders-badge admin-orders-badge--cancelled">Refunded</span>
+                                <div style="font-size:.72rem;color:var(--cv-text-secondary);margin-top:4px;"><a href="/admin/invoices/<?= $invId ?>">INV-<?= $invId ?></a></div>
+                            <?php elseif ($invStatus === 'cancelled'): ?>
+                                <span class="admin-orders-badge admin-orders-badge--cancelled">Cancelled</span>
+                                <div style="font-size:.72rem;color:var(--cv-text-secondary);margin-top:4px;"><a href="/admin/invoices/<?= $invId ?>">INV-<?= $invId ?></a></div>
+                            <?php else: ?>
+                                <span class="admin-orders-badge admin-orders-badge--pending">Unpaid</span>
+                                <div style="font-size:.72rem;color:var(--cv-text-secondary);margin-top:4px;"><a href="/admin/invoices/<?= $invId ?>">INV-<?= $invId ?></a></div>
                             <?php endif; ?>
                         </td>
                         <td style="text-align:center;">
