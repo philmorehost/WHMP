@@ -115,8 +115,14 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
             </select>
             <?php if ($isEdit): ?>
                 <p style="margin:var(--cv-space-1) 0 0;font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">
-                    Changing this recalculates what the client still owes and will be billed for — services, domains, unpaid invoices, open orders, open quotes, recurring invoices and unbilled charges — into the new currency. Paid invoices and settled transactions keep the figures they were billed at. Amounts are re-rounded, so switching back will not restore the exact original values.
+                    Changing this recalculates the client's balances into the new currency. Amounts are re-rounded, so switching back will not restore the exact original values.
                 </p>
+                <label style="display:flex;gap:var(--cv-space-2);align-items:flex-start;margin-top:var(--cv-space-2);font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">
+                    <input type="checkbox" name="include_settled" id="include-settled" value="1" style="margin-top:2px;">
+                    <span>
+                        <strong>Convert settled records too.</strong> Left unticked, only what the client still owes or will be billed for moves — services, domains, unpaid invoices, open orders, open quotes, recurring invoices and unbilled charges — and a paid invoice keeps the figure it was billed at. Tick it for one uniform currency across the client's whole history (paid and refunded invoices, the payments that settled them, cancelled orders, closed services and credit notes), accepting that what was actually charged then has to be read off the gateway.
+                    </span>
+                </label>
             <?php endif; ?>
         </div>
         <?php if ($isEdit): ?>
@@ -189,8 +195,12 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
 
                 var chosen = select.options[select.selectedIndex];
                 var label = chosen ? chosen.text.replace(/\s+/g, ' ').trim() : select.value;
+                var settled = document.getElementById('include-settled');
+                var scope = settled && settled.checked
+                    ? 'Every figure on the account will be recalculated, including paid and refunded invoices, the payments that settled them, cancelled orders, closed services and credit notes.'
+                    : 'Every amount the client still owes or will be billed for will be recalculated. Paid invoices and settled transactions keep the figures they were billed at.';
 
-                if (!window.confirm('Change this client\'s default currency to ' + label + '?\n\nEvery amount the client still owes or will be billed for - services, domains, unpaid invoices, open orders, open quotes, recurring invoices and unbilled charges - will be recalculated into that currency. Paid invoices and settled transactions keep the figures they were billed at. Amounts are re-rounded, so switching back will not restore the exact original values.')) {
+                if (!window.confirm('Change this client\'s default currency to ' + label + '?\n\n' + scope + '\n\nAmounts are re-rounded, so switching back will not restore the exact original values.')) {
                     event.preventDefault();
                 }
             });

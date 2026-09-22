@@ -423,29 +423,34 @@ final class ClientController
 
         // Currency is deliberately NOT part of update(): switching it has to
         // recalculate every amount the client is billed — services, domains,
-        // invoices, orders, quotes, credit notes, recurring-invoice templates,
-        // pending charges and the transactions that settled an invoice —
-        // because on this install all of those are denominated in the client's
-        // own currency. That is what updateCurrency() does, and it no-ops when
-        // the currency is unchanged. A blank choice means "leave the currency
-        // alone" rather than reverting to the system default; note that
-        // updateCurrency() itself early-returns when the new id matches the
-        // client's current one, so re-saving an unrelated edit can't re-round
-        // the account.
+        // invoices, orders, quotes, recurring-invoice templates, unbilled
+        // charges and the payments that settled an invoice — because on this
+        // install all of those are denominated in the client's own currency.
+        // That is what updateCurrency() does, and it no-ops when the currency
+        // is unchanged, so re-saving an unrelated edit can't re-round the
+        // account. A blank choice means "leave the currency alone" rather than
+        // reverting to the system default.
+        //
+        // Whether settled records move too is the admin's call on each save
+        // rather than a stored preference: only they can weigh a uniformly
+        // denominated record against restating a figure a gateway already
+        // charged.
         $requestedCurrency = $request->input('currency_id');
         if ($requestedCurrency !== null && $requestedCurrency !== '') {
             $newCurrencyId = (int) $requestedCurrency;
             $oldCurrencyId = $existing !== null && $existing['currency_id'] !== null ? (int) $existing['currency_id'] : null;
+            $includeSettled = (string) $request->input('include_settled', '') === '1';
 
             if ($newCurrencyId !== $oldCurrencyId && ($currency = $this->currencies->find($newCurrencyId)) !== null) {
-                $this->clients->updateCurrency($id, $newCurrencyId);
+                $this->clients->updateCurrency($id, $newCurrencyId, $includeSettled);
                 $this->activity->log(
                     'admin',
                     (int) $this->guard->currentAdmin()['id'],
                     'client.currency_changed',
                     'client',
                     $id,
-                    "Changed client #{$id} default currency to " . (string) ($currency['code'] ?? $newCurrencyId) . ' — all balances recalculated',
+                    "Changed client #{$id} default currency to " . (string) ($currency['code'] ?? $newCurrencyId)
+                        . ($includeSettled ? ' — every balance recalculated, settled records included' : ' — live balances recalculated'),
                     $request->ip()
                 );
             }
