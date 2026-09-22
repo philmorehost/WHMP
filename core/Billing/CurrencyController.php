@@ -82,6 +82,24 @@ final class CurrencyController
         return Response::redirect('/admin/currencies');
     }
 
+    /**
+     * Marks which currency the catalog prices are entered in. Deliberately not
+     * the same thing as the default currency: the default is the unit every
+     * rate is quoted against, while the pricing currency is simply the one the
+     * admin typed the product/add-on/domain prices in. See
+     * CurrencyService::catalogRate().
+     */
+    public function setPricing(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $this->currencies->setPricing((int) $params['id']);
+
+        return Response::redirect('/admin/currencies');
+    }
+
     public function destroy(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {

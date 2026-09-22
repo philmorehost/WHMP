@@ -158,10 +158,15 @@
 
 <div class="admin-cur-card">
     <h2 class="admin-cur-card__title">💱 Active Currencies</h2>
+    <p style="margin:16px 24px 0;font-size:.85rem;line-height:1.6;color:var(--cv-text-secondary);">
+        <strong>Mark the currency you type your prices in.</strong> Product, add-on and domain prices are all entered in one currency, and it need not be the base currency.
+        Catalog figures are converted from it for each client, so a plan priced <code>22350</code> in a naira pricing currency reads <strong>₦22,350</strong> to a naira client and <strong>$15.00</strong> to a US-dollar client at a rate of 1490.
+        Leave nothing marked and prices are treated as base-currency amounts — the behaviour before this setting existed.
+    </p>
     <div class="admin-cur-card__body" style="padding:0;overflow-x:auto;">
         <div style="overflow-x:auto;">
             <table class="admin-cur-table" id="currencies-table">
-                <thead><tr><th>Code</th><th>Symbol</th><th>Exchange Rate</th><th>Status</th><th style="width:200px;">Actions</th></tr></thead>
+                <thead><tr><th>Code</th><th>Symbol</th><th>Exchange Rate</th><th>Status</th><th>Prices in</th><th style="width:240px;">Actions</th></tr></thead>
                 <tbody>
                 <?php foreach ($currencies as $currency): ?>
                     <tr>
@@ -186,9 +191,22 @@
                                 <span style="color:var(--cv-text-secondary);font-size:.85rem;">Active</span>
                             <?php endif; ?>
                         </td>
+                        <td>
+                            <?php if ((int) ($currency['is_pricing'] ?? 0) === 1): ?>
+                                <span style="background:linear-gradient(135deg,rgba(59,130,246,.2),rgba(37,99,235,.15));color:#3b82f6;border:1px solid rgba(59,130,246,.3);padding:4px 10px;border-radius:6px;display:inline-block;font-size:.7rem;font-weight:700;">💲 Catalog</span>
+                            <?php else: ?>
+                                <span style="color:var(--cv-text-secondary);font-size:.85rem;">—</span>
+                            <?php endif; ?>
+                        </td>
                         <td style="display:flex;gap:6px;align-items:center;">
                             <button class="admin-cur-btn" type="submit">💾 Save</button>
                             </form>
+                            <?php if ((int) ($currency['is_pricing'] ?? 0) !== 1): ?>
+                                <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>/pricing" style="margin:0;">
+                                    <?= csrf_field() ?>
+                                    <button class="admin-cur-btn--secondary" type="submit" style="padding:6px 12px;" title="Your product, add-on and domain prices are entered in this currency.">💲 Prices</button>
+                                </form>
+                            <?php endif; ?>
                             <?php if ((int) $currency['is_default'] !== 1): ?>
                                 <form method="post" action="/admin/currencies/<?= (int) $currency['id'] ?>/default" style="margin:0;">
                                     <?= csrf_field() ?>
@@ -203,7 +221,7 @@
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($currencies === []): ?>
-                    <tr><td colspan="5" style="color:var(--cv-text-secondary);text-align:center;padding:32px;">No currencies configured.</td></tr>
+                    <tr><td colspan="6" style="color:var(--cv-text-secondary);text-align:center;padding:32px;">No currencies configured.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>

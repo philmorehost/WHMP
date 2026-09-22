@@ -254,7 +254,7 @@ final class DomainRenewalBillingService
                         // CheckoutService/ProrationService.
                         $redemptionFee = $this->currency->convert(
                             (float) ($tldPricing['redemption_fee'] ?? 0.0),
-                            $this->currency->rateFor($this->currency->resolveForClient($client))
+                            $this->currency->catalogRate($this->currency->resolveForClient($client))
                         );
                     }
                 }

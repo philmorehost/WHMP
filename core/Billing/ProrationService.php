@@ -57,7 +57,7 @@ final class ProrationService
         // final and in the client's own currency, never re-converted.
         $client = $this->clients->find((int) $service['client_id']);
         $currency = $this->currency->resolveForClient($client);
-        $newAmount = $this->currency->convert($newAmount, $this->currency->rateFor($currency));
+        $newAmount = $this->currency->convert($newAmount, $this->currency->catalogRate($currency));
 
         $this->hooks->fire(HookPoints::UPGRADE_REQUESTED, ['serviceId' => $serviceId, 'mode' => $mode]);
 

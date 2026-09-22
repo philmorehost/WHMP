@@ -65,7 +65,7 @@ final class ServiceAddonService
         // in the client's own currency.
         $client = $this->clients->find((int) $parent['client_id']);
         $currency = $this->currency->resolveForClient($client);
-        $rate = $this->currency->rateFor($currency);
+        $rate = $this->currency->catalogRate($currency);
         $convertedAmount = $this->currency->convert($price, $rate);
         $convertedSetup = $this->currency->convert($setupFee, $rate);
 

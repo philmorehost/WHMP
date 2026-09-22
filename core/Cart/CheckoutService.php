@@ -44,13 +44,18 @@ final class CheckoutService
     }
 
     /**
-     * Converts every monetary field in a priced() result from base currency
-     * into $currency, exactly once — the point where a catalog price first
-     * becomes a real, stored charge. Everything downstream that reads the
-     * resulting services.amount/invoices.total back (renewals, proration,
-     * the dashboard) must never convert it again — those rows lock rate 1.0
-     * via denominateColumns()/denominateFor() specifically because this is
-     * the one place the real conversion already happened.
+     * Converts every monetary field in a priced() result from the catalog
+     * pricing currency into $currency, exactly once — the point where a catalog
+     * price first becomes a real, stored charge. catalogRate(), not rateFor():
+     * the prices the admin typed are in the pricing currency flagged on
+     * /admin/currencies, which need not be the base currency (that mix-up is
+     * what quoted a ₦22,350 plan as $22,350).
+     *
+     * Everything downstream that reads the resulting services.amount/invoices.total
+     * back (renewals, proration, the dashboard) must never convert it again —
+     * those rows lock rate 1.0 via denominateColumns()/denominateFor()
+     * specifically because this is the one place the real conversion already
+     * happened.
      *
      * @param array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float} $priced
      * @param array<string, mixed> $currency
@@ -58,7 +63,7 @@ final class CheckoutService
      */
     private function convertPriced(array $priced, array $currency): array
     {
-        $rate = $this->currency->rateFor($currency);
+        $rate = $this->currency->catalogRate($currency);
         $convert = fn (float $amount): float => $this->currency->convert($amount, $rate);
 
         foreach ($priced['lines'] as &$line) {
@@ -148,13 +153,13 @@ final class CheckoutService
             }
         }
 
-        // CartService::priced()/priceItems() is always base-currency — the
-        // shopping cart page converts it for display via its own
-        // $money/format() closure, but nothing before this converted the
-        // amounts that actually get stored. Converting here, once, is what
-        // makes the order/invoice match what the client saw while shopping
-        // instead of charging the raw base-currency figure under the
-        // client's currency symbol.
+        // CartService::priced()/priceItems() returns catalog prices in the
+        // pricing currency (see CurrencyService::catalogRate()) — the shopping
+        // cart page converts them for display via its own $money/format()
+        // closure, but nothing before this converted the amounts that actually
+        // get stored. Converting here, once, is what makes the order/invoice
+        // match what the client saw while shopping instead of charging the raw
+        // catalog figure under the client's currency symbol.
         $priced = $this->convertPriced($priced, $effectiveCurrency);
 
         $tax = $this->tax->calculate($client ?? [], $priced['total']);

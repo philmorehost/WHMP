@@ -153,7 +153,7 @@ final class DomainController
                 $targetClient = $clientId > 0 ? $this->clients->find($clientId) : null;
                 $amount = $this->currency->convert(
                     (float) $tldPricing['register_price'],
-                    $this->currency->rateFor($this->currency->resolveForClient($targetClient))
+                    $this->currency->catalogRate($this->currency->resolveForClient($targetClient))
                 );
             }
         }
@@ -431,7 +431,7 @@ final class DomainController
 
             $amount = $this->currency->convert(
                 (float) $tldPricing['renew_price'],
-                $this->currency->rateFor($this->currency->resolveForClient($this->clients->find((int) $domain['client_id'])))
+                $this->currency->catalogRate($this->currency->resolveForClient($this->clients->find((int) $domain['client_id'])))
             );
         }
 

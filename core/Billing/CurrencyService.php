@@ -219,11 +219,41 @@ final class CurrencyService
     }
 
     /** @param array<string, mixed> $currency */
-    public function format(float $baseAmount, array $currency): string
+    public function format(float $catalogAmount, array $currency): string
     {
-        $converted = $this->convert($baseAmount, $this->rateFor($currency));
+        $converted = $this->convert($catalogAmount, $this->catalogRate($currency));
 
         return ($currency['symbol'] ?? '$') . number_format($converted, 2);
+    }
+
+    /**
+     * The multiplier that turns a CATALOG price into $currency.
+     *
+     * A catalog price is the figure the admin typed into a pricing field —
+     * products/product_pricing, add-on products, domain_pricing, configurable
+     * option pricing. Those figures are all written in ONE currency, the one
+     * flagged as the pricing currency on /admin/currencies, which is not
+     * necessarily the base/default currency.
+     *
+     * rateFor() alone answers "base -> $currency", so using it for a catalog
+     * price silently assumes the catalog is priced in the base currency. Where
+     * an install prices in naira but defaults to USD, that assumption quotes a
+     * ₦22,350 plan as $22,350 to a dollar client — the raw 22350 x 1.0, with no
+     * conversion anywhere. Dividing by the pricing currency's own rate makes the
+     * same figure come out as ₦22,350 for a naira client (x 1490/1490 = x1) and
+     * $15.00 for a dollar client (x 1/1490).
+     *
+     * When the pricing currency IS the base currency this is identical to
+     * rateFor() — which is every install that has never set the flag, and the
+     * reason this changes no existing figure until an admin marks one.
+     *
+     * @param array<string, mixed> $currency
+     */
+    public function catalogRate(array $currency): float
+    {
+        $pricingRate = $this->rateFor($this->currencies->pricing());
+
+        return $pricingRate > 0 ? $this->rateFor($currency) / $pricingRate : 1.0;
     }
 
     /**

@@ -32,6 +32,42 @@ final class CurrencyRepository
         return $this->db->selectOne('SELECT * FROM currencies WHERE code = ?', [strtoupper($code)]);
     }
 
+    /**
+     * The currency the CATALOG prices are entered in — the one the admin typed
+     * into the product, add-on and domain pricing fields.
+     *
+     * Every "convert a catalog price" path in the app used to assume that was
+     * the base/default currency (see CurrencyService::catalogRate()), which is
+     * only true when prices happen to have been entered in the base currency.
+     * On an install priced in naira with USD as the default, the raw figure was
+     * multiplied by 1.0 and the ₦22,350 plan was quoted, ordered and reported
+     * as $22,350.
+     *
+     * Falls back to the default currency, so an install that never sets the
+     * flag behaves exactly as it did before.
+     *
+     * @return array<string, mixed>
+     */
+    public function pricing(): array
+    {
+        $row = $this->db->selectOne('SELECT * FROM currencies WHERE is_pricing = 1 LIMIT 1');
+
+        return $row ?? $this->default();
+    }
+
+    /** Exactly one row can hold the pricing flag; marking $id clears it everywhere else. */
+    public function setPricing(int $id): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->transaction(function () use ($id, $now) {
+            $this->db->update('UPDATE currencies SET is_pricing = 0, updated_at = ?', [$now]);
+            $this->db->update('UPDATE currencies SET is_pricing = 1, updated_at = ? WHERE id = ?', [$now, $id]);
+
+            return null;
+        });
+    }
+
     /** @return array<string, mixed> */
     public function default(): array
     {
@@ -78,6 +114,10 @@ final class CurrencyRepository
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         $this->db->transaction(function () use ($id, $now) {
+            $outgoing = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE is_default = 1 LIMIT 1');
+            $oldRate = $outgoing !== null ? (float) $outgoing['exchange_rate'] : 1.0;
+            $oldRate = $oldRate > 0 ? $oldRate : 1.0;
+
             $this->db->update('UPDATE currencies SET is_default = 0, updated_at = ?', [$now]);
 
             // Promoting a currency to base also resets its rate to 1. Every
@@ -90,6 +130,22 @@ final class CurrencyRepository
                 'UPDATE currencies SET is_default = 1, exchange_rate = 1.0000, updated_at = ? WHERE id = ?',
                 [$now, $id]
             );
+
+            // ...and that reset makes every OTHER row's rate stale, which this
+            // method used to leave behind: a rate reads "units of this currency
+            // per 1 base unit", so it is meaningless once the base itself
+            // changes. Promoting NGN kept USD at 1.0, so the two converted 1:1
+            // and every price, invoice and gateway charge silently changed
+            // meaning. Dividing by the outgoing base's rate restates them
+            // against the new base — the old base lands on 1/1490 = 0.00067114,
+            // which DECIMAL(18,8) holds (migration 0126 widened it for exactly
+            // this kind of inverse rate).
+            if (abs($oldRate - 1.0) > 0.00000001) {
+                $this->db->update(
+                    'UPDATE currencies SET exchange_rate = exchange_rate / ?, updated_at = ? WHERE id <> ?',
+                    [$oldRate, $now, $id]
+                );
+            }
 
             return null;
         });

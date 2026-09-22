@@ -372,14 +372,15 @@ final class ServiceController
                 return Response::redirect("/admin/services/{$id}?price_error=" . urlencode('This product has no price for the service\'s billing cycle.'));
             }
 
-            // Catalog prices are held in the base currency, but a service's
-            // amount is stored denominated in the owning client's currency.
-            // Converted once, for that client, same as CheckoutService does at
-            // checkout — otherwise a NGN client's service (₦1,043) is reset
-            // onto the raw USD catalog figure and read back as ₦0.70.
+            // A catalog price is held in the pricing currency flagged on
+            // /admin/currencies — not necessarily the base currency — but a
+            // service's amount is stored denominated in the owning client's
+            // currency. Converted once, for that client, same as CheckoutService
+            // does at checkout — otherwise a NGN client's service (₦1,043) is
+            // reset onto the raw USD catalog figure and read back as ₦0.70.
             $amount = $this->currency->convert(
                 (float) $priceRow['price'],
-                $this->currency->rateFor($this->currency->resolveForClient($this->clients->find((int) $service['client_id'])))
+                $this->currency->catalogRate($this->currency->resolveForClient($this->clients->find((int) $service['client_id'])))
             );
 
             $this->services->updateAmount($id, $amount);
