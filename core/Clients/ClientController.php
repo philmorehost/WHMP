@@ -48,7 +48,8 @@ final class ClientController
         private readonly \CodeVault\Support\TicketRepository $tickets,
         private readonly \CodeVault\Support\TicketReplyRepository $ticketReplies,
         private readonly DomainRepository $domains,
-        private readonly RecurringInvoiceRepository $recurringInvoices
+        private readonly RecurringInvoiceRepository $recurringInvoices,
+        private readonly \CodeVault\Billing\CurrencyRepository $currencies
     ) {
     }
 
@@ -419,6 +420,36 @@ final class ClientController
         if (isset($fields['password']) && $fields['password'] !== '') {
             $this->clients->updatePassword($id, $fields['password']);
         }
+
+        // Currency is deliberately NOT part of update(): switching it has to
+        // recalculate every amount the client is billed — services, domains,
+        // invoices, orders, quotes, credit notes, recurring-invoice templates,
+        // pending charges and the transactions that settled an invoice —
+        // because on this install all of those are denominated in the client's
+        // own currency. That is what updateCurrency() does, and it no-ops when
+        // the currency is unchanged. A blank choice means "leave the currency
+        // alone" rather than reverting to the system default; note that
+        // updateCurrency() itself early-returns when the new id matches the
+        // client's current one, so re-saving an unrelated edit can't re-round
+        // the account.
+        $requestedCurrency = $request->input('currency_id');
+        if ($requestedCurrency !== null && $requestedCurrency !== '') {
+            $newCurrencyId = (int) $requestedCurrency;
+            $oldCurrencyId = $existing !== null && $existing['currency_id'] !== null ? (int) $existing['currency_id'] : null;
+
+            if ($newCurrencyId !== $oldCurrencyId && ($currency = $this->currencies->find($newCurrencyId)) !== null) {
+                $this->clients->updateCurrency($id, $newCurrencyId);
+                $this->activity->log(
+                    'admin',
+                    (int) $this->guard->currentAdmin()['id'],
+                    'client.currency_changed',
+                    'client',
+                    $id,
+                    "Changed client #{$id} default currency to " . (string) ($currency['code'] ?? $newCurrencyId) . ' — all balances recalculated',
+                    $request->ip()
+                );
+            }
+        }
         $this->customFieldValues->saveForClient($id, $this->extractCustomFieldValues($request));
         $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'client.updated', 'client', $id, "Updated client #{$id}", $request->ip());
 
@@ -498,9 +529,13 @@ final class ClientController
     private function extractFields(Request $request): array
     {
         $groupId = $request->input('client_group_id');
+        $currencyId = $request->input('currency_id');
 
         return [
             'client_group_id' => $groupId !== null && $groupId !== '' ? (int) $groupId : null,
+            // '' / null = "system default" — create() falls back to the default
+            // currency for it, and update() leaves the existing one untouched.
+            'currency_id' => $currencyId !== null && $currencyId !== '' ? (int) $currencyId : null,
             'email' => trim((string) $request->input('email', '')),
             'password' => (string) $request->input('password', ''),
             'first_name' => trim((string) $request->input('first_name', '')),
@@ -538,6 +573,7 @@ final class ClientController
         return [
             'client' => $client,
             'groups' => $this->groups->all(),
+            'currencies' => $this->currencies->all(),
             'customFields' => $this->customFields->forType('client'),
             'customFieldValues' => $clientId !== null ? $this->customFieldValues->forClient($clientId) : [],
             'error' => $error,

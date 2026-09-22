@@ -257,69 +257,250 @@ final class ClientRepository
         );
     }
 
+    /**
+     * Recalculates everything a client is billed for into a new currency.
+     *
+     * This is the *deliberate* admin action from the Edit Client screen (see
+     * setCurrencyPreference() for the passive storefront one). Because every
+     * stored figure on this install is denominated in the client's own
+     * currency, moving the client has to move the figures with it: services,
+     * domains, invoices, orders, quotes, credit notes, recurring-invoice
+     * templates, pending charges and the transactions that settled an invoice
+     * are all converted so they keep meaning the same amount of money, now
+     * expressed in the new currency.
+     *
+     * Two storage conventions have to be told apart per row, and conflating
+     * them is what made the old implementation display nonsense:
+     *
+     * - **Denominated** (`currency_id` set AND `currency_rate` = 1.0, the shape
+     *   denominateColumns() writes): the amount is already in that currency,
+     *   so it converts by the ratio between the two rates — `$factor`.
+     * - **Base** (`currency_id IS NULL`, or a `currency_rate` other than 1.0
+     *   from the older lockColumns() convention): the amount is in the *base*
+     *   currency and any rate on the row is display-only, so it converts at the
+     *   target currency's own rate. Multiplying such a row by `$factor` divided
+     *   it by the old currency's rate — an imported base-currency invoice on a
+     *   naira account would have come out 1490x too small.
+     *
+     * Every row lands denominated in the target currency: `currency_rate` 1.0
+     * and `currency_id` NULL for the base currency, matching
+     * denominateColumns(). The old code wrote the raw ratio into
+     * `currency_rate` instead, which made every display path multiply the
+     * already-converted amount a second time — the invoice list, the invoice
+     * detail page, the order list, the revenue reports and the amount
+     * PaymentCallbackController asks the gateway for all read that column as
+     * "stored figure x rate".
+     */
     public function updateCurrency(int $id, int $currencyId): void
     {
         $client = $this->db->selectOne('SELECT currency_id FROM clients WHERE id = ?', [$id]);
-        $oldCurrencyId = $client !== null ? ($client['currency_id'] !== null ? (int) $client['currency_id'] : null) : null;
+        $oldCurrencyId = $client !== null && $client['currency_id'] !== null ? (int) $client['currency_id'] : null;
 
         if ($oldCurrencyId === $currencyId) {
             return;
         }
 
-        $oldRate = 1.0000;
-        if ($oldCurrencyId !== null) {
-            $oldCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE id = ?', [$oldCurrencyId]);
-            if ($oldCurr !== null) {
-                $oldRate = (float) $oldCurr['exchange_rate'];
-            }
-        } else {
-            $defaultCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE is_default = 1 LIMIT 1');
-            if ($defaultCurr !== null) {
-                $oldRate = (float) $defaultCurr['exchange_rate'];
-            }
-        }
+        $oldRate = $this->effectiveRate($oldCurrencyId);
+        $newRate = $this->effectiveRate($currencyId);
+        $factor = $oldRate > 0 ? $newRate / $oldRate : 1.0;
 
-        $newRate = 1.0000;
-        $newCurr = $this->db->selectOne('SELECT exchange_rate FROM currencies WHERE id = ?', [$currencyId]);
-        if ($newCurr !== null) {
-            $newRate = (float) $newCurr['exchange_rate'];
-        }
+        // The shape every re-denominated row ends up in.
+        $documentCurrencyId = $this->isBaseCurrency($currencyId) ? null : $currencyId;
+        $scale = $this->scaleSql();
 
-        $factor = $newRate / $oldRate;
-
-        $this->db->transaction(function() use ($id, $currencyId, $factor) {
+        $this->db->transaction(function () use ($id, $currencyId, $factor, $newRate, $documentCurrencyId, $scale) {
             $this->db->update(
                 'UPDATE clients SET currency_id = ?, updated_at = ? WHERE id = ?',
                 [$currencyId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
             );
 
+            // Amounts with no currency column of their own are denominated in
+            // the client's currency by definition, so they move by the ratio.
+            foreach (['services', 'domains', 'billable_items'] as $table) {
+                $this->db->update("UPDATE {$table} SET amount = amount * ? WHERE client_id = ?", [$factor, $id]);
+            }
+
+            // Line items and the transactions that settled an invoice are scaled
+            // BEFORE the invoice itself is relabelled: their multiplier is read
+            // from the invoice's currency columns as they stand right now. Run
+            // this after the invoices UPDATE and every row would look
+            // denominated in the target currency and be scaled as such.
             $this->db->update(
-                'UPDATE services SET amount = amount * ? WHERE client_id = ?',
-                [$factor, $id]
+                'UPDATE invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                 SET ii.amount = ii.amount * ' . $this->scaleSql('i') . '
+                 WHERE i.client_id = ?',
+                [$factor, $newRate, $id]
             );
 
             $this->db->update(
-                'UPDATE domains SET amount = amount * ? WHERE client_id = ?',
-                [$factor, $id]
+                'UPDATE transactions t JOIN invoices i ON i.id = t.invoice_id
+                 SET t.amount = t.amount * ' . $this->scaleSql('i') . '
+                 WHERE i.client_id = ?',
+                [$factor, $newRate, $id]
+            );
+
+            // discount_amount is converted with the rest: leaving it behind
+            // broke the invoice's own subtotal + tax - discount = total
+            // identity, so the detail page no longer added up.
+            $this->db->update(
+                "UPDATE invoices SET
+                    subtotal = subtotal * {$scale},
+                    tax_amount = tax_amount * {$scale},
+                    discount_amount = discount_amount * {$scale},
+                    total = total * {$scale},
+                    currency_id = ?,
+                    currency_rate = 1.0000
+                 WHERE client_id = ?",
+                [
+                    $factor, $newRate,
+                    $factor, $newRate,
+                    $factor, $newRate,
+                    $factor, $newRate,
+                    $documentCurrencyId, $id,
+                ]
             );
 
             $this->db->update(
-                'UPDATE invoices SET subtotal = subtotal * ?, tax_amount = tax_amount * ?, total = total * ?, currency_id = ?, currency_rate = ? WHERE client_id = ?',
-                [$factor, $factor, $factor, $currencyId, $factor, $id]
-            );
-
-            // transactions has no client_id column of its own — it's
-            // scoped to a client only via the invoice it paid.
-            $this->db->update(
-                'UPDATE transactions SET amount = amount * ? WHERE invoice_id IN (SELECT id FROM invoices WHERE client_id = ?)',
-                [$factor, $id]
+                'UPDATE order_items oi JOIN orders o ON o.id = oi.order_id
+                 SET oi.unit_price = oi.unit_price * ' . $this->scaleSql('o') . ',
+                     oi.setup_fee = oi.setup_fee * ' . $this->scaleSql('o') . '
+                 WHERE o.client_id = ?',
+                [$factor, $newRate, $factor, $newRate, $id]
             );
 
             $this->db->update(
-                'UPDATE orders SET total = total * ?, currency_id = ?, currency_rate = ? WHERE client_id = ?',
-                [$factor, $currencyId, $factor, $id]
+                "UPDATE orders SET
+                    total = total * {$scale},
+                    discount_amount = discount_amount * {$scale},
+                    currency_id = ?,
+                    currency_rate = 1.0000
+                 WHERE client_id = ?",
+                [$factor, $newRate, $factor, $newRate, $documentCurrencyId, $id]
             );
+
+            // Quotes and credit notes are still written through
+            // lockedColumnsFor(), i.e. base-currency amounts with a display
+            // rate, so the CASE above converts them rather than the ratio.
+            $this->db->update(
+                'UPDATE credit_note_items cni JOIN credit_notes cn ON cn.id = cni.credit_note_id
+                 SET cni.amount = cni.amount * ' . $this->scaleSql('cn') . '
+                 WHERE cn.client_id = ?',
+                [$factor, $newRate, $id]
+            );
+
+            $this->db->update(
+                "UPDATE credit_notes SET total = total * {$scale}, currency_id = ?, currency_rate = 1.0000 WHERE client_id = ?",
+                [$factor, $newRate, $documentCurrencyId, $id]
+            );
+
+            $this->db->update(
+                'UPDATE quote_items qi JOIN quotes q ON q.id = qi.quote_id
+                 SET qi.amount = qi.amount * ' . $this->scaleSql('q') . '
+                 WHERE q.client_id = ?',
+                [$factor, $newRate, $id]
+            );
+
+            $this->db->update(
+                "UPDATE quotes SET total = total * {$scale}, currency_id = ?, currency_rate = 1.0000 WHERE client_id = ?",
+                [$factor, $newRate, $documentCurrencyId, $id]
+            );
+
+            foreach ($this->db->select('SELECT id, currency_id, currency_rate, items FROM recurring_invoices WHERE client_id = ?', [$id]) as $template) {
+                $rowFactor = $this->rowConvertsByRatio($template) ? $factor : $newRate;
+                $encoded = (string) ($template['items'] ?? '[]');
+                $items = json_decode($encoded, true);
+
+                if (is_array($items)) {
+                    foreach ($items as $index => $item) {
+                        if (is_array($item) && isset($item['amount'])) {
+                            $items[$index]['amount'] = round((float) $item['amount'] * $rowFactor, 2);
+                        }
+                    }
+
+                    $encoded = (string) json_encode($items);
+                }
+
+                $this->db->update(
+                    'UPDATE recurring_invoices SET items = ?, amount = amount * ?, currency_id = ?, currency_rate = 1.00000000 WHERE id = ?',
+                    [$encoded, $rowFactor, $documentCurrencyId, (int) $template['id']]
+                );
+            }
         });
+    }
+
+    /**
+     * Records the client's preferred currency WITHOUT touching a single stored
+     * amount.
+     *
+     * The storefront currency widget calls this. Picking a different currency
+     * in the header is a change of *view* — it re-prices the catalog for that
+     * visitor and persists as the client's preference — but routing it through
+     * updateCurrency() also re-denominated the whole account, and back again on
+     * the next click, losing a little to rounding on every round trip. Only the
+     * deliberate admin change converts.
+     */
+    public function setCurrencyPreference(int $id, int $currencyId): void
+    {
+        $this->db->update(
+            'UPDATE clients SET currency_id = ?, updated_at = ? WHERE id = ?',
+            [$currencyId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    /**
+     * A currency's live rate against the base, with the base's own rate pinned
+     * at 1.0 — the same rule CurrencyService::rateFor() enforces.
+     *
+     * The `currencies` table has no constraint tying the default row's
+     * exchange_rate to 1, so an install that seeded NGN=1490 and later promoted
+     * NGN to default keeps the 1490. Reading that column raw (as this method
+     * used to) made the conversion factor wrong by three orders of magnitude.
+     * NULL means "no preference", i.e. the base currency.
+     */
+    private function effectiveRate(?int $currencyId): float
+    {
+        if ($currencyId === null) {
+            return 1.0;
+        }
+
+        $row = $this->db->selectOne('SELECT exchange_rate, is_default FROM currencies WHERE id = ?', [$currencyId]);
+
+        if ($row === null) {
+            return 1.0;
+        }
+
+        if ((int) $row['is_default'] === 1) {
+            return 1.0;
+        }
+
+        $rate = (float) $row['exchange_rate'];
+
+        return $rate > 0 ? $rate : 1.0;
+    }
+
+    private function isBaseCurrency(int $currencyId): bool
+    {
+        $row = $this->db->selectOne('SELECT is_default FROM currencies WHERE id = ?', [$currencyId]);
+
+        return $row !== null && (int) $row['is_default'] === 1;
+    }
+
+    /**
+     * SQL for "does this row convert by the ratio between the two rates, or at
+     * the target's own rate?" — bound with the ratio first, then the rate.
+     * Assumes the row's currency columns are still the pre-conversion ones.
+     */
+    private function scaleSql(string $alias = ''): string
+    {
+        $prefix = $alias === '' ? '' : $alias . '.';
+
+        return "CASE WHEN {$prefix}currency_id IS NOT NULL AND {$prefix}currency_rate = 1.0 THEN ? ELSE ? END";
+    }
+
+    /** @param array<string, mixed> $row */
+    private function rowConvertsByRatio(array $row): bool
+    {
+        return ($row['currency_id'] ?? null) !== null && (float) ($row['currency_rate'] ?? 0) === 1.0;
     }
 
     /** Lazily populated the first time a registrar module (e.g. ConnectReseller) has to create a customer record on its own side for this client. */

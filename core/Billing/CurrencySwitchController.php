@@ -13,6 +13,12 @@ use CodeVault\Response;
  * Public currency switcher (store/cart header widget). Stores the choice
  * in-session for everyone, and additionally saves it as the logged-in
  * client's profile preference so it persists across sessions/devices.
+ *
+ * It deliberately calls setCurrencyPreference(), NOT updateCurrency(): the
+ * latter converts every balance on the account, and this endpoint is one click
+ * away from the storefront header for any signed-in client. Re-denominating on
+ * a browse-currency toggle also rounded every amount twice per round trip, so a
+ * client who toggled USD/NGN twice came back to slightly different invoices.
  */
 final class CurrencySwitchController
 {
@@ -34,7 +40,7 @@ final class CurrencySwitchController
             $client = $this->guard->currentClient();
 
             if ($client !== null) {
-                $this->clients->updateCurrency((int) $client['id'], $currencyId);
+                $this->clients->setCurrencyPreference((int) $client['id'], $currencyId);
             }
         }
 

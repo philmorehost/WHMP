@@ -1,6 +1,7 @@
 <?php
 /** @var array<string, mixed>|null $client */
 /** @var array<int, array<string, mixed>> $groups */
+/** @var array<int, array<string, mixed>> $currencies */
 /** @var array<int, array<string, mixed>> $customFields */
 /** @var array<int, string> $customFieldValues */
 /** @var string|null $error */
@@ -18,7 +19,7 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
         <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
     <?php endif; ?>
 
-    <form method="post" action="<?= e($action) ?>"><?= csrf_field() ?>
+    <form method="post" action="<?= e($action) ?>" id="client-form"><?= csrf_field() ?>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--cv-space-3);">
             <div class="cv-field">
                 <label class="cv-label">First Name</label>
@@ -101,6 +102,23 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
                 <?php endforeach; ?>
             </select>
         </div>
+        <div class="cv-field">
+            <label class="cv-label">Default Currency</label>
+            <?php $currentCurrencyId = ($client['currency_id'] ?? null) !== null ? (int) $client['currency_id'] : 0; ?>
+            <select class="cv-select" name="currency_id">
+                <option value="" <?= $currentCurrencyId === 0 ? 'selected' : '' ?>>System default</option>
+                <?php foreach (($currencies ?? []) as $currency): ?>
+                    <option value="<?= (int) $currency['id'] ?>" <?= $currentCurrencyId === (int) $currency['id'] ? 'selected' : '' ?>>
+                        <?= e((string) $currency['code']) ?> (<?= e((string) $currency['symbol']) ?>)<?= !empty($currency['is_default']) ? ' — default' : '' ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <?php if ($isEdit): ?>
+                <p style="margin:var(--cv-space-1) 0 0;font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">
+                    Changing this recalculates the client's services, domains, invoices, orders, quotes, credit notes, recurring invoices and pending charges into the new currency. Amounts are re-rounded, so switching back will not restore the exact original figures.
+                </p>
+            <?php endif; ?>
+        </div>
         <?php if ($isEdit): ?>
         <div class="cv-field">
             <label class="cv-label">Status</label>
@@ -149,6 +167,35 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
     </form>
 
     <?php if ($isEdit): ?>
+        <script nonce="<?= csp_nonce() ?>">
+        // Changing the currency rewrites every balance on the account, so it is
+        // worth one confirmation. app.js's data-confirm can't express "only
+        // when the value actually changed", which is the condition that matters
+        // here — saving an unrelated edit must not prompt.
+        (function () {
+            var form = document.getElementById('client-form');
+            var select = form ? form.querySelector('select[name="currency_id"]') : null;
+
+            if (!form || !select) {
+                return;
+            }
+
+            var initial = select.value;
+
+            form.addEventListener('submit', function (event) {
+                if (select.value === initial) {
+                    return;
+                }
+
+                var chosen = select.options[select.selectedIndex];
+                var label = chosen ? chosen.text.replace(/\s+/g, ' ').trim() : select.value;
+
+                if (!window.confirm('Change this client\'s default currency to ' + label + '?\n\nEvery amount on the account - services, domains, invoices, orders, quotes, credit notes, recurring invoices and pending charges - will be recalculated into that currency. Amounts are re-rounded, so switching back will not restore the exact original figures.')) {
+                    event.preventDefault();
+                }
+            });
+        })();
+        </script>
         <form method="post" action="/admin/clients/<?= (int) $client['id'] ?>/verify-vat" style="margin-top:var(--cv-space-4);"><?= csrf_field() ?>
             <button class="cv-btn cv-btn--secondary" type="submit">Verify VAT Number via VIES</button>
         </form>
