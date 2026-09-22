@@ -264,10 +264,25 @@ final class ClientRepository
      * setCurrencyPreference() for the passive storefront one). Because every
      * stored figure on this install is denominated in the client's own
      * currency, moving the client has to move the figures with it: services,
-     * domains, invoices, orders, quotes, credit notes, recurring-invoice
-     * templates, pending charges and the transactions that settled an invoice
-     * are all converted so they keep meaning the same amount of money, now
-     * expressed in the new currency.
+     * domains, unpaid invoices, open orders, open quotes, recurring-invoice
+     * templates, unbilled charges and the payments made against an invoice that
+     * is still owed are all converted so they keep meaning the same amount of
+     * money, now expressed in the new currency.
+     *
+     * Settled history is NOT restated. A paid invoice, the transaction that
+     * settled it, a cancelled order, a terminated service or a withheld
+     * billable item records money that actually changed hands at a figure a
+     * gateway already took, and rewriting it would misstate what was charged.
+     * Only amounts that are still live move — outstanding balances, what will
+     * be billed next, open quotes and unbilled charges — which is also why each
+     * statement below carries a status predicate. Rows left behind keep their
+     * own currency_id, so they still display correctly in the currency they
+     * were billed in; the invoice list, the invoice detail page and
+     * CurrencyService::formatDocument() all read the row's own lock.
+     *
+     * Credit notes and the client credit ledger are deliberately not touched at
+     * all: they are documents of record with no "still owed" state to read, and
+     * leaving both alone keeps them consistent with each other.
      *
      * Two storage conventions have to be told apart per row, and conflating
      * them is what made the old implementation display nonsense:
@@ -316,26 +331,43 @@ final class ClientRepository
 
             // Amounts with no currency column of their own are denominated in
             // the client's currency by definition, so they move by the ratio.
-            foreach (['services', 'domains', 'billable_items'] as $table) {
-                $this->db->update("UPDATE {$table} SET amount = amount * ? WHERE client_id = ?", [$factor, $id]);
-            }
+            // Cancelled/terminated services and domains are closed — their
+            // amount feeds no future renewal — so they stay as billed.
+            $this->db->update(
+                "UPDATE services SET amount = amount * ? WHERE client_id = ? AND status IN ('pending', 'active', 'suspended')",
+                [$factor, $id]
+            );
+
+            $this->db->update(
+                "UPDATE domains SET amount = amount * ? WHERE client_id = ? AND status IN ('pending', 'active', 'expired', 'grace', 'redemption')",
+                [$factor, $id]
+            );
+
+            // Only unbilled charges are live: an invoiced item has already been
+            // carried onto an invoice, and a cancelled one is void.
+            $this->db->update(
+                "UPDATE billable_items SET amount = amount * ? WHERE client_id = ? AND status = 'pending'",
+                [$factor, $id]
+            );
 
             // Line items and the transactions that settled an invoice are scaled
             // BEFORE the invoice itself is relabelled: their multiplier is read
             // from the invoice's currency columns as they stand right now. Run
             // this after the invoices UPDATE and every row would look
-            // denominated in the target currency and be scaled as such.
+            // denominated in the target currency and be scaled as such. The
+            // same "only while it is still owed" predicate applies, so a paid
+            // invoice's lines and its payment keep their original figures.
             $this->db->update(
                 'UPDATE invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  SET ii.amount = ii.amount * ' . $this->scaleSql('i') . '
-                 WHERE i.client_id = ?',
+                 WHERE i.client_id = ? ' . $this->openInvoiceSql('i'),
                 [$factor, $newRate, $id]
             );
 
             $this->db->update(
                 'UPDATE transactions t JOIN invoices i ON i.id = t.invoice_id
                  SET t.amount = t.amount * ' . $this->scaleSql('i') . '
-                 WHERE i.client_id = ?',
+                 WHERE i.client_id = ? ' . $this->openInvoiceSql('i'),
                 [$factor, $newRate, $id]
             );
 
@@ -350,7 +382,7 @@ final class ClientRepository
                     total = total * {$scale},
                     currency_id = ?,
                     currency_rate = 1.0000
-                 WHERE client_id = ?",
+                 WHERE client_id = ? " . $this->openInvoiceSql(),
                 [
                     $factor, $newRate,
                     $factor, $newRate,
@@ -364,7 +396,7 @@ final class ClientRepository
                 'UPDATE order_items oi JOIN orders o ON o.id = oi.order_id
                  SET oi.unit_price = oi.unit_price * ' . $this->scaleSql('o') . ',
                      oi.setup_fee = oi.setup_fee * ' . $this->scaleSql('o') . '
-                 WHERE o.client_id = ?',
+                 WHERE o.client_id = ? ' . $this->liveOrderSql('o'),
                 [$factor, $newRate, $factor, $newRate, $id]
             );
 
@@ -374,38 +406,30 @@ final class ClientRepository
                     discount_amount = discount_amount * {$scale},
                     currency_id = ?,
                     currency_rate = 1.0000
-                 WHERE client_id = ?",
+                 WHERE client_id = ? " . $this->liveOrderSql(),
                 [$factor, $newRate, $factor, $newRate, $documentCurrencyId, $id]
             );
 
-            // Quotes and credit notes are still written through
-            // lockedColumnsFor(), i.e. base-currency amounts with a display
-            // rate, so the CASE above converts them rather than the ratio.
-            $this->db->update(
-                'UPDATE credit_note_items cni JOIN credit_notes cn ON cn.id = cni.credit_note_id
-                 SET cni.amount = cni.amount * ' . $this->scaleSql('cn') . '
-                 WHERE cn.client_id = ?',
-                [$factor, $newRate, $id]
-            );
-
-            $this->db->update(
-                "UPDATE credit_notes SET total = total * {$scale}, currency_id = ?, currency_rate = 1.0000 WHERE client_id = ?",
-                [$factor, $newRate, $documentCurrencyId, $id]
-            );
-
+            // Quotes are still written through lockedColumnsFor(), i.e.
+            // base-currency amounts with a display rate, so the CASE above
+            // converts them at the target's rate rather than by the ratio. Only
+            // the ones still awaiting a decision move; an accepted, declined or
+            // expired quote records a decision that was already made.
             $this->db->update(
                 'UPDATE quote_items qi JOIN quotes q ON q.id = qi.quote_id
                  SET qi.amount = qi.amount * ' . $this->scaleSql('q') . '
-                 WHERE q.client_id = ?',
+                 WHERE q.client_id = ? ' . $this->openQuoteSql('q'),
                 [$factor, $newRate, $id]
             );
 
             $this->db->update(
-                "UPDATE quotes SET total = total * {$scale}, currency_id = ?, currency_rate = 1.0000 WHERE client_id = ?",
+                "UPDATE quotes SET total = total * {$scale}, currency_id = ?, currency_rate = 1.0000 WHERE client_id = ? " . $this->openQuoteSql(),
                 [$factor, $newRate, $documentCurrencyId, $id]
             );
 
-            foreach ($this->db->select('SELECT id, currency_id, currency_rate, items FROM recurring_invoices WHERE client_id = ?', [$id]) as $template) {
+            // A cancelled template raises nothing more; active and paused ones
+            // are what the cron will bill next.
+            foreach ($this->db->select("SELECT id, currency_id, currency_rate, items FROM recurring_invoices WHERE client_id = ? AND status IN ('active', 'paused')", [$id]) as $template) {
                 $rowFactor = $this->rowConvertsByRatio($template) ? $factor : $newRate;
                 $encoded = (string) ($template['items'] ?? '[]');
                 $items = json_decode($encoded, true);
@@ -495,6 +519,30 @@ final class ClientRepository
         $prefix = $alias === '' ? '' : $alias . '.';
 
         return "CASE WHEN {$prefix}currency_id IS NOT NULL AND {$prefix}currency_rate = 1.0 THEN ? ELSE ? END";
+    }
+
+    /** Only an invoice that is still owed is recalculated; paid, refunded and cancelled ones are settled. */
+    private function openInvoiceSql(string $alias = ''): string
+    {
+        $prefix = $alias === '' ? '' : $alias . '.';
+
+        return "AND {$prefix}status = 'unpaid' AND COALESCE({$prefix}is_cancelled, 0) = 0";
+    }
+
+    /** A cancelled or fraudulent order is closed; a pending or active one has not finished billing yet. */
+    private function liveOrderSql(string $alias = ''): string
+    {
+        $prefix = $alias === '' ? '' : $alias . '.';
+
+        return "AND {$prefix}status IN ('pending', 'active') AND COALESCE({$prefix}is_cancelled, 0) = 0";
+    }
+
+    /** A quote still awaiting the client's decision. */
+    private function openQuoteSql(string $alias = ''): string
+    {
+        $prefix = $alias === '' ? '' : $alias . '.';
+
+        return "AND {$prefix}status IN ('draft', 'sent')";
     }
 
     /** @param array<string, mixed> $row */

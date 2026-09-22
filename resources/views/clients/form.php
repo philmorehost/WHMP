@@ -115,7 +115,7 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
             </select>
             <?php if ($isEdit): ?>
                 <p style="margin:var(--cv-space-1) 0 0;font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">
-                    Changing this recalculates the client's services, domains, invoices, orders, quotes, credit notes, recurring invoices and pending charges into the new currency. Amounts are re-rounded, so switching back will not restore the exact original figures.
+                    Changing this recalculates what the client still owes and will be billed for — services, domains, unpaid invoices, open orders, open quotes, recurring invoices and unbilled charges — into the new currency. Paid invoices and settled transactions keep the figures they were billed at. Amounts are re-rounded, so switching back will not restore the exact original values.
                 </p>
             <?php endif; ?>
         </div>
@@ -190,7 +190,7 @@ $val = fn (string $key, string $default = '') => e((string) ($client[$key] ?? $d
                 var chosen = select.options[select.selectedIndex];
                 var label = chosen ? chosen.text.replace(/\s+/g, ' ').trim() : select.value;
 
-                if (!window.confirm('Change this client\'s default currency to ' + label + '?\n\nEvery amount on the account - services, domains, invoices, orders, quotes, credit notes, recurring invoices and pending charges - will be recalculated into that currency. Amounts are re-rounded, so switching back will not restore the exact original figures.')) {
+                if (!window.confirm('Change this client\'s default currency to ' + label + '?\n\nEvery amount the client still owes or will be billed for - services, domains, unpaid invoices, open orders, open quotes, recurring invoices and unbilled charges - will be recalculated into that currency. Paid invoices and settled transactions keep the figures they were billed at. Amounts are re-rounded, so switching back will not restore the exact original values.')) {
                     event.preventDefault();
                 }
             });
