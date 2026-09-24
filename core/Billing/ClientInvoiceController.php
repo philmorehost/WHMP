@@ -381,11 +381,23 @@ final class ClientInvoiceController
         // Create consolidated Mass Payment invoice
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $today = substr($now, 0, 10);
-        // The summed totals are already base-currency amounts copied from the
-        // source invoices, so the consolidated invoice only needs the matching
-        // display lock — pairing a currency_id with a hardcoded 1.0 rate would
-        // under-display it by the whole exchange rate.
-        $currencyLock = $this->currency->lockColumns($this->currency->resolveForClient($client));
+        // Denominate, do NOT lock a conversion rate.
+        //
+        // The line amounts copied below are each source invoice's own stored
+        // total, and every invoice this app raises is *denominated* in the
+        // client's currency (RecurringBillingService, BillableItemInvoicingJob,
+        // ServiceAddonService, ProrationService and the add-funds screen all go
+        // through denominateFor() — see CurrencyService::denominateColumns()).
+        // So the figures are already expressed in the client's currency and
+        // must be recorded the same way, at rate 1.0.
+        //
+        // lockColumns() instead stamps the client currency's *live FX rate*
+        // onto the row, and every reader multiplies by that column
+        // (client-invoice-show.php, PaymentCallbackController::initiate()): on a
+        // client whose currency trades at 1520, a ₦28,339.00 invoice displayed
+        // and charged as ₦43,075,280.00. That is the "merged invoice shows the
+        // wrong amount for each line" report.
+        $currencyLock = $this->currency->denominateFor($client);
 
         $massInvoiceId = (int) $db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
