@@ -858,7 +858,11 @@ final class ClientServiceController
             (int) $departments[0]['id'],
             $subject,
             trim((string) $client['first_name'] . ' ' . (string) $client['last_name']),
-            $body
+            $body,
+            // These tickets are raised *by* an action on this service, so the
+            // link is certain — it costs nothing to carry it onto the ticket
+            // and it saves staff identifying the service from the body text.
+            (int) $service['id']
         );
 
         $this->activity->log(

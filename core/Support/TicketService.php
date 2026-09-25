@@ -30,12 +30,22 @@ final class TicketService
     ) {
     }
 
-    public function open(?int $clientId, string $email, int $departmentId, string $subject, string $authorName, string $message): int
+    /**
+     * Opens a ticket. `$serviceId`/`$domainId` name the service or domain the
+     * ticket is about when the caller knows one — the client portal's picker
+     * and the service actions that funnel an unsupported vendor call into a
+     * ticket. They are trailing and optional so the mail-piping path and the
+     * notification centre don't have to care, and the ids are the caller's
+     * responsibility to authorise: this method trusts them.
+     */
+    public function open(?int $clientId, string $email, int $departmentId, string $subject, string $authorName, string $message, ?int $serviceId = null, ?int $domainId = null): int
     {
         $ticketId = $this->tickets->create([
             'client_id' => $clientId,
             'email' => $email,
             'department_id' => $departmentId,
+            'service_id' => $serviceId,
+            'domain_id' => $domainId,
             'subject' => $subject,
             'status' => 'open',
         ]);
@@ -286,6 +296,11 @@ final class TicketService
             'client_id' => $source['client_id'],
             'email' => $source['email'],
             'department_id' => $departmentId,
+            // The split is a continuation of the same conversation about the
+            // same thing — carrying the item across keeps "which service is
+            // this about?" attached to both halves.
+            'service_id' => $source['service_id'] ?? null,
+            'domain_id' => $source['domain_id'] ?? null,
             'subject' => $newSubject,
             'status' => 'open',
             'priority' => $source['priority'],

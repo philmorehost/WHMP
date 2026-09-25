@@ -402,6 +402,35 @@ $id = (int) $ticket['id'];
                     <p class="ticket-detail-hero__meta-label">Department</p>
                     <p class="ticket-detail-hero__meta-item"><?= e($ticket['department_name']) ?></p>
                 </div>
+                <?php if (!empty($ticket['service_id'])): ?>
+                    <?php
+                    // The item the ticket was raised about, so the client can
+                    // jump to it and support can see at a glance exactly which
+                    // service is being discussed (see find()'s joins).
+                    $relatedServiceLabel = (string) ($ticket['service_product_name'] ?? 'Service');
+                    if (trim((string) ($ticket['service_domain'] ?? '')) !== '') {
+                        $relatedServiceLabel .= ' — ' . (string) $ticket['service_domain'];
+                    }
+                    ?>
+                    <div>
+                        <p class="ticket-detail-hero__meta-label">Related Service</p>
+                        <p class="ticket-detail-hero__meta-item">
+                            <a href="/client/services/<?= (int) $ticket['service_id'] ?>" style="color:#60a5fa;font-weight:600;text-decoration:none;">
+                                <?= e($relatedServiceLabel) ?> &rarr;
+                            </a>
+                        </p>
+                    </div>
+                <?php endif; ?>
+                <?php if (!empty($ticket['domain_id'])): ?>
+                    <div>
+                        <p class="ticket-detail-hero__meta-label">Related Domain</p>
+                        <p class="ticket-detail-hero__meta-item">
+                            <a href="/client/domains/<?= (int) $ticket['domain_id'] ?>" style="color:#60a5fa;font-weight:600;text-decoration:none;">
+                                <?= e((string) ($ticket['related_domain_name'] ?? 'Domain')) ?> &rarr;
+                            </a>
+                        </p>
+                    </div>
+                <?php endif; ?>
                 <div>
                     <p class="ticket-detail-hero__meta-label">Status</p>
                     <p class="ticket-detail-hero__meta-item">

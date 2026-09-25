@@ -385,6 +385,39 @@ $identityLabel = static function (array $t): string {
                 <span class="admin-ticket-hero__meta-label">📁 Department</span>
                 <span class="admin-ticket-hero__meta-value"><?= e($ticket['department_name']) ?></span>
             </div>
+            <?php if (!empty($ticket['service_id']) || !empty($ticket['domain_id'])): ?>
+                <?php
+                // The client ticked which service/domain this is about on the
+                // ticket form; link straight through so the admin can review
+                // the item (status, next due date, provisioning) without
+                // hunting for it. Labels come from find()'s joins.
+                $reportedServiceLabel = (string) ($ticket['service_product_name'] ?? 'Service');
+                if (trim((string) ($ticket['service_domain'] ?? '')) !== '') {
+                    $reportedServiceLabel .= ' — ' . (string) $ticket['service_domain'];
+                }
+                $hasBoth = !empty($ticket['service_id']) && !empty($ticket['domain_id']);
+                ?>
+                <div class="admin-ticket-hero__meta-item">
+                    <span class="admin-ticket-hero__meta-label">🧩 About</span>
+                    <span class="admin-ticket-hero__meta-value">
+                        <?php if (!empty($ticket['service_id'])): ?>
+                            <?php if (($ticket['service_product_name'] ?? null) === null): ?>
+                                <span style="color:rgba(255,255,255,.5);">Service #<?= (int) $ticket['service_id'] ?> (no longer exists)</span>
+                            <?php else: ?>
+                                <a href="/admin/services/<?= (int) $ticket['service_id'] ?>" style="color:#60a5fa;font-weight:600;text-decoration:none;"><?= e($reportedServiceLabel) ?></a>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                        <?php if ($hasBoth): ?><span style="color:rgba(255,255,255,.4);"> · </span><?php endif; ?>
+                        <?php if (!empty($ticket['domain_id'])): ?>
+                            <?php if (($ticket['related_domain_name'] ?? null) === null): ?>
+                                <span style="color:rgba(255,255,255,.5);">Domain #<?= (int) $ticket['domain_id'] ?> (no longer exists)</span>
+                            <?php else: ?>
+                                <a href="/admin/domains/<?= (int) $ticket['domain_id'] ?>" style="color:#60a5fa;font-weight:600;text-decoration:none;"><?= e((string) $ticket['related_domain_name']) ?></a>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </span>
+                </div>
+            <?php endif; ?>
             <div class="admin-ticket-hero__meta-item">
                 <span class="admin-ticket-hero__meta-label">🎯 Status</span>
                 <span class="admin-ticket-hero__meta-value"><?= e($ticket['status']) ?></span>

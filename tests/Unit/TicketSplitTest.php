@@ -13,6 +13,7 @@ use CodeVault\Support\TicketReplyRepository;
 use CodeVault\Support\TicketRepository;
 use CodeVault\Support\TicketService;
 use CodeVault\Tests\Support\DatabaseTestCase;
+use DateTimeImmutable;
 
 /**
  * Ticket split (blueprint: merge existed, split did not). Splitting moves
@@ -92,6 +93,53 @@ final class TicketSplitTest extends DatabaseTestCase
         // Both sides carry a private note marking where the split happened.
         $this->assertCount(1, array_filter($sourceReplies, static fn (string $m): bool => str_contains($m, '— Split:')));
         $this->assertCount(1, array_filter($newReplies, static fn (string $m): bool => str_contains($m, '— Split from ticket #')));
+    }
+
+    public function test_split_carries_the_related_service_and_domain_onto_the_new_ticket(): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $clientId = (new ClientRepository($this->db))->create([
+            'email' => 'split3@example.test',
+            'password' => 'secret123',
+            'first_name' => 'Split',
+            'last_name' => 'Tester',
+        ]);
+        $groupId = (int) $this->db->insert(
+            'INSERT INTO product_groups (name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            ['Split Group', 0, $now, $now]
+        );
+        $productId = (int) $this->db->insert(
+            'INSERT INTO products (product_group_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            [$groupId, 'Split Product', $now, $now]
+        );
+        $serviceId = (int) $this->db->insert(
+            "INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, 'monthly', ?, 'active', ?, ?, ?)",
+            [$clientId, $productId, 'Split Product', 9.99, $now, $now, $now]
+        );
+        $domainId = (int) $this->db->insert(
+            'INSERT INTO domains (client_id, domain_name, tld, registrar_slug, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$clientId, 'split-carry.test', 'test', 'local', 'active', $now, $now]
+        );
+
+        $ticketId = $this->tickets->create([
+            'client_id' => $clientId,
+            'email' => 'split3@example.test',
+            'department_id' => $this->departmentId,
+            'subject' => 'Two problems on one service',
+            'service_id' => $serviceId,
+            'domain_id' => $domainId,
+        ]);
+        $reply1 = $this->replies->create($ticketId, 'client', $clientId, 'Split Tester', 'About the hosting');
+        $reply2 = $this->replies->create($ticketId, 'client', $clientId, 'Split Tester', 'Unrelated second problem');
+
+        $result = $this->service->split($ticketId, $reply2, 'Second problem', $this->otherDepartmentId, 1, 'Admin Person');
+
+        // Both halves are still about the same service/domain, so the new
+        // ticket must not lose that context.
+        $newTicket = $this->tickets->find((int) $result['newTicketId']);
+        $this->assertSame($serviceId, (int) $newTicket['service_id']);
+        $this->assertSame($domainId, (int) $newTicket['domain_id']);
+        $this->assertSame('Split Product', $newTicket['service_product_name']);
     }
 
     public function test_split_moves_attachments_with_the_replies(): void

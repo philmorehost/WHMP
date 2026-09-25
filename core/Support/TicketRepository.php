@@ -19,10 +19,13 @@ final class TicketRepository
     {
         return $this->db->selectOne(
             <<<'SQL'
-            SELECT t.*, d.name AS department_name, c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
+            SELECT t.*, d.name AS department_name, c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email,
+                   s.product_name AS service_product_name, s.domain AS service_domain, dm.domain_name AS related_domain_name
             FROM tickets t
             JOIN departments d ON d.id = t.department_id
             LEFT JOIN clients c ON c.id = t.client_id
+            LEFT JOIN services s ON s.id = t.service_id
+            LEFT JOIN domains dm ON dm.id = t.domain_id
             WHERE t.id = ?
             SQL,
             [$id]
@@ -257,19 +260,28 @@ final class TicketRepository
         );
     }
 
-    /** @param array<string, mixed> $fields */
+    /**
+     * `service_id`/`domain_id` name the item the ticket is about. Both are
+     * optional — a general enquiry, a piped-in email and every ticket opened
+     * by a non-portal flow leave them NULL — so callers that don't know about
+     * them keep working unchanged.
+     *
+     * @param array<string, mixed> $fields
+     */
     public function create(array $fields): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
-            'INSERT INTO tickets (client_id, email, department_id, subject, status, priority, last_reply_at, last_reply_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO tickets (client_id, email, department_id, service_id, domain_id, subject, status, priority, last_reply_at, last_reply_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $fields['client_id'] ?? null,
                 // Emails are stored lowercased so sender lookups (the mail-
                 // piping flood guard) can use the email index.
                 strtolower(trim((string) ($fields['email'] ?? ''))),
                 $fields['department_id'],
+                isset($fields['service_id']) && (int) $fields['service_id'] > 0 ? (int) $fields['service_id'] : null,
+                isset($fields['domain_id']) && (int) $fields['domain_id'] > 0 ? (int) $fields['domain_id'] : null,
                 $fields['subject'],
                 $fields['status'] ?? 'open',
                 $fields['priority'] ?? 'medium',

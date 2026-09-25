@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace CodeVault\Support;
 
+use CodeVault\Billing\ServiceRepository;
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Domains\DomainRepository;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\View;
@@ -27,7 +29,11 @@ final class ClientTicketController
         private readonly DepartmentRepository $departments,
         private readonly TicketService $ticketService,
         private readonly TicketAttachmentRepository $attachments,
-        private readonly TicketAttachmentService $attachmentService
+        private readonly TicketAttachmentService $attachmentService,
+        // The client's own services and domains, for the "what is this about?"
+        // picker on the ticket form and to authorise the ids that come back.
+        private readonly ServiceRepository $services,
+        private readonly DomainRepository $domains
     ) {
     }
 
@@ -54,6 +60,16 @@ final class ClientTicketController
 
         return $this->page('support.client-ticket-create', [
             'departments' => $this->departments->all(),
+            // The picker list is this client's own services and domains — the
+            // ticket then names the exact item ("cPanel hosting — example.com")
+            // instead of staff having to guess it from the message body.
+            'services' => $this->services->forClient((int) $client['id']),
+            'domains' => $this->domains->forClient((int) $client['id']),
+            // A "raised a ticket about this service" link can hand the id over
+            // in the query string; honour it only when it is really this
+            // client's own, so a crafted URL can't preselect someone else's.
+            'selectedServiceId' => $this->ownedServiceId($client, (int) $request->query('service_id', 0)),
+            'selectedDomainId' => $this->ownedDomainId($client, (int) $request->query('domain_id', 0)),
             'limitReached' => $request->query('limit') === '1',
             'maxOpenTickets' => self::MAX_OPEN_TICKETS_PER_CLIENT,
         ]);
@@ -87,7 +103,12 @@ final class ClientTicketController
             $departmentId,
             $subject,
             (string) $client['first_name'] . ' ' . (string) $client['last_name'],
-            $message
+            $message,
+            // Both are optional on the form, and the submitted ids are
+            // untrusted: ownedServiceId()/ownedDomainId() drop anything that
+            // isn't this client's own instead of recording it.
+            $this->ownedServiceId($client, (int) $request->input('service_id', 0)),
+            $this->ownedDomainId($client, (int) $request->input('domain_id', 0))
         );
 
         // Attachments on the opening message belong to the ticket itself
@@ -251,6 +272,42 @@ final class ClientTicketController
         }
 
         return $ticket;
+    }
+
+    /**
+     * The posted/prefilled service id, but only when that service is really
+     * this client's own — the id arrives from a form field (or a query
+     * string), so it is attacker-controlled and must never be trusted just
+     * because the page that rendered it was ours.
+     *
+     * Returns null for "nothing selected", for a malformed id, and for a
+     * service belonging to another account alike. A stale form (the service
+     * was deleted between page load and submit) therefore degrades to "no
+     * item named" rather than failing the whole ticket.
+     *
+     * @param array<string, mixed> $client
+     */
+    private function ownedServiceId(array $client, int $serviceId): ?int
+    {
+        if ($serviceId <= 0) {
+            return null;
+        }
+
+        $service = $this->services->find($serviceId);
+
+        return $service !== null && (int) $service['client_id'] === (int) $client['id'] ? $serviceId : null;
+    }
+
+    /** @param array<string, mixed> $client Same rule as ownedServiceId(), for domains. */
+    private function ownedDomainId(array $client, int $domainId): ?int
+    {
+        if ($domainId <= 0) {
+            return null;
+        }
+
+        $domain = $this->domains->find($domainId);
+
+        return $domain !== null && (int) $domain['client_id'] === (int) $client['id'] ? $domainId : null;
     }
 
     private function deniedOrNotFound(): Response
