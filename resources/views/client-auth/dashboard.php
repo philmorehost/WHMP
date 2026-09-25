@@ -564,7 +564,7 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                 </table>
             </div>
             <?php else: ?>
-            <div class="dbd-empty">No tickets yet. <a href="/client/tickets/new">Open a Ticket →</a></div>
+            <div class="dbd-empty">No tickets yet. <a href="/client/tickets/create">Open a Ticket →</a></div>
             <?php endif; ?>
         </div>
 
@@ -583,7 +583,7 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                 <a href="/domains/register" class="dbd-action">
                     <div class="dbd-action__icon" style="background:rgba(59,130,246,.12);">🌐</div>Register New Domains
                 </a>
-                <a href="/client/tickets/new" class="dbd-action">
+                <a href="/client/tickets/create" class="dbd-action">
                     <div class="dbd-action__icon" style="background:rgba(107,114,128,.12);">✉️</div>Submit Support Ticket
                 </a>
                 <a href="/client/account" class="dbd-action">
