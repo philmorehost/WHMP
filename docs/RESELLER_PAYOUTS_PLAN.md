@@ -247,25 +247,67 @@ Two numbers, one table, no extra state to keep in step.
 Money columns are `DECIMAL(18,6)` to match every other money column since
 migration 0126.
 
-## 8. Proposed phases
+**A consequence of storing the maturity date, which an operator has to know.**
+Because `withdrawable_at` is written per entry when the entry is written,
+changing `reseller.payout_holding_days` governs receipts collected from then on
+and does **not** retroactively release money already in hand. Shortening the
+period does not free everything that is waiting; lengthening it does not re-hold
+anything that has matured. Both directions fail safe — an entry is only ever held
+*longer* than a later policy would choose, never paid out earlier — which is the
+right direction for a control that exists to cover a chargeback window. If
+retroactive release is ever wanted, it has to be a deliberate migration that
+rewrites `withdrawable_at`, not a side-effect of a settings form.
 
-- **Phase A — the account (report only).** Accrue a store receipt when a store
-  order's invoice is paid; record the cost invoice as the debit; show the reseller
-  their balance, how much of it is withdrawable (30 days — §9 item 5), and the
-  entries behind both. No movement of money.
-- **Phase B — request and approve.** Reseller payout requests; admin queue;
-  approve/reject/mark-paid with a reference; the payout ledger entry. Payment is
-  **manual bank transfer** — the simplest thing that can be honest.
-- **Phase C — netting and statements.** Settle cost invoices from the balance
-  automatically; monthly statement per reseller; exportable for accounting.
-- **Phase D — methods and automation.** Gateway payouts, automatic payouts above
-  a threshold, and refund/chargeback handling. (The 30-day holding period is *not*
-  deferred to here: it is a rule about what counts as withdrawable, so it belongs
-  with the balance in Phase A. Since `withdrawable_at` is written when the receipt
-  is written, adding it later would mean back-filling every existing entry.)
+## 8. Phases
 
-Phase A is safe to build immediately: it moves no money and its only output is a
-number we can check by hand against the orders.
+- **Phase A — the account (report only).** ✅ *Built.* Accrue a store receipt when
+  a store order's invoice is paid; record the cost invoice as the debit; show the
+  reseller their balance, how much of it is withdrawable (30 days — §9 item 5), and
+  the entries behind both. No movement of money.
+- **Phase B — request and approve.** ✅ *Built.* Reseller payout requests; admin
+  queue; approve/reject/mark-paid with a reference. Payment is **manual bank
+  transfer** — the simplest thing that can be honest.
+- **Phase C — netting and statements.** ⬜ *Not started.* Settle cost invoices from
+  the balance automatically; monthly statement per reseller; exportable for
+  accounting.
+- **Phase D — methods and automation.** ⬜ *Not started.* Gateway payouts,
+  automatic payouts above a threshold, and refund/chargeback handling. (The 30-day
+  holding period is *not* deferred to here: it is a rule about what counts as
+  withdrawable, so it belongs with the balance in Phase A. Since
+  `withdrawable_at` is written when the receipt is written, adding it later would
+  mean back-filling every existing entry.)
+
+### What Phase B settled (2026-09-28)
+
+These were not in the original sketch and shape the built feature:
+
+- **The account is debited when the request is MADE, not when it is paid.** A
+  pending request that has not touched the balance is money the reseller can spend
+  again, so double-spending would be possible exactly when an admin is slow.
+  Debiting at request makes the second request fail on arithmetic instead of on a
+  rule. Recording a payment therefore writes *nothing* to the ledger.
+- **"One open request per reseller" is enforced by the storage engine.**
+  `UNIQUE (reseller_id, status)` would have permitted exactly one *paid* payout per
+  reseller ever, so `reseller_payouts` carries a generated column that is 1 only
+  while pending, with `UNIQUE (reseller_id, open_flag)`. Repeated NULLs do not
+  collide, so any number of decided rows coexist.
+- **A payment reference is mandatory.** A manual transfer with no reference is
+  unauditable; the reference is what turns "we paid them" from an assertion into
+  a fact.
+- **A rejection returns the funds as an appended entry, immediately withdrawable**
+  and filed as an `adjustment` rather than a positive payout — money coming back is
+  a different kind of event, and the "paid out" total must not count payouts that
+  never happened.
+- **The rate is locked at request** (`currency_rate` and `amount`, alongside
+  `amount_base`), so a settled payout cannot be re-derived from a later rate and
+  disagree with the transfer that settled it.
+- **Requests are for the whole withdrawable balance, not a chosen amount.** A
+  partial payout leaves dust and creates a second "spoken for" balance to keep in
+  step, and the minimum already decides whether a transfer is worth making.
+
+Phase A was safe to build first for the reason given above: it moves no money and
+its only output is a number we can check by hand against the orders.
+
 
 ## 9. Decisions
 

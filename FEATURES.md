@@ -106,6 +106,14 @@ Generated from the live codebase.
 they sell from, plus white-label storefronts served at `{slug}.{platform host}` or a verified custom domain.
 Resellers set their own retail prices over our cost, and we bill them that cost monthly (**Admin → Resellers**,
 **Store Cost Billing**).
+- **Reseller running account & payouts** 🆕 — every sale at a store credits the reseller's account the moment
+their customer's invoice is **paid** (never at order time), and the monthly cost we bill them is debited against
+the same balance. Balances are held in the base currency, because the reseller carries the exchange movement
+between collection and payout. A receipt becomes **withdrawable 30 days after payment** (the card chargeback
+window), so the pages always show two figures — what is owed and what can be taken today — and payouts are
+measured against the second. Resellers request a payout themselves (**Reseller Area → Your account**) and admins
+answer it from a queue (**Admin → Resellers → Reseller Payouts**). Payment is a **manual bank transfer** whose
+reference the admin records: nothing in the system moves money.
 - **Email campaigns** — bulk marketing sends with per-recipient tracking.
 - **SEO tools** — canonical URLs, meta tags, and structured JSON-LD data.
 - **Promotions** — public deals page driven by active coupon campaigns.
