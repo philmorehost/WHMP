@@ -9,6 +9,7 @@
 /** @var string $docsUrl */
 /** @var array<string, mixed>|null $cost */
 /** @var array<int, array<string, mixed>> $arrears */
+/** @var array<int, array<string, mixed>> $goLive */
 
 $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
@@ -229,8 +230,34 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             </form>
         <?php endif; ?>
 
-        <p style="color:var(--cv-text-secondary);margin-top:var(--cv-space-4);">A verified domain also needs a TLS
-            certificate before customers can use it over https://. That is set up on the server side — ask support
-            once the domain is verified.</p>
+        <?php if ($goLive !== []): ?>
+            <h3 style="margin-top:var(--cv-space-4);">Getting live on your own domain</h3>
+            <table class="cv-table">
+                <tbody>
+                <?php foreach ($goLive as $step): ?>
+                    <tr>
+                        <td><?= e((string) $step['label']) ?></td>
+                        <td>
+                            <?php if ($step['manual']): ?>
+                                <span class="cv-badge">Ask support</span>
+                            <?php elseif ($step['done']): ?>
+                                <span class="cv-badge cv-badge--success">Done</span>
+                            <?php else: ?>
+                                <span class="cv-badge cv-badge--warning">Outstanding</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="color:var(--cv-text-secondary);"><?= e((string) $step['detail']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p style="color:var(--cv-text-secondary);">The last two steps are server configuration, not something you or
+                this page can change: the domain has to point at the server running this platform, and that server needs
+                a TLS certificate for it. Once the domain is verified, ask support to finish those and your store will
+                answer on it.</p>
+            <p style="color:var(--cv-text-secondary);">Until then your store keeps working at
+                <?php if ($platformUrl !== null): ?><code><?= e((string) $platformUrl) ?></code><?php else: ?>its platform address<?php endif; ?>
+                — you do not have to wait to start selling.</p>
+        <?php endif; ?>
     </div>
 <?php endif; ?>

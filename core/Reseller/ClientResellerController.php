@@ -254,6 +254,7 @@ final class ClientResellerController
             'store' => $store,
             'cost' => $summaries[0] ?? null,
             'arrears' => $storeId === null ? [] : $this->costs->arrears($storeId),
+            'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
             'platformHost' => $this->locator->platformHost(),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null

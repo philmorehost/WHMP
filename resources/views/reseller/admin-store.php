@@ -11,6 +11,7 @@
  * @var array<string, mixed>|null $verification
  * @var float $markup
  * @var int $overrideCount
+ * @var array<int, array<string, mixed>> $goLive
  */
 
 $clientName = $client === null
@@ -213,6 +214,47 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <p style="color:var(--cv-text-secondary);">Verification means DNS proves they control the domain. It does
                 NOT issue a TLS certificate — that is server configuration, and the store is not usable over https://
                 until it is done.</p>
+        <?php endif; ?>
+    </div>
+
+    <div class="cv-card">
+        <h2 class="cv-card__title">Going live on the custom domain</h2>
+        <p style="color:var(--cv-text-secondary);">Five things have to hold before customers reach this store on its
+            own domain. The last two happen on the server that runs this application — no amount of clicking here can
+            do them, so they are listed rather than tracked.</p>
+        <table class="cv-table">
+            <thead><tr><th>Step</th><th>State</th><th>What it means</th></tr></thead>
+            <tbody>
+            <?php foreach ($goLive as $step): ?>
+                <tr>
+                    <td><?= e((string) $step['label']) ?></td>
+                    <td>
+                        <?php if ($step['manual']): ?>
+                            <span class="cv-badge">On the server</span>
+                        <?php elseif ($step['done']): ?>
+                            <span class="cv-badge cv-badge--success">Done</span>
+                        <?php else: ?>
+                            <span class="cv-badge cv-badge--warning">Outstanding</span>
+                        <?php endif; ?>
+                    </td>
+                    <td style="color:var(--cv-text-secondary);"><?= e((string) $step['detail']) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+
+        <?php if ($customDomain !== null): ?>
+            <form method="post" action="/admin/resellers/<?= (int) $clientId ?>/store/domain/override"
+                  style="margin-top:var(--cv-space-3);">
+                <?= csrf_field() ?>
+                <input type="hidden" name="verified" value="<?= $verified ? '0' : '1' ?>">
+                <button class="cv-btn" type="submit"><?= $verified
+                    ? 'Remove verification'
+                    : 'Mark verified without DNS' ?></button>
+            </form>
+            <p style="color:var(--cv-text-secondary);">Only for a provider that cannot serve the TXT record. An override
+                is recorded as <strong>manual</strong> on the store and in the activity log — it is never presented as a
+                DNS proof, and a later real DNS proof replaces it.</p>
         <?php endif; ?>
     </div>
 <?php endif; ?>

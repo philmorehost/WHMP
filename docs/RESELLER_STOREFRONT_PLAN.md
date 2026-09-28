@@ -243,9 +243,40 @@ with `reseller_id`) and three settings: `reseller.billing_auto`,
   it fails the denominated-order test with 14,900 against 10.
 
 ### Phase 5 — Custom domain go-live
-- DNS verification job + admin override, certificate instructions, and a
-  "store is live" checklist. Documents the server-side half that this
-  application cannot do.
+**Implemented 2026-09-29.** Migration `0189_add_store_domain_verification_method` adds
+`resellers.domain_verification_method` (`txt` | `cname` | `manual` | NULL), so the store itself records
+*how* a domain was verified. Without it an admin override becomes indistinguishable from a DNS proof
+once the activity log has scrolled away.
+- **`DomainVerificationJob`** (`reseller-domain-verification`, daily, registered in `bin/cron.php`)
+  re-checks every claimed-but-unverified domain, so a reseller who adds their TXT record at midnight
+  goes live without pressing anything again. The "Verify domain now" button still exists and is the
+  same code path, so the scheduler and the button cannot drift apart.
+- **It verifies and never revokes.** A store that is already verified is not examined again, so a
+  transient DNS failure at 03:00 cannot take a working storefront offline — and once control of a
+  domain has been proved, that proof does not expire, because the risk it guards against (someone
+  claiming a hostname they do not control) is settled at verification and cannot come back. A failed
+  re-check reports the failure and leaves the mark standing.
+- **Moving to a new domain clears the verification and re-issues the token.** `setCustomDomain`
+  already did this; it is now pinned by a test. A verification applies to a *domain*, so a different
+  one has to earn its own — otherwise a reseller could verify a domain they control and then point the
+  store at one they do not.
+- **Admin override**, `/admin/resellers/{clientId}/store/domain/override`: forces the verification
+  (recorded `manual`) or removes it without releasing the domain. Logged with the admin who did it.
+  Exists for providers that cannot serve the TXT record, and for a verification that turns out to have
+  been wrong. A later real DNS proof *replaces* the manual mark rather than coexisting with it.
+- **"Store is live" checklist** on both the admin and the reseller store page: domain claimed, control
+  proved (naming the record to add, or how it was proved), store switched on, and then two steps marked
+  **manual** rather than done — the domain pointing at this server and a TLS certificate for it.
+  Nothing in this application can observe or perform those, so they are reported as outstanding rather
+  than pretended to be tracked.
+- **The server-side half is deliberately out of this application's reach:** point the domain at this
+  host (A/CNAME), then issue a certificate for it. Until both are done the store keeps working on
+  `{slug}.{platform host}`. Operational steps are in the Admin Guide.
+- Tests: `ResellerDomainGoLiveTest` (18) — the nightly check, the CNAME path, the activity record, the
+  never-revoke property, the override in both directions, the manual→real upgrade, moving domains, and
+  the checklist. Negative controls: making a failed check revoke fails with "The nightly job must not
+  un-verify a live domain", and dropping the `domain_verified_at IS NULL` filter fails the
+  "not examined again" test.
 
 ## 5. What "we charge the reseller the discounted amount" means concretely
 
@@ -335,7 +366,11 @@ Phase 3 is built on that, and the reseller is invoiced for cost in Phase 4.
   `ResellerCostService`, `ResellerCostBillingJob`; admin screen
   `/admin/resellers/billing`; the reseller's own figures on
   `/client/reseller/store`.
-- Phase 5 not started.
+- **Phase 5 — implemented** (2026-09-29). Migration
+  `0189_add_store_domain_verification_method`; `DomainVerificationJob`; admin
+  domain override; the go-live checklist on both store pages; the server-side
+  steps documented in the Admin Guide.
+- All five phases are done. Remaining known gaps are listed in §7.
 
 ### Test-harness note (found 2026-09-29)
 
@@ -395,3 +430,26 @@ one lazily.
 - Reseller-branded email sending domains (DKIM/SPF per tenant) — a reseller's
   customers will receive mail from our domain until that is tackled.
 - Self-service reseller signup and KYC.
+
+### Still-open items at the end of Phase 5
+
+- **The two domain columns are deliberately still separate.**
+  `api_credentials.reseller_domain` is the API-key activation gate (nothing is
+  ever served there) and `resellers.custom_domain` is the domain a store is
+  served on. They have similar names and different jobs; collapsing them would
+  change a gate that is already tested, so it was left alone and is written down
+  here so nobody assumes they are the same field.
+- **Monthly only.** `ResellerCostBillingJob` bills per closed calendar month.
+  `reseller.billing_auto` offers automatic (monthly) or manual, and does not
+  offer a weekly option it would not implement — weekly needs week-grouping in
+  `duePeriods()`.
+- **Accrual below a minimum that never clears it stays unbilled** rather than
+  being carried forward indefinitely. It keeps showing as *unbilled* in the
+  report, so it is visible and recoverable, but a store permanently under the
+  minimum would never be invoiced automatically.
+- **Cost invoices dune like any other invoice.** There is no cost-specific
+  reminder sequence, and no automatic suspension for unpaid cost (a deliberate
+  decision — see §6 item 9).
+- **Re-verifying a domain is not repeated.** `DomainVerificationJob` verifies
+  only unverified claims and never revokes; a domain that stops resolving here
+  keeps its verified mark until an admin removes it.

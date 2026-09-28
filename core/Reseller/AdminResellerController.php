@@ -349,6 +349,62 @@ final class AdminResellerController
         return Response::redirect('/admin/resellers/' . $clientId . '/store');
     }
 
+    /**
+     * Forces the domain verification, or takes it back.
+     *
+     * An override is a decision about who controls a hostname, so it is recorded
+     * as 'manual' on the store itself (never as a DNS proof) and in the activity
+     * log with the admin who made it. Needed when a provider cannot serve the
+     * TXT record DomainVerifier wants, or when a verification turns out to have
+     * been wrong.
+     */
+    public function overrideStoreDomain(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That client does not have a store.');
+
+            return Response::redirect('/admin/resellers');
+        }
+
+        $verified = (string) $request->input('verified', '1') === '1';
+        $result = $this->stores->overrideDomainVerification((int) $store['id'], $verified);
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        $domain = (string) ($store['custom_domain'] ?? '');
+
+        $this->session->flash(
+            'reseller_notice',
+            $verified
+                ? 'Marked ' . $domain . ' as verified without checking DNS. It is recorded as a manual override, and the store '
+                    . 'will serve that domain as soon as it points here.'
+                : 'Verification removed from ' . $domain . '. The store stays reachable on its platform address only.'
+        );
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            $verified ? 'reseller.store.domain_verification_overridden' : 'reseller.store.domain_verification_cleared',
+            'reseller',
+            (int) $store['id'],
+            ($verified ? 'Forced verification of ' : 'Removed verification from ') . $domain . ' without checking DNS',
+            $request->ip()
+        );
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
     /** Taking a store offline: its customers see 503 rather than our shop at our prices. */
     public function setStoreStatus(Request $request, array $params): Response
     {
@@ -405,6 +461,7 @@ final class AdminResellerController
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
                 ? null
                 : '_codevault-verify.' . $store['custom_domain'],
+            'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),

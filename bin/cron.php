@@ -49,6 +49,7 @@ use CodeVault\Billing\ServicePruningJob;
 use CodeVault\Domains\DomainPruningJob;
 use CodeVault\Billing\StaleInvoiceCancellationJob;
 use CodeVault\Reseller\ResellerCostBillingJob;
+use CodeVault\Reseller\DomainVerificationJob;
 
 $kernel = new Kernel(dirname(__DIR__));
 
@@ -80,6 +81,10 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     // written by this tick's work is billed on the next one, never midway.
     $scheduler->register($kernel->container->make(ResellerCostBillingJob::class));
     $scheduler->register($kernel->container->make(MailPipingJob::class));
+    // A claimed store domain goes live on its own once DNS answers, instead of
+    // waiting for the reseller to press "Verify" again. Verifies only; it never
+    // un-verifies, so a transient DNS failure cannot take a store offline.
+    $scheduler->register($kernel->container->make(DomainVerificationJob::class));
     $scheduler->register($kernel->container->make(BackupCronJob::class));
     $scheduler->register($kernel->container->make(CancellationCronJob::class));
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));

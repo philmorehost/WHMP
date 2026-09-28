@@ -52,4 +52,8 @@ $router->post('/admin/resellers/{clientId}/store', [AdminResellerController::cla
 $router->post('/admin/resellers/{clientId}/store/brand', [AdminResellerController::class, 'saveStoreBrand']);
 $router->post('/admin/resellers/{clientId}/store/domain', [AdminResellerController::class, 'claimStoreDomain']);
 $router->post('/admin/resellers/{clientId}/store/verify', [AdminResellerController::class, 'verifyStoreDomain']);
+// Forcing a domain verification (or taking it back) when DNS cannot be queried
+// the way DomainVerifier needs. Recorded as 'manual' so an override never looks
+// like a real proof.
+$router->post('/admin/resellers/{clientId}/store/domain/override', [AdminResellerController::class, 'overrideStoreDomain']);
 $router->post('/admin/resellers/{clientId}/store/status', [AdminResellerController::class, 'setStoreStatus']);

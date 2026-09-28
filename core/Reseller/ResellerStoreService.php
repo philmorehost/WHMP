@@ -186,12 +186,126 @@ final class ResellerStoreService
         $result = $this->verifier->verify($domain, $token, $this->locator->platformHost());
 
         if ($result['verified']) {
-            $this->stores->markDomainVerified($storeId);
+            $this->stores->markDomainVerified($storeId, (string) $result['method']);
         }
 
         return $result + [
             'record_name' => $this->verifier->recordName($domain),
             'expected' => $this->verifier->expectedValue($token),
+        ];
+    }
+
+    /**
+     * An admin forcing the domain verification, or taking it back.
+     *
+     * Exists because some DNS providers cannot be queried the way
+     * DomainVerifier needs them to be (no TXT records, or a proxy in front),
+     * and because a verification that turns out to have been wrong has to be
+     * removable without deleting the store. Both directions are recorded as
+     * 'manual' / cleared, so the store itself shows that a human decided this
+     * rather than DNS — an override must not become indistinguishable from a
+     * real proof once the activity log has scrolled away.
+     *
+     * Un-verifying leaves the domain claimed: it stays reserved to this store,
+     * it just stops being served.
+     *
+     * @return array{success: bool, error: ?string}
+     */
+    public function overrideDomainVerification(int $storeId, bool $verified): array
+    {
+        $store = $this->stores->find($storeId);
+
+        if ($store === null) {
+            return ['success' => false, 'error' => 'Store not found.'];
+        }
+
+        if (trim((string) ($store['custom_domain'] ?? '')) === '') {
+            return ['success' => false, 'error' => 'That store has not claimed a domain.'];
+        }
+
+        if ($verified) {
+            $this->stores->markDomainVerified($storeId, 'manual');
+
+            return ['success' => true, 'error' => null];
+        }
+
+        $this->stores->clearDomainVerification($storeId);
+
+        return ['success' => true, 'error' => null];
+    }
+
+    /**
+     * The steps between a store existing and it being live on its own domain,
+     * in order, with whatever is still missing and what to do about it.
+     *
+     * The last two steps carry `manual` with `done => null`, which is the honest
+     * answer rather than a gap: pointing the domain at this server and holding a
+     * TLS certificate for it happen on the server, outside this application. We
+     * can report that the step is outstanding; PHP cannot perform it.
+     *
+     * @param array<string, mixed> $store
+     * @return array<int, array{key: string, label: string, done: ?bool, manual: bool, detail: string}>
+     */
+    public function goLiveChecklist(array $store): array
+    {
+        $domain = trim((string) ($store['custom_domain'] ?? ''));
+        $verified = ($store['domain_verified_at'] ?? null) !== null;
+        $active = ($store['status'] ?? 'active') === 'active';
+        $token = trim((string) ($store['domain_verification_token'] ?? ''));
+
+        $proofDetail = match ((string) ($store['domain_verification_method'] ?? '')) {
+            'txt' => 'Proved by a TXT record.',
+            'cname' => 'Proved by the domain pointing at us.',
+            'manual' => 'Forced by an administrator — DNS was not checked.',
+            default => 'Verified before we started recording the method.',
+        };
+
+        return [
+            [
+                'key' => 'domain_claimed',
+                'label' => 'Domain claimed',
+                'done' => $domain !== '',
+                'manual' => false,
+                'detail' => $domain !== '' ? $domain : 'No custom domain has been claimed yet.',
+            ],
+            [
+                'key' => 'dns_proof',
+                'label' => 'Control of the domain proved',
+                'done' => $verified,
+                'manual' => false,
+                'detail' => $verified
+                    ? $proofDetail
+                    : ($domain === '' || $token === ''
+                        ? 'Claim a domain first.'
+                        : 'Add a TXT record at ' . $this->verifier->recordName($domain)
+                            . ' containing ' . $this->verifier->expectedValue($token)
+                            . ', or point ' . $domain . ' at ' . $this->locator->platformHost() . '.'),
+            ],
+            [
+                'key' => 'store_active',
+                'label' => 'Store switched on',
+                'done' => $active,
+                'manual' => false,
+                'detail' => $active
+                    ? 'The store is active.'
+                    : 'The store is suspended — its domain returns 503 rather than our shop.',
+            ],
+            [
+                'key' => 'dns_points_here',
+                'label' => 'Domain points at this server',
+                'done' => null,
+                'manual' => true,
+                'detail' => 'On the server: point ' . ($domain !== '' ? $domain : 'the domain')
+                    . ' at this host (A or CNAME) so its requests arrive here.',
+            ],
+            [
+                'key' => 'tls_certificate',
+                'label' => 'TLS certificate issued',
+                'done' => null,
+                'manual' => true,
+                'detail' => 'On the server: issue a certificate for ' . ($domain !== '' ? $domain : 'the domain')
+                    . ' once that record resolves, or browsers will refuse the connection.',
+            ],
         ];
     }
 

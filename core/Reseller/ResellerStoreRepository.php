@@ -146,13 +146,64 @@ final class ResellerStoreRepository
         );
     }
 
-    public function markDomainVerified(int $id): void
+    /**
+     * Records that the domain is verified, and how we came to know.
+     *
+     * $method is 'txt' or 'cname' for a DNS proof, 'manual' for an admin
+     * override, and null for "verified but the method was not recorded" (rows
+     * that predate the column). It is written as given rather than merged, so a
+     * domain that was forced through by an admin and later produces a real DNS
+     * proof is upgraded to the real one instead of keeping the override mark.
+     */
+    public function markDomainVerified(int $id, ?string $method = null): void
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         $this->db->update(
-            'UPDATE resellers SET domain_verified_at = ?, updated_at = ? WHERE id = ?',
-            [$now, $now, $id]
+            'UPDATE resellers SET domain_verified_at = ?, domain_verification_method = ?, updated_at = ? WHERE id = ?',
+            [$now, $method, $now, $id]
+        );
+    }
+
+    /**
+     * Takes the verification back off a domain, leaving the claim in place.
+     *
+     * The domain stays claimed (so it is still reserved to this store) but stops
+     * being served, because ResellerStoreLocator serves a custom domain only
+     * when domain_verified_at is set. Used when a verification turns out to have
+     * been wrong.
+     */
+    public function clearDomainVerification(int $id): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->update(
+            'UPDATE resellers SET domain_verified_at = NULL, domain_verification_method = NULL, updated_at = ? WHERE id = ?',
+            [$now, $id]
+        );
+    }
+
+    /**
+     * Stores that have claimed a domain and not yet proved control of it.
+     *
+     * Deliberately only the UNVERIFIED ones. A store that is already verified is
+     * never re-examined, and never un-verified, by the nightly check: a
+     * transient DNS failure must not take a live storefront offline. Once a
+     * domain has been proven, the proof does not expire.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function pendingDomainClaims(): array
+    {
+        return $this->db->select(
+            'SELECT * FROM resellers
+             WHERE custom_domain IS NOT NULL
+               AND custom_domain <> ?
+               AND domain_verification_token IS NOT NULL
+               AND domain_verification_token <> ?
+               AND domain_verified_at IS NULL
+             ORDER BY id ASC',
+            ['', '']
         );
     }
 

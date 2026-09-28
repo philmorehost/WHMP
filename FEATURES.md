@@ -102,6 +102,10 @@ Generated from the live codebase.
 ## Marketing & Growth
 
 - **Affiliate program** — referral tracking, commissions, and payout requests.
+- **Reseller programme** 🆕 — client-owned API keys that stay inert until the reseller declares the domain
+they sell from, plus white-label storefronts served at `{slug}.{platform host}` or a verified custom domain.
+Resellers set their own retail prices over our cost, and we bill them that cost monthly (**Admin → Resellers**,
+**Store Cost Billing**).
 - **Email campaigns** — bulk marketing sends with per-recipient tracking.
 - **SEO tools** — canonical URLs, meta tags, and structured JSON-LD data.
 - **Promotions** — public deals page driven by active coupon campaigns.
@@ -148,6 +152,8 @@ Point one system cron at `bin/cron.php`; it runs each job on its own schedule.
 | `DomainRenewalBillingJob` | Invoice domain renewals |
 | `DomainSyncJob` | Sync domain status from registrars |
 | `BillableItemInvoicingJob` | Roll ad-hoc charges into invoices |
+| `ResellerCostBillingJob` | Invoice each store for the cost of the orders it took (one per closed month) |
+| `DomainVerificationJob` | Verify claimed store domains once DNS answers |
 | `QuoteExpiryJob` | Expire stale quotes |
 | `TicketEscalationJob` | Escalate SLA-breaching tickets |
 | `TicketAutoCloseJob` | Close idle resolved tickets |
