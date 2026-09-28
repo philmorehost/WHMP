@@ -41,6 +41,7 @@ final class ClientResellerController
         private readonly ResellerCredentialService $credentials,
         private readonly ResellerStoreService $stores,
         private readonly ResellerStoreLocator $locator,
+        private readonly ResellerRetailPricing $retail,
         private readonly ResellerSettings $settings,
         private readonly ResellerPricing $pricing,
         private readonly CurrencyService $currency,
@@ -438,6 +439,227 @@ final class ClientResellerController
         ]);
 
         return Response::redirect('/client/reseller/store');
+    }
+
+    // --- prices ------------------------------------------------------------
+
+    /**
+     * What this reseller's customers will pay.
+     *
+     * A preview, not a live storefront: until checkout charges retail (Phase 3)
+     * the public store still shows list prices, so showing these figures to a
+     * customer now would be advertising a price we do not honour. The page says
+     * so, and lists both the cost and the margin per line so the reseller can
+     * see the two numbers that decide their profit.
+     */
+    public function prices(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $currency = $this->currency->resolveForClient($client);
+
+        return $this->page('reseller.prices', [
+            'store' => $store,
+            'markup' => $this->retail->markupFor($store),
+            'services' => $this->presentRetailServices($this->retail->previewServices($store), $currency),
+            'domains' => $this->presentRetailDomains($this->retail->previewDomains($store), $currency),
+            'error' => $this->session->pullFlash('reseller_error'),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'discounts' => $this->settings->all(),
+            'currency' => $currency,
+        ]);
+    }
+
+    /**
+     * Saves the whole price list in one go: the store-wide markup, then any
+     * individual overrides.
+     *
+     * A submission with a below-cost price is refused in full rather than
+     * partly applied — a half-saved price list is worse than a rejected one,
+     * because the reseller cannot tell which rows went through.
+     */
+    public function savePrices(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $storeId = (int) $store['id'];
+        $markup = ResellerRetailPricing::clampMarkup((float) $request->input('markup_percent', 0));
+        $problems = [];
+
+        // Both loops are driven by the CATALOGUE, not by the posted keys, so a
+        // product id or TLD that was not on the form is simply not looked at —
+        // a posted key cannot introduce a price for something that does not
+        // exist, and any key we do accept is one we already know the cost of.
+        $productPrices = [];
+
+        foreach ($this->retail->previewServices($store) as $product) {
+            foreach ($product['cycles'] as $cycle) {
+                $key = (int) $product['product_id'] . ':' . (string) $cycle['cycle'];
+                $raw = trim((string) $this->postedPrice($request, 'price', $key));
+
+                if ($raw === '') {
+                    $productPrices[$key] = null;
+
+                    continue;
+                }
+
+                $value = (float) $raw;
+                $label = (string) $product['name'] . ' (' . (string) $cycle['label'] . ')';
+                $problem = $this->retail->overrideProblem($value, (float) $cycle['retail']['cost'], $label);
+
+                if ($problem !== null) {
+                    $problems[] = $problem;
+
+                    continue;
+                }
+
+                $productPrices[$key] = $value;
+            }
+        }
+
+        $domainPrices = [];
+
+        foreach ($this->retail->previewDomains($store) as $row) {
+            $tld = (string) $row['tld'];
+            $member = [];
+
+            foreach (['register', 'transfer', 'renew'] as $which) {
+                $raw = trim((string) $this->postedPrice($request, 'domain', $tld . '.' . $which));
+
+                if ($raw === '') {
+                    $member[$which] = null;
+
+                    continue;
+                }
+
+                $value = (float) $raw;
+                $problem = $this->retail->overrideProblem(
+                    $value,
+                    (float) $row[$which . '_retail']['cost'],
+                    $tld . ' ' . $which
+                );
+
+                if ($problem !== null) {
+                    $problems[] = $problem;
+
+                    continue;
+                }
+
+                $member[$which] = $value;
+            }
+
+            $domainPrices[$tld] = $member + ['register' => null, 'transfer' => null, 'renew' => null];
+        }
+
+        if ($problems !== []) {
+            $this->session->flash('reseller_error', implode(' ', array_slice($problems, 0, 3))
+                . (count($problems) > 3 ? ' (and ' . (count($problems) - 3) . ' more)' : '')
+                . ' Nothing was saved.');
+
+            return Response::redirect('/client/reseller/prices');
+        }
+
+        $this->stores->setMarkup($storeId, $markup);
+        $this->retail->saveOverrides($storeId, $productPrices, $domainPrices);
+
+        $this->session->flash('reseller_notice', 'Your prices are saved. Nothing is charged at these prices yet — they go live when your store starts taking orders.');
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'reseller.store.prices_updated',
+            'reseller',
+            $storeId,
+            'Set store markup to ' . number_format($markup, 2) . '% with '
+                . count(array_filter($productPrices, static fn ($p): bool => $p !== null)) . ' product override(s)',
+            $request->ip()
+        );
+
+        return Response::redirect('/client/reseller/prices');
+    }
+
+    /** A posted price field, or '' — the form nests them under `price` and `domain`. */
+    private function postedPrice(Request $request, string $group, string $key): string
+    {
+        $values = $request->input($group, []);
+
+        if (!is_array($values) || !array_key_exists($key, $values) || !is_scalar($values[$key])) {
+            return '';
+        }
+
+        return (string) $values[$key];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $catalogue
+     * @param array<string, mixed> $currency
+     * @return array<int, array<string, mixed>>
+     */
+    private function presentRetailServices(array $catalogue, array $currency): array
+    {
+        foreach ($catalogue as $i => $product) {
+            foreach ($product['cycles'] as $j => $cycle) {
+                $catalogue[$i]['cycles'][$j]['retail_display'] = $this->presentRetailQuote($cycle['retail'], $currency);
+            }
+        }
+
+        return $catalogue;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $catalogue
+     * @param array<string, mixed> $currency
+     * @return array<int, array<string, mixed>>
+     */
+    private function presentRetailDomains(array $catalogue, array $currency): array
+    {
+        foreach ($catalogue as $i => $row) {
+            foreach (['register', 'transfer', 'renew'] as $which) {
+                $catalogue[$i][$which . '_display'] = $this->presentRetailQuote($row[$which . '_retail'], $currency);
+            }
+        }
+
+        return $catalogue;
+    }
+
+    /**
+     * @param array<string, mixed> $quote
+     * @param array<string, mixed> $currency
+     * @return array<string, mixed>
+     */
+    private function presentRetailQuote(array $quote, array $currency): array
+    {
+        return $quote + [
+            'list_display' => $this->currency->format((float) $quote['list'], $currency),
+            'cost_display' => $this->currency->format((float) $quote['cost'], $currency),
+            'retail_display' => $this->currency->format((float) $quote['retail'], $currency),
+            'margin_display' => $this->currency->format((float) $quote['margin'], $currency),
+            'below_cost' => $this->retail->belowCost((float) $quote['retail'], (float) $quote['cost']),
+        ];
     }
 
     /**

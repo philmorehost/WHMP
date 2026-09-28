@@ -38,6 +38,8 @@ final class AdminResellerController
         private readonly ResellerCredentialService $credentials,
         private readonly ResellerStoreService $stores,
         private readonly ResellerStoreLocator $locator,
+        private readonly ResellerRetailPricing $retail,
+        private readonly ResellerRetailPriceRepository $priceOverrides,
         private readonly ClientRepository $clients,
         private readonly ActivityLogger $activity
     ) {
@@ -397,6 +399,9 @@ final class AdminResellerController
             'client' => $this->clients->find($clientId),
             'platformHost' => $this->locator->platformHost(),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
+            'markup' => $store === null ? 0.0 : $this->retail->markupFor($store),
+            'overrideCount' => $store === null ? 0 : $this->priceOverrides->countFor((int) $store['id']),
+            'discounts' => $this->settings->all(),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
                 ? null
                 : '_codevault-verify.' . $store['custom_domain'],

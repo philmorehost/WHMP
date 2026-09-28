@@ -117,6 +117,20 @@ final class ResellerStoreRepository
     }
 
     /**
+     * The store-wide markup over our list price — the default retail for every
+     * item the reseller has not priced by hand. Clamped by the caller
+     * (ResellerRetailPricing::clampMarkup) because that is where the rule and
+     * its explanation live.
+     */
+    public function setMarkup(int $id, float $percent): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET markup_percent = ?, updated_at = ? WHERE id = ?',
+            [round($percent, 2), (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    /**
      * Claims a custom domain, unverified, and issues a fresh verification
      * token. Moving to a different domain always clears the verified stamp and
      * re-issues the token — verification applies to a domain, so a new domain

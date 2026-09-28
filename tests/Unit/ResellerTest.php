@@ -26,6 +26,8 @@ use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerCredentialService;
 use CodeVault\Reseller\ResellerPricing;
+use CodeVault\Reseller\ResellerRetailPriceRepository;
+use CodeVault\Reseller\ResellerRetailPricing;
 use CodeVault\Reseller\ResellerSettings;
 use CodeVault\Reseller\ResellerStoreLocator;
 use CodeVault\Reseller\ResellerStoreRepository;
@@ -128,6 +130,7 @@ final class ResellerTest extends DatabaseTestCase
             $this->service,
             $this->storeService,
             $this->locator,
+            new ResellerRetailPricing($this->pricing, new ResellerRetailPriceRepository($this->db)),
             $this->resellerSettings,
             $this->pricing,
             new CurrencyService(new CurrencyRepository($this->db)),

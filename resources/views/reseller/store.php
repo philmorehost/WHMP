@@ -14,6 +14,7 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
 <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Your Store</h1>
     <p><a href="/client/reseller">&larr; Back to the reseller area</a> &middot;
+        <a href="/client/reseller/prices">Your prices &rarr;</a> &middot;
         <a href="<?= e($docsUrl) ?>">API documentation</a></p>
 
     <?php if ($error !== null && $error !== ''): ?>

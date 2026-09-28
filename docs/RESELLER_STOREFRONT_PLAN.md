@@ -142,6 +142,30 @@ Each phase is independently useful and independently verifiable.
 - Tenant storefront shows retail prices.
 - No checkout change yet.
 
+### Phase 2 — Reseller retail pricing  *(additive — implemented)*
+- `resellers.markup_percent` (store-wide default, clamped 0–1000) plus
+  `reseller_prices` (per product+cycle) and `reseller_domain_prices` (per TLD,
+  three prices, each optional) for hand-set overrides — migration 0186.
+- `ResellerRetailPricing` composes the three figures: **list** (ours), **cost**
+  (list less the admin discount) and **retail** (list + markup, or an override).
+  `previewServices()`/`previewDomains()` build the whole catalogue at retail on
+  top of `ResellerPricing`, so the two cannot disagree about a price.
+- Reseller UI at `/client/reseller/prices`: markup, per-cycle and per-TLD
+  overrides, with cost and margin shown per line. The admin sees the store's
+  markup and override count on the admin store page.
+- **Retail prices are NOT shown on the public storefront yet.** Until checkout
+  charges retail (Phase 3), displaying them would advertise a price we do not
+  honour, so the page says so explicitly and the storefront keeps list prices.
+- A price below cost is refused on save (a half-saved price list is worse than
+  a rejected one) but never silently rewritten afterwards; if a later discount
+  change pushes a published price under cost, `belowCost()` reports it and the
+  UI warns.
+
+### Phase 2b — domain retail overrides
+- `reseller_domain_prices` exists and is wired, but the UI sets all three
+  prices per TLD from one row; a per-registrar or per-period schedule is not
+  modelled.
+
 ### Phase 3 — Checkout and orders under a tenant  *(money path — highest risk)*
 - `CartService::priceItems()` takes an optional store context: lines carry
   `unit_price` (retail) **and** `cost_price`; the returned totals carry

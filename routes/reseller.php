@@ -25,6 +25,11 @@ $router->post('/client/reseller/store/brand', [ClientResellerController::class, 
 $router->post('/client/reseller/store/domain', [ClientResellerController::class, 'claimStoreDomain']);
 $router->post('/client/reseller/store/verify', [ClientResellerController::class, 'verifyStoreDomain']);
 
+// What the reseller's own customers will pay: a store-wide markup plus optional
+// per-cycle and per-TLD overrides. Preview only until checkout charges retail.
+$router->get('/client/reseller/prices', [ClientResellerController::class, 'prices']);
+$router->post('/client/reseller/prices', [ClientResellerController::class, 'savePrices']);
+
 // Admin side: the discounts resellers get, and the keys issued to them.
 $router->get('/admin/resellers', [AdminResellerController::class, 'index']);
 $router->post('/admin/resellers/discounts', [AdminResellerController::class, 'saveDiscounts']);

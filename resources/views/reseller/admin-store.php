@@ -9,6 +9,8 @@
  * @var string|null $error
  * @var string|null $notice
  * @var array<string, mixed>|null $verification
+ * @var float $markup
+ * @var int $overrideCount
  */
 
 $clientName = $client === null
@@ -123,6 +125,32 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <span style="color:var(--cv-text-secondary);">Its domain will return 503 rather than showing our shop.</span>
             <?php endif; ?>
         </form>
+    </div>
+
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <h2 class="cv-card__title">Prices the reseller charges</h2>
+        <p>Retail prices are the reseller's own — they set them on their own store page, not here. Shown so you can
+            see what their customers will be charged once the store goes live.</p>
+        <table class="cv-table">
+            <tbody>
+            <tr>
+                <th>Store-wide markup</th>
+                <td><?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($markup)) ?>% over list</td>
+            </tr>
+            <tr>
+                <th>Prices set by hand</th>
+                <td><?= (int) $overrideCount === 0
+                    ? '<em>none — the markup covers everything</em>'
+                    : (int) $overrideCount . ' override(s)' ?></td>
+            </tr>
+            <tr>
+                <th>Your discount to them</th>
+                <td><?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($discounts['service'])) ?>% services /
+                    <?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain'])) ?>% domains
+                    &middot; <a href="/admin/resellers">change</a></td>
+            </tr>
+            </tbody>
+        </table>
     </div>
 
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">

@@ -195,6 +195,15 @@ final class ResellerStoreService
         ];
     }
 
+    /**
+     * The store-wide markup, clamped by the rule's owner so there is one
+     * definition of what a legal markup is (ResellerRetailPricing).
+     */
+    public function setMarkup(int $storeId, float $percent): void
+    {
+        $this->stores->setMarkup($storeId, ResellerRetailPricing::clampMarkup($percent));
+    }
+
     /** @return array{success: bool, error: ?string} */
     public function setStatus(int $storeId, string $status): array
     {
