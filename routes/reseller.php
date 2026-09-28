@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
+use CodeVault\Reseller\AdminResellerPayoutsController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerController;
@@ -24,6 +25,12 @@ $router->get('/client/reseller/docs', [ClientResellerController::class, 'docs'])
 // the session guard, so one reseller cannot read another's account by editing a
 // parameter.
 $router->get('/client/reseller/account', [ClientResellerAccountController::class, 'index']);
+
+// Asking for the withdrawable balance, and withdrawing the request. The amount is
+// never posted -- ResellerPayoutService decides it from the account -- so the form
+// carries nothing but a CSRF token and there is no figure to tamper with.
+$router->post('/client/reseller/account/payouts', [ClientResellerAccountController::class, 'requestPayout']);
+$router->post('/client/reseller/account/payouts/{payoutId}/cancel', [ClientResellerAccountController::class, 'cancelPayout']);
 
 // The white-label store. Claiming a domain and proving control of it are
 // separate steps on purpose: nothing is served on a claimant's domain until
@@ -58,6 +65,14 @@ $router->post('/admin/resellers/billing/run', [AdminResellerBillingController::c
 // billing pair — '/admin/resellers/accounts' must not be read as a client id.
 $router->get('/admin/resellers/accounts', [AdminResellerAccountsController::class, 'index']);
 $router->post('/admin/resellers/payouts/settings', [AdminResellerAccountsController::class, 'saveSettings']);
+
+// The payout queue. Registered before the parameterised routes below for the same
+// reason as the literal paths above, and because 'payouts' at this position is
+// otherwise readable as a client id. Payment is a manual bank transfer, so these
+// endpoints only RECORD a decision -- none of them moves money.
+$router->get('/admin/resellers/payouts', [AdminResellerPayoutsController::class, 'index']);
+$router->post('/admin/resellers/payouts/{payoutId}/paid', [AdminResellerPayoutsController::class, 'markPaid']);
+$router->post('/admin/resellers/payouts/{payoutId}/reject', [AdminResellerPayoutsController::class, 'reject']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

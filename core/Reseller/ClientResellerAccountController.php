@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace CodeVault\Reseller;
 
+use CodeVault\Activity\ActivityLogger;
 use CodeVault\Billing\CurrencyService;
 use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Request;
 use CodeVault\Response;
+use CodeVault\Session\SessionManager;
 use CodeVault\View;
 
 /**
@@ -43,9 +45,12 @@ final class ClientResellerAccountController
     public function __construct(
         private readonly ClientAuthGuard $guard,
         private readonly View $view,
+        private readonly SessionManager $session,
         private readonly ResellerLedgerService $ledger,
+        private readonly ResellerPayoutService $payouts,
         private readonly ResellerStoreRepository $stores,
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly ActivityLogger $activity
     ) {
     }
 
@@ -75,7 +80,144 @@ final class ClientResellerAccountController
         return $this->page('reseller.client-account', [
             'account' => $account,
             'baseCode' => strtoupper(trim($this->currency->codeFor(null))),
+            'payout' => $this->withAmountCodes($this->payouts->summaryFor((int) $store['id'])),
+            'labels' => ResellerPayoutService::STATUS_LABELS,
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'error' => $this->session->pullFlash('reseller_error'),
         ]);
+    }
+
+    /**
+     * Attach the currency code each payout was denominated in.
+     *
+     * The row stores a currency ID, and the reseller's own currency may have
+     * changed since the payout was asked for. Reading the code from the row rather
+     * than from the client's current setting is what keeps an old payout labelled
+     * in the unit it was actually sent in.
+     *
+     * @param array{open: array<string, mixed>|null, history: array<int, array<string, mixed>>} $summary
+     * @return array{open: array<string, mixed>|null, history: array<int, array<string, mixed>>}
+     */
+    private function withAmountCodes(array $summary): array
+    {
+        $code = function (array $row): string {
+            return strtoupper(trim($this->currency->codeFor(
+                $row['currency_id'] === null ? null : (int) $row['currency_id']
+            )));
+        };
+
+        if (is_array($summary['open'])) {
+            $summary['open']['amount_code'] = $code($summary['open']);
+        }
+
+        foreach ($summary['history'] as $i => $row) {
+            $summary['history'][$i]['amount_code'] = $code($row);
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Ask for the withdrawable balance.
+     *
+     * The amount is never taken from the form. The service decides it from the
+     * account, so a reseller cannot request a figure of their choosing — including
+     * one larger than they have — by editing a field. The form posts nothing but a
+     * CSRF token.
+     */
+    public function requestPayout(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            return Response::redirect('/client/reseller');
+        }
+
+        $result = $this->payouts->request((int) $store['id']);
+
+        if (!$result['ok']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/account');
+        }
+
+        $payoutId = (int) $result['payout']['id'];
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'reseller.payout.requested',
+            null,
+            null,
+            'Requested reseller payout #' . $payoutId . ' for '
+                . number_format((float) $result['payout']['amount'], 2) . ' '
+                . $this->currency->codeFor(
+                    $result['payout']['currency_id'] === null ? null : (int) $result['payout']['currency_id']
+                ),
+            $request->ip()
+        );
+
+        $this->session->flash(
+            'reseller_notice',
+            'Payout requested. The funds have been set aside from your available balance '
+            . 'and will be sent by bank transfer once they are reviewed.'
+        );
+
+        return Response::redirect('/client/reseller/account');
+    }
+
+    /**
+     * Withdraw a request that has not been paid yet.
+     *
+     * The service compares the request's owner against the signed-in client rather
+     * than trusting the posted id, so one reseller cannot cancel another's request
+     * by editing a field.
+     */
+    public function cancelPayout(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $payoutId = (int) ($params['payoutId'] ?? 0);
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            return Response::redirect('/client/reseller');
+        }
+
+        $result = $this->payouts->cancel($payoutId, (int) $store['id']);
+
+        if (!$result['ok']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/account');
+        }
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'reseller.payout.cancelled',
+            null,
+            null,
+            'Cancelled reseller payout request #' . $payoutId,
+            $request->ip()
+        );
+
+        $this->session->flash(
+            'reseller_notice',
+            'Payout request cancelled and the funds returned to your available balance.'
+        );
+
+        return Response::redirect('/client/reseller/account');
     }
 
     /** @param array<string, mixed> $data */

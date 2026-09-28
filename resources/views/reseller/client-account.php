@@ -8,6 +8,10 @@
  *
  * @var array<string, mixed> $account
  * @var string $baseCode
+ * @var array{open: array<string, mixed>|null, history: array<int, array<string, mixed>>} $payout
+ * @var array<string, string> $labels
+ * @var string|null $notice
+ * @var string|null $error
  */
 
 $money = static fn (float $amount, string $code): string => number_format($amount, 2) . ($code === '' ? '' : ' ' . $code);
@@ -17,6 +21,9 @@ $holdingDays = (int) ($account['holding_days'] ?? 0);
 $inArrears = ($account['in_arrears'] ?? false) === true;
 $entries = is_array($account['entries'] ?? null) ? $account['entries'] : [];
 $totals = is_array($account['totals'] ?? null) ? $account['totals'] : [];
+
+$openRequest = is_array($payout['open'] ?? null) ? $payout['open'] : null;
+$payoutHistory = is_array($payout['history'] ?? null) ? $payout['history'] : [];
 
 $kindLabels = [
     'store_receipt' => 'Sale at your store',
@@ -37,6 +44,13 @@ $kindLabels = [
         nothing in your account, and showing it as earnings would be a number you could not spend.
     </p>
 </div>
+
+<?php if ($error !== null && $error !== ''): ?>
+    <div class="cv-alert cv-alert--error" style="margin-bottom:var(--cv-space-4);"><?= e((string) $error) ?></div>
+<?php endif; ?>
+<?php if ($notice !== null && $notice !== ''): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-4);"><?= e((string) $notice) ?></div>
+<?php endif; ?>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Balance</h2>
@@ -98,6 +112,101 @@ $kindLabels = [
         Requesting a payout is coming next — this page currently shows the figures a payout will be able to draw on.
         Nothing on this page moves money.
     </p>
+</div>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Getting paid</h2>
+
+    <?php if ($openRequest !== null): ?>
+        <?php
+        $reqAmount = (float) $openRequest['amount'];
+        $reqCode = $theirCode !== '' ? $theirCode : $baseCode;
+        ?>
+        <p style="color:var(--cv-text-secondary);">
+            You have a payout request awaiting payment. <strong>The funds have already been set aside</strong>, so
+            they are no longer part of your available balance — that is why asking a second time is not possible
+            while this one is open.
+        </p>
+        <table class="cv-table">
+            <tbody>
+            <tr>
+                <td><strong>Request #<?= (int) $openRequest['id'] ?></strong><br>
+                    <span style="color:var(--cv-text-secondary);">
+                        <?= e($labels[(string) $openRequest['status']] ?? (string) $openRequest['status']) ?>
+                        &middot; asked for on <?= e((string) $openRequest['requested_at']) ?>
+                    </span></td>
+                <td><strong><?= e($money($reqAmount, $reqCode)) ?></strong><br>
+                    <span style="color:var(--cv-text-secondary);">
+                        <?= e($money((float) $openRequest['amount_base'], $baseCode)) ?> leaves your account
+                    </span></td>
+                <td>
+                    <form method="post" action="/client/reseller/account/payouts/<?= (int) $openRequest['id'] ?>/cancel">
+                        <?= csrf_field() ?>
+                        <button class="cv-btn" type="submit">Cancel this request</button>
+                    </form>
+                    <div style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:4px;">
+                        Cancelling returns the money to your available balance straight away.
+                    </div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    <?php else: ?>
+        <?php if (($account['can_withdraw'] ?? false) === true): ?>
+            <p style="color:var(--cv-text-secondary);">
+                <?= e($money((float) $account['withdrawable'], $theirCode)) ?> is ready to be paid out.
+                Payouts are sent by bank transfer, so they are reviewed by hand before the money moves.
+            </p>
+            <form method="post" action="/client/reseller/account/payouts">
+                <?= csrf_field() ?>
+                <button class="cv-btn" type="submit">Request a payout</button>
+                <span style="color:var(--cv-text-secondary);">
+                    The whole available balance is requested, not part of it.
+                </span>
+            </form>
+        <?php elseif ((float) $account['withdrawable'] > 0): ?>
+            <p style="color:var(--cv-text-secondary);">
+                <?= e($money((float) $account['withdrawable'], $theirCode)) ?> is available, which is below the
+                <?= e($money((float) $account['minimum'], $theirCode)) ?> minimum for a payout. The money is
+                yours — it is just not worth a transfer yet, and it stays here until it is.
+            </p>
+        <?php else: ?>
+            <p style="color:var(--cv-text-secondary);">
+                Nothing is available to withdraw yet.
+                <?php if ($holdingDays > 0): ?>
+                    A sale becomes available <?= $holdingDays ?> days after your customer pays, so the sales below
+                    that date cannot be paid out.
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
+    <?php endif; ?>
+
+    <?php if ($payoutHistory !== []): ?>
+        <table class="cv-table" style="margin-top:var(--cv-space-3);">
+            <thead>
+            <tr><th>#</th><th>Asked for</th><th>Amount sent</th><th>State</th><th>Reference</th><th>Decided</th></tr>
+            </thead>
+            <tbody>
+            <?php foreach ($payoutHistory as $row): ?>
+                <?php $status = (string) $row['status']; ?>
+                <tr>
+                    <td>#<?= (int) $row['id'] ?></td>
+                    <td><?= e((string) $row['requested_at']) ?></td>
+                    <td><?= e($money((float) $row['amount'], (string) ($row['amount_code'] ?? $baseCode))) ?></td>
+                    <td><?= e($labels[$status] ?? $status) ?></td>
+                    <td>
+                        <?php if (($row['reference'] ?? null) !== null && $row['reference'] !== ''): ?>
+                            <code><?= e((string) $row['reference']) ?></code>
+                        <?php else: ?>
+                            &mdash;
+                        <?php endif; ?>
+                    </td>
+                    <td><?= e((string) ($row['decided_at'] ?? '')) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
 </div>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
