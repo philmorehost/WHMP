@@ -11,6 +11,12 @@
 /** @var array<int, array<string, mixed>> $creditLedger */
 /** @var callable(float): string $serviceMoney */
 /** @var callable(array<string, mixed>): string $invoiceMoney */
+/** @var array<int, array<string, mixed>> $tickets this client's support tickets (Message tab) */
+/** @var array<string, mixed>|null $activeTicket the ticket being replied to, if one is open */
+/** @var array<int, array<string, mixed>> $activeTicketReplies */
+/** @var string|null $aiSuggestion a draft/refine result on its way back to the reply box */
+/** @var string|null $aiError */
+/** @var string|null $aiMode 'draft' when generated from the conversation, 'refine' when the admin's own text was rewritten */
 $tabs = ['summary' => 'Summary', 'profile' => 'Profile', 'contacts' => 'Contacts', 'billing' => 'Billing', 'log' => 'Log', 'message' => 'Message'];
 $id = (int) $client['id'];
 ?>
@@ -315,6 +321,42 @@ $id = (int) $client['id'];
     background: linear-gradient(135deg, rgba(239,68,68,.2), rgba(220,38,38,.15));
     color: #ef4444;
     border: 1px solid rgba(239,68,68,.3);
+}
+/* Cancelled and refunded are neither "paid" nor "still owed", so they get
+   their own colours — the two-way paid/unpaid badge this replaced painted
+   both of them red and made a voided invoice read as money outstanding. */
+.admin-detail-badge--cancelled {
+    background: linear-gradient(135deg, rgba(107,114,128,.2), rgba(75,85,99,.15));
+    color: #6b7280;
+    border: 1px solid rgba(107,114,128,.3);
+}
+.admin-detail-badge--refunded {
+    background: linear-gradient(135deg, rgba(59,130,246,.2), rgba(37,99,235,.15));
+    color: #3b82f6;
+    border: 1px solid rgba(59,130,246,.3);
+}
+/* Ticket statuses (Message tab). Kept separate from the invoice/service badge
+   names so the two scales can diverge later without one silently reusing the
+   other's meaning. */
+.admin-detail-badge--ticket-open {
+    background: linear-gradient(135deg, rgba(16,185,129,.2), rgba(5,150,105,.15));
+    color: #10b981;
+    border: 1px solid rgba(16,185,129,.3);
+}
+.admin-detail-badge--ticket-answered {
+    background: linear-gradient(135deg, rgba(59,130,246,.2), rgba(37,99,235,.15));
+    color: #3b82f6;
+    border: 1px solid rgba(59,130,246,.3);
+}
+.admin-detail-badge--ticket-customer-reply {
+    background: linear-gradient(135deg, rgba(245,158,11,.2), rgba(217,119,6,.15));
+    color: #f59e0b;
+    border: 1px solid rgba(245,158,11,.3);
+}
+.admin-detail-badge--ticket-closed {
+    background: linear-gradient(135deg, rgba(107,114,128,.2), rgba(75,85,99,.15));
+    color: #6b7280;
+    border: 1px solid rgba(107,114,128,.3);
 }
 
 @media (max-width: 768px) {
@@ -773,18 +815,32 @@ $id = (int) $client['id'];
         <div class="admin-detail-card__body" style="padding:0;">
             <div style="overflow-x:auto;">
                 <table class="admin-detail-table">
-                    <thead><tr><th>#</th><th>Total</th><th>Due</th><th>Status</th></tr></thead>
+                    <thead><tr><th>#</th><th>Total</th><th>Due</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                     <?php foreach ($invoices as $invoice): ?>
+                        <?php
+                        // One badge per status, so a cancelled or refunded
+                        // invoice is not shown in the "unpaid" colour.
+                        $invoiceStatus = (string) ($invoice['status'] ?? '');
+                        $invoiceBadge = match ($invoiceStatus) {
+                            'paid' => 'admin-detail-badge--paid',
+                            'cancelled' => 'admin-detail-badge--cancelled',
+                            'refunded' => 'admin-detail-badge--refunded',
+                            default => 'admin-detail-badge--unpaid',
+                        };
+                        ?>
                         <tr>
                             <td><a href="/admin/invoices/<?= (int) $invoice['id'] ?>">INV-<?= (int) $invoice['id'] ?></a></td>
                             <td style="font-family:'Monaco', 'Courier New', monospace; font-weight:700;"><?= e($invoiceMoney($invoice)) ?></td>
                             <td><?= e($invoice['due_date']) ?></td>
-                            <td><span class="admin-detail-badge <?= $invoice['status'] === 'paid' ? 'admin-detail-badge--paid' : 'admin-detail-badge--unpaid' ?>"><?= e($invoice['status']) ?></span></td>
+                            <td><span class="admin-detail-badge <?= $invoiceBadge ?>"><?= e($invoiceStatus) ?></span></td>
+                            <td style="text-align:right; white-space:nowrap;">
+                                <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/invoices/<?= (int) $invoice['id'] ?>" style="padding:4px 10px; font-size:.75rem;">View</a>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($invoices === []): ?>
-                        <tr><td colspan="4" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No invoices yet.</td></tr>
+                        <tr><td colspan="5" style="color:var(--cv-text-secondary); text-align:center; padding:32px;">No invoices yet.</td></tr>
                     <?php endif; ?>
                     </tbody>
                 </table>
@@ -862,6 +918,120 @@ $id = (int) $client['id'];
     <?php if (!empty($error)): ?>
         <div style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:12px 16px;border-radius:8px;margin-bottom:20px;font-weight:600;">
             ⚠️ <?= e($error) ?>
+        </div>
+    <?php endif; ?>
+
+    <?php
+    // ---- Support tickets on the Message tab ------------------------------
+    // Until now the only ticket actions here were "open a new one" and "send
+    // an email": reading or answering an existing ticket meant leaving the
+    // client's account for the Tickets section. The list below is the
+    // client's own tickets, and picking one opens a reply box underneath it.
+    $ticketStatusBadge = static fn (string $status): string => match ($status) {
+        'open' => 'admin-detail-badge--ticket-open',
+        'answered' => 'admin-detail-badge--ticket-answered',
+        'customer-reply' => 'admin-detail-badge--ticket-customer-reply',
+        default => 'admin-detail-badge--ticket-closed',
+    };
+    // $aiSuggestion/$aiError/$aiMode come back from the AI actions via a
+    // one-shot session value (they are far too long for a redirect URL).
+    $aiSuggestion = $aiSuggestion ?? null;
+    $aiError = $aiError ?? null;
+    $aiMode = $aiMode ?? null;
+    ?>
+    <div class="admin-detail-card" style="margin-bottom:24px;">
+        <h2 class="admin-detail-card__title">🎫 Support Tickets (<?= count($tickets) ?>)</h2>
+        <div class="admin-detail-card__body" style="padding:0;">
+            <div style="overflow-x:auto;">
+                <table class="admin-detail-table">
+                    <thead><tr><th>#</th><th>Subject</th><th>Department</th><th>Status</th><th>Last reply</th><th></th></tr></thead>
+                    <tbody>
+                    <?php foreach ($tickets as $ticket): ?>
+                        <?php
+                        $ticketStatus = (string) ($ticket['status'] ?? '');
+                        $isOpenTicket = $activeTicket !== null && (int) $activeTicket['id'] === (int) $ticket['id'];
+                        ?>
+                        <tr<?= $isOpenTicket ? ' style="background:rgba(59,130,246,.08);"' : '' ?>>
+                            <td><a href="/admin/tickets/<?= (int) $ticket['id'] ?>">#<?= (int) $ticket['id'] ?></a></td>
+                            <td><a href="/admin/tickets/<?= (int) $ticket['id'] ?>" style="font-weight:600;"><?= e((string) $ticket['subject']) ?></a></td>
+                            <td><?= e((string) ($ticket['department_name'] ?? '')) ?></td>
+                            <td><span class="admin-detail-badge <?= $ticketStatusBadge($ticketStatus) ?>"><?= e($ticketStatus) ?></span></td>
+                            <td style="color:var(--cv-text-secondary);font-size:.8rem;"><?= e((string) ($ticket['last_reply_at'] ?? $ticket['updated_at'] ?? '')) ?></td>
+                            <td style="text-align:right;white-space:nowrap;">
+                                <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/clients/<?= $id ?>?tab=message&amp;ticket_id=<?= (int) $ticket['id'] ?>#cv-ticket-reply" style="padding:4px 10px;font-size:.75rem;"><?= $isOpenTicket ? 'Replying…' : 'Reply' ?></a>
+                                <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/tickets/<?= (int) $ticket['id'] ?>" style="padding:4px 10px;font-size:.75rem;">Open</a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if ($tickets === []): ?>
+                        <tr><td colspan="6" style="color:var(--cv-text-secondary);text-align:center;padding:32px;">No support tickets from this client yet.</td></tr>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <?php if ($activeTicket !== null): ?>
+        <div class="admin-detail-card" id="cv-ticket-reply" style="margin-bottom:24px;border:1px solid rgba(59,130,246,.35);">
+            <h2 class="admin-detail-card__title">
+                ↩️ Reply to Ticket #<?= (int) $activeTicket['id'] ?> — <?= e((string) $activeTicket['subject']) ?>
+                <span class="admin-detail-badge <?= $ticketStatusBadge((string) ($activeTicket['status'] ?? '')) ?>" style="margin-left:8px;"><?= e((string) ($activeTicket['status'] ?? '')) ?></span>
+            </h2>
+            <div class="admin-detail-card__body">
+                <details style="margin-bottom:18px;">
+                    <summary style="cursor:pointer;font-weight:700;font-size:.85rem;margin-bottom:10px;">Conversation (<?= count($activeTicketReplies) ?> messages)</summary>
+                    <div style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px;">
+                        <?php foreach ($activeTicketReplies as $reply): ?>
+                            <?php $isStaff = ($reply['author_type'] ?? '') === 'admin'; ?>
+                            <div style="border:1px solid var(--cv-border-default);border-left:3px solid <?= $isStaff ? '#3b82f6' : '#10b981' ?>;border-radius:8px;padding:10px 12px;background:<?= $isStaff ? 'rgba(59,130,246,.06)' : 'rgba(16,185,129,.06)' ?>;">
+                                <div style="font-size:.75rem;color:var(--cv-text-secondary);margin-bottom:6px;">
+                                    <strong><?= e((string) ($reply['author_name'] ?? ($isStaff ? 'Support' : 'Client'))) ?></strong>
+                                    · <?= e((string) ($reply['created_at'] ?? '')) ?>
+                                    <?php if (!empty($reply['is_private'])): ?><span style="color:#f59e0b;">· private note</span><?php endif; ?>
+                                </div>
+                                <div style="font-size:.9rem;white-space:pre-wrap;"><?= e((string) ($reply['message'] ?? '')) ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </details>
+
+                <?php if ($aiError !== null): ?>
+                    <div style="margin-bottom:16px;padding:12px 16px;background:linear-gradient(135deg, rgba(239,68,68,.15), rgba(220,38,38,.1));border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#dc2626;font-size:.9rem;">
+                        ⚠️ <?= e($aiError) ?>
+                    </div>
+                <?php elseif ($aiSuggestion !== null): ?>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">
+                            <?= $aiMode === 'refine' ? '✨ AI-refined draft' : '✨ AI-suggested reply' ?>
+                        </label>
+                        <textarea id="cv-client-ai-suggestion" class="cv-input" rows="6" style="width:100%;" readonly><?= e($aiSuggestion) ?></textarea>
+                        <button type="button" class="admin-detail-btn admin-detail-btn--secondary" data-copy-value-from="cv-client-ai-suggestion" data-copy-value-to="cv-client-ticket-reply" style="margin-top:8px;">→ Insert into reply</button>
+                    </div>
+                <?php endif; ?>
+
+                <?php
+                // One form, three outcomes: plain submit sends the reply, and the
+                // two AI buttons re-post the same textarea to their own endpoint
+                // via formaction. No JavaScript, and because each AI call
+                // redirects back here, a refresh re-renders instead of re-billing
+                // the provider.
+                $ticketReplyAction = "/admin/clients/{$id}/tickets/" . (int) $activeTicket['id'];
+                ?>
+                <form method="post" action="<?= $ticketReplyAction ?>/reply" style="margin:0;">
+                    <?= csrf_field() ?>
+                    <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:.85rem;font-weight:700;margin-bottom:6px;">Your Reply</label>
+                        <textarea id="cv-client-ticket-reply" name="message" class="cv-input" rows="6" style="width:100%;" placeholder="Type your reply to <?= e((string) $client['email']) ?>…" required></textarea>
+                    </div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                        <button type="submit" class="admin-detail-btn admin-detail-btn--primary">📨 Send Reply</button>
+                        <button type="submit" class="admin-detail-btn admin-detail-btn--secondary" formaction="<?= $ticketReplyAction ?>/ai-draft">✨ AI: Generate reply</button>
+                        <button type="submit" class="admin-detail-btn admin-detail-btn--secondary" formaction="<?= $ticketReplyAction ?>/ai-refine">✨ AI: Refine my draft</button>
+                        <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/tickets/<?= (int) $activeTicket['id'] ?>" style="text-decoration:none;">Open full ticket →</a>
+                    </div>
+                </form>
+            </div>
         </div>
     <?php endif; ?>
 

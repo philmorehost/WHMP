@@ -33,3 +33,9 @@ $router->post('/admin/clients/{id}/credit', [ClientController::class, 'grantCred
 $router->post('/admin/clients/{id}/login-as', [ClientController::class, 'loginAsClient']);
 $router->post('/admin/clients/{id}/send-message', [ClientController::class, 'sendMessage']);
 $router->post('/admin/clients/{id}/create-ticket', [ClientController::class, 'createTicket']);
+// Message tab: reply to the client's ticket without leaving their page, plus
+// the two AI helpers (draft a reply from the conversation, refine the admin's
+// own draft). Both ids are in the path and are re-checked against each other.
+$router->post('/admin/clients/{id}/tickets/{ticketId}/reply', [ClientController::class, 'replyToTicket']);
+$router->post('/admin/clients/{id}/tickets/{ticketId}/ai-draft', [ClientController::class, 'aiDraftTicketReply']);
+$router->post('/admin/clients/{id}/tickets/{ticketId}/ai-refine', [ClientController::class, 'aiRefineTicketReply']);

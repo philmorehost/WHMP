@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace CodeVault\Clients;
 
 use CodeVault\Activity\ActivityLogger;
+use CodeVault\Ai\AiProvider;
+use CodeVault\Ai\AiSettings;
+use CodeVault\Ai\PiiRedactor;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Billing\ClientCreditRepository;
 use CodeVault\Billing\CreditService;
@@ -49,7 +52,13 @@ final class ClientController
         private readonly \CodeVault\Support\TicketReplyRepository $ticketReplies,
         private readonly DomainRepository $domains,
         private readonly RecurringInvoiceRepository $recurringInvoices,
-        private readonly \CodeVault\Billing\CurrencyRepository $currencies
+        private readonly \CodeVault\Billing\CurrencyRepository $currencies,
+        // Replies from the Message tab go through TicketService so the ticket's
+        // status/last_reply_at and its hooks behave exactly as they do when the
+        // same reply is sent from the ticket page.
+        private readonly \CodeVault\Support\TicketService $ticketService,
+        private readonly AiProvider $aiProvider,
+        private readonly AiSettings $aiSettings
     ) {
     }
 
@@ -232,9 +241,26 @@ final class ClientController
         }
 
         $tab = (string) $request->query('tab', 'summary');
+        $tab = in_array($tab, ['summary', 'profile', 'contacts', 'billing', 'log', 'message'], true) ? $tab : 'summary';
+
         $billingPage = max(1, (int) $request->query('billing_page', 1));
         $billingPagination = $this->invoices->paginateForClient((int) $client['id'], $billingPage, 10);
         $currency = $this->currencyService->resolveForClient($client);
+
+        // Message tab: every ticket this client has, plus the one the admin
+        // opened to reply to (null when they haven't picked one).
+        $clientTickets = $this->tickets->forClient((int) $client['id']);
+        $activeTicket = $this->ticketForClient($client, (int) $request->query('ticket_id', 0));
+        $activeTicketReplies = $activeTicket !== null
+            ? $this->ticketReplies->forTicket((int) $activeTicket['id'], includePrivate: true)
+            : [];
+
+        // A drafted or refined reply is handed back through a one-shot session
+        // value rather than the query string — the text is far too long for a
+        // URL, and pullFlash() means a refresh can't resurface a stale draft.
+        // Pulled only on the message tab so a visit to another tab can't eat it.
+        $aiFlash = $tab === 'message' ? $this->session->pullFlash('client_message_ai', []) : [];
+        $aiFlash = is_array($aiFlash) ? $aiFlash : [];
 
         return $this->render('clients.show', [
             'client' => $client,
@@ -258,7 +284,7 @@ final class ClientController
                 (float) ($invoice['currency_rate'] ?? 1.0),
                 $currency
             ),
-            'tab' => in_array($tab, ['summary', 'profile', 'contacts', 'billing', 'log', 'message'], true) ? $tab : 'summary',
+            'tab' => $tab,
             'contacts' => $this->contacts->forClient((int) $client['id']),
             'activity' => $this->activity->forSubject('client', (int) $client['id']),
             'services' => $this->services->forClient((int) $client['id']),
@@ -269,6 +295,14 @@ final class ClientController
             'creditBalance' => $this->credit->balance((int) $client['id']),
             'creditLedger' => $this->credit->forClient((int) $client['id']),
             'departments' => $this->departments->all(),
+            // Message tab — the client's tickets, the one being replied to, and
+            // any AI draft/refine result on its way back to the reply box.
+            'tickets' => $clientTickets,
+            'activeTicket' => $activeTicket,
+            'activeTicketReplies' => $activeTicketReplies,
+            'aiSuggestion' => $aiFlash['text'] ?? null,
+            'aiError' => $aiFlash['error'] ?? null,
+            'aiMode' => $aiFlash['mode'] ?? null,
             'msg' => (string) $request->query('msg', ''),
             'error' => (string) $request->query('error', ''),
         ]);
@@ -346,6 +380,215 @@ final class ClientController
         $this->activity->log('admin', $adminId, 'ticket.created_for_client', 'client', $id, "Opened support ticket #{$ticketId}: {$subject}");
 
         return Response::redirect("/admin/clients/{$id}?tab=message&msg=" . urlencode("Support ticket #{$ticketId} created successfully for client."));
+    }
+
+    /**
+     * Replies to one of this client's tickets straight from their Message tab,
+     * so support does not have to jump to the ticket page to answer.
+     *
+     * Both ids arrive in the URL, so the ticket is re-checked against the
+     * client before anything is written: without that, a mistyped ticket_id —
+     * or a crafted link — would post a reply onto a different client's ticket.
+     *
+     * The write goes through TicketService::reply() rather than straight to the
+     * reply table, because that is the single place a ticket's status moves:
+     * it marks the ticket "answered", stamps last_reply_at and fires the reply
+     * hooks, exactly as a reply sent from the ticket page does.
+     */
+    public function replyToTicket(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $client = $this->clients->find((int) $params['id']);
+        $ticket = $this->ticketForClient($client, (int) $params['ticketId']);
+
+        if ($client === null || $ticket === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $message = trim((string) $request->input('message', ''));
+
+        if ($message === '') {
+            return Response::redirect($this->messageTabUrl((int) $client['id'], (int) $ticket['id'], 'error=' . urlencode('A reply cannot be empty.')));
+        }
+
+        $admin = $this->guard->currentAdmin();
+        $adminId = $admin ? (int) $admin['id'] : null;
+        $adminName = $admin ? trim(($admin['first_name'] ?? '') . ' ' . ($admin['last_name'] ?? '')) : '';
+
+        $this->ticketService->reply((int) $ticket['id'], 'admin', $adminId, $adminName !== '' ? $adminName : 'Support Staff', $message);
+
+        $this->activity->log('admin', $adminId, 'ticket.replied', 'ticket', (int) $ticket['id'], "Replied to ticket #{$ticket['id']} from client #{$client['id']}'s Message tab", $request->ip());
+
+        return Response::redirect($this->messageTabUrl((int) $client['id'], (int) $ticket['id'], 'msg=' . urlencode("Reply sent on ticket #{$ticket['id']}.")));
+    }
+
+    /**
+     * Asks the AI provider to draft a reply for this client's ticket, from the
+     * conversation so far. The result is handed back to the reply box rather
+     * than sent — the admin still reads, edits and sends it.
+     */
+    public function aiDraftTicketReply(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $client = $this->clients->find((int) $params['id']);
+        $ticket = $this->ticketForClient($client, (int) $params['ticketId']);
+
+        if ($client === null || $ticket === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $clientId = (int) $client['id'];
+        $ticketId = (int) $ticket['id'];
+        $error = $this->aiUnavailableReason();
+
+        if ($error !== null) {
+            return $this->flashAiResult($clientId, $ticketId, null, $error, 'draft');
+        }
+
+        $conversation = array_map(
+            static fn (array $reply): array => ['author' => (string) $reply['author_type'], 'message' => (string) $reply['message']],
+            $this->ticketReplies->forTicket($ticketId, includePrivate: false)
+        );
+
+        $result = $this->aiProvider->complete(...$this->buildTicketReplyPrompts($conversation));
+
+        return $this->flashAiResult(
+            $clientId,
+            $ticketId,
+            $result['success'] ? (string) $result['text'] : null,
+            $result['success'] ? null : (string) ($result['error'] ?? 'The AI provider did not return a reply.'),
+            'draft'
+        );
+    }
+
+    /**
+     * Rewrites the draft the admin has already typed, instead of inventing a
+     * reply from the transcript — "AI refine message" as opposed to "generate
+     * response". The prompt is explicit that it must keep every fact the draft
+     * contains and invent none, since this text is sent to a customer.
+     */
+    public function aiRefineTicketReply(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
+            return $denied;
+        }
+
+        $client = $this->clients->find((int) $params['id']);
+        $ticket = $this->ticketForClient($client, (int) $params['ticketId']);
+
+        if ($client === null || $ticket === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $clientId = (int) $client['id'];
+        $ticketId = (int) $ticket['id'];
+        // The refine button re-posts the reply textarea itself (a formaction on
+        // a button inside the reply form), so the text arrives as `message`;
+        // `draft` is accepted as well for direct callers.
+        $draft = trim((string) ($request->input('draft') ?? $request->input('message', '')));
+
+        if ($draft === '') {
+            return $this->flashAiResult($clientId, $ticketId, null, 'Type a reply first — there is nothing to refine.', 'refine');
+        }
+
+        $error = $this->aiUnavailableReason();
+
+        if ($error !== null) {
+            return $this->flashAiResult($clientId, $ticketId, null, $error, 'refine');
+        }
+
+        $systemPrompt = 'You are a support agent assistant for a web hosting and domain company. '
+            . 'Rewrite the support agent\'s draft reply below so it is clear, professional and concise, '
+            . 'in the same language as the draft. Keep every fact, figure and promise it contains and add none of your own. '
+            . 'Reply with only the rewritten message body — no greeting, no signature, no commentary.';
+
+        $result = $this->aiProvider->complete($systemPrompt, PiiRedactor::redact($draft));
+
+        return $this->flashAiResult(
+            $clientId,
+            $ticketId,
+            $result['success'] ? (string) $result['text'] : null,
+            $result['success'] ? null : (string) ($result['error'] ?? 'The AI provider did not return a rewrite.'),
+            'refine'
+        );
+    }
+
+    /**
+     * Why AI drafting can't run right now, or null when it can. Mirrors the
+     * ticket page's gate and its wording, so the same setting explains the
+     * same refusal on both screens.
+     */
+    private function aiUnavailableReason(): ?string
+    {
+        if (!$this->aiSettings->isFeatureEnabled('ticket_replies')) {
+            return 'AI ticket-reply drafting is turned off. An admin can enable it under Configuration → AI Copilot.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Hands a draft/refine result back to the reply box via a one-shot session
+     * value and redirects, so the POST is refresh-safe (a refresh re-renders
+     * the form rather than re-calling the provider and re-billing the request).
+     */
+    private function flashAiResult(int $clientId, int $ticketId, ?string $text, ?string $error, string $mode): Response
+    {
+        $this->session->flash('client_message_ai', [
+            'ticket_id' => $ticketId,
+            'mode' => $mode,
+            'text' => $text,
+            'error' => $error,
+        ]);
+
+        return Response::redirect($this->messageTabUrl($clientId, $ticketId, ''));
+    }
+
+    // A ticket is only ever acted on through its owning client: the id in the
+    // URL is not evidence of ownership, so every Message-tab action re-checks it.
+    /** @param array<string, mixed>|null $client */
+    private function ticketForClient(?array $client, int $ticketId): ?array
+    {
+        if ($client === null || $ticketId <= 0) {
+            return null;
+        }
+
+        $ticket = $this->tickets->find($ticketId);
+
+        return $ticket !== null && (int) $ticket['client_id'] === (int) $client['id'] ? $ticket : null;
+    }
+
+    private function messageTabUrl(int $clientId, int $ticketId, string $flash): string
+    {
+        $url = "/admin/clients/{$clientId}?tab=message&ticket_id={$ticketId}";
+
+        return $flash !== '' ? $url . '&' . $flash : $url;
+    }
+
+    /**
+     * @param array<int, array{author: string, message: string}> $conversation oldest-first
+     * @return array{0: string, 1: string} [systemPrompt, userPrompt]
+     */
+    private function buildTicketReplyPrompts(array $conversation): array
+    {
+        $systemPrompt = 'You are a support agent assistant for a web hosting and domain company. '
+            . 'Draft a concise, professional reply to the customer\'s latest message in the ticket transcript below. '
+            . 'Reply with only the message body — no greeting, no signature, no explanation of what you did.';
+
+        $transcript = [];
+
+        foreach ($conversation as $turn) {
+            $speaker = $turn['author'] === 'admin' ? 'Support' : 'Customer';
+            $transcript[] = "{$speaker}: " . PiiRedactor::redact($turn['message']);
+        }
+
+        return [$systemPrompt, implode("\n\n", $transcript)];
     }
 
     public function grantCredit(Request $request, array $params): Response
