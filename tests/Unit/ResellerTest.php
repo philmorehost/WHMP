@@ -23,9 +23,13 @@ use CodeVault\Domains\DomainPricingRepository;
 use CodeVault\Request;
 use CodeVault\Reseller\ApiDocumentation;
 use CodeVault\Reseller\ClientResellerController;
+use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerCredentialService;
 use CodeVault\Reseller\ResellerPricing;
 use CodeVault\Reseller\ResellerSettings;
+use CodeVault\Reseller\ResellerStoreLocator;
+use CodeVault\Reseller\ResellerStoreRepository;
+use CodeVault\Reseller\ResellerStoreService;
 use CodeVault\Session\SessionManager;
 use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\App;
@@ -59,6 +63,8 @@ final class ResellerTest extends DatabaseTestCase
     private SessionManager $session;
     private ClientAuthGuard $guard;
     private ClientResellerController $controller;
+    private ResellerStoreService $storeService;
+    private ResellerStoreLocator $locator;
     private int $clientId;
     private int $otherClientId;
 
@@ -74,6 +80,13 @@ final class ResellerTest extends DatabaseTestCase
         $this->service = new ResellerCredentialService($this->credentials);
         $this->clients = new ClientRepository($this->db);
 
+        $configDir = sys_get_temp_dir() . '/codevault-reseller-test-' . uniqid();
+        mkdir($configDir);
+
+        $stores = new ResellerStoreRepository($this->db);
+        $this->locator = new ResellerStoreLocator($stores, new Config($configDir));
+        $this->storeService = new ResellerStoreService($stores, $this->locator, new DomainVerifier());
+
         $this->clientId = $this->clients->create([
             'email' => 'reseller@example.test',
             'password' => 'correct-horse-battery',
@@ -88,8 +101,6 @@ final class ResellerTest extends DatabaseTestCase
             'last_name' => 'Two',
         ]);
 
-        $configDir = sys_get_temp_dir() . '/codevault-reseller-test-' . uniqid();
-        mkdir($configDir);
         $_SESSION = [];
         $this->session = new SessionManager(new Config($configDir));
         $this->guard = new ClientAuthGuard($this->session, $this->clients);
@@ -115,6 +126,8 @@ final class ResellerTest extends DatabaseTestCase
             new View(dirname(__DIR__, 2) . '/resources/views'),
             $this->session,
             $this->service,
+            $this->storeService,
+            $this->locator,
             $this->resellerSettings,
             $this->pricing,
             new CurrencyService(new CurrencyRepository($this->db)),

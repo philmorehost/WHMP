@@ -22,6 +22,9 @@ class Request
     /** @var array<string, array<string, mixed>> */
     private array $files;
 
+    /** @var array<string, mixed> */
+    private array $server;
+
     private string $method;
 
     private string $path;
@@ -42,6 +45,7 @@ class Request
         $this->body = $body;
         $this->headers = $headers;
         $this->files = $files;
+        $this->server = $server;
         $this->method = strtoupper($server['REQUEST_METHOD'] ?? 'GET');
         $this->ip = $server['REMOTE_ADDR'] ?? '0.0.0.0';
         $this->rawBody = $rawBody;
@@ -86,6 +90,20 @@ class Request
     public function rawBody(): string
     {
         return $this->rawBody;
+    }
+
+    /**
+     * The request's Host, as it arrived — untrusted.
+     *
+     * Nothing may use this to decide what to serve until it has been matched
+     * against a known reseller store (see Reseller\CurrentReseller for why the
+     * Host header is otherwise not trusted anywhere in this codebase).
+     */
+    public function host(): string
+    {
+        $host = $this->server['HTTP_HOST'] ?? $this->server['SERVER_NAME'] ?? 'localhost';
+
+        return Reseller\ResellerStoreLocator::normaliseHost((string) $host);
     }
 
     public function baseUrl(): string

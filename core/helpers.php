@@ -137,17 +137,39 @@ if (!function_exists('brand_name')) {
      */
     function brand_name(): string
     {
-        static $cached = null;
+        // Keyed by the site being served, not a single slot. This used to be one
+        // `static $cached`, which is correct only while a process serves exactly
+        // one brand — true for a web request, false for a cron run that renders
+        // mail for several reseller storefronts, which would sign all of them
+        // with the first reseller's name.
+        static $cache = [];
 
-        if ($cached !== null) {
-            return $cached;
+        $key = 'platform';
+        $storeName = '';
+
+        try {
+            $tenant = \CodeVault\Support\App::container()->make(\CodeVault\Reseller\CurrentReseller::class);
+
+            if ($tenant->exists()) {
+                $key = 'store:' . $tenant->id();
+                $storeName = trim((string) ($tenant->get()['brand_name'] ?? ''));
+            }
+        } catch (\Throwable) {
+            // No container yet (installer, CLI bootstrap) — platform brand.
         }
 
-        $name = '';
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
+        }
+
+        $name = $storeName;
 
         try {
             $container = \CodeVault\Support\App::container();
-            $name = trim((string) ($container->make(\CodeVault\Settings\SettingsRepository::class)->get('theme.brand_name', '') ?? ''));
+
+            if ($name === '') {
+                $name = trim((string) ($container->make(\CodeVault\Settings\SettingsRepository::class)->get('theme.brand_name', '') ?? ''));
+            }
 
             if ($name === '') {
                 $name = trim((string) $container->make(\CodeVault\Config::class)->env('APP_NAME', ''));
@@ -156,7 +178,7 @@ if (!function_exists('brand_name')) {
             // No container/DB yet (installer, CLI bootstrap) — fall through.
         }
 
-        return $cached = ($name !== '' ? $name : 'WHMP');
+        return $cache[$key] = ($name !== '' ? $name : 'WHMP');
     }
 }
 

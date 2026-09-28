@@ -24,7 +24,11 @@ final class ThemeSettings
     private const DEFAULT_PRIMARY_COLOR = '#ff8f28';
 
     public function __construct(
-        private readonly SettingsRepository $settings
+        private readonly SettingsRepository $settings,
+        // The reseller storefront this request belongs to, if any. Read at
+        // get() time rather than construction time, because this class is
+        // built before the Kernel has looked at the Host header.
+        private readonly ?\CodeVault\Reseller\CurrentReseller $currentReseller = null
     ) {
     }
 
@@ -56,12 +60,53 @@ final class ThemeSettings
         ];
     }
 
+    /**
+     * The storefront's own brand, laid over the platform's.
+     *
+     * Per-field, not wholesale: a reseller who has only uploaded a logo still
+     * gets the platform's name and colour, rather than a store with blank
+     * branding. The colour is re-validated here even though it is validated on
+     * save — this value ends up inside a <style> block, so a row edited
+     * directly in the database must not be able to inject CSS.
+     *
+     * @return array{brandName: string, logoUrl: ?string, faviconUrl: ?string, primaryColor: string, primaryColorDark: string, termsUrl: ?string}
+     */
+    public function forCurrentSite(): array
+    {
+        $theme = $this->get();
+        $brand = $this->currentReseller?->brand() ?? [];
+
+        if (isset($brand['brandName'])) {
+            $theme['brandName'] = $brand['brandName'];
+        }
+
+        if (isset($brand['logoUrl'])) {
+            $theme['logoUrl'] = $brand['logoUrl'];
+        }
+
+        if (isset($brand['faviconUrl'])) {
+            $theme['faviconUrl'] = $brand['faviconUrl'];
+        }
+
+        if (isset($brand['primaryColor']) && self::isValidHex($brand['primaryColor'])) {
+            $theme['primaryColor'] = $brand['primaryColor'];
+            $theme['primaryColorDark'] = $this->darken($brand['primaryColor'], 0.82);
+        }
+
+        return $theme;
+    }
+
+    public function isCurrentStore(): bool
+    {
+        return $this->currentReseller !== null && $this->currentReseller->exists();
+    }
+
     public function save(string $brandName, ?string $logoUrl, string $primaryColor, ?string $termsUrl = null, ?string $faviconUrl = null): void
     {
         $this->settings->set(self::BRAND_NAME_KEY, $brandName !== '' ? $brandName : self::DEFAULT_BRAND_NAME);
         $this->settings->set(self::LOGO_URL_KEY, $logoUrl ?? '');
         $this->settings->set(self::FAVICON_URL_KEY, $faviconUrl ?? '');
-        $this->settings->set(self::PRIMARY_COLOR_KEY, $this->isValidHex($primaryColor) ? $primaryColor : self::DEFAULT_PRIMARY_COLOR);
+        $this->settings->set(self::PRIMARY_COLOR_KEY, self::isValidHex($primaryColor) ? $primaryColor : self::DEFAULT_PRIMARY_COLOR);
         $this->settings->set(self::TERMS_URL_KEY, $termsUrl ?? '');
     }
 
@@ -71,7 +116,8 @@ final class ThemeSettings
         return $this->settings->get(self::TERMS_URL_KEY) ?: null;
     }
 
-    public function isValidHex(string $color): bool
+    /** The one colour format the theme accepts, shared with the reseller store brand. */
+    public static function isValidHex(string $color): bool
     {
         return (bool) preg_match('/^#[0-9a-fA-F]{6}$/', $color);
     }
@@ -79,7 +125,7 @@ final class ThemeSettings
     /** Multiplies each RGB channel by $factor (< 1 darkens) — enough to derive a hover shade from one admin-picked color without a full color library. */
     private function darken(string $hex, float $factor): string
     {
-        if (!$this->isValidHex($hex)) {
+        if (!self::isValidHex($hex)) {
             return $hex;
         }
 

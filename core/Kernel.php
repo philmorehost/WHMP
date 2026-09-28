@@ -185,6 +185,8 @@ use CodeVault\Support\TicketRepository;
 use CodeVault\Backup\BackupRunRepository;
 use CodeVault\Backup\BackupService;
 use CodeVault\Security\SecurityHeaders;
+use CodeVault\Reseller\CurrentReseller;
+use CodeVault\Reseller\ResellerStoreLocator;
 use CodeVault\Theme\ThemeSettings;
 use CodeVault\Support\TicketService;
 use CodeVault\Update\BackupManager;
@@ -269,6 +271,12 @@ class Kernel
         $this->container->instance(Kernel::class, $this);
 
         $this->container->singleton(Config::class, fn () => new Config($basePath));
+
+        // The reseller storefront this request belongs to, set in handle() from
+        // the Host header once it has matched a known store. A singleton so the
+        // theme layer, the brand helper and the URL builders all read the same
+        // answer; null on the platform's own host.
+        $this->container->singleton(CurrentReseller::class, fn () => new CurrentReseller());
 
         $this->container->singleton(Database::class, function (Container $c) {
             /** @var Config $config */
@@ -1161,7 +1169,7 @@ class Kernel
         });
 
         $this->container->singleton(SeoTags::class, function (Container $c) {
-            return new SeoTags($c->make(Config::class));
+            return new SeoTags($c->make(Config::class), $c->make(CurrentReseller::class));
         });
 
         $this->container->singleton(PageFetcher::class, fn () => new InProcessPageFetcher($this));
@@ -1595,6 +1603,34 @@ class Kernel
             } catch (\Throwable $e) {
                 // Prevent database failures from crashing the system during early bootstrap
             }
+        }
+
+        // Which storefront is this? Resolved from the Host header, but only
+        // ever to a store the database already knows about: the locator refuses
+        // a custom domain we have not DNS-verified, and returns null for any
+        // host that matches nothing — in which case this request is served
+        // exactly as it was before storefronts existed. Wrapped because it
+        // needs the database, and a storefront lookup must never be the reason
+        // a site fails to boot.
+        try {
+            /** @var CurrentReseller $tenant */
+            $tenant = $this->container->make(CurrentReseller::class);
+            $match = $this->container->make(ResellerStoreLocator::class)->resolve($request->host());
+
+            if ($match !== null) {
+                $tenant->set($match['store'], $match['host']);
+
+                // A suspended store is taken offline rather than falling back to
+                // the platform site: serving OUR shop, at OUR prices, on the
+                // reseller's own domain would be worse than an outage — their
+                // customers would buy from us believing they were buying from
+                // the reseller.
+                if ($tenant->isSuspended()) {
+                    return SecurityHeaders::apply(Response::html('503 Store Unavailable', 503));
+                }
+            }
+        } catch (\Throwable) {
+            // No tenant this request; carry on as the platform site.
         }
 
         /** @var SessionManager $session */

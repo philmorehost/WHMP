@@ -37,7 +37,9 @@ class View
 
         if ($this->theme !== null) {
             try {
-                $data += ['theme' => $this->theme->get()];
+                // forCurrentSite(), not get(): on a reseller's domain the store's
+                // own brand must win, per field, over the platform's.
+                $data += ['theme' => $this->theme->forCurrentSite()];
             } catch (\Throwable) {
                 $data += ['theme' => [
                     'brandName' => 'CodeVault',

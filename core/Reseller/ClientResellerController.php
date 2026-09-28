@@ -39,6 +39,8 @@ final class ClientResellerController
         private readonly View $view,
         private readonly SessionManager $session,
         private readonly ResellerCredentialService $credentials,
+        private readonly ResellerStoreService $stores,
+        private readonly ResellerStoreLocator $locator,
         private readonly ResellerSettings $settings,
         private readonly ResellerPricing $pricing,
         private readonly CurrencyService $currency,
@@ -225,6 +227,217 @@ final class ClientResellerController
             '/client/reseller',
             'Back to the reseller area'
         );
+    }
+
+    // --- the storefront ----------------------------------------------------
+
+    /** The reseller's own white-label store: branding, address, custom domain. */
+    public function store(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        return $this->page('reseller.store', [
+            'store' => $store,
+            'platformHost' => $this->locator->platformHost(),
+            'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
+            'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
+                ? null
+                : '_codevault-verify.' . $store['custom_domain'],
+            'error' => $this->session->pullFlash('reseller_error'),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'verification' => $this->session->pullFlash('reseller_verification'),
+            'docsUrl' => '/client/reseller/docs',
+        ]);
+    }
+
+    /** Opens the store. The address label is derived from the name, and can be changed after. */
+    public function openStore(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $result = $this->stores->openForClient(
+            (int) $client['id'],
+            (string) $request->input('store_name', ''),
+            (string) $request->input('slug', '')
+        );
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'reseller.store.opened',
+            'reseller',
+            (int) ($result['store']['id'] ?? 0),
+            'Opened reseller store "' . (string) ($result['store']['slug'] ?? '') . '"',
+            $request->ip()
+        );
+
+        $this->session->flash(
+            'reseller_notice',
+            'Your store is created. Set your logo and colours, then point your own domain at it if you have one.'
+        );
+
+        return Response::redirect('/client/reseller/store');
+    }
+
+    public function saveStoreBrand(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $storeId = (int) $store['id'];
+
+        $result = $this->stores->saveBrand($storeId, [
+            'brand_name' => $request->input('brand_name', ''),
+            'logo_url' => $request->input('logo_url', ''),
+            'favicon_url' => $request->input('favicon_url', ''),
+            'primary_color' => $request->input('primary_color', ''),
+        ]);
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        // The address is a separate submission because changing it breaks
+        // links that already exist; it is only touched when actually provided.
+        $slug = trim((string) $request->input('slug', ''));
+
+        if ($slug !== '') {
+            $renamed = $this->stores->rename($storeId, $slug);
+
+            if (!$renamed['success']) {
+                $this->session->flash('reseller_error', (string) $renamed['error']);
+
+                return Response::redirect('/client/reseller/store');
+            }
+        }
+
+        $this->session->flash('reseller_notice', 'Store branding saved.');
+
+        return Response::redirect('/client/reseller/store');
+    }
+
+    /** Claims the domain the store will be served on. Nothing is served there until it verifies. */
+    public function claimStoreDomain(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $domain = trim((string) $request->input('custom_domain', ''));
+
+        if ($domain === '') {
+            $this->stores->releaseDomain((int) $store['id']);
+            $this->session->flash('reseller_notice', 'Custom domain removed. Your store is back on its platform address only.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $result = $this->stores->claimDomain((int) $store['id'], $domain);
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $this->session->flash(
+            'reseller_notice',
+            'Domain saved. Create the DNS record shown below and press Verify — we cannot serve your store on '
+            . $result['domain'] . ' until the record is live.'
+        );
+
+        return Response::redirect('/client/reseller/store');
+    }
+
+    /** Asks DNS whether this reseller really controls the domain they claimed. */
+    public function verifyStoreDomain(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $result = $this->stores->verifyDomain((int) $store['id']);
+
+        if ($result['verified']) {
+            $this->session->flash(
+                'reseller_notice',
+                'Domain verified — your store is live on ' . (string) $store['custom_domain'] . '.'
+            );
+
+            $this->activity->log(
+                'client',
+                (int) $client['id'],
+                'reseller.store.domain_verified',
+                'reseller',
+                (int) $store['id'],
+                'Verified store domain ' . (string) $store['custom_domain']
+                    . ' via ' . (string) $result['method'],
+                $request->ip()
+            );
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        // Show what DNS actually returned. "Not verified" alone leaves a
+        // reseller guessing between a missing record, a typo, and propagation.
+        $this->session->flash('reseller_verification', [
+            'domain' => (string) ($store['custom_domain'] ?? ''),
+            'record_name' => (string) ($result['record_name'] ?? ''),
+            'expected' => (string) ($result['expected'] ?? ''),
+            'found' => (array) ($result['found'] ?? []),
+            'error' => $result['error'],
+        ]);
+
+        return Response::redirect('/client/reseller/store');
     }
 
     /**

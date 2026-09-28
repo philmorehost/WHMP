@@ -6,6 +6,7 @@ namespace CodeVault\Reseller;
 
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
+use CodeVault\Clients\ClientRepository;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Session\SessionManager;
@@ -35,6 +36,9 @@ final class AdminResellerController
         private readonly SessionManager $session,
         private readonly ResellerSettings $settings,
         private readonly ResellerCredentialService $credentials,
+        private readonly ResellerStoreService $stores,
+        private readonly ResellerStoreLocator $locator,
+        private readonly ClientRepository $clients,
         private readonly ActivityLogger $activity
     ) {
     }
@@ -50,6 +54,8 @@ final class AdminResellerController
         return $this->render('reseller.admin-index', [
             'discounts' => $this->settings->all(),
             'resellers' => $resellers,
+            'stores' => $this->stores->all(),
+            'platformHost' => $this->locator->platformHost(),
             'activeCount' => count(array_filter($resellers, static fn (array $r): bool => (int) ($r['active'] ?? 0) === 1)),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
@@ -152,6 +158,252 @@ final class AdminResellerController
             'title' => 'CodeVault Admin — Reseller API Documentation',
             'content' => $content,
         ]));
+    }
+
+    // --- the storefront ----------------------------------------------------
+
+    /**
+     * One reseller's store. Addressed by CLIENT id, not store id, so the page
+     * also works for a client who has a key but has not opened a store yet —
+     * which is exactly when an admin needs to be able to see that.
+     */
+    public function store(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        return $this->renderStorePage($clientId, $store, $request);
+    }
+
+    /** Opens a store on a client's behalf — for a reseller who asked support to set one up. */
+    public function openStore(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $result = $this->stores->openForClient(
+            $clientId,
+            (string) $request->input('store_name', ''),
+            (string) $request->input('slug', '')
+        );
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.store.opened',
+            'reseller',
+            (int) ($result['store']['id'] ?? 0),
+            'Opened a reseller store for client #' . $clientId . ' at slug ' . (string) ($result['store']['slug'] ?? ''),
+            $request->ip()
+        );
+
+        $this->session->flash('reseller_notice', 'Store opened.');
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
+    public function saveStoreBrand(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That client does not have a store.');
+
+            return Response::redirect('/admin/resellers');
+        }
+
+        $result = $this->stores->saveBrand((int) $store['id'], [
+            'brand_name' => $request->input('brand_name', ''),
+            'logo_url' => $request->input('logo_url', ''),
+            'favicon_url' => $request->input('favicon_url', ''),
+            'primary_color' => $request->input('primary_color', ''),
+        ]);
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        $slug = trim((string) $request->input('slug', ''));
+
+        if ($slug !== '') {
+            $renamed = $this->stores->rename((int) $store['id'], $slug);
+
+            if (!$renamed['success']) {
+                $this->session->flash('reseller_error', (string) $renamed['error']);
+
+                return Response::redirect('/admin/resellers/' . $clientId . '/store');
+            }
+        }
+
+        $this->session->flash('reseller_notice', 'Store saved.');
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
+    public function claimStoreDomain(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That client does not have a store.');
+
+            return Response::redirect('/admin/resellers');
+        }
+
+        $domain = trim((string) $request->input('custom_domain', ''));
+
+        if ($domain === '') {
+            $this->stores->releaseDomain((int) $store['id']);
+            $this->session->flash('reseller_notice', 'Custom domain released.');
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        $result = $this->stores->claimDomain((int) $store['id'], $domain);
+
+        $this->session->flash(
+            $result['success'] ? 'reseller_notice' : 'reseller_error',
+            $result['success']
+                ? 'Domain claimed. It will not be served until the DNS record below is verified.'
+                : (string) $result['error']
+        );
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
+    /**
+     * Admins can verify too, and can see exactly what DNS returned — so a
+     * support ticket about a failing domain can be answered without guessing.
+     */
+    public function verifyStoreDomain(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That client does not have a store.');
+
+            return Response::redirect('/admin/resellers');
+        }
+
+        $result = $this->stores->verifyDomain((int) $store['id']);
+
+        if ($result['verified']) {
+            $this->session->flash(
+                'reseller_notice',
+                'Domain verified via ' . (string) $result['method'] . ' — the store is live on '
+                . (string) $store['custom_domain'] . '.'
+            );
+
+            $this->activity->log(
+                'admin',
+                $this->adminId(),
+                'reseller.store.domain_verified',
+                'reseller',
+                (int) $store['id'],
+                'Verified store domain ' . (string) $store['custom_domain'] . ' via ' . (string) $result['method'],
+                $request->ip()
+            );
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        $this->session->flash('reseller_verification', [
+            'domain' => (string) ($store['custom_domain'] ?? ''),
+            'record_name' => (string) ($result['record_name'] ?? ''),
+            'expected' => (string) ($result['expected'] ?? ''),
+            'found' => (array) ($result['found'] ?? []),
+            'error' => $result['error'],
+        ]);
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
+    /** Taking a store offline: its customers see 503 rather than our shop at our prices. */
+    public function setStoreStatus(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+        $status = (string) $request->input('status', 'active');
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That client does not have a store.');
+
+            return Response::redirect('/admin/resellers');
+        }
+
+        $result = $this->stores->setStatus((int) $store['id'], $status);
+
+        $this->session->flash(
+            $result['success'] ? 'reseller_notice' : 'reseller_error',
+            $result['success']
+                ? ($status === 'active' ? 'Store reactivated.' : 'Store suspended — its domain now returns a 503.')
+                : (string) $result['error']
+        );
+
+        if ($result['success']) {
+            $this->activity->log(
+                'admin',
+                $this->adminId(),
+                $status === 'active' ? 'reseller.store.activated' : 'reseller.store.suspended',
+                'reseller',
+                (int) $store['id'],
+                'Set reseller store #' . $store['id'] . ' (client #' . $clientId . ') to ' . $status,
+                $request->ip()
+            );
+        }
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
+    /** @param array<string, mixed>|null $store */
+    private function renderStorePage(int $clientId, ?array $store, Request $request): Response
+    {
+        return $this->render('reseller.admin-store', [
+            'clientId' => $clientId,
+            'store' => $store,
+            'client' => $this->clients->find($clientId),
+            'platformHost' => $this->locator->platformHost(),
+            'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
+            'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
+                ? null
+                : '_codevault-verify.' . $store['custom_domain'],
+            'error' => $this->session->pullFlash('reseller_error'),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'verification' => $this->session->pullFlash('reseller_verification'),
+        ]);
     }
 
     /** The signed-in admin's id for the activity log, or null when there isn't one. */

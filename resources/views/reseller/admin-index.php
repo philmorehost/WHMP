@@ -44,7 +44,7 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
     </form>
 </div>
 
-<div class="cv-card">
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Reseller API keys</h2>
     <p><?= count($resellers) ?> key(s) issued, <strong><?= (int) $activeCount ?></strong> active.
         A key is created disabled and only becomes active when the client submits the domain they resell from —
@@ -93,6 +93,69 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
         <?php endforeach; ?>
         <?php if ($resellers === []): ?>
             <tr><td colspan="8" style="color:var(--cv-text-secondary);">No reseller API keys have been issued yet.</td></tr>
+        <?php endif; ?>
+        </tbody>
+    </table>
+</div>
+
+<div class="cv-card">
+    <h2 class="cv-card__title">White-label stores</h2>
+    <p>Each store serves our catalogue under the reseller's own branding. A custom domain is only served once DNS
+        proves the reseller controls it — a domain typed in but unverified is listed here and serves nothing.
+        A suspended store returns 503 on its domain rather than showing our shop at our prices.</p>
+    <table class="cv-table">
+        <thead>
+        <tr>
+            <th>Store</th><th>Client</th><th>Platform address</th><th>Custom domain</th>
+            <th>Status</th><th>Opened</th><th></th>
+        </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($stores as $store): ?>
+            <?php
+            $storeVerified = ($store['domain_verified_at'] ?? null) !== null;
+            $storeActive = ($store['status'] ?? 'active') === 'active';
+            ?>
+            <tr>
+                <td>
+                    <a href="/admin/resellers/<?= (int) $store['client_id'] ?>/store">
+                        <?= e((string) ($store['brand_name'] ?? $store['slug'])) ?>
+                    </a>
+                    <br><code><?= e((string) $store['slug']) ?></code>
+                </td>
+                <td>
+                    <a href="/admin/clients/<?= (int) $store['client_id'] ?>">
+                        <?= e(trim((string) ($store['first_name'] ?? '') . ' ' . (string) ($store['last_name'] ?? ''))) ?>
+                    </a>
+                    <br><span style="color:var(--cv-text-secondary);"><?= e((string) ($store['email'] ?? '')) ?></span>
+                </td>
+                <td><code><?= e((string) $store['slug']) ?>.<?= e($platformHost) ?></code></td>
+                <td>
+                    <?php if (($store['custom_domain'] ?? null) === null): ?>
+                        <em>not set</em>
+                    <?php elseif ($storeVerified): ?>
+                        <span class="cv-badge cv-badge--success">Verified</span>
+                        <code><?= e((string) $store['custom_domain']) ?></code>
+                    <?php else: ?>
+                        <span class="cv-badge cv-badge--danger">Not verified</span>
+                        <code><?= e((string) $store['custom_domain']) ?></code>
+                    <?php endif; ?>
+                </td>
+                <td>
+                    <?php if ($storeActive): ?>
+                        <span class="cv-badge cv-badge--success">Active</span>
+                    <?php else: ?>
+                        <span class="cv-badge cv-badge--danger">Suspended</span>
+                    <?php endif; ?>
+                </td>
+                <td><?= e((string) ($store['created_at'] ?? '')) ?></td>
+                <td>
+                    <a class="cv-btn" href="/admin/resellers/<?= (int) $store['client_id'] ?>/store">Manage</a>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        <?php if ($stores === []): ?>
+            <tr><td colspan="7" style="color:var(--cv-text-secondary);">No reseller stores have been opened yet.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>
