@@ -73,6 +73,16 @@ final class CheckoutService
             $line['line_total'] = $convert((float) $line['line_total']);
             $line['domain_price'] = $convert((float) ($line['domain_price'] ?? 0.0));
 
+            // The reseller's cost is stored in the client's currency too. Left
+            // in catalogue units it would be the same class of bug as an
+            // unconverted price: a figure in naira recorded as dollars, owed
+            // by a reseller whose store sells in the client's currency.
+            foreach (['cost_price', 'cost_setup_fee', 'cost_options_total', 'cost_domain_price'] as $costField) {
+                if (($line[$costField] ?? null) !== null) {
+                    $line[$costField] = $convert((float) $line[$costField]);
+                }
+            }
+
             foreach ($line['options'] as &$option) {
                 $option['price'] = $convert((float) $option['price']);
             }
@@ -85,6 +95,7 @@ final class CheckoutService
         $priced['domainTotal'] = $convert((float) ($priced['domainTotal'] ?? 0.0));
         $priced['discount'] = $convert((float) $priced['discount']);
         $priced['total'] = $convert((float) $priced['total']);
+        $priced['costTotal'] = $convert((float) ($priced['costTotal'] ?? 0.0));
 
         return $priced;
     }
@@ -98,7 +109,6 @@ final class CheckoutService
         $effectiveCurrency = $this->currency->resolveEffective($client, $this->currencySelection->get());
 
         $result = $this->executeOrder($clientId, $client, $this->cartService->priced(), $effectiveCurrency);
-
         if ($result['success']) {
             $this->cart->clear();
         }
@@ -176,6 +186,15 @@ final class CheckoutService
         }
 
         [$orderId, $invoiceId, $serviceIds] = $result;
+
+        // A store's customer becomes that store's account — but ONLY if the
+        // account has no owner yet. An existing client of ours who happens to
+        // buy from a reseller's store keeps their existing ownership: letting
+        // one order reassign an account would let a reseller capture customers
+        // we already have. (Reversing this is a one-line change here.)
+        if ($priced['store_id'] !== null) {
+            $this->clients->setResellerIfUnclaimed($clientId, (int) $priced['store_id']);
+        }
 
         // Auto-provision products and domains configured with autosetup === 'order'
         $hasPendingApproval = false;
@@ -285,6 +304,9 @@ final class CheckoutService
         $discount = (float) ($priced['discount'] ?? 0.0);
         $promoCode = $priced['promoCode'] ?? null;
         $promotionId = $priced['promotionId'] ?? null;
+        // The store this order is being placed at, or null on the platform's
+        // own checkout. Drives both the attribution and the cost columns.
+        $storeId = ($priced['store_id'] ?? null) === null ? null : (int) $priced['store_id'];
 
         $domainInvoiceItems = [];
         $orderLinesWithDomains = [];
@@ -318,8 +340,21 @@ final class CheckoutService
         $orderTotal = $existing ? $priced['total'] : $invoiceTotal;
 
         $orderId = (int) $this->db->insert(
-            'INSERT INTO orders (client_id, status, total, discount_amount, promotion_code, currency_id, currency_rate, no_invoice, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$clientId, $existing ? 'active' : 'pending', $orderTotal, $discount, $promoCode, $currencyLock['currency_id'], $currencyLock['currency_rate'], $existing ? 1 : 0, $now, $now]
+            'INSERT INTO orders (client_id, reseller_id, status, total, cost_total, discount_amount, promotion_code, currency_id, currency_rate, no_invoice, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                $clientId,
+                $priced['store_id'] ?? null,
+                $existing ? 'active' : 'pending',
+                $orderTotal,
+                $storeId === null ? null : (float) ($priced['costTotal'] ?? 0.0),
+                $discount,
+                $promoCode,
+                $currencyLock['currency_id'],
+                $currencyLock['currency_rate'],
+                $existing ? 1 : 0,
+                $now,
+                $now,
+            ]
         );
 
         // Insert domains into DB now that we have orderId
@@ -414,7 +449,7 @@ final class CheckoutService
             }
 
             $this->db->insert(
-                'INSERT INTO order_items (order_id, product_id, product_name, billing_cycle, quantity, unit_price, setup_fee, configurable_options, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO order_items (order_id, product_id, product_name, billing_cycle, quantity, unit_price, cost_price, setup_fee, configurable_options, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $orderId,
                     $line['product_id'],
@@ -422,6 +457,7 @@ final class CheckoutService
                     $line['billing_cycle'],
                     $line['quantity'],
                     $unitPrice,
+                    $line['cost_price'] ?? null,
                     $line['setup_fee'],
                     json_encode($line['options']),
                     $now,

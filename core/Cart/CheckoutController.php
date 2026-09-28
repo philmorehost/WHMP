@@ -51,13 +51,39 @@ final class CheckoutController
         private readonly DomainPricingRepository $domainPricing,
         private readonly DomainService $domainService,
         private readonly AbandonedCartRepository $abandonedCarts,
-        private readonly \CodeVault\Session\SessionManager $session
+        private readonly \CodeVault\Session\SessionManager $session,
+        // Only used to price the shop pages at the store's retail rates, so the
+        // shelf label matches what checkout will charge.
+        private readonly ?\CodeVault\Reseller\ResellerRetailPricing $retail = null
     ) {
+    }
+
+    /**
+     * The shop page's cache key, which MUST differ per store.
+     *
+     * A reseller's storefront shows that reseller's retail prices, so a single
+     * shared key would serve one store's prices to another for the cache's
+     * lifetime — a cross-tenant price leak that is invisible in normal use and
+     * only shows up under load. Static and public so a test can assert two
+     * stores never share one.
+     *
+     * @param array<string, mixed>|null $store
+     */
+    public static function catalogueCacheKey(?array $store): string
+    {
+        return 'store:index_v3:' . ($store === null ? 'platform' : 'store-' . (int) ($store['id'] ?? 0));
     }
 
     public function store(Request $request): Response
     {
-        $groups = $this->cache->remember('store:index_v2', 60, function () {
+        // The cache key carries the store id. A reseller's storefront shows the
+        // reseller's own retail prices, so a shared key would serve one store's
+        // prices to another for up to a minute — a cross-tenant price leak that
+        // is invisible in normal use and only appears under load.
+        $store = $this->cartService->activeStore();
+        $cacheKey = self::catalogueCacheKey($store);
+
+        $groups = $this->cache->remember($cacheKey, 60, function () use ($store) {
             $groups = $this->groups->all();
             $productsByGroup = $this->products->allGroupedByGroup();
             $db = \CodeVault\Support\App::container()->make(\CodeVault\Database::class);
@@ -70,6 +96,17 @@ final class CheckoutController
                         $monthlyRow = array_values(array_filter($pricingRows, fn($r) => $r['billing_cycle'] === 'monthly'))[0] ?? $pricingRows[0];
                         $prod['starting_price'] = (float) $monthlyRow['price'];
                         $prod['starting_cycle'] = (string) $monthlyRow['billing_cycle'];
+
+                        // On a store this is the price the CUSTOMER will be
+                        // charged, not the catalogue figure — the shelf label
+                        // and the checkout must not disagree.
+                        if ($store !== null && $this->retail !== null) {
+                            $prod['starting_price'] = $this->retail->priceFor(
+                                (float) $monthlyRow['price'],
+                                $this->retail->markupFor($store),
+                                null
+                            );
+                        }
                     } else {
                         $prod['starting_price'] = 0.00;
                         $prod['starting_cycle'] = 'monthly';
@@ -115,6 +152,21 @@ final class CheckoutController
         unset($og);
 
         $pricing = $this->pricing->forProduct((int) $product['id']);
+
+        // On a store, the cycle prices shown here are the ones the customer
+        // will be charged. Pricing them at catalogue rates while checkout
+        // charged retail is the one combination that must never ship: the
+        // customer would be billed more than the page told them.
+        $store = $this->cartService->activeStore();
+
+        if ($store !== null && $this->retail !== null) {
+            $markup = $this->retail->markupFor($store);
+
+            foreach ($pricing as $i => $row) {
+                $pricing[$i]['price'] = $this->retail->priceFor((float) $row['price'], $markup, null);
+            }
+        }
+
         $cheapest = $pricing === [] ? 0.0 : min(array_map(static fn (array $row) => (float) $row['price'], $pricing));
         $url = $this->seo->canonicalUrl("/store/{$product['id']}");
         $client = $this->guard->currentClient();

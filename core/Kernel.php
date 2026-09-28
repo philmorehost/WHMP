@@ -500,7 +500,11 @@ class Kernel
                 $c->make(ConfigurableOptionRepository::class),
                 $c->make(ConfigurableOptionPricingRepository::class),
                 $c->make(PromotionService::class),
-                $c->make(Database::class)
+                $c->make(Database::class),
+                // The storefront this request is on (null on the platform's own
+                // site) and the engine that turns catalogue prices into retail.
+                $c->make(CurrentReseller::class),
+                $c->make(ResellerRetailPricing::class)
             );
         });
 

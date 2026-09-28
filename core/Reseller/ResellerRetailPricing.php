@@ -194,6 +194,16 @@ final class ResellerRetailPricing
     }
 
     /**
+     * What the reseller owes us for one catalogue figure: list less the admin's
+     * discount. Exposed because the cart has to compute the cost side of a line
+     * it is pricing at retail, from the same catalogue lookup.
+     */
+    public function costPriceFor(float $listPrice, string $kind): float
+    {
+        return $this->cost->resellerPrice($listPrice, $kind);
+    }
+
+    /**
      * A price the reseller has set that no longer covers what they owe us.
      *
      * Reported, never corrected: the customer must be charged what the reseller

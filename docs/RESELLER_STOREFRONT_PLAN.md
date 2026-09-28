@@ -167,15 +167,32 @@ Each phase is independently useful and independently verifiable.
   modelled.
 
 ### Phase 3 — Checkout and orders under a tenant  *(money path — highest risk)*
-- `CartService::priceItems()` takes an optional store context: lines carry
-  `unit_price` (retail) **and** `cost_price`; the returned totals carry
-  `costTotal`.
-- `CheckoutService::buildOrder()` writes `orders.reseller_id`, `orders.cost_total`,
-  and tags the customer `clients.reseller_id`.
-- `order_items` gains `cost_price` (snapshot, like `unit_price`).
-- Tests: retail vs cost on the same order; the customer is invoiced retail;
-  cost is unaffected by promotions (a coupon is *our* concession, it must not
-  reduce what the reseller owes... **decision needed**, see §6).
+**Implemented 2026-09-29.** Migration `0187_add_reseller_attribution_to_orders`
+adds `orders.reseller_id`, `orders.cost_total`, `order_items.cost_price` and
+`clients.reseller_id`. Both foreign keys are `ON DELETE SET NULL`: deleting a
+store must never delete an order or a client account.
+- `CartService::priceItems()` takes an optional store context. Lines then carry
+  both `unit_price` (retail) **and** `cost_price`; the totals carry `costTotal`
+  and the priced cart carries `store_id`. On the platform path every `cost_*`
+  value is `null`, so a platform order is byte-for-byte what it was.
+- Setup fees, configurable options and domains go through the same
+  `ResellerRetailPricing` call as the base price, so no line can be retail in
+  one component and cost in another.
+- `CheckoutService` converts the cost figures with the *same* rate as the
+  retail figures (they are the same currency at that point), then writes
+  `orders.reseller_id` + `orders.cost_total` and one `order_items.cost_price`
+  per line as a snapshot, exactly like `unit_price`.
+- **The customer's invoice is retail only.** `cost_total` is never totalled
+  onto a document; it is the ledger figure Phase 4 bills the reseller for.
+- A promotion reduces the customer's price only — `costTotal` is computed
+  before the discount, so a reseller's campaign cannot spend our margin.
+- `order_items.cost_price` is per line because a mix of products with different
+  markups, and a later markup change, would make a single order-level figure
+  un-auditable.
+- Tests: 12 in `ResellerStoreCheckoutTest`, driving the real storefront path
+  (session `Cart` → `priceItems()` → `placeOrder()`), 51 assertions. A negative
+  control (forcing `priceItems()` to ignore the store) fails 7 of the 12 — the
+  money tests bite, and the two platform-path tests correctly still pass.
 
 ### Phase 4 — Billing the reseller
 - A report of cost accrued per reseller per period, and a job that raises the
@@ -202,8 +219,8 @@ Recommended model, and the one the phases above assume:
 The alternative (the customer pays the reseller directly, off-platform, and we
 invoice the reseller for cost) removes step 1 entirely and makes the storefront
 order-only. Both are defensible; they differ in who carries the payment risk and
-which gateway account the money lands in. **This needs a decision before
-Phase 3.**
+which gateway account the money lands in. **Decided: we collect** (see §6) —
+Phase 3 is built on that, and the reseller is invoiced for cost in Phase 4.
 
 ## 6. Decisions needed
 
@@ -220,11 +237,22 @@ Phase 3.**
    reserved list (`www`, `api`, `admin`, `mail`, `checkout`, …) so a store can
    never sit on infrastructure-looking names.
 
-Still open (needed before Phase 3):
+**Decided 2026-09-29, while implementing Phase 3:**
 
-4. **Existing clients** — may an existing client of ours order from a store and
-   become attributed to that reseller, or is a store's customer always a new or
-   already-attributed account?
+4. **Existing clients** — *a store attributes only the accounts it created.*
+   An existing client of ours who buys from a store keeps their current owner;
+   only the order is attributed to the store. The alternative — reassigning them
+   — would move a client's account, history and support relationship to a third
+   party on the strength of one purchase, and would let a reseller acquire our
+   clients by marketing at them. The claim is made by
+   `ClientRepository::setResellerIfUnclaimed()` with the guard *inside* the
+   `UPDATE` (`WHERE id = ? AND reseller_id IS NULL`), so it is atomic and the
+   first store to create a customer keeps them. A platform order leaves
+   `reseller_id` `NULL`, and a customer who belongs to nobody is attributed to
+   whichever store first creates them.
+
+**Still open:**
+
 5. **Unverified domains** — a store with no verified domain: reachable on its
    platform subdomain only (implemented), or invisible entirely?
 
@@ -235,7 +263,66 @@ Still open (needed before Phase 3):
   `DomainVerifier`, `ResellerStoreService`; tenant resolution in
   `Kernel::handle()`; per-tenant branding through `ThemeSettings::forCurrentSite()`,
   `brand_name()` and `SeoTags`; admin and client store screens.
-- Phases 2–5 not started.
+- **Phase 2 — implemented** (2026-09-28). Migration
+  `0186_add_reseller_retail_prices` (`resellers.markup_percent`,
+  `reseller_prices`, `reseller_domain_prices`); `ResellerRetailPricing` + its
+  repository; reseller price list at `/client/reseller/prices`; admin sees the
+  markup and override count on the admin store page.
+- **Phase 3 — implemented** (2026-09-29). Migration
+  `0187_add_reseller_attribution_to_orders`; store-aware `CartService` and
+  `CheckoutService`; order and account attribution; per-tenant catalogue cache
+  key.
+- Phases 4–5 not started.
+
+### Test-harness note (found 2026-09-29)
+
+A killed test run leaves `codevault_test` unusable, and the symptom imitates a
+migration-order bug. `DatabaseTestCase::setUp()` drops every table and *then*
+migrates, so a process killed between the two leaves a populated `migrations`
+table with no schema behind it. The next run fails somewhere mid-chain — I saw
+`Table 'codevault_test.mail_campaign_recipients' doesn't exist` raised from
+migration `0145`, and separately
+`Duplicate entry '0133_add_client_id_to_mail_campaigns.php' for key 'migration'`.
+Both disappear after:
+
+```sql
+DROP DATABASE IF EXISTS codevault_test; CREATE DATABASE codevault_test;
+```
+
+(`AbandonedCartTest` then passes 7/7.) Before believing any mid-chain failure,
+reset the database — and never kill a run mid-migration.
+
+`0145` is also genuinely fragile in isolation: its guard asks whether the
+*column* exists, so when the *table* is missing it proceeds to `ALTER` a table
+that is not there. It should check the table exists first (and skip), the way
+`0134` guards each of its steps.
+
+### Harness coupling fixed while landing Phase 3 (2026-09-29)
+
+`CartCheckoutTest::setUp()` boots the real `Kernel` and then re-pinned only
+`Database` to the test connection. Every other singleton the Kernel built —
+`SettingsRepository` in particular — stayed bound to the application's
+configured database (`clientmore_whmp`), so on any machine where that database
+is unreachable 9 of its 16 tests died with
+`Access denied for user 'clientmore_whmp'@'localhost'`, thrown from
+`CheckoutService` when it resolves `SettingsRepository` lazily to stamp the new
+invoice's due date. Nothing to do with the storefront — but it is the suite that
+guards the *platform* checkout path, i.e. the one thing Phase 3 must be shown not
+to have changed, so it was worth repairing rather than excusing.
+
+Fix: re-pin the DB-backed singletons, not just `Database` (the same repair
+`OrderCancellationTest` / `AcceptOrderJobTest` already carry):
+
+```php
+$container = \CodeVault\Support\App::container();
+$container->instance(\CodeVault\Database::class, $this->db);
+$container->instance(SettingsRepository::class, new SettingsRepository($this->db));
+```
+
+Result: `CartCheckoutTest` 16/16, 65 assertions. The general lesson is worth
+keeping: **a container built at boot keeps the connections it was built with**,
+and re-pinning one of them looks like it worked until something resolves another
+one lazily.
 
 ## 7. Explicitly out of scope
 

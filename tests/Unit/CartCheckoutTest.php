@@ -49,7 +49,17 @@ final class CartCheckoutTest extends DatabaseTestCase
     {
         parent::setUp();
         new \CodeVault\Kernel(dirname(__DIR__, 2));
-        \CodeVault\Support\App::container()->instance(\CodeVault\Database::class, $this->db);
+
+        // Booting the Kernel builds every DB-backed singleton against the
+        // application's configured database, so re-pinning Database is not
+        // enough: CheckoutService resolves SettingsRepository from the
+        // container lazily when it stamps the new invoice's due date, and a
+        // singleton bound at boot still holds the app connection — which is
+        // "Access denied for user 'clientmore_whmp'" wherever that database
+        // is not reachable. Same fix as OrderCancellationTest/AcceptOrderJobTest.
+        $container = \CodeVault\Support\App::container();
+        $container->instance(\CodeVault\Database::class, $this->db);
+        $container->instance(SettingsRepository::class, new SettingsRepository($this->db));
 
         (new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations'))->run();
 

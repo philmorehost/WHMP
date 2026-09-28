@@ -316,6 +316,23 @@ final class ClientRepository
      * PaymentCallbackController asks the gateway for all read that column as
      * "stored figure x rate".
      */
+    /**
+     * Which reseller store brought this account in — set ONCE, and only while
+     * the account has no owner.
+     *
+     * The `reseller_id IS NULL` test is part of the UPDATE rather than a check
+     * beforehand, so two concurrent orders cannot both believe they were first,
+     * and no caller can accidentally reassign an account that already belongs
+     * somewhere. Returns true when this call is the one that claimed it.
+     */
+    public function setResellerIfUnclaimed(int $clientId, int $resellerId): bool
+    {
+        return $this->db->update(
+            'UPDATE clients SET reseller_id = ?, updated_at = ? WHERE id = ? AND reseller_id IS NULL',
+            [$resellerId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $clientId]
+        ) > 0;
+    }
+
     public function updateCurrency(int $id, int $currencyId, bool $includeSettled = false): void
     {
         $client = $this->db->selectOne('SELECT currency_id FROM clients WHERE id = ?', [$id]);
