@@ -46,6 +46,16 @@ automatically and reuses Phase 4 rather than replacing it.
 - Balance < 0 → **they owe us**: they priced below our cost, which §6/§7 already
   says is their problem. A payout can never take the balance below zero.
 
+**Refunds and chargebacks append, they do not edit.** A refunded order reverses
+*both* sides — the receipt and the cost — as two further entries. The original
+entries are never edited or deleted: an append-only ledger has to keep the story,
+and "why is this balance what it is" is the only question the account exists to
+answer.
+
+**Decided 2026-09-28:** this running-account model, crediting a receipt when the
+customer's invoice is **paid**, settling cost invoices **from the balance**, and
+reversing **both** sides on a refund. See §9.
+
 This is worth being precise about, because it resolves the apparent redundancy in
 Phase 4: the cost invoice is **not** a separate demand for cash. It is the debit
 side of the same account, and it is settled out of the reseller's balance — the
@@ -161,18 +171,18 @@ States: `pending → paid | rejected | cancelled`. Each transition is a one-way
 guarded update (`WHERE status = 'pending'`), so a double-click cannot pay twice —
 the same shape as the cost-invoice claim guard in Phase 4.
 
-## 6. The hard parts (each needs a decision, not a guess)
+## 6. The hard parts
 
-- **When is retail credited?** Recommendation: **when the customer's invoice is
-  paid** — that is the moment we actually hold the money. Crediting at order
+- **When is retail credited?** *Decided (§9): when the customer's invoice is
+  PAID.* That is the moment we actually hold the money; crediting at order
   creation would create a withdrawable balance funded by money nobody has paid.
-- **Refunds and chargebacks.** If a store order is refunded, the retail we hold
-  goes back, so the receipt must be reversed. Whether the *cost* is also reversed
-  is a business decision, not a technical one: if we refund our cost too, the
-  reseller's negative margin is ours to absorb.
+- **Refunds and chargebacks.** *Decided (§9): reverse both sides*, the receipt
+  **and** the cost, as appended reversing entries. The alternative — keeping the
+  cost owed on a sale the customer got refunded — would leave a reseller owing us
+  for a sale they made in good faith.
 - **Holding period.** A payout immediately after payment can be withdrawn and then
   charged back, leaving us exposed. A holding period (e.g. funds become
-  withdrawable N days after payment) is the usual defence.
+  withdrawable N days after payment) is the usual defence. *Still open (§9).*
 - **Currency.** Entries are in the reseller's currency, converted per order from
   its stored convention. **Who bears the FX movement** between the day we collect
   and the day we pay out is a decision; the ledger as designed fixes the rate at
@@ -222,14 +232,25 @@ rule `client_credit_ledger` already follows, and worth copying deliberately.
 Phase A is safe to build immediately: it moves no money and its only output is a
 number we can check by hand against the orders.
 
-## 9. Decisions needed before Phase B
+## 9. Decisions
 
-1. **Model**: the running account in §2 (recommended), or a gross
-   invoice-and-payout pair with no netting?
-2. **Accrual trigger**: credit on **payment** (recommended) or on order placement?
-3. **Cost invoices**: settle them from the balance automatically (recommended), or
-   keep demanding them in cash and pay retail out separately?
-4. **Refunds**: reverse the receipt only, or the cost as well?
+**Decided 2026-09-28:**
+
+1. **Model** — *one running account, netted* (§2). The cost invoice is the debit
+   side of the same account, not a separate demand for cash we are already
+   holding.
+2. **Accrual trigger** — *when the customer's invoice is PAID.* That is the moment
+   we actually hold the money; crediting on order placement would create a
+   withdrawable balance funded by money nobody has paid yet.
+3. **Cost invoices** — *settled from the balance automatically*, so the reseller
+   sees one number instead of a bill they must pay out of a balance we owe them.
+4. **Refunds** — *reverse both sides*, the receipt **and** the cost, as appended
+   reversing entries. Consistent with the storefront plan's "below-cost pricing is
+   the reseller's problem" (a refunded sale simply un-winds) and it keeps the two
+   sides of the ledger coherent.
+
+**Still open (needed before Phase B):**
+
 5. **Holding period**: none, or N days after payment before funds are withdrawable?
 6. **Minimum payout** amount, and whether it differs per currency.
 7. **FX risk**: we carry it (recommended, and simplest to explain) or the reseller?
