@@ -68,8 +68,16 @@ final class ResellerClubEmailProvisioningModuleTest extends DatabaseTestCase
             'message' => 'Order placed successfully',
         ]));
 
+        // product_type is the module's contract, and it is explicit: create()
+        // switches on `$params['product_type']` (defaulting to business_email)
+        // and NEVER infers it from the product's name. This test asserted
+        // /google/add.json while passing only a product_name, so it took the
+        // default branch -- the test's own name said Google Workspace, but it
+        // never told the module. singleSignOn() below passes product_type too,
+        // so the module is self-consistent.
         $result = $this->module->create([
             'product_name' => 'Google Workspace Business Starter',
+            'product_type' => 'google_workspace',
             'domain' => 'googlecompany.com',
             'no_of_accounts' => 1,
         ]);
@@ -106,9 +114,31 @@ final class ResellerClubEmailProvisioningModuleTest extends DatabaseTestCase
         $serverGroups = new ServerGroupRepository($this->db);
         $servers = new ServerRepository($this->db);
 
-        $guard = $this->createMock(\CodeVault\Auth\AuthGuard::class);
-        $guard->method('check')->willReturn(true);
-        $guard->method('can')->willReturn(true);
+        // AuthGuard is FINAL, so it cannot be doubled. This test errored on the
+        // createMock() before it ever reached the controller and had therefore
+        // never verified the import it is named for. A real guard with a
+        // super-admin session replaces the mock: AuthGuard::can() bypasses the
+        // permission matrix for a super-admin, which is exactly what the mock was
+        // standing in for. Names are fully qualified because this file does not
+        // import them.
+        $roles = new \CodeVault\Staff\RoleRepository($this->db);
+        $superAdminRoleId = $roles->create('Import Super Admin', true, []);
+        $adminId = (new \CodeVault\Auth\AdminRepository($this->db))->create(
+            'rcimporter',
+            'rcimporter@example.test',
+            'secret123',
+            'Import Admin',
+            $superAdminRoleId
+        );
+
+        $configDir = sys_get_temp_dir() . '/codevault-rc-import-' . uniqid();
+        mkdir($configDir);
+        $_SESSION = [];
+        $session = new \CodeVault\Session\SessionManager(new \CodeVault\Config($configDir));
+        $guard = new \CodeVault\Auth\AuthGuard($session, new \CodeVault\Auth\AdminRepository($this->db), $roles);
+        // Seed the guard's own session key rather than calling login(), which
+        // session_regenerate_id()s and warns in CLI (no active session).
+        $_SESSION['admin_id'] = $adminId;
 
         $view = $this->createMock(\CodeVault\View::class);
 

@@ -88,7 +88,7 @@ final class NocixDedicatedServerModuleTest extends TestCase
         $this->assertTrue($result['success']);
         $request = $this->http->lastRequest();
         $this->assertSame('GET', $request['method']);
-        $this->assertSame('https://my.nocix.net/api/disconnect-server/?service_id=5001', $request['url']);
+        $this->assertSame('https://manage.nocix.net/api/disconnect-server/?service_id=5001', $request['url']);
         $this->assertSame('Basic ' . base64_encode('nocixuser:TOKEN123'), $request['headers']['Authorization']);
     }
 
@@ -99,7 +99,7 @@ final class NocixDedicatedServerModuleTest extends TestCase
         $result = $this->module->unsuspend(['username' => '5002', 'server' => $this->server]);
 
         $this->assertTrue($result['success']);
-        $this->assertSame('https://my.nocix.net/api/reconnect-server/?service_id=5002', $this->http->lastRequest()['url']);
+        $this->assertSame('https://manage.nocix.net/api/reconnect-server/?service_id=5002', $this->http->lastRequest()['url']);
     }
 
     public function test_suspend_reports_the_error_message_from_a_nocix_error_response(): void
@@ -121,7 +121,7 @@ final class NocixDedicatedServerModuleTest extends TestCase
         $result = $this->module->usage(['username' => '5003', 'server' => $this->server]);
 
         $this->assertTrue($result['success']);
-        $this->assertSame('https://my.nocix.net/api/bandwidth-graphing/?service_id=5003', $this->http->lastRequest()['url']);
+        $this->assertSame('https://manage.nocix.net/api/bandwidth-graphing/?service_id=5003', $this->http->lastRequest()['url']);
         $this->assertIsArray($result['data']);
     }
 
@@ -144,7 +144,7 @@ final class NocixDedicatedServerModuleTest extends TestCase
         $result = $this->module->testConnection(['server' => $this->server]);
 
         $this->assertTrue($result['success']);
-        $this->assertSame('https://my.nocix.net/api/list-services/', $this->http->lastRequest()['url']);
+        $this->assertSame('https://manage.nocix.net/api/list-services/', $this->http->lastRequest()['url']);
     }
 
     public function test_test_connection_fails_on_unauthorized(): void

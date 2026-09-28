@@ -17,7 +17,12 @@ final class CpanelUapiClientTest extends TestCase
     private array $server = [
         'hostname' => 'whm.example.test',
         'api_username' => 'root',
-        'api_token' => 'TOKEN123',
+        // A realistic WHM API token. The client treats a secret as a token only
+        // when it is 30-64 alphanumeric characters and sends anything else as a
+        // password via Basic auth. 'TOKEN123' is EIGHT characters, so it took the
+        // password branch -- which is why this test saw Basic auth while asserting
+        // the `whm user:token` header.
+        'api_token' => 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0',
         'api_port' => null,
         'use_ssl' => true,
     ];
@@ -41,7 +46,25 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertStringContainsString('cpanel_jsonapi_apiversion=3', $request['url']);
         $this->assertStringContainsString('cpanel_jsonapi_module=Email', $request['url']);
         $this->assertStringContainsString('cpanel_jsonapi_func=list_pops', $request['url']);
-        $this->assertSame('whm root:TOKEN123', $request['headers']['Authorization']);
+        $this->assertSame('whm root:a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0', $request['headers']['Authorization']);
+    }
+
+    public function test_a_password_shaped_secret_is_sent_as_basic_auth(): void
+    {
+        $this->http->respondWith(200, json_encode(['result' => ['status' => 1, 'data' => []]]));
+
+        // The other half of the same rule, and the one the fixture above used to
+        // cover by accident. A WHM API token is ~50 alphanumeric characters; a
+        // password is not, and Basic auth is what WHM expects for one. Testing
+        // only the token branch would leave this rule half-covered.
+        $passwordServer = array_merge($this->server, ['api_token' => 'Passw0rd!']);
+
+        $this->client->call($passwordServer, 'cvuser1', 'Email', 'list_pops');
+
+        $this->assertSame(
+            'Basic ' . base64_encode('root:Passw0rd!'),
+            $this->http->lastRequest()['headers']['Authorization']
+        );
     }
 
     public function test_call_passes_extra_params_through_the_query_string(): void
