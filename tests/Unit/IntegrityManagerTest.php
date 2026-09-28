@@ -52,7 +52,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_pending_when_no_activation_key_has_been_stored(): void
     {
-        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($http);
 
         $result = $manager->check();
@@ -63,7 +63,15 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_active_when_server_confirms_the_key_is_valid(): void
     {
-        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        // body.status === 1, NOT body.valid. The manager's success test is
+        // `(int) ($response['body']['status'] ?? 0) === 1`, in check() and in
+        // validateKeyRemotely() alike, and no other code in the repo reads a
+        // `valid` field from the licence API. These fixtures used `valid`, so
+        // EVERY "valid" response fell through to the "server reachable and
+        // explicitly rejected" branch and returned Suspended -- which is also why
+        // the explicit-rejection test passed trivially, and why the grace test
+        // could never see a last_valid_at to be gracious about.
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($http);
         $manager->storeActivationKey('CV-TEST-KEY');
 
@@ -75,7 +83,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_cached_result_is_reused_within_the_ttl_without_calling_the_server_again(): void
     {
-        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($http);
         $manager->storeActivationKey('CV-TEST-KEY');
 
@@ -88,7 +96,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_suspended_immediately_when_server_explicitly_rejects_the_key(): void
     {
-        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => false, 'message' => 'revoked']]);
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 0, 'message' => 'revoked']]);
         $manager = $this->manager($http);
         $manager->storeActivationKey('CV-TEST-KEY');
 
@@ -99,7 +107,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_grace_when_server_unreachable_but_recently_valid(): void
     {
-        $okHttp = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $okHttp = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($okHttp);
         $manager->storeActivationKey('CV-TEST-KEY');
         $manager->check(); // establishes last_valid_at = now
@@ -121,7 +129,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_suspended_when_server_unreachable_and_grace_period_expired(): void
     {
-        $okHttp = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $okHttp = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($okHttp);
         $manager->storeActivationKey('CV-TEST-KEY');
         $manager->check();
@@ -143,7 +151,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_kill_switch_short_circuits_to_suspended_without_calling_the_server(): void
     {
-        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($http);
         $manager->storeActivationKey('CV-TEST-KEY');
         $manager->kill();
@@ -159,7 +167,7 @@ final class IntegrityManagerTest extends DatabaseTestCase
 
     public function test_store_and_read_activation_key_round_trips_through_encryption(): void
     {
-        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
         $manager = $this->manager($http);
 
         $manager->storeActivationKey('CV-SUPER-SECRET');

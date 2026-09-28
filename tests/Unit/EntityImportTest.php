@@ -131,7 +131,11 @@ final class EntityImportTest extends DatabaseTestCase
         $this->assertCount(1, $rows);
         $this->assertSame($this->productId, (int) $rows[0]['product_id']);
         $this->assertSame('monthly', $rows[0]['billing_cycle']);
-        $this->assertSame('9.99', $rows[0]['amount']);
+        // Money columns are 6dp since migration 0126, so a stored amount reads
+        // back as "9.990000". Asserting the storage STRING tested the column
+        // definition rather than the imported figure, and broke the moment the
+        // columns widened -- compare numerically instead.
+        $this->assertEqualsWithDelta(9.99, (float) $rows[0]['amount'], 0.000001);
         $this->assertSame('pending', $rows[0]['status']);
         $this->assertSame('2026-08-01', $rows[0]['next_due_date']);
     }
@@ -191,7 +195,7 @@ final class EntityImportTest extends DatabaseTestCase
         $rows = $this->invoices->forClient($this->clientId);
         $this->assertCount(1, $rows);
         $this->assertSame('unpaid', $rows[0]['status']);
-        $this->assertSame('100.00', $rows[0]['total']);
+        $this->assertEqualsWithDelta(100.00, (float) $rows[0]['total'], 0.000001);
         $this->assertNull($rows[0]['paid_at']);
 
         $items = $this->invoices->items((int) $rows[0]['id']);
@@ -208,9 +212,9 @@ final class EntityImportTest extends DatabaseTestCase
 
         $rows = $this->invoices->forClient($this->clientId);
         $this->assertSame('paid', $rows[0]['status']);
-        $this->assertSame('120.00', $rows[0]['total']);
-        $this->assertSame('10.00', $rows[0]['tax_amount']);
-        $this->assertSame('110.00', $rows[0]['subtotal']);
+        $this->assertEqualsWithDelta(120.00, (float) $rows[0]['total'], 0.000001);
+        $this->assertEqualsWithDelta(10.00, (float) $rows[0]['tax_amount'], 0.000001);
+        $this->assertEqualsWithDelta(110.00, (float) $rows[0]['subtotal'], 0.000001);
         $this->assertSame('2026-01-10 00:00:00', $rows[0]['paid_at']);
     }
 
@@ -308,9 +312,9 @@ final class EntityImportTest extends DatabaseTestCase
         $this->assertSame('active', $product['status']);
 
         $productPricing = $pricing->forProduct((int) $product['id']);
-        $this->assertSame('9.99', $productPricing['monthly']['price']);
-        $this->assertSame('5.00', $productPricing['monthly']['setup_fee']);
-        $this->assertSame('99.00', $productPricing['annually']['price']);
+        $this->assertEqualsWithDelta(9.99, (float) $productPricing['monthly']['price'], 0.000001);
+        $this->assertEqualsWithDelta(5.00, (float) $productPricing['monthly']['setup_fee'], 0.000001);
+        $this->assertEqualsWithDelta(99.00, (float) $productPricing['annually']['price'], 0.000001);
     }
 
     public function test_product_import_updates_an_existing_product_by_name_without_duplicating(): void
@@ -359,12 +363,12 @@ final class EntityImportTest extends DatabaseTestCase
 
         $result = $importer->import($headers, [['xyz', 'local', '10.00', '9.00', '11.00']]);
         $this->assertSame(1, $result['imported']);
-        $this->assertSame('10.00', $domainPricing->findByTld('xyz')['register_price']);
+        $this->assertEqualsWithDelta(10.00, (float) $domainPricing->findByTld('xyz')['register_price'], 0.000001);
         $this->assertCount($countBefore + 1, $domainPricing->all());
 
         // Re-importing an updated price for the same TLD updates, doesn't duplicate.
         $importer->import($headers, [['.xyz', 'local', '12.00', '9.00', '11.00']]);
-        $this->assertSame('12.00', $domainPricing->findByTld('xyz')['register_price']);
+        $this->assertEqualsWithDelta(12.00, (float) $domainPricing->findByTld('xyz')['register_price'], 0.000001);
         $this->assertCount($countBefore + 1, $domainPricing->all());
     }
 

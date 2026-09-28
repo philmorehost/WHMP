@@ -77,6 +77,13 @@ final class ResellerStoreTest extends DatabaseTestCase
         putenv('APP_NAME=Platform');
         $_ENV['APP_NAME'] = 'Platform';
 
+        // brand_name() memoises per site for the LIFE OF THE PROCESS, and this
+        // suite drops and recreates its tables between tests -- so AUTO_INCREMENT
+        // restarts, store ids repeat, and a 'store:1' memo written by an earlier
+        // test would be served here as this store's brand. The memo used to be a
+        // `static` inside the helper and nothing could clear it; now it can.
+        brand_name_forget();
+
         $this->configDir = sys_get_temp_dir() . '/codevault-store-test-' . uniqid();
         mkdir($this->configDir);
 
@@ -135,6 +142,10 @@ final class ResellerStoreTest extends DatabaseTestCase
             putenv('APP_NAME');
             unset($_ENV['APP_NAME']);
         }
+
+        // Leave no brand memoised for whatever runs next: this class changes the
+        // site between assertions, and the memo would otherwise outlive it.
+        brand_name_forget();
 
         parent::tearDown();
     }

@@ -142,8 +142,12 @@ if (!function_exists('brand_name')) {
         // one brand — true for a web request, false for a cron run that renders
         // mail for several reseller storefronts, which would sign all of them
         // with the first reseller's name.
-        static $cache = [];
-
+        //
+        // The memo itself lives in BrandNameCache rather than a `static` here,
+        // because a function-level static cannot be cleared from outside: nothing
+        // could drop it when a brand actually changed, and no test could start
+        // from a clean slate. The suite recreates its tables between tests, so
+        // store ids repeat and a stale 'store:1' was served to another store.
         $key = 'platform';
         $storeName = '';
 
@@ -158,8 +162,8 @@ if (!function_exists('brand_name')) {
             // No container yet (installer, CLI bootstrap) — platform brand.
         }
 
-        if (array_key_exists($key, $cache)) {
-            return $cache[$key];
+        if (\CodeVault\Theme\BrandNameCache::has($key)) {
+            return \CodeVault\Theme\BrandNameCache::get($key);
         }
 
         $name = $storeName;
@@ -178,7 +182,25 @@ if (!function_exists('brand_name')) {
             // No container/DB yet (installer, CLI bootstrap) — fall through.
         }
 
-        return $cache[$key] = ($name !== '' ? $name : 'WHMP');
+        $resolved = $name !== '' ? $name : 'WHMP';
+        \CodeVault\Theme\BrandNameCache::put($key, $resolved);
+
+        return $resolved;
+    }
+}
+
+if (!function_exists('brand_name_forget')) {
+    /**
+     * Drop the memoised brand for one site, or for every site.
+     *
+     * Needed wherever a brand is CHANGED in a process that may already have
+     * asked for it: without this, saving a new brand and then rendering an email
+     * in the same request signs the mail with the old name. Tests call it between
+     * cases, because the memo outlives any single test in the process.
+     */
+    function brand_name_forget(?string $site = null): void
+    {
+        \CodeVault\Theme\BrandNameCache::forget($site);
     }
 }
 

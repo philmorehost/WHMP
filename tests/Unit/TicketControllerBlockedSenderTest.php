@@ -109,8 +109,12 @@ final class TicketControllerBlockedSenderTest extends DatabaseTestCase
 
     public function test_block_sender_with_no_email_redirects_with_an_error_flag(): void
     {
+        // An EMPTY email, not a NULL one. tickets.email is NOT NULL, so the null
+        // this used to set threw "Column 'email' cannot be null" from the FIXTURE
+        // and the test errored before reaching the controller at all -- it had
+        // never once exercised the guard it is named for. '' is the real
+        // "no email" state, and createTicket('') already produces it.
         $ticketId = $this->createTicket('');
-        $this->db->update('UPDATE tickets SET email = NULL WHERE id = ?', [$ticketId]);
 
         $response = $this->controller->blockSender(
             new Request([], [], ['REQUEST_METHOD' => 'POST', 'REMOTE_ADDR' => '127.0.0.1'], []),

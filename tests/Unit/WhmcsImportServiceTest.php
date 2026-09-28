@@ -147,7 +147,10 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $invoices = new InvoiceRepository($this->db);
         $invoice = $invoices->forClient((int) $client['id'])[0];
         $this->assertSame('paid', $invoice['status']);
-        $this->assertSame('100.00', $invoice['total']);
+        // Money columns are 6dp since migration 0126, so a stored amount reads
+        // back as "100.000000". Asserting the storage STRING tested the column
+        // definition rather than the imported figure -- compare numerically.
+        $this->assertEqualsWithDelta(100.00, (float) $invoice['total'], 0.000001);
     }
 
     public function test_import_preserves_a_legacy_phpass_hash_and_randomizes_a_missing_password(): void
@@ -241,11 +244,11 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $this->assertCount(2, $rows);
         $paymentRow = array_values(array_filter($rows, static fn (array $r) => $r['gateway_transaction_id'] === 'TXN-100'))[0];
         $this->assertSame('completed', $paymentRow['status']);
-        $this->assertSame('100.00', $paymentRow['amount']);
+        $this->assertEqualsWithDelta(100.00, (float) $paymentRow['amount'], 0.000001);
 
         $refundRow = array_values(array_filter($rows, static fn (array $r) => $r['gateway_transaction_id'] === 'TXN-REFUND'))[0];
         $this->assertSame('refunded', $refundRow['status']);
-        $this->assertSame('25.00', $refundRow['amount']);
+        $this->assertEqualsWithDelta(25.00, (float) $refundRow['amount'], 0.000001);
     }
 
     public function test_import_creates_new_currencies_and_updates_the_existing_default(): void
@@ -264,7 +267,7 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $this->assertCount(2, $currencies->all());
         $eur = $currencies->findByCode('EUR');
         $this->assertNotNull($eur);
-        $this->assertSame('0.9200', $eur['exchange_rate']);
+        $this->assertEqualsWithDelta(0.92, (float) $eur['exchange_rate'], 0.000001);
         $this->assertSame('EUR', $eur['symbol'], 'the suffix is trimmed of surrounding whitespace');
     }
 
@@ -437,9 +440,9 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $com = $pricing->findByTld('com');
         $this->assertNotNull($com);
         $this->assertSame('local', $com['registrar_slug']);
-        $this->assertSame('12.99', $com['register_price']);
-        $this->assertSame('10.99', $com['transfer_price']);
-        $this->assertSame('14.99', $com['renew_price']);
+        $this->assertEqualsWithDelta(12.99, (float) $com['register_price'], 0.000001);
+        $this->assertEqualsWithDelta(10.99, (float) $com['transfer_price'], 0.000001);
+        $this->assertEqualsWithDelta(14.99, (float) $com['renew_price'], 0.000001);
     }
 
     public function test_import_falls_back_to_local_registrar_and_warns_when_whmcs_autoreg_module_is_unrecognized(): void
@@ -458,8 +461,8 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $net = $pricing->findByTld('net');
         $this->assertNotNull($net);
         $this->assertSame('local', $net['registrar_slug']);
-        $this->assertSame('20.00', $net['register_price']);
-        $this->assertSame('0.00', $net['transfer_price']);
+        $this->assertEqualsWithDelta(20.00, (float) $net['register_price'], 0.000001);
+        $this->assertEqualsWithDelta(0.0, (float) $net['transfer_price'], 0.000001);
     }
 
     public function test_import_migrates_services_with_correct_product_name_domain_and_dedicated_ip_hostname(): void
@@ -516,9 +519,9 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         $pricing = new ProductPricingRepository($this->db);
         $byCycle = $pricing->forProduct((int) $product['id']);
 
-        $this->assertSame('9.99', $byCycle['monthly']['price']);
-        $this->assertSame('5.00', $byCycle['monthly']['setup_fee']);
-        $this->assertSame('99.99', $byCycle['annually']['price']);
+        $this->assertEqualsWithDelta(9.99, (float) $byCycle['monthly']['price'], 0.000001);
+        $this->assertEqualsWithDelta(5.00, (float) $byCycle['monthly']['setup_fee'], 0.000001);
+        $this->assertEqualsWithDelta(99.99, (float) $byCycle['annually']['price'], 0.000001);
         $this->assertArrayNotHasKey('quarterly', $byCycle); // no column value supplied — no row created
     }
 
