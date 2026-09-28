@@ -42,7 +42,8 @@ final class ResellerCostBillingJob implements CronJob
         private readonly TaxCalculator $tax,
         private readonly SettingsRepository $settings,
         private readonly Database $db,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        private readonly ResellerLedgerService $ledger
     ) {
     }
 
@@ -68,6 +69,13 @@ final class ResellerCostBillingJob implements CronJob
 
         foreach ($this->costs->duePeriods($today, $minimum) as $period) {
             $invoiceId = $this->raise($period, $dueDays);
+
+            // The debit side of the reseller's account: the cost invoice is the
+            // document, and this records it against the same balance the retail
+            // receipts feed. Deliberately AFTER raise() returns, so it can only
+            // ever happen for an invoice that actually committed -- raise() rolls
+            // the invoice and the orders it claims back together, or not at all.
+            $this->ledger->recordCostInvoice($invoiceId);
 
             $this->hooks->fire(HookPoints::INVOICE_CREATED, [
                 'invoiceId' => $invoiceId,

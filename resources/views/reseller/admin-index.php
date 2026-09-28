@@ -11,7 +11,9 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Resellers</h1>
-    <p><a href="<?= e($docsUrl) ?>">Reseller API documentation &rarr;</a></p>
+    <p><a href="<?= e($docsUrl) ?>">Reseller API documentation &rarr;</a>
+        &middot; <a href="/admin/resellers/billing">Store cost billing &rarr;</a>
+        &middot; <a href="/admin/resellers/accounts">Reseller accounts &rarr;</a></p>
 
     <?php if ($error !== null && $error !== ''): ?>
         <div class="cv-alert cv-alert--error"><?= e((string) $error) ?></div>

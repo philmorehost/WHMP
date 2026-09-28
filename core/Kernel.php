@@ -1013,6 +1013,34 @@ class Kernel
             }
         });
 
+        // Paying a store's invoice is what puts money in the reseller's account
+        // (payout plan section 2). Accruing on PAYMENT rather than on order
+        // placement is the decision that keeps the balance honest: crediting at
+        // order time would create a withdrawable balance funded by money nobody
+        // has paid.
+        //
+        // Independent of the listeners above and wrapped for the same reason --
+        // the money is already taken by this point, so a bookkeeping failure must
+        // not turn a successful payment into an error. ResellerLedgerService
+        // re-checks the invoice's own PAID state, so a hook that fires twice is a
+        // no-op rather than a double credit, and most invoices belong to no store
+        // at all (the ordinary case returns null without doing anything).
+        $hooks->register(HookPoints::INVOICE_PAID, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $this->container->make(\CodeVault\Reseller\ResellerLedgerService::class)
+                    ->accrueStoreReceipt((int) $invoiceId);
+            } catch (\Throwable) {
+                // The account records money we already hold; it is reconciled by
+                // the report, not by failing the payment.
+            }
+        });
+
         $this->container->singleton(AffiliateRepository::class, function (Container $c) {
             return new AffiliateRepository($c->make(Database::class));
         });

@@ -18,6 +18,8 @@ use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerCostBillingJob;
 use CodeVault\Reseller\ResellerCostRepository;
 use CodeVault\Reseller\ResellerCostService;
+use CodeVault\Reseller\ResellerLedgerRepository;
+use CodeVault\Reseller\ResellerLedgerService;
 use CodeVault\Reseller\ResellerStoreLocator;
 use CodeVault\Reseller\ResellerStoreRepository;
 use CodeVault\Reseller\ResellerStoreService;
@@ -105,7 +107,17 @@ final class ResellerCostBillingTest extends DatabaseTestCase
             new TaxCalculator(new TaxRuleRepository($this->db), new VatNumberValidator(), new TaxSettings($this->settings)),
             $this->settings,
             $this->db,
-            new HookDispatcher()
+            new HookDispatcher(),
+            // The job also debits the reseller's account now, so the account and
+            // the invoice it raises stay in step by construction rather than by a
+            // second sweep remembering to look.
+            new ResellerLedgerService(
+                new ResellerLedgerRepository($this->db),
+                $this->storeRepo,
+                $this->clients,
+                $this->currency,
+                $this->settings
+            )
         );
     }
 

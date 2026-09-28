@@ -17,8 +17,12 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Store cost billing</h1>
     <p><a href="/admin/resellers">&larr; Back to resellers</a> &middot;
+        <a href="/admin/resellers/accounts">Reseller accounts</a> &middot;
         <a href="/admin/resellers/docs">Reseller API docs</a></p>
     <p style="color:var(--cv-text-secondary);">
+        This page is what the stores <strong>owe us</strong>. The mirror of it — what we
+        <strong>owe them</strong>, accrued from the same orders and netted against these cost invoices — is the
+        <a href="/admin/resellers/accounts">reseller accounts</a> report.</p>
         A customer buying at a reseller's store pays <strong>us</strong> at retail. The order records what it cost
         us — the catalogue price less the reseller discount — and that is what we bill the reseller for, on an
         ordinary invoice against their client account. Cost is never added to the customer's own invoice.

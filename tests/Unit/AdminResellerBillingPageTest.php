@@ -130,7 +130,16 @@ final class AdminResellerBillingPageTest extends DatabaseTestCase
                 new TaxCalculator(new TaxRuleRepository($this->db), new VatNumberValidator(), new TaxSettings($this->settings)),
                 $this->settings,
                 $this->db,
-                new HookDispatcher()
+                new HookDispatcher(),
+                // Fully qualified: this file does not import the ledger classes,
+                // and it only needs one of them.
+                new \CodeVault\Reseller\ResellerLedgerService(
+                    new \CodeVault\Reseller\ResellerLedgerRepository($this->db),
+                    $storeRepo,
+                    $this->clients,
+                    $currency,
+                    $this->settings
+                )
             ),
             new ActivityLogger($this->db)
         );

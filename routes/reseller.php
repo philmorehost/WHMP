@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
 use CodeVault\Reseller\AdminResellerController;
+use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerController;
 
 /** @var CodeVault\Router $router */
@@ -16,6 +18,12 @@ $router->post('/client/reseller/key', [ClientResellerController::class, 'request
 $router->post('/client/reseller/activate', [ClientResellerController::class, 'activate']);
 $router->post('/client/reseller/rotate', [ClientResellerController::class, 'rotate']);
 $router->get('/client/reseller/docs', [ClientResellerController::class, 'docs']);
+
+// What the reseller has earned. Registered as a literal path before the store
+// routes below, and it takes no client id at all — the client is re-derived from
+// the session guard, so one reseller cannot read another's account by editing a
+// parameter.
+$router->get('/client/reseller/account', [ClientResellerAccountController::class, 'index']);
 
 // The white-label store. Claiming a domain and proving control of it are
 // separate steps on purpose: nothing is served on a claimant's domain until
@@ -45,6 +53,12 @@ $router->get('/admin/resellers/billing', [AdminResellerBillingController::class,
 $router->post('/admin/resellers/billing/settings', [AdminResellerBillingController::class, 'saveSettings']);
 $router->post('/admin/resellers/billing/run', [AdminResellerBillingController::class, 'runNow']);
 
+// What we OWE each store: the running account Phase A writes. Registered as a
+// literal path before the parameterised routes below for the same reason as the
+// billing pair — '/admin/resellers/accounts' must not be read as a client id.
+$router->get('/admin/resellers/accounts', [AdminResellerAccountsController::class, 'index']);
+$router->post('/admin/resellers/payouts/settings', [AdminResellerAccountsController::class, 'saveSettings']);
+
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).
 $router->get('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'store']);
@@ -57,3 +71,8 @@ $router->post('/admin/resellers/{clientId}/store/verify', [AdminResellerControll
 // like a real proof.
 $router->post('/admin/resellers/{clientId}/store/domain/override', [AdminResellerController::class, 'overrideStoreDomain']);
 $router->post('/admin/resellers/{clientId}/store/status', [AdminResellerController::class, 'setStoreStatus']);
+
+// One store's account and the entries behind it. Addressed by client id, like the
+// store routes above, so a client with no store still lands somewhere that can
+// explain why rather than on a 404.
+$router->get('/admin/resellers/{clientId}/account', [AdminResellerAccountsController::class, 'show']);
