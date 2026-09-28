@@ -34,10 +34,22 @@ automatically and reuses Phase 4 rather than replacing it.
 
 | Direction | Kind | Amount | When |
 |---|---|---|---|
-| `+` | `store_receipt` | the customer's **retail** total, in the reseller's currency | the customer's invoice is **paid** |
+| `+` | `store_receipt` | the customer's **retail** total, in the account's base unit | the customer's invoice is **paid** |
 | `−` | `cost_invoice` | the **cost** of that order, per the monthly cost invoice | when Phase 4 raises the invoice |
-| `−` | `payout` | what we actually sent them | when a payout is paid |
+| `−` | `payout` | what we actually sent them, at the rate we sent it at | when a payout is paid |
 | `±` | `adjustment` | manual, admin-only, with a reason | as needed |
+
+**The account is kept in ONE unit — the base currency — and shown in the
+reseller's currency at the live rate.** That is the direct consequence of the FX
+decision (§9 item 7): the reseller carries the movement, so the figure they see
+is a conversion of a stable underlying amount rather than a number frozen on the
+day of the sale. Two things follow, and both are intended:
+
+- **The balance a reseller sees moves day to day**, with no new sales at all. The
+  figure on the day of a sale is not a promise, and the UI must not present it as
+  one.
+- A payout **locks the rate at the moment it is paid** and records it, so the
+  amount actually sent is auditable and the money leaving the account is exact.
 
 **Balance = sum of the entries.** Then:
 
@@ -180,13 +192,20 @@ the same shape as the cost-invoice claim guard in Phase 4.
   **and** the cost, as appended reversing entries. The alternative — keeping the
   cost owed on a sale the customer got refunded — would leave a reseller owing us
   for a sale they made in good faith.
-- **Holding period.** A payout immediately after payment can be withdrawn and then
-  charged back, leaving us exposed. A holding period (e.g. funds become
-  withdrawable N days after payment) is the usual defence. *Still open (§9).*
-- **Currency.** Entries are in the reseller's currency, converted per order from
-  its stored convention. **Who bears the FX movement** between the day we collect
-  and the day we pay out is a decision; the ledger as designed fixes the rate at
-  the moment of receipt, so the reseller's balance is stable and *we* carry FX.
+- **Holding period.** *Decided (§9): 30 days.* A receipt becomes withdrawable 30
+  days after the payment that funded it, which covers the card chargeback window.
+  It gates **withdrawal only** — the balance and the entries behind it are visible
+  from the moment they happen. Phase A therefore has to answer two different
+  questions ("what is the balance?" and "how much of it is withdrawable?"), which
+  is why `withdrawable_at` is a column on the entry rather than a rule applied at
+  display time.
+- **Currency and who carries FX.** *Decided (§9): the reseller carries it.* Entries
+  are therefore kept in the account's **base unit** and converted to the reseller's
+  currency only for display and at payout — not fixed at the moment of receipt.
+  This is the one decision that changed the design instead of filling in a blank:
+  fixing the rate at receipt would have been simpler and would have made the
+  reseller's balance stable, which is precisely the risk they have now taken on.
+  See §2 for the two things a reseller will notice.
 - **Tax and reporting.** Paying a reseller is a payment to a third party, which
   may create reporting obligations (a statement or a self-billed invoice). Out of
   scope here, but it must be designed before any real money moves.
@@ -197,15 +216,19 @@ the same shape as the cost-invoice claim guard in Phase 4.
 ## 7. Data model sketch
 
 ```
-reseller_ledger                     (new — currency-explicit, typed)
-  id, reseller_id, client_id, currency_id,
+reseller_ledger                     (new — typed, ONE unit per account)
+  id, reseller_id, client_id,
   kind ENUM('store_receipt','cost_invoice','payout','adjustment'),
-  amount DECIMAL(10,2)   -- signed: + is owed to the reseller, - is owed by them
+  amount DECIMAL(18,6)   -- BASE-currency, signed: + owed to them, - owed by them
+  withdrawable_at TIMESTAMP NULL,   -- NULL on debits; receipt date + 30 days
   order_id, invoice_id, payout_id, description, admin_id, created_at
-  INDEX (reseller_id, currency_id)
+  INDEX (reseller_id, created_at)
 
 reseller_payouts
-  id, client_id, reseller_id, amount DECIMAL(10,2), currency_id, currency_rate,
+  id, client_id, reseller_id,
+  amount DECIMAL(18,6),             -- in the reseller's currency, as sent
+  currency_id, currency_rate,       -- the rate LOCKED at payout, recorded
+  amount_base DECIMAL(18,6),        -- what actually left the account
   status ENUM('pending','paid','rejected','cancelled'),
   method VARCHAR(32), reference VARCHAR(191), note TEXT,
   requested_at, decided_at, decided_by
@@ -213,21 +236,33 @@ reseller_payouts
 
 **No new balance column anywhere**, on either table: a balance that is stored *and*
 derived will eventually disagree with itself. The balance is
-`SUM(reseller_ledger.amount)` for the reseller in that currency — which is the same
-rule `client_credit_ledger` already follows, and worth copying deliberately.
+`SUM(reseller_ledger.amount)` for the reseller — **one unit, and no `currency_id`
+on the ledger**, because an account that mixes units has no total. (That is
+exactly why `client_credit_ledger` cannot be reused: it mixes client-currency
+grants with base-currency credit-note totals, so no single factor ever fitted it.)
+
+The withdrawable figure is the same sum restricted to `withdrawable_at <= NOW()`.
+Two numbers, one table, no extra state to keep in step.
+
+Money columns are `DECIMAL(18,6)` to match every other money column since
+migration 0126.
 
 ## 8. Proposed phases
 
 - **Phase A — the account (report only).** Accrue a store receipt when a store
-  order's invoice is paid; record the cost invoice as the debit; show the
-  reseller their balance and the entries behind it. No movement of money.
+  order's invoice is paid; record the cost invoice as the debit; show the reseller
+  their balance, how much of it is withdrawable (30 days — §9 item 5), and the
+  entries behind both. No movement of money.
 - **Phase B — request and approve.** Reseller payout requests; admin queue;
   approve/reject/mark-paid with a reference; the payout ledger entry. Payment is
   **manual bank transfer** — the simplest thing that can be honest.
 - **Phase C — netting and statements.** Settle cost invoices from the balance
   automatically; monthly statement per reseller; exportable for accounting.
-- **Phase D — methods and automation.** Gateway payouts, automatic payouts above a
-  threshold, holding periods, refund/chargeback handling.
+- **Phase D — methods and automation.** Gateway payouts, automatic payouts above
+  a threshold, and refund/chargeback handling. (The 30-day holding period is *not*
+  deferred to here: it is a rule about what counts as withdrawable, so it belongs
+  with the balance in Phase A. Since `withdrawable_at` is written when the receipt
+  is written, adding it later would mean back-filling every existing entry.)
 
 Phase A is safe to build immediately: it moves no money and its only output is a
 number we can check by hand against the orders.
@@ -249,10 +284,29 @@ number we can check by hand against the orders.
    the reseller's problem" (a refunded sale simply un-winds) and it keeps the two
    sides of the ledger coherent.
 
-**Still open (needed before Phase B):**
+**Decided 2026-09-28 (Phase B questions):**
 
-5. **Holding period**: none, or N days after payment before funds are withdrawable?
-6. **Minimum payout** amount, and whether it differs per currency.
-7. **FX risk**: we carry it (recommended, and simplest to explain) or the reseller?
-8. **Payout method for Phase B**: manual bank transfer with an admin-recorded
-   reference (recommended), or a gateway payout from the start?
+5. **Holding period** — *30 days.* A receipt becomes withdrawable 30 days after the
+   payment that funded it, covering the card chargeback window. It gates
+   withdrawal only; the balance and its entries are visible immediately.
+6. **Minimum payout** — *50.00, a single value for all currencies.* Deliberately
+   the same figure the affiliate programme already seeds as `affiliates.min_payout`
+   (migration 0115): two payout features carrying two different minimums is an
+   inconsistency that generates support tickets. A per-currency minimum is the
+   more correct answer for NGN against USD, and is not being built until there are
+   multi-currency resellers to justify it.
+7. **FX risk** — *the reseller carries it.* The account is therefore kept in the
+   base unit and converted at payout, rather than fixed at receipt. This is the
+   one decision that changed the design: §2 for what a reseller will notice, §6
+   for why it is the opposite of the simpler option.
+8. **Payout method** — *manual bank transfer,* with the admin recording a
+   reference. Phase B records and settles payouts; automation is Phase D. Keeping
+   it manual keeps Phase B small enough to be correct, and leaves a real ledger to
+   check against before any money moves automatically.
+
+**Still open, but not blocking:** the cost-side debit needs its base-currency
+equivalent pinned when Phase 4 raises the invoice — and a denominated invoice
+stores `currency_rate = 1.0`, so the rate in force on the invoice date is **not
+recoverable from the invoice afterwards**. `ResellerCostBillingJob` must capture
+it at the moment it bills. This is a Phase A implementation detail rather than a
+business decision, and it is written down so it does not become a surprise.
