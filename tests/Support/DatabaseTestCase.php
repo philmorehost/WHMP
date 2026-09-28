@@ -43,6 +43,22 @@ abstract class DatabaseTestCase extends TestCase
         $pdo = $this->db->connection();
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
 
+        // `migrations` goes FIRST, deliberately. Everything else here is
+        // order-independent; this one row is not.
+        //
+        // It records which migrations have been applied, so a drop interrupted
+        // partway through (killed run, cancelled debug session) can otherwise
+        // leave rows claiming work whose tables no longer exist. The NEXT run
+        // then dies in the middle of the chain — on an `ALTER TABLE` against a
+        // table that was never created, which reads exactly like a
+        // migration-ordering bug — when the real state is "the bookkeeping
+        // outlived the schema". That is a genuinely confusing failure: it cost
+        // real time to diagnose, and it is not a property of any migration.
+        //
+        // Dropping it first makes the state recoverable by construction: with no
+        // `migrations` table, the next migrate() simply re-runs everything.
+        $pdo->exec('DROP TABLE IF EXISTS `migrations`');
+
         foreach ($this->db->select('SHOW TABLES') as $row) {
             $table = array_values($row)[0];
             $pdo->exec("DROP TABLE IF EXISTS `{$table}`");
