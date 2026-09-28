@@ -66,6 +66,7 @@ $groups = [
         '/admin/promo-banners' => 'Promo Banners',
         '/admin/affiliates' => 'Affiliates',
         '/admin/resellers' => 'Resellers',
+        '/admin/resellers/billing' => 'Store Cost Billing',
         '/admin/resellers/docs' => 'Reseller API Docs',
         '/admin/ai-visibility' => 'AI Visibility',
         '/admin/ask-ai' => 'Ask AI',

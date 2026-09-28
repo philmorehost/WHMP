@@ -195,9 +195,52 @@ store must never delete an order or a client account.
   money tests bite, and the two platform-path tests correctly still pass.
 
 ### Phase 4 — Billing the reseller
-- A report of cost accrued per reseller per period, and a job that raises the
-  reseller's invoice via the existing invoice path (no new money code).
-- Needs rules: invoice cadence, minimum, whether unpaid cost suspends the store.
+**Implemented 2026-09-29.** Migration `0188_add_reseller_cost_invoicing` adds
+`orders.reseller_cost_invoice_id` (FK to `invoices` `ON DELETE SET NULL`, indexed
+with `reseller_id`) and three settings: `reseller.billing_auto`,
+`reseller.billing_minimum`, `reseller.billing_due_days`. Daily job
+`ResellerCostBillingJob`, registered in `bin/cron.php` as `reseller-cost-billing`.
+- **Idempotency is a property of the data, not of the run.** An order's cost is
+  billed when its stamp is set, and the guard is *inside* the UPDATE
+  (`... AND reseller_cost_invoice_id IS NULL`). Running twice bills once; a
+  missed month is billed by the next run; deleting an invoice un-bills its
+  orders rather than losing them. There is no "last run" marker to keep in sync.
+- **One invoice per store per closed calendar month.** `duePeriods()` walks
+  months in order instead of selecting "everything older than a cutoff", so three
+  months of downtime produce three monthly invoices rather than one catch-up
+  figure indistinguishable from a spike in sales. The current month is never
+  billed.
+- **A month below the minimum is carried forward** into the next invoice that
+  clears it, and the invoice records every month it covers. Accrual that never
+  clears a raised minimum stays unbilled and keeps showing as *unbilled* in the
+  report — hard to bill must not become silently written off.
+- **The reseller is billed in their own currency.** `orders.cost_total` is in the
+  *customer's* order currency and a store's customers each choose their own, so
+  the mix is normalised through the existing `CurrencyService::toBase()` — which
+  reverses whichever storage convention wrote the row, denominated or locked —
+  and converted once. Conversion lives in `ResellerCostService` and nowhere
+  else, so the report and the invoice cannot disagree about a figure.
+- **Arrears suspend nothing.** A storefront going offline takes the reseller's
+  own customers with it, so suspension stays an explicit admin action on the
+  store page; the report surfaces unpaid cost invoices instead.
+- The invoice lands on the reseller's **client account** through the ordinary
+  invoice path (no new money code), so it ages, duns and can be paid with the
+  same gateways as any other invoice.
+- Invoice lines name **our order number and date only, never the customer**. A
+  store's customer may be one of our own clients, and a reseller must not be able
+  to read our client list off an invoice.
+- Admin screen `/admin/resellers/billing`: per-currency totals (never summed
+  across currencies — an NGN total and a USD total have no common total), the
+  per-store breakdown, arrears, the three tunables, and a "bill now" button that
+  reports how many invoices it raised and is safe to press twice. The reseller
+  sees their own figures and unpaid invoices on `/client/reseller/store`.
+- Tests: `ResellerCostBillingTest` (18) covers once-ness, closed periods, the
+  carry-forward, zero-cost months, all three currency shapes, terms, privacy and
+  arrears. `AdminResellerBillingPageTest` (8) covers the page, the
+  `resellers.manage` gate and a double press of "bill now". Negative controls:
+  removing the unbilled filter is caught by the transactional claim guard
+  (`claimed 0 of 1 orders`), and taking cost at face value instead of normalising
+  it fails the denominated-order test with 14,900 against 10.
 
 ### Phase 5 — Custom domain go-live
 - DNS verification job + admin override, certificate instructions, and a
@@ -256,6 +299,21 @@ Phase 3 is built on that, and the reseller is invoiced for cost in Phase 4.
 5. **Unverified domains** — a store with no verified domain: reachable on its
    platform subdomain only (implemented), or invisible entirely?
 
+**Decided 2026-09-29, before implementing Phase 4:**
+
+6. **Currency of the reseller invoice** — *the reseller's own account currency*,
+   converting each order at the storage convention it was written with. Matches
+   how every other invoice is denominated, and the converted figure is
+   reproducible from the order instead of depending on today's rate.
+7. **Cadence** — *monthly, one invoice per store per closed calendar month*, from
+   the daily cron, plus a manual "bill now" that is safe to press twice.
+8. **Minimum** — *none by default* (`reseller.billing_minimum` = `0.00`). Below a
+   raised minimum a month is carried into the next invoice rather than invoiced
+   on its own or dropped.
+9. **Unpaid cost** — *never auto-suspend.* Taking a reseller's storefront offline
+   also takes their customers offline, so it stays an explicit admin action;
+   arrears are surfaced in the report instead.
+
 ## 8. Status
 
 - **Phase 1 — implemented** (2026-09-28). Migration `0185_create_resellers_table`;
@@ -272,7 +330,12 @@ Phase 3 is built on that, and the reseller is invoiced for cost in Phase 4.
   `0187_add_reseller_attribution_to_orders`; store-aware `CartService` and
   `CheckoutService`; order and account attribution; per-tenant catalogue cache
   key.
-- Phases 4–5 not started.
+- **Phase 4 — implemented** (2026-09-29). Migration
+  `0188_add_reseller_cost_invoicing`; `ResellerCostRepository`,
+  `ResellerCostService`, `ResellerCostBillingJob`; admin screen
+  `/admin/resellers/billing`; the reseller's own figures on
+  `/client/reseller/store`.
+- Phase 5 not started.
 
 ### Test-harness note (found 2026-09-29)
 

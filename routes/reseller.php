@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use CodeVault\Reseller\AdminResellerBillingController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerController;
 
@@ -35,6 +36,14 @@ $router->get('/admin/resellers', [AdminResellerController::class, 'index']);
 $router->post('/admin/resellers/discounts', [AdminResellerController::class, 'saveDiscounts']);
 $router->post('/admin/resellers/{clientId}/toggle', [AdminResellerController::class, 'toggle']);
 $router->get('/admin/resellers/docs', [AdminResellerController::class, 'docs']);
+
+// What the stores owe us, and how it is billed. Registered BEFORE the
+// parameterised store routes below so these literal paths cannot be read as a
+// client id. "Bill now" is safe to press twice — an order carries the id of the
+// invoice that billed it, so idempotency is a property of the data.
+$router->get('/admin/resellers/billing', [AdminResellerBillingController::class, 'index']);
+$router->post('/admin/resellers/billing/settings', [AdminResellerBillingController::class, 'saveSettings']);
+$router->post('/admin/resellers/billing/run', [AdminResellerBillingController::class, 'runNow']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

@@ -48,6 +48,7 @@ use CodeVault\Billing\ServiceTerminationJob;
 use CodeVault\Billing\ServicePruningJob;
 use CodeVault\Domains\DomainPruningJob;
 use CodeVault\Billing\StaleInvoiceCancellationJob;
+use CodeVault\Reseller\ResellerCostBillingJob;
 
 $kernel = new Kernel(dirname(__DIR__));
 
@@ -74,6 +75,10 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->register($kernel->container->make(TicketEscalationJob::class));
     $scheduler->register($kernel->container->make(TicketAutoCloseJob::class));
     $scheduler->register($kernel->container->make(BillableItemInvoicingJob::class));
+    // Bills each store for the cost of the orders it took, one invoice per
+    // closed calendar month. Registered after the renewal sweep so an order
+    // written by this tick's work is billed on the next one, never midway.
+    $scheduler->register($kernel->container->make(ResellerCostBillingJob::class));
     $scheduler->register($kernel->container->make(MailPipingJob::class));
     $scheduler->register($kernel->container->make(BackupCronJob::class));
     $scheduler->register($kernel->container->make(CancellationCronJob::class));

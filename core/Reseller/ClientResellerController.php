@@ -45,7 +45,8 @@ final class ClientResellerController
         private readonly ResellerSettings $settings,
         private readonly ResellerPricing $pricing,
         private readonly CurrencyService $currency,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly ResellerCostService $costs
     ) {
     }
 
@@ -242,9 +243,17 @@ final class ClientResellerController
         }
 
         $store = $this->stores->forClient((int) $client['id']);
+        $storeId = $store === null ? null : (int) $store['id'];
+
+        // What this store has cost its owner, in their own currency, and what is
+        // still unpaid. Read-only: nothing here lets a reseller change what they
+        // owe, because cost comes from our catalogue and the admin's discount.
+        $summaries = $storeId === null ? [] : $this->costs->storeSummaries($storeId);
 
         return $this->page('reseller.store', [
             'store' => $store,
+            'cost' => $summaries[0] ?? null,
+            'arrears' => $storeId === null ? [] : $this->costs->arrears($storeId),
             'platformHost' => $this->locator->platformHost(),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null

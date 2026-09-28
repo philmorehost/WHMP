@@ -7,6 +7,8 @@
 /** @var string|null $notice */
 /** @var array<string, mixed>|null $verification */
 /** @var string $docsUrl */
+/** @var array<string, mixed>|null $cost */
+/** @var array<int, array<string, mixed>> $arrears */
 
 $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
@@ -22,6 +24,47 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
     <?php endif; ?>
     <?php if ($notice !== null && $notice !== ''): ?>
         <div class="cv-alert cv-alert--success"><?= e((string) $notice) ?></div>
+    <?php endif; ?>
+
+    <?php if ($cost !== null): ?>
+        <h2 class="cv-card__title" style="margin-top:var(--cv-space-4);">What your store has cost you</h2>
+        <p style="color:var(--cv-text-secondary);">
+            Your customers pay you directly — we never charge them. This is the wholesale cost of the orders your
+            store has taken, at our catalogue prices, and we invoice it to your client account: one invoice per
+            closed calendar month. A month still in progress is never invoiced.
+        </p>
+        <table class="cv-table">
+            <tbody>
+            <?php $code = (string) $cost['currency_code']; ?>
+            <tr><td>Orders taken</td><td><?= (int) $cost['order_count'] ?></td></tr>
+            <tr><td>Accrued in total</td>
+                <td><?= e(number_format((float) $cost['accrued'], 2)) ?> <?= e($code) ?></td></tr>
+            <tr><td>Already invoiced</td>
+                <td><?= e(number_format((float) $cost['billed'], 2)) ?> <?= e($code) ?></td></tr>
+            <tr><td>Not yet invoiced</td>
+                <td><?= e(number_format((float) $cost['unbilled'], 2)) ?> <?= e($code) ?></td></tr>
+            </tbody>
+        </table>
+
+        <h3>Cost invoices</h3>
+        <?php if ($arrears === []): ?>
+            <p style="color:var(--cv-text-secondary);">Nothing unpaid. Invoices appear here as they are raised.</p>
+        <?php else: ?>
+            <table class="cv-table">
+                <thead><tr><th>Invoice</th><th>Amount</th><th>Due</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($arrears as $row): ?>
+                    <tr>
+                        <td>#<?= (int) $row['id'] ?></td>
+                        <td><?= e(number_format((float) $row['total'], 2)) ?>
+                            <?= e((string) ($row['currency']['code'] ?? '')) ?></td>
+                        <td><?= e(substr((string) $row['due_date'], 0, 10)) ?></td>
+                        <td><a class="cv-btn" href="/client/invoices/<?= (int) $row['id'] ?>">View invoice</a></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
     <?php endif; ?>
 
     <?php if (is_array($verification)): ?>

@@ -134,7 +134,13 @@ final class ResellerTest extends DatabaseTestCase
             $this->resellerSettings,
             $this->pricing,
             new CurrencyService(new CurrencyRepository($this->db)),
-            new ActivityLogger($this->db)
+            new ActivityLogger($this->db),
+            new \CodeVault\Reseller\ResellerCostService(
+                new \CodeVault\Reseller\ResellerCostRepository($this->db),
+                new \CodeVault\Reseller\ResellerStoreRepository($this->db),
+                new \CodeVault\Clients\ClientRepository($this->db),
+                new CurrencyService(new CurrencyRepository($this->db))
+            )
         );
     }
 
