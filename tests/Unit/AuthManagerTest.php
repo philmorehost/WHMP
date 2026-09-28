@@ -14,6 +14,7 @@ use CodeVault\Security\CountryRuleRepository;
 use CodeVault\Security\IpRuleRepository;
 use CodeVault\Security\LoginAttemptRepository;
 use CodeVault\Security\NullGeoIpResolver;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use DateTimeImmutable;
 
@@ -48,7 +49,13 @@ final class AuthManagerTest extends DatabaseTestCase
             $hooks,
         );
 
-        $this->auth = new AuthManager($admins, $bruteGuard, $this->accountLocks, $hooks);
+        // AuthManager takes FIVE dependencies. This hand-built site lagged the
+        // 5th (a SettingsRepository, added in e7f3cc8 so the global
+        // security.2fa_enabled switch can turn 2FA off), so every test in this
+        // class died with an ArgumentCountError before asserting anything.
+        // two_factor_enabled defaults to 0 on admins, so the fixture above still
+        // logs in normally with the switch on.
+        $this->auth = new AuthManager($admins, $bruteGuard, $this->accountLocks, $hooks, new SettingsRepository($this->db));
     }
 
     public function test_correct_credentials_succeed(): void

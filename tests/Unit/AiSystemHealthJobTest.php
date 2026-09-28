@@ -11,6 +11,7 @@ use CodeVault\Cron\CronRunRepository;
 use CodeVault\Database;
 use CodeVault\Database\Migrator;
 use CodeVault\Mail\Mailer;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Tests\Support\DatabaseTestCase;
 
 /**
@@ -31,6 +32,20 @@ final class AiSystemHealthJobTest extends DatabaseTestCase
         new \CodeVault\Kernel(dirname(__DIR__, 2));
         $container = \CodeVault\Support\App::container();
         $container->instance(Database::class, $this->db);
+
+        // SettingsRepository is a Kernel SINGLETON built around the
+        // APPLICATION's database, and Kernel boot resolves it before this test
+        // can re-pin Database — so re-pinning Database alone does not reach it.
+        //
+        // The consequence is not a wrong number, it is state leaking out of the
+        // test suite entirely: the job records its double-send guard
+        // (automation.ai_health_last_run) through settings, so the guard was
+        // written to the shared application DB. Whichever test sent the first
+        // report then silently suppressed the send for every test after it, and
+        // for the whole of the next run — which is why this class reported one
+        // pass and two failures in one run and three failures in the next.
+        $container->instance(SettingsRepository::class, new SettingsRepository($this->db));
+
         (new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations'))->run();
 
         (new AdminRepository($this->db))->create('ops', $this->adminEmail, 'secret123', 'Ops Admin', null);

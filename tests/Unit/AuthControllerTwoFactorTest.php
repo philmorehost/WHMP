@@ -28,6 +28,7 @@ use CodeVault\Security\PasswordResetToken;
 use CodeVault\Security\PasswordResetTokenRepository;
 use CodeVault\Security\RecoveryCodes;
 use CodeVault\Security\Totp;
+use CodeVault\Settings\SettingsRepository;
 use CodeVault\Session\SessionManager;
 use CodeVault\Staff\RoleRepository;
 use CodeVault\Support\App;
@@ -92,7 +93,13 @@ final class AuthControllerTwoFactorTest extends DatabaseTestCase
             new NullGeoIpResolver(),
             $hooks,
         );
-        $auth = new AuthManager($this->admins, $bruteGuard, new AccountLockRepository($this->db), $hooks);
+        // AuthManager takes FIVE dependencies. This hand-built site lagged the
+        // 5th (a SettingsRepository, added in e7f3cc8 so the global
+        // security.2fa_enabled switch can turn 2FA off), so every test in this
+        // class died with an ArgumentCountError before asserting anything.
+        // The shipped default is on ('1'), which is the behaviour these 2FA
+        // tests were written against.
+        $auth = new AuthManager($this->admins, $bruteGuard, new AccountLockRepository($this->db), $hooks, new SettingsRepository($this->db));
 
         $this->controller = new AuthController(
             $auth,
