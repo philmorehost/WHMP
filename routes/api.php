@@ -40,3 +40,8 @@ $router->get('/api/services', [ApiResourceController::class, 'services']);
 $router->get('/api/domains', [ApiResourceController::class, 'domains']);
 $router->get('/api/tickets', [ApiResourceController::class, 'tickets']);
 $router->post('/api/tickets/{id}/reply', [ApiResourceController::class, 'replyToTicket']);
+
+// Reseller API — the one endpoint a client-owned key can reach. It holds the
+// reseller.read scope and nothing else, because every other scope above opens
+// install-wide data (all clients, all invoices, all tickets).
+$router->get('/api/reseller/pricing', [ApiResourceController::class, 'resellerPricing']);

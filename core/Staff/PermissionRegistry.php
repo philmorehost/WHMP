@@ -40,6 +40,7 @@ final class PermissionRegistry
     public const ADDONS_MANAGE = 'addons.manage';
     public const WIDGETS_MANAGE = 'widgets.manage';
     public const SECURITY_QUESTIONS_MANAGE = 'security_questions.manage';
+    public const RESELLERS_MANAGE = 'resellers.manage';
 
     /**
      * @return array<string, array{label: string, group: string}> permission
@@ -76,6 +77,7 @@ final class PermissionRegistry
             self::ADDONS_MANAGE => ['label' => 'Activate & configure addon modules', 'group' => 'Configuration'],
             self::WIDGETS_MANAGE => ['label' => 'Activate & configure dashboard widgets', 'group' => 'Configuration'],
             self::SECURITY_QUESTIONS_MANAGE => ['label' => 'Activate & configure security question modules', 'group' => 'Security'],
+            self::RESELLERS_MANAGE => ['label' => 'Manage resellers, reseller API keys & reseller discounts', 'group' => 'Billing'],
         ];
     }
 

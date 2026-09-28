@@ -249,4 +249,49 @@ final class ApiResourceController
 
         return ApiResponse::success(['invoice_id' => $invoiceId], 201);
     }
+
+    /**
+     * GET /api/reseller/pricing — the reseller catalogue, at list and reseller prices.
+     *
+     * This is the only endpoint a reseller key can reach (see
+     * ResellerCredentialService::SCOPES — every other scope in the catalog reads
+     * install-wide data). It answers one question: "what does a product or TLD
+     * cost me, after my reseller discount?"
+     *
+     * Two things the response deliberately makes explicit, because getting
+     * either wrong is how a reseller quotes a wildly wrong number:
+     *
+     * - `currency` names the currency the figures are IN. Catalogue prices are
+     *   the amounts an admin typed into the pricing fields, which are in the
+     *   designated pricing currency — not necessarily USD, and not the calling
+     *   client's currency. A bare number invites it to be read as dollars.
+     * - Every price is an object: `list`, `discount_percent`, `reseller`. The
+     *   discount is shown per line, so a reseller (or a test) can verify the
+     *   arithmetic instead of trusting a single figure.
+     */
+    public function resellerPricing(Request $request): Response
+    {
+        try {
+            $credential = $this->auth->authenticate($request);
+            $this->auth->authorize($credential, 'reseller.read');
+        } catch (ApiAuthException $e) {
+            return ApiResponse::error($e->getMessage(), 'UNAUTHORIZED', 401);
+        }
+
+        $container = \CodeVault\Support\App::container();
+        $pricing = $container->make(\CodeVault\Reseller\ResellerPricing::class);
+        $settings = $container->make(\CodeVault\Reseller\ResellerSettings::class);
+        $currency = $container->make(\CodeVault\Billing\CurrencyRepository::class)->pricing();
+
+        return ApiResponse::success([
+            'discounts' => $settings->all(),
+            'currency' => [
+                'code' => (string) $currency['code'],
+                'symbol' => (string) $currency['symbol'],
+                'note' => 'All figures are catalogue prices in this currency.',
+            ],
+            'services' => $pricing->serviceCatalogue(),
+            'domains' => $pricing->domainCatalogue(),
+        ]);
+    }
 }

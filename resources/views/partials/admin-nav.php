@@ -65,6 +65,8 @@ $groups = [
         '/admin/campaigns' => 'Campaigns',
         '/admin/promo-banners' => 'Promo Banners',
         '/admin/affiliates' => 'Affiliates',
+        '/admin/resellers' => 'Resellers',
+        '/admin/resellers/docs' => 'Reseller API Docs',
         '/admin/ai-visibility' => 'AI Visibility',
         '/admin/ask-ai' => 'Ask AI',
     ]],

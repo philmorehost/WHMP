@@ -592,6 +592,9 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                 <a href="/client/affiliate" class="dbd-action">
                     <div class="dbd-action__icon" style="background:rgba(245,158,11,.12);">🤝</div>Affiliate Program
                 </a>
+                <a href="/client/reseller" class="dbd-action">
+                    <div class="dbd-action__icon" style="background:rgba(16,185,129,.12);">📦</div>Reseller Area &amp; API
+                </a>
                 <form method="post" action="/client/logout" style="margin:0;"><?= csrf_field() ?>
                     <button type="submit" class="dbd-action dbd-action--danger">
                         <div class="dbd-action__icon" style="background:rgba(239,68,68,.1);">🚪</div>Log Out
