@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Affiliates;
 
 use CodeVault\Billing\InvoiceRepository;
+use CodeVault\Settings\SettingsRepository;
 
 /**
  * Affiliate engine orchestration (blueprint §4.4): referral attribution
@@ -21,7 +22,8 @@ final class AffiliateService
         private readonly AffiliateReferralRepository $referrals,
         private readonly AffiliateCommissionRepository $commissions,
         private readonly AffiliatePayoutRequestRepository $payoutRequests,
-        private readonly InvoiceRepository $invoices
+        private readonly InvoiceRepository $invoices,
+        private readonly SettingsRepository $settings
     ) {
     }
 
@@ -91,7 +93,29 @@ final class AffiliateService
             return ['success' => false, 'error' => 'You already have a payout request pending review.'];
         }
 
-        $minPayout = (float) \CodeVault\Support\App::container()->make(\CodeVault\Settings\SettingsRepository::class)->get('affiliates.min_payout', '50.00');
+        // What the request is FOR, and what the minimum is compared against.
+        // This assignment was missing: the comparison below read `null <
+        // $minPayout`, which is true for any positive minimum, so EVERY payout
+        // request was refused with "minimum balance required" — including
+        // affiliates who had earned far more than the minimum. Nothing could
+        // ever be paid out.
+        $pending = $this->commissions->pendingTotal($affiliateId);
+
+        // A zero balance is refused whatever the configured minimum is: a payout
+        // request for 0.00 is not a payout, and it would sit in an admin's queue
+        // forever with nothing to send. With a minimum of 0 ("no minimum") this
+        // is the only thing standing between a button press and an empty request.
+        if ($pending <= 0.0) {
+            return ['success' => false, 'error' => 'You have no commission balance to withdraw yet.'];
+        }
+
+        // The minimum is a money rule and is read from settings, injected like
+        // every other dependency. It used to be fetched from the global
+        // container at this point, which meant a purely unit-tested service
+        // threw "App container has not been set" — and nothing reached this
+        // line anyway, because the missing $pending above refused every request
+        // first.
+        $minPayout = (float) $this->settings->get('affiliates.min_payout', '50.00');
 
         if ($pending < $minPayout) {
             return ['success' => false, 'error' => "The minimum commission balance required for a payout request is $" . number_format($minPayout, 2) . "."];

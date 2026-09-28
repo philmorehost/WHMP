@@ -99,7 +99,8 @@ final class ClientAuthControllerTwoFactorTest extends DatabaseTestCase
             new AffiliateReferralRepository($this->db),
             new AffiliateCommissionRepository($this->db),
             new AffiliatePayoutRequestRepository($this->db),
-            new InvoiceRepository($this->db)
+            new InvoiceRepository($this->db),
+            new SettingsRepository($this->db)
         );
 
         $container = new Container();

@@ -1036,6 +1036,7 @@ class Kernel
                 $c->make(AffiliateCommissionRepository::class),
                 $c->make(AffiliatePayoutRequestRepository::class),
                 $c->make(InvoiceRepository::class),
+                $c->make(SettingsRepository::class),
             );
         });
 

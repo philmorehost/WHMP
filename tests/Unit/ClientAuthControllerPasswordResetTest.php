@@ -100,7 +100,8 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
             new AffiliateReferralRepository($this->db),
             new AffiliateCommissionRepository($this->db),
             new AffiliatePayoutRequestRepository($this->db),
-            new InvoiceRepository($this->db)
+            new InvoiceRepository($this->db),
+            new SettingsRepository($this->db)
         );
 
         $mail = new EmailDispatcher(new EmailTemplateRepository($this->db), new EmailLogRepository($this->db), new SyncQueue());
@@ -151,15 +152,76 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
         $this->assertSame(0, count($this->db->select('SELECT * FROM password_reset_tokens')));
     }
 
+    /**
+     * The cooldown, which is what actually answers a second request.
+     *
+     * The forgot-password handler is public and sends real mail, so a scripted
+     * caller must not be able to email-bomb an address through our own
+     * transport. The response is identical whether or not a link was sent, so
+     * the cooldown cannot be used to probe which addresses exist.
+     */
+    public function test_a_second_request_inside_the_cooldown_sends_nothing_and_looks_identical(): void
+    {
+        $this->controller->sendResetLink($this->postRequest(['email' => 'resetclient@example.test']));
+
+        $first = $this->db->selectOne(
+            'SELECT token_hash FROM password_reset_tokens WHERE account_type = ? AND account_id = ?',
+            ['client', $this->clientId]
+        );
+
+        $this->assertNotNull($first);
+
+        $response = $this->controller->sendResetLink($this->postRequest(['email' => 'resetclient@example.test']));
+
+        $this->assertSame(200, $response->status());
+        $this->assertCount(1, $this->db->select('SELECT * FROM password_reset_tokens'));
+
+        $second = $this->db->selectOne(
+            'SELECT token_hash FROM password_reset_tokens WHERE account_type = ? AND account_id = ?',
+            ['client', $this->clientId]
+        );
+
+        $this->assertSame(
+            $first['token_hash'],
+            $second['token_hash'],
+            'a request inside the cooldown must not issue a second token'
+        );
+
+        // One email, not two: the whole point of the cooldown.
+        $this->assertCount(1, $this->db->select("SELECT * FROM email_log WHERE template_key = 'client_password_reset'"));
+    }
+
+    /**
+     * Requesting a fresh link must supersede the old one, so a link that was
+     * already forwarded or leaked stops working the moment a new one is asked
+     * for. Reached by ageing the first link past the cooldown — the cooldown is
+     * about not email-bombing, not about invalidation.
+     */
     public function test_issuing_a_second_reset_link_invalidates_the_first(): void
     {
         $this->controller->sendResetLink($this->postRequest(['email' => 'resetclient@example.test']));
-        $first = $this->db->selectOne('SELECT id FROM password_reset_tokens WHERE account_type = ? AND account_id = ?', ['client', $this->clientId]);
+
+        $first = $this->db->selectOne(
+            'SELECT token_hash FROM password_reset_tokens WHERE account_type = ? AND account_id = ?',
+            ['client', $this->clientId]
+        );
+
+        $this->assertNotNull($first);
+
+        $this->db->update(
+            'UPDATE password_reset_tokens SET created_at = ? WHERE account_type = ? AND account_id = ?',
+            [(new \DateTimeImmutable('-5 minutes'))->format('Y-m-d H:i:s'), 'client', $this->clientId]
+        );
 
         $this->controller->sendResetLink($this->postRequest(['email' => 'resetclient@example.test']));
-        $second = $this->db->selectOne('SELECT id FROM password_reset_tokens WHERE account_type = ? AND account_id = ?', ['client', $this->clientId]);
 
-        $this->assertNotSame($first['id'], $second['id']);
+        $second = $this->db->selectOne(
+            'SELECT token_hash FROM password_reset_tokens WHERE account_type = ? AND account_id = ?',
+            ['client', $this->clientId]
+        );
+
+        $this->assertNotNull($second);
+        $this->assertNotSame($first['token_hash'], $second['token_hash'], 'a fresh link must supersede the old one');
         $this->assertCount(1, $this->db->select('SELECT * FROM password_reset_tokens'), 'only the most recently issued token should remain valid');
     }
 
@@ -266,7 +328,8 @@ final class ClientAuthControllerPasswordResetTest extends DatabaseTestCase
                 new AffiliateReferralRepository($this->db),
                 new AffiliateCommissionRepository($this->db),
                 new AffiliatePayoutRequestRepository($this->db),
-                new InvoiceRepository($this->db)
+                new InvoiceRepository($this->db),
+                new SettingsRepository($this->db)
             ),
             App::container()->make(SessionManager::class),
             $this->clients,
