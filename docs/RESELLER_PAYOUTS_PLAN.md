@@ -363,7 +363,7 @@ backfill must capture the rate itself rather than trusting `toBase()`.)*
 
 ## 10. Phase C — design notes (not yet built)
 
-### 10.1 The first item is a defect, not a feature
+### 10.1 ✅ FIXED (commit 591fe99) — cost invoices were netted but never settled
 
 **Cost invoices are debited from the account but never marked paid.** Found
 2026-09-29 while designing this phase, and it is live in the shipped code.
@@ -407,10 +407,30 @@ Two implementation cautions, both of which are cheap to get wrong:
    running account, netted" (decision 1). The alternative — leave the shortfall on
    the invoice — reintroduces two places that both claim to know what is owed.
 
-Consequence to accept: the cost report's arrears section becomes permanently empty,
-because with netting there are no unpaid cost invoices. Arrears are a negative
-balance. The section should be removed rather than left as a table that always says
-"none", since a reader will otherwise assume the query is broken.
+Consequence accepted: the cost report's arrears section is normally empty, because
+with netting there are no unpaid cost invoices. The table was KEPT rather than deleted,
+because it still surfaces documents raised before the fix plus any an admin re-opens by
+hand, and its copy now says so.
+
+**A second-order effect the fix caused, and its mitigation.** Marking the invoice paid
+made the dashboard count one store sale twice: `AdminDashboardController` shows
+`InvoiceRepository::totalPaidThisMonth()` as *income this month*, and a store sale
+produces TWO invoices — the customer's retail one and the reseller's cost one. So
+`totalPaidThisMonth()` and `paidThisMonthByCurrency()` now exclude invoices that an
+order names as its `reseller_cost_invoice_id`. No migration was needed: InnoDB had
+already created an index for that foreign key. The overdue metrics needed nothing and
+actually improved, since cost invoices no longer inflate them.
+
+**Still overstated, pre-existing, and NOT fixed here.** For a store sale the customer's
+retail invoice counts in full, but our revenue is the COST — the retail is collected on
+the reseller's behalf and the margin is theirs. So *income this month* was already
+overstated by (retail − cost) before any of this. What income should mean once resellers
+exist is a product decision, so the change above only stops the same sale being counted
+twice; it does not attempt to answer that question.
+
+`topClientsByRevenue()` was deliberately left alone. It answers "how much has this client
+paid us, ever", and for a reseller a netted cost invoice is a genuine charge to them, so
+excluding it would be a different claim than the one the widget makes.
 
 ### 10.2 Statements
 
