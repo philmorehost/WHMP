@@ -82,6 +82,42 @@ final class DashboardAggregatesTest extends DatabaseTestCase
         $this->assertEqualsWithDelta(100.00, $this->invoices->totalPaidThisMonth(), 0.001);
     }
 
+    public function test_a_netted_reseller_cost_invoice_is_not_counted_as_cash_collected(): void
+    {
+        $now = new DateTimeImmutable();
+        $stamp = $now->format('Y-m-d H:i:s');
+
+        // Cash we actually received.
+        $ordinary = $this->insertInvoice('paid', 100.00, $now->format('Y-m-d'));
+        $this->db->update('UPDATE invoices SET paid_at = ? WHERE id = ?', [$stamp, $ordinary]);
+
+        // A reseller's store-cost invoice. It is marked paid because it is settled
+        // from their running account rather than by a payment, so NO cash changes
+        // hands on it — see ResellerCostBillingJob.
+        $cost = $this->insertInvoice('paid', 400.00, $now->format('Y-m-d'));
+        $this->db->update('UPDATE invoices SET paid_at = ? WHERE id = ?', [$stamp, $cost]);
+        $this->linkAsResellerCostInvoice($cost, 400.0);
+
+        // Only the cash invoice. Counting the cost invoice too would report ONE store
+        // sale twice: the customer's retail invoice and the reseller's cost invoice.
+        $this->assertEqualsWithDelta(100.00, $this->invoices->totalPaidThisMonth(), 0.001);
+
+        // The grouped income figure (and the AI insight built on it) must agree with
+        // the scalar one, or the dashboard and the widget quote different incomes.
+        $grouped = 0.0;
+        foreach ($this->invoices->paidThisMonthByCurrency() as $row) {
+            $grouped += (float) $row['amount'];
+        }
+        $this->assertEqualsWithDelta(100.00, $grouped, 0.001);
+
+        // Negative control: the LINK is what excludes it, not the row being absent or
+        // the status being ignored. Unlink it and the same invoice IS counted — which
+        // is also what the dashboard did before cost invoices were settled at all.
+        $this->db->update('UPDATE orders SET reseller_cost_invoice_id = NULL WHERE reseller_cost_invoice_id = ?', [$cost]);
+
+        $this->assertEqualsWithDelta(500.00, $this->invoices->totalPaidThisMonth(), 0.001);
+    }
+
     public function test_ticket_count_open_excludes_closed(): void
     {
         $deptId = $this->insertDepartment();
@@ -149,6 +185,20 @@ final class DashboardAggregatesTest extends DatabaseTestCase
         return (int) $this->db->insert(
             'INSERT INTO invoices (client_id, status, subtotal, total, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [$this->clientId, $status, $total, $total, $dueDate, $now, $now]
+        );
+    }
+
+    /**
+     * Make an invoice the cost invoice for a store order, which is what marks it as
+     * netted. The order carries the cost; the invoice is what it was billed as.
+     */
+    private function linkAsResellerCostInvoice(int $invoiceId, float $cost): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->insert(
+            'INSERT INTO orders (client_id, status, total, cost_total, reseller_cost_invoice_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$this->clientId, 'active', $cost + 100.0, $cost, $invoiceId, $now, $now]
         );
     }
 

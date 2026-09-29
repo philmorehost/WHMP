@@ -476,8 +476,15 @@ final class InvoiceRepository
      */
     public function paidThisMonthByCurrency(): array
     {
+        // Same exclusion as totalPaidThisMonth(), and for the same reason: this backs
+        // the dashboard's income-by-currency figure and the AI insight built on it,
+        // and a netted reseller cost invoice is not cash collected. Feeds the same
+        // number twice otherwise -- once per side of one store sale.
         return $this->sumByCurrency(
-            "i.status = 'paid' AND i.paid_at >= ?",
+            "i.status = 'paid' AND i.paid_at >= ?
+             AND NOT EXISTS (
+                 SELECT 1 FROM orders o WHERE o.reseller_cost_invoice_id = i.id
+             )",
             [(new DateTimeImmutable('first day of this month'))->format('Y-m-d 00:00:00')]
         );
     }
@@ -539,10 +546,37 @@ final class InvoiceRepository
         ], $rows);
     }
 
+    /**
+     * Cash collected this month — the dashboard's "income this month".
+     *
+     * A reseller's STORE-COST invoice is excluded, and that is not a detail. It is
+     * marked 'paid' the moment it is raised, because it is settled from the
+     * reseller's running account rather than by a payment (see
+     * ResellerCostBillingJob) — no cash changes hands on it at all. Counting it here
+     * would report ONE store sale twice: once as the customer's retail invoice and
+     * once as the reseller's cost invoice, inflating the dashboard by the cost of
+     * every store sale.
+     *
+     * Identified through orders.reseller_cost_invoice_id rather than a status or a
+     * flag column, because that link is what MAKES the invoice a cost invoice and it
+     * already exists. InnoDB created an index for that foreign key
+     * (fk_orders_reseller_cost_invoice), so this stays a per-row index lookup rather
+     * than a scan of the orders table per invoice.
+     *
+     * Still overstated for store sales, and that part is pre-existing and NOT fixed
+     * here: the customer's retail invoice counts in full, but our revenue on a store
+     * sale is the COST — the retail is collected on the reseller's behalf. Deciding
+     * what "income" should mean once resellers exist is a product question, so this
+     * change only stops the same sale being counted twice.
+     */
     public function totalPaidThisMonth(): float
     {
         $row = $this->db->selectOne(
-            "SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE status = 'paid' AND paid_at >= ?",
+            "SELECT COALESCE(SUM(i.total), 0) AS total FROM invoices i
+             WHERE i.status = 'paid' AND i.paid_at >= ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM orders o WHERE o.reseller_cost_invoice_id = i.id
+               )",
             [(new DateTimeImmutable('first day of this month'))->format('Y-m-d 00:00:00')]
         );
 

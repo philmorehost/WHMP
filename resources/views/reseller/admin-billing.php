@@ -159,8 +159,15 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
 <div class="cv-card">
     <h2 class="cv-card__title">Unpaid cost invoices</h2>
     <p style="color:var(--cv-text-secondary);">
-        Cost already invoiced and still owed. Nothing here suspends a store: taking a storefront offline also takes
-        the reseller's customers offline, so that stays an explicit decision on the store page.
+        Cost already invoiced and still owed. <strong>This should normally be empty.</strong> A cost invoice is
+        settled from the reseller's balance the moment it is raised, so no cash is ever due on it — arrears appear
+        as a <em>negative balance</em> on the
+        <a href="/admin/resellers/accounts">reseller accounts</a> report instead. A row here is either a document
+        raised before that settlement was applied, or one an admin re-opened by hand.
+    </p>
+    <p style="color:var(--cv-text-secondary);">
+        Nothing here suspends a store: taking a storefront offline also takes the reseller's customers offline, so
+        that stays an explicit decision on the store page.
     </p>
     <table class="cv-table">
         <thead>

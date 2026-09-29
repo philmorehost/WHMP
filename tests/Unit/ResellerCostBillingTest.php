@@ -6,6 +6,7 @@ namespace CodeVault\Tests\Unit;
 
 use CodeVault\Billing\CurrencyRepository;
 use CodeVault\Billing\CurrencyService;
+use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\TaxCalculator;
 use CodeVault\Billing\TaxRuleRepository;
 use CodeVault\Billing\TaxSettings;
@@ -54,6 +55,7 @@ final class ResellerCostBillingTest extends DatabaseTestCase
     private ResellerCostService $service;
     private ResellerStoreRepository $storeRepo;
     private ResellerCostBillingJob $job;
+    private InvoiceRepository $invoices;
     private int $resellerClientId;
     private int $customerId;
     private int $storeId;
@@ -100,6 +102,8 @@ final class ResellerCostBillingTest extends DatabaseTestCase
 
         $this->ngnId = (new CurrencyRepository($this->db))->create('NGN', 'N', 1490.0);
 
+        $this->invoices = new InvoiceRepository($this->db);
+
         $this->job = new ResellerCostBillingJob(
             $this->service,
             $this->costs,
@@ -117,7 +121,10 @@ final class ResellerCostBillingTest extends DatabaseTestCase
                 $this->clients,
                 $this->currency,
                 $this->settings
-            )
+            ),
+            // ...and settles the invoice itself, so the dunning sweep cannot chase
+            // a bill that has already been taken off the reseller's balance.
+            $this->invoices
         );
     }
 
@@ -132,7 +139,11 @@ final class ResellerCostBillingTest extends DatabaseTestCase
 
         $invoice = $this->onlyInvoice();
         $this->assertEqualsWithDelta(75.0, (float) $invoice['subtotal'], 0.001);
-        $this->assertSame('unpaid', $invoice['status']);
+
+        // Settled, not owed. The cost came off the reseller's balance in the same
+        // pass that raised this invoice (see the settlement tests below), so
+        // leaving it 'unpaid' is what let the dunning sweep chase it.
+        $this->assertSame('paid', $invoice['status']);
 
         // Both orders are stamped with the invoice that billed them, which is
         // what makes the next run a no-op.
@@ -358,19 +369,97 @@ final class ResellerCostBillingTest extends DatabaseTestCase
         $this->assertEqualsWithDelta(75.0, (float) $after[0]['accrued'], 0.001);
     }
 
-    public function test_arrears_lists_cost_invoices_that_are_still_unpaid(): void
+    public function test_arrears_is_empty_because_a_cost_invoice_is_settled_not_owed(): void
+    {
+        // This test used to assert the opposite -- that a freshly billed cost
+        // invoice appears in arrears -- and that assertion WAS the bug: the
+        // invoice was left unpaid after its full amount had already been taken
+        // off the reseller's balance, so the dunning sweep chased a bill that had
+        // been settled and added a late fee the ledger never saw.
+        $this->order(30.0, $this->placedIn(1, 5));
+        $this->job->handle();
+
+        $this->assertSame([], $this->service->arrears());
+
+        // The negative control, so this cannot pass merely because arrears() is
+        // broken: the very same invoice, forced back to unpaid, IS listed. That is
+        // what the sweep would have seen on every run before the fix.
+        $this->db->update("UPDATE invoices SET status = 'unpaid' WHERE id = ?", [(int) $this->onlyInvoice()['id']]);
+
+        $arrears = $this->service->arrears();
+        $this->assertCount(1, $arrears, 'arrears() must be capable of listing an unpaid cost invoice');
+        $this->assertEqualsWithDelta(30.0, (float) $arrears[0]['total'], 0.001);
+        $this->assertSame(1, (int) $arrears[0]['order_count']);
+    }
+
+    // ------------------------------------------------------- settled, not owed
+
+    public function test_the_cost_invoice_is_settled_as_soon_as_it_is_billed(): void
+    {
+        $this->order(30.0, $this->placedIn(1, 5));
+
+        $this->job->handle();
+
+        $invoice = $this->onlyInvoice();
+
+        // Paid, with paid_at stamped -- several reporting queries are keyed on
+        // "status = paid AND paid_at >= ?", so a status without the timestamp
+        // would silently vanish from those reports.
+        $this->assertSame('paid', (string) $invoice['status']);
+        $this->assertNotNull($invoice['paid_at']);
+    }
+
+    public function test_a_settled_cost_invoice_is_never_offered_to_the_dunning_sweep(): void
     {
         $this->order(30.0, $this->placedIn(1, 5));
         $this->job->handle();
 
-        $arrears = $this->service->arrears();
-        $this->assertCount(1, $arrears);
-        $this->assertEqualsWithDelta(30.0, (float) $arrears[0]['total'], 0.001);
-        $this->assertSame(1, (int) $arrears[0]['order_count']);
+        // The job bills with terms (default 7 days), so nothing is overdue yet.
+        // Age the invoice past its due date to reach the state the sweep looks for.
+        $this->db->update(
+            'UPDATE invoices SET due_date = ? WHERE id = ?',
+            [(new DateTimeImmutable('-1 day'))->format('Y-m-d'), (int) $this->onlyInvoice()['id']]
+        );
 
-        $this->db->update("UPDATE invoices SET status = 'paid' WHERE id = ?", [(int) $this->onlyInvoice()['id']]);
+        // overdue() is nothing more than "unpaid and past due", and it is the ONLY
+        // input to DunningJob. Not being in it is the whole guarantee: no reminder
+        // email to the reseller, and no 5% late fee that was never debited.
+        $this->assertSame([], $this->invoices->overdue());
 
-        $this->assertSame([], $this->service->arrears());
+        // The negative control: the same aged invoice, forced back to unpaid, IS
+        // overdue. Without this the test could pass simply because overdue() was
+        // broken, or because the due date never took.
+        $this->db->update("UPDATE invoices SET status = 'unpaid' WHERE id = ?", [(int) $this->onlyInvoice()['id']]);
+
+        $overdue = $this->invoices->overdue();
+        $this->assertCount(1, $overdue, 'the aged invoice must be reachable by the sweep when unpaid');
+    }
+
+    public function test_a_settled_cost_invoice_stays_settled_and_is_not_re_stamped_across_runs(): void
+    {
+        // I first wrote a test here asserting that an invoice whose debit did NOT
+        // post stays unpaid -- and it could not work: the job only ever raises
+        // invoices from duePeriods(), which requires a store, so the "no debit"
+        // branch is unreachable through this job. The test failed by asserting a
+        // state the code cannot produce. This is the reachable version of the
+        // property that matters: settling is a ONE-WAY, once-only transition.
+        $this->order(30.0, $this->placedIn(1, 5));
+
+        $this->job->handle();
+        $afterFirst = $this->onlyInvoice();
+
+        $this->job->handle();
+        $this->job->handle();
+
+        $afterThird = $this->onlyInvoice();
+
+        $this->assertSame((int) $afterFirst['id'], (int) $afterThird['id'], 'no second invoice on a later run');
+        $this->assertSame('paid', (string) $afterThird['status']);
+        $this->assertSame(
+            (string) $afterFirst['paid_at'],
+            (string) $afterThird['paid_at'],
+            'markPaid() is guarded by "AND status = unpaid", so a later run must not re-stamp the settlement'
+        );
     }
 
     public function test_arrears_never_include_a_customers_invoice(): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Reseller;
 
 use CodeVault\Billing\CurrencyService;
+use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Billing\TaxCalculator;
 use CodeVault\Cron\CronJob;
 use CodeVault\Database;
@@ -43,7 +44,8 @@ final class ResellerCostBillingJob implements CronJob
         private readonly SettingsRepository $settings,
         private readonly Database $db,
         private readonly HookDispatcher $hooks,
-        private readonly ResellerLedgerService $ledger
+        private readonly ResellerLedgerService $ledger,
+        private readonly InvoiceRepository $invoices
     ) {
     }
 
@@ -75,7 +77,37 @@ final class ResellerCostBillingJob implements CronJob
             // receipts feed. Deliberately AFTER raise() returns, so it can only
             // ever happen for an invoice that actually committed -- raise() rolls
             // the invoice and the orders it claims back together, or not at all.
-            $this->ledger->recordCostInvoice($invoiceId);
+            $posted = $this->ledger->recordCostInvoice($invoiceId);
+
+            // Settle the invoice itself, and only when the debit actually posted.
+            //
+            // Decision 3: cost invoices are settled from the balance, so no cash is
+            // ever due on this document. Without this the invoice stays 'unpaid',
+            // and since InvoiceRepository::overdue() is nothing more than "unpaid
+            // and past due", the dunning sweep then emails the reseller reminders
+            // for a bill already taken off their balance -- and adds a 5% late fee
+            // that is NEVER debited, because the debit happened above and is guarded
+            // by hasCostEntryForInvoice(). The two records would then disagree by
+            // exactly the fee. Found 2026-09-29.
+            //
+            // Through the repository rather than the payment path on purpose:
+            // paying an invoice normally fires INVOICE_PAID, which runs the
+            // provisioning and notification listeners for a document that is not a
+            // customer sale. markPaid() is a plain guarded UPDATE that also stamps
+            // paid_at, so the reporting queries keyed on "paid AND paid_at >= ?"
+            // still see this invoice.
+            //
+            // The null check is DEFENSIVE and not reachable through this job today:
+            // raise() only ever creates invoices from duePeriods(), which requires a
+            // store, so recordCostInvoice() always posts for a freshly raised
+            // invoice and always returns the entry id. It stays because the
+            // alternative -- settling on "an invoice was raised" rather than "the
+            // debit posted" -- would write off money nobody was ever charged for if
+            // that ever changed. There is deliberately no test for the null branch,
+            // because a state the code cannot produce cannot be tested honestly.
+            if ($posted !== null) {
+                $this->invoices->markPaid($invoiceId);
+            }
 
             $this->hooks->fire(HookPoints::INVOICE_CREATED, [
                 'invoiceId' => $invoiceId,

@@ -139,7 +139,8 @@ final class AdminResellerBillingPageTest extends DatabaseTestCase
                     $this->clients,
                     $currency,
                     $this->settings
-                )
+                ),
+                new \CodeVault\Billing\InvoiceRepository($this->db)
             ),
             new ActivityLogger($this->db)
         );
