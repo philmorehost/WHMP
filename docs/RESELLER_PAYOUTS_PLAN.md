@@ -352,3 +352,96 @@ stores `currency_rate = 1.0`, so the rate in force on the invoice date is **not
 recoverable from the invoice afterwards**. `ResellerCostBillingJob` must capture
 it at the moment it bills. This is a Phase A implementation detail rather than a
 business decision, and it is written down so it does not become a surprise.
+
+*(Phase A note, 2026-09-29: partially settled. `recordCostInvoice()` converts via
+`CurrencyService::toBase()`, which for a denominated row divides by the currency's
+**live** rate rather than one recorded on the invoice. That is correct on the
+normal path because the job raises the invoice and posts the debit in the same
+request, so "live" and "at billing" are the same instant. It is NOT correct for a
+backfill: settling a historical invoice later would use today's rate. Any future
+backfill must capture the rate itself rather than trusting `toBase()`.)*
+
+## 10. Phase C — design notes (not yet built)
+
+### 10.1 The first item is a defect, not a feature
+
+**Cost invoices are debited from the account but never marked paid.** Found
+2026-09-29 while designing this phase, and it is live in the shipped code.
+
+`ResellerCostBillingJob::raise()` inserts the invoice `unpaid` with
+`due_date = now + reseller.billing_due_days` (default 7) and `service_id` NULL.
+`ResellerLedgerService::recordCostInvoice()` then debits the ledger by the
+invoice's **total** — possibly driving the balance negative, which is the intended
+`in_arrears` state. Nothing ever marks the invoice settled, so:
+
+- `InvoiceRepository::overdue()` (`WHERE status = 'unpaid' AND due_date < today`)
+  has no notion of reseller cost invoices, so `DunningJob` emails the reseller
+  `invoice_overdue` reminders for a bill that has already been netted off their
+  balance.
+- `DunningJob` also adds a late fee (`billing.late_fee_percentage`, default 5%) to
+  `invoices.subtotal` / `total`. **That fee is never debited from the ledger** — the
+  debit happened at creation and is guarded by `hasCostEntryForInvoice()` — so the
+  invoice and the account then disagree by exactly the fee. (It is applied once per
+  invoice, guarded by an `invoice_items LIKE '%Late Fee%'` check, so it does not
+  compound.)
+- The admin cost report's "unpaid cost invoices" section lists them forever, reading
+  as arrears that are in fact already settled.
+- **No suspension, and nothing acts on `INVOICE_OVERDUE`.** `ServiceRepository::
+  overdueForSuspension()` requires `i.service_id = s.id` and a cost invoice has none,
+  so the blast radius is wrong emails and a wrong fee rather than cut-off service.
+
+The fix is decision 3 ("settled from the balance automatically") applied to the
+invoice row: mark it settled in the same transaction that posts the debit.
+
+Two implementation cautions, both of which are cheap to get wrong:
+
+1. **Set the status through the repository, not the payment path.** Routing this
+   through the normal payment flow would fire `INVOICE_PAID` and run the
+   provisioning and notification listeners for a document that is not a customer
+   sale. (The ledger's own accrual would be safe either way —
+   `accrueStoreReceipt()` looks for an order via `storeOrderForInvoice()` and a cost
+   invoice has no `order_id` — but the other listeners are not.)
+2. **Decide what "settled" means when the balance does not cover it.** The debit is
+   for the full total regardless, so the account goes negative and the debt lives
+   there. Marking the invoice paid as well is the reading consistent with "one
+   running account, netted" (decision 1). The alternative — leave the shortfall on
+   the invoice — reintroduces two places that both claim to know what is owed.
+
+Consequence to accept: the cost report's arrears section becomes permanently empty,
+because with netting there are no unpaid cost invoices. Arrears are a negative
+balance. The section should be removed rather than left as a table that always says
+"none", since a reader will otherwise assume the query is broken.
+
+### 10.2 Statements
+
+A statement is a period, a reseller, and the entries in it — with an **opening
+balance, the entries, and a closing balance**, plus the withdrawable figure as at
+the period end. All of it derived from `reseller_ledger`; there is no balance
+column to drift, so a statement is a query and not a snapshot that has to be kept
+in step.
+
+Open questions, deliberately not answered yet:
+
+- **A document or a view?** A statement a reseller downloads and forwards should
+  probably be a numbered, immutable PDF like an invoice. A view can be recomputed
+  and corrected. These have different audit properties and it is worth deciding
+  rather than drifting into whichever is easier.
+- **Does it need to be a tax document?** §6 flags that paying a third party may
+  create reporting obligations (a statement, or a self-billed invoice). That is the
+  reason this is a design question and not a formatting one.
+- **Currency.** The statement's figures should be the base ones, with the
+  reseller-currency equivalents shown for the closing balance only — showing a
+  converted figure per line would imply each line was settled at that rate, which is
+  exactly what "the reseller carries the FX movement" denies.
+
+### 10.3 Export
+
+A CSV of ledger entries: `created_at, kind, amount_base, withdrawable_at, order_id,
+invoice_id, payout_id, description`. Base amounts only, one row per entry, no
+totals — a spreadsheet can sum, and a total in an export invites someone to
+reconcile against it when the ledger is the authority.
+
+The one thing an export must include that the screens do not: **`payout_id` and
+`invoice_id` as plain ids rather than links**, because the point of the export is to
+be joined against other records outside the system.
+
