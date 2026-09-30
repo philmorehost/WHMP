@@ -54,6 +54,30 @@ final class CurrencyServiceTest extends DatabaseTestCase
         $this->assertSame('USD', $currency['code']);
     }
 
+    public function test_resolve_for_client_tolerates_a_row_that_omits_currency_id(): void
+    {
+        // The test above passes ['currency_id' => null] — the key IS present,
+        // so it never exercised the absent-key path. A document builder gets a
+        // narrow projection of the client row, and if that projection drops the
+        // column the key is *absent*, which a bare $row['currency_id'] read
+        // raises on under PHP 8.2. A warning emitted into a PDF byte stream
+        // corrupts the file, so this must be silent.
+        $warnings = [];
+        set_error_handler(function (int $errno, string $message) use (&$warnings): bool {
+            $warnings[] = $message;
+            return true;
+        });
+
+        try {
+            $currency = $this->service->resolveForClient(['id' => 7, 'email' => 'buyer@example.test']);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $warnings, 'a client row without a currency_id key must not raise a warning');
+        $this->assertSame('USD', $currency['code']);
+    }
+
     public function test_convert_applies_rate_and_rounds_to_two_decimals(): void
     {
         $this->assertSame(92.33, $this->service->convert(100.36, 0.92));

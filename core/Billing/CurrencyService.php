@@ -22,7 +22,12 @@ final class CurrencyService
     /** @return array<string, mixed> */
     public function resolveForClient(?array $client): array
     {
-        if ($client !== null && $client['currency_id'] !== null) {
+        // `?? null` covers both a NULL currency_id and a row that omits the
+        // key entirely. Callers pass raw rows straight from the database, and
+        // a partially-selected row (a PDF built from a narrow projection) has
+        // no such key — reading it directly raises "Undefined array key" on
+        // PHP 8.2, and a warning printed into a PDF byte stream corrupts it.
+        if ($client !== null && ($client['currency_id'] ?? null) !== null) {
             $currency = $this->currencies->find((int) $client['currency_id']);
 
             if ($currency !== null) {
