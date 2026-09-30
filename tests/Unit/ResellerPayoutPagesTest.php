@@ -62,6 +62,7 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
     private ResellerPayoutRepository $payouts;
     private ResellerPayoutService $service;
     private ResellerStoreRepository $storeRepo;
+    private \CodeVault\Reseller\ResellerStatementService $statements;
     private int $superAdminId;
     private int $plainAdminId;
     private int $resellerClientId;
@@ -139,6 +140,15 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         $this->payouts = new ResellerPayoutRepository($this->db);
         $this->service = new ResellerPayoutService($this->payouts, $this->ledger, $this->accounts, $currency);
 
+        // The numbered statements are issued by the ADMIN, but the client controller
+        // reads them, so it needs the service even though it can never write one.
+        $this->statements = new \CodeVault\Reseller\ResellerStatementService(
+            new \CodeVault\Reseller\ResellerStatementRepository($this->db),
+            $this->accounts,
+            $this->settings,
+            $currency
+        );
+
         $view = new View(dirname(__DIR__, 2) . '/resources/views');
 
         $this->admin = new AdminResellerPayoutsController(
@@ -160,7 +170,8 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
             $this->service,
             $this->storeRepo,
             $currency,
-            new ActivityLogger($this->db)
+            new ActivityLogger($this->db),
+            $this->statements
         );
     }
 
@@ -401,6 +412,63 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         // Seeded directly rather than through AuthGuard::login(), which calls
         // session_regenerate_id() and warns in CLI where there is no active session.
         $_SESSION['admin_id'] = $adminId;
+    }
+
+    // --------------------------------------------------- numbered statements
+
+    public function test_the_reseller_sees_their_own_issued_statements(): void
+    {
+        $this->signInAsClient();
+        $issued = $this->statements->issue($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        $response = $this->client->statements($this->request());
+        $body = (string) $response->body();
+
+        $this->assertSame(200, $response->status());
+        $this->assertStringContainsString((string) $issued['number'], $body);
+        $this->assertStringContainsString('/client/reseller/statements/' . (int) $issued['id'], $body);
+    }
+
+    public function test_the_reseller_sees_their_own_statement_document(): void
+    {
+        $this->signInAsClient();
+        $issued = $this->statements->issue($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        $body = (string) $this->client->showStatement(
+            $this->request(),
+            ['statementId' => (string) $issued['id']]
+        )->body();
+
+        $this->assertStringContainsString((string) $issued['number'], $body);
+        $this->assertStringContainsString('2026-08-01', $body);
+    }
+
+    public function test_a_reseller_cannot_open_another_stores_statement(): void
+    {
+        // A REAL statement belonging to a DIFFERENT store. The id is genuine and the
+        // signed-in reseller is genuine — only the pairing is wrong, which is the
+        // case an id-only check misses.
+        $otherClientId = $this->clients->create([
+            'email' => 'other-store-owner@example.test',
+            'password' => 'correct-horse-battery',
+            'first_name' => 'Other',
+            'last_name' => 'Owner',
+        ]);
+        $now = date('Y-m-d H:i:s');
+        $otherStoreId = (int) $this->db->insert(
+            'INSERT INTO resellers (client_id, slug, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            [$otherClientId, 'other-store-' . uniqid(), 'active', $now, $now]
+        );
+        $other = $this->statements->issue($otherStoreId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        $this->signInAsClient();
+        $response = $this->client->showStatement($this->request(), ['statementId' => (string) $other['id']]);
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString(
+            'not available',
+            (string) $this->session->pullFlash('reseller_error')
+        );
     }
 
     private function signInAsClient(): void

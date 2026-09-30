@@ -235,7 +235,16 @@ $kindLabels = [
 </div>
 
 <div class="cv-card">
-    <h2 class="cv-card__title">Statement</h2>
+    <h2 class="cv-card__title">Statements</h2>
+    <p style="color:var(--cv-text-secondary);">
+        Frozen, numbered copies of your account for a period. Unlike everything else on this page, an issued
+        statement never changes afterwards — so the copy you keep and the copy we hold always agree.
+    </p>
+    <p><a class="cv-btn" href="/client/reseller/statements">View your statements</a></p>
+</div>
+
+<div class="cv-card">
+    <h2 class="cv-card__title">Recent activity</h2>
     <p style="color:var(--cv-text-secondary);">
         Newest first. Entries are never edited or removed — a refund, a correction and a payout are all new lines —
         so this list is a record of what happened rather than a summary of where things ended up.

@@ -260,6 +260,47 @@ final class ResellerStatementTest extends DatabaseTestCase
         $this->assertNotNull($issued['issued_at']);
     }
 
+    public function test_the_settings_form_the_controller_and_the_document_all_name_the_same_keys(): void
+    {
+        // A seam no compiler checks, and the failure is completely silent: the form
+        // writes name="company_x", the controller reads a different string, and the
+        // field simply never saves. Each half looks right on its own, so this reads
+        // both files and the identity() keys together.
+        $view = (string) file_get_contents(dirname(__DIR__, 2) . '/resources/views/configuration/general.php');
+        $controller = (string) file_get_contents(dirname(__DIR__, 2) . '/core/Configuration/GeneralSettingsController.php');
+        $identity = $this->statements->identity();
+
+        $seams = [
+            ['field' => 'company_tax_number', 'setting' => 'company.tax_number', 'identity' => 'tax_number'],
+            ['field' => 'company_registration_number', 'setting' => 'company.registration_number', 'identity' => 'registration_number'],
+            ['field' => 'company_address', 'setting' => 'company.address', 'identity' => 'address'],
+            ['field' => 'company_phone', 'setting' => 'company.phone', 'identity' => 'phone'],
+        ];
+
+        foreach ($seams as $seam) {
+            $this->assertStringContainsString(
+                'name="' . $seam['field'] . '"',
+                $view,
+                'no form field is named ' . $seam['field']
+            );
+            $this->assertStringContainsString(
+                "input('" . $seam['field'] . "'",
+                $controller,
+                'the controller never reads ' . $seam['field']
+            );
+            $this->assertStringContainsString(
+                "set('" . $seam['setting'] . "'",
+                $controller,
+                'the controller never saves ' . $seam['setting']
+            );
+            $this->assertArrayHasKey(
+                $seam['identity'],
+                $identity,
+                'the document never reads ' . $seam['setting']
+            );
+        }
+    }
+
     /**
      * A PAID store order and its invoice, so the accrual has something real to read.
      * Returns the invoice id, which is what the ledger is keyed on.

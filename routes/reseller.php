@@ -32,6 +32,13 @@ $router->get('/client/reseller/account', [ClientResellerAccountController::class
 $router->post('/client/reseller/account/payouts', [ClientResellerAccountController::class, 'requestPayout']);
 $router->post('/client/reseller/account/payouts/{payoutId}/cancel', [ClientResellerAccountController::class, 'cancelPayout']);
 
+// The numbered statements issued to this reseller (plan §10.2). Read-only: a
+// reseller cannot issue one to themselves, because issuing freezes our tax
+// identity and mints a number, and both are our decision rather than theirs.
+// Neither route carries a store id — the store comes from the session guard.
+$router->get('/client/reseller/statements', [ClientResellerAccountController::class, 'statements']);
+$router->get('/client/reseller/statements/{statementId}', [ClientResellerAccountController::class, 'showStatement']);
+
 // The white-label store. Claiming a domain and proving control of it are
 // separate steps on purpose: nothing is served on a claimant's domain until
 // DNS shows they control it.
@@ -96,6 +103,15 @@ $router->get('/admin/resellers/{clientId}/account/export', [AdminResellerAccount
 // (plan §10.2). A view, not yet the numbered tax document that section asks for;
 // see the controller method for why those are different things.
 $router->get('/admin/resellers/{clientId}/statement', [AdminResellerAccountsController::class, 'statement']);
+
+// ISSUE the numbered, frozen document for a period. A POST because it mints a
+// number and writes a record: opening a page must never do either.
+$router->post('/admin/resellers/{clientId}/statement/issue', [AdminResellerAccountsController::class, 'issueStatement']);
+
+// One issued statement, rendered from its frozen snapshot. `statements` (plural)
+// rather than `statement` so the issued documents are addressable separately from
+// the live view, which has no id at all.
+$router->get('/admin/resellers/{clientId}/statements/{statementId}', [AdminResellerAccountsController::class, 'showStatement']);
 
 // One store's account and the entries behind it. Addressed by client id, like the
 // store routes above, so a client with no store still lands somewhere that can

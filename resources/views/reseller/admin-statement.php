@@ -20,6 +20,8 @@
  *
  * @var int $clientId
  * @var array<string, mixed> $statement
+ * @var array<int, array<string, mixed>> $issued
+ * @var array<int, string> $missingIdentity
  * @var string $baseCode
  * @var string|null $notice
  * @var string|null $error
@@ -34,6 +36,8 @@ $entries = is_array($statement['entries'] ?? null) ? $statement['entries'] : [];
 $running = is_array($statement['running'] ?? null) ? $statement['running'] : [];
 $inArrears = ($statement['in_arrears'] ?? false) === true;
 $holdingDays = (int) ($statement['holding_days'] ?? 0);
+$missingIdentity = is_array($missingIdentity ?? null) ? $missingIdentity : [];
+$issued = is_array($issued ?? null) ? $issued : [];
 
 // The period, as the two plain dates a reader thinks in rather than the
 // datetimes the query needs.
@@ -195,6 +199,64 @@ $kindLabels = [
             <tr><td colspan="7" style="color:var(--cv-text-secondary);">
                 No entries fall in this period, so the closing balance is the opening one. Activity outside the
                 period is on the <a href="/admin/resellers/<?= $clientId ?>/account">full ledger</a>.
+            </td></tr>
+        <?php endif; ?>
+        </tbody>
+    </table>
+</div>
+
+<div class="cv-card" style="margin-top:var(--cv-space-4);">
+    <h2 class="cv-card__title">Issued statements</h2>
+    <p style="color:var(--cv-text-secondary);">
+        Issuing turns the figures above into a <strong>numbered document that can no longer change</strong>. This is
+        not the same thing as printing the page: a late entry dated inside the same period will appear above the
+        moment it is posted, but it will never appear in a statement already issued. That refusal to move is the
+        whole value of the document — without it, two copies of the same statement could disagree.
+    </p>
+
+    <?php if ($missingIdentity !== []): ?>
+        <div class="cv-alert cv-alert--error">
+            <strong>Before issuing a tax document:</strong> these identity fields are still blank, so the document
+            will show them as missing — <?= e(implode(', ', $missingIdentity)) ?>.
+            Set them under <a href="/admin/settings/general">General Settings → Company Information</a>.
+            They are saved onto the document as they stand at the moment you issue it, so filling them in afterwards
+            will not change a statement that has already gone out.
+        </div>
+    <?php endif; ?>
+
+    <form method="post" action="/admin/resellers/<?= $clientId ?>/statement/issue"
+          style="display:flex;gap:var(--cv-space-2);align-items:flex-end;flex-wrap:wrap;">
+        <?= csrf_field() ?>
+        <input type="hidden" name="from" value="<?= e($fromDate) ?>">
+        <input type="hidden" name="to" value="<?= e($toDate) ?>">
+        <button class="cv-btn" type="submit">Issue for <?= e($fromDate) ?> &ndash; <?= e($toDate) ?></button>
+    </form>
+    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:var(--cv-space-2);">
+        Issuing the same period twice returns the statement that already exists rather than minting a second
+        number, so a double click cannot put a gap in the sequence.
+    </p>
+
+    <table class="cv-table" style="margin-top:var(--cv-space-3);">
+        <thead>
+        <tr><th>Number</th><th>Period</th><th>Closing</th><th>Issued</th><th></th></tr>
+        </thead>
+        <tbody>
+        <?php foreach ($issued as $doc): ?>
+            <tr>
+                <td>
+                    <a href="/admin/resellers/<?= $clientId ?>/statements/<?= (int) $doc['id'] ?>">
+                        <strong><?= e((string) $doc['number']) ?></strong>
+                    </a>
+                </td>
+                <td><?= e(substr((string) $doc['period_from'], 0, 10)) ?> &ndash; <?= e(substr((string) $doc['period_to'], 0, 10)) ?></td>
+                <td><?= e($money((float) $doc['closing_base'], $baseCode)) ?></td>
+                <td><?= e((string) $doc['issued_at']) ?></td>
+                <td><a class="cv-btn" href="/admin/resellers/<?= $clientId ?>/statements/<?= (int) $doc['id'] ?>">Open</a></td>
+            </tr>
+        <?php endforeach; ?>
+        <?php if ($issued === []): ?>
+            <tr><td colspan="5" style="color:var(--cv-text-secondary);">
+                Nothing has been issued to this store yet.
             </td></tr>
         <?php endif; ?>
         </tbody>

@@ -7,6 +7,7 @@ namespace CodeVault\Reseller;
 use CodeVault\Activity\ActivityLogger;
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Billing\CurrencyService;
+use CodeVault\Reseller\ResellerStatementService;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Session\SessionManager;
@@ -56,7 +57,8 @@ final class AdminResellerAccountsController
         private readonly ResellerLedgerService $ledger,
         private readonly ResellerStoreRepository $stores,
         private readonly CurrencyService $currency,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly ResellerStatementService $documents
     ) {
     }
 
@@ -257,6 +259,126 @@ final class AdminResellerAccountsController
         return $this->render('reseller.admin-statement', [
             'clientId' => $clientId,
             'statement' => $statement,
+            'issued' => $this->documents->listing((int) $store['id'], 24),
+            'missingIdentity' => $this->documents->missingIdentity(),
+            'baseCode' => $this->baseCurrencyCode(),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'error' => $this->session->pullFlash('reseller_error'),
+        ]);
+    }
+
+    /**
+     * Issue the NUMBERED statement for the requested period (plan §10.2).
+     *
+     * The live view above and this are deliberately different pages. The view is
+     * recomputed on every read and can be corrected; an issued statement is frozen
+     * and can only be superseded. Publishing is therefore an explicit action with an
+     * explicit click, never a side effect of looking at something — a document that
+     * numbers itself when you open it is a document nobody decided to send.
+     *
+     * Issuing is IDEMPOTENT: a repeated request for a period already issued returns
+     * the existing document and says so, because minting a second number for the same
+     * period would make the sequence unauditable. The redirect goes to the document
+     * either way, so pressing the button twice lands in the same place.
+     */
+    public function issueStatement(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash(
+                'reseller_error',
+                'Client #' . $clientId . ' has no store, so there is no statement to issue.'
+            );
+
+            return Response::redirect('/admin/resellers/accounts');
+        }
+
+        [$from, $to] = $this->period($request);
+        $issued = $this->documents->issue((int) $store['id'], $from, $to, $this->adminId());
+
+        if ($issued === null) {
+            $this->session->flash('reseller_error', 'That store no longer exists.');
+
+            return Response::redirect('/admin/resellers/accounts');
+        }
+
+        $already = ($issued['already_issued'] ?? false) === true;
+
+        if ($already) {
+            $this->session->flash(
+                'reseller_notice',
+                'Statement ' . $issued['number'] . ' was already issued for that period — showing the existing '
+                . 'document rather than issuing a second number.'
+            );
+        } else {
+            $this->session->flash('reseller_notice', 'Issued statement ' . $issued['number'] . '.');
+
+            // Logged only when a number is actually minted. A repeat is not an event:
+            // it issues nothing, changes nothing, and logging it would bury the real
+            // issuances in the activity log.
+            $this->activity->log(
+                'admin',
+                $this->adminId(),
+                'reseller.statement.issue',
+                null,
+                null,
+                'Issued statement ' . $issued['number'] . ' for store #' . (int) $store['id']
+                    . ' covering ' . substr($from, 0, 10) . ' to ' . substr($to, 0, 10),
+                $request->ip()
+            );
+        }
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/statements/' . (int) $issued['id']);
+    }
+
+    /**
+     * One issued statement, rendered from what was frozen.
+     *
+     * THE OWNERSHIP CHECK IS THE POINT. The statement id arrives in the URL, so it
+     * must be verified against the store in the URL as well — otherwise any statement
+     * could be read by guessing an id, and these documents name another company's
+     * revenue. The check is here rather than in the query so there is no code path
+     * that reaches a document without passing it.
+     */
+    public function showStatement(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Client #' . $clientId . ' has no store.');
+
+            return Response::redirect('/admin/resellers/accounts');
+        }
+
+        $document = $this->documents->find((int) ($params['statementId'] ?? 0));
+
+        if ($document === null || (int) $document['reseller_id'] !== (int) $store['id']) {
+            $this->session->flash(
+                'reseller_error',
+                'That statement does not exist, or does not belong to this store.'
+            );
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/statement');
+        }
+
+        return $this->render('reseller.admin-statement-document', [
+            'clientId' => $clientId,
+            // The store is attached here rather than joined in the query, so the
+            // document always renders under the store that was AUTHORISED above. A
+            // join would let a mismatched row supply its own store and quietly
+            // defeat the ownership check.
+            'document' => $document + ['store' => $store],
             'baseCode' => $this->baseCurrencyCode(),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
@@ -283,14 +405,36 @@ final class AdminResellerAccountsController
         $defaultFrom = date('Y-m-01 00:00:00');
         $defaultTo = date('Y-m-t 23:59:59');
 
-        $from = $this->normaliseDate((string) $request->query('from', ''), false);
-        $to = $this->normaliseDate((string) $request->query('to', ''), true);
+        $from = $this->normaliseDate($this->periodValue($request, 'from'), false);
+        $to = $this->normaliseDate($this->periodValue($request, 'to'), true);
 
         if ($from !== null && $to !== null && $from > $to) {
             return [$defaultFrom, $defaultTo];
         }
 
         return [$from ?? $defaultFrom, $to ?? $defaultTo];
+    }
+
+    /**
+     * A period bound, from the POST body or the query string.
+     *
+     * BOTH, body first, because the two pages that use a period disagree about where
+     * it comes from: viewing the statement is a GET form (query string) and issuing
+     * one is a POST form (body). `query()` and `input()` are separate sources with no
+     * fallback between them, so reading only one would silently ignore the other —
+     * and the failure is the quiet kind: the issue button would have frozen the
+     * CURRENT month whatever period the admin had chosen, which looks exactly like it
+     * worked.
+     */
+    private function periodValue(Request $request, string $key): string
+    {
+        $value = $request->input($key);
+
+        if ($value === null || $value === '') {
+            $value = $request->query($key);
+        }
+
+        return trim((string) ($value ?? ''));
     }
 
     /**

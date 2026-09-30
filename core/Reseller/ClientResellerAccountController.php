@@ -50,7 +50,8 @@ final class ClientResellerAccountController
         private readonly ResellerPayoutService $payouts,
         private readonly ResellerStoreRepository $stores,
         private readonly CurrencyService $currency,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        private readonly ResellerStatementService $documents
     ) {
     }
 
@@ -218,6 +219,80 @@ final class ClientResellerAccountController
         );
 
         return Response::redirect('/client/reseller/account');
+    }
+
+    /**
+     * The numbered statements this reseller has been issued.
+     *
+     * Read-only, and the store is derived from the guard rather than from the URL,
+     * so on THIS page there is no id to tamper with at all — the same rule the
+     * account page follows. A reseller sees their own by construction, not by a
+     * check somebody has to remember to write.
+     */
+    public function statements(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            return Response::redirect('/client/reseller');
+        }
+
+        return $this->page('reseller.client-statements', [
+            'issued' => $this->documents->listing((int) $store['id'], 36),
+            'baseCode' => strtoupper(trim($this->currency->codeFor(null))),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'error' => $this->session->pullFlash('reseller_error'),
+        ]);
+    }
+
+    /**
+     * One issued statement, as the reseller received it.
+     *
+     * THE OWNERSHIP CHECK IS WHY THIS IS A SEPARATE METHOD from statements(): the
+     * id IS in the URL here, so it has to be verified against the store derived from
+     * the session. Without it, any reseller could read another store's revenue by
+     * counting upwards — and these documents carry our cost, their customer's
+     * activity, and the store's whole trading history.
+     */
+    public function showStatement(Request $request, array $params): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            return Response::redirect('/client/reseller');
+        }
+
+        $document = $this->documents->find((int) ($params['statementId'] ?? 0));
+
+        if ($document === null || (int) $document['reseller_id'] !== (int) $store['id']) {
+            // ONE message for "does not exist" and "is not yours", deliberately.
+            // Distinguishing them would confirm which statement ids exist, which is
+            // information about other stores.
+            $this->session->flash('reseller_error', 'That statement is not available on your account.');
+
+            return Response::redirect('/client/reseller/statements');
+        }
+
+        return $this->page('reseller.client-statement-document', [
+            // Attached here rather than joined, so the document is always rendered
+            // under the store that was authorised above.
+            'document' => $document + ['store' => $store],
+            'baseCode' => strtoupper(trim($this->currency->codeFor(null))),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'error' => $this->session->pullFlash('reseller_error'),
+        ]);
     }
 
     /** @param array<string, mixed> $data */

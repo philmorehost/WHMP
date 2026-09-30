@@ -41,6 +41,30 @@
             </div>
 
             <div class="cv-field">
+                <label class="cv-label">Tax / VAT Registration Number</label>
+                <input class="cv-input" type="text" name="company_tax_number" value="<?= e($companyTaxNumber ?? '') ?>" placeholder="e.g. GB123456789">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Printed on numbered reseller statements. Left blank it is reported as missing rather than replaced with a placeholder — a made-up registration number on a tax document is worse than an absent one.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Company Registration Number</label>
+                <input class="cv-input" type="text" name="company_registration_number" value="<?= e($companyRegistrationNumber ?? '') ?>" placeholder="e.g. 09876543">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Printed on numbered reseller statements.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Registered Address</label>
+                <textarea class="cv-input" name="company_address" rows="3" placeholder="1 Example Street&#10;London&#10;United Kingdom"><?= e($companyAddress ?? '') ?></textarea>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">One line per address line. Printed on numbered reseller statements.</span>
+            </div>
+
+            <div class="cv-field">
+                <label class="cv-label">Contact Phone</label>
+                <input class="cv-input" type="text" name="company_phone" value="<?= e($companyPhone ?? '') ?>" placeholder="e.g. +44 20 1234 5678">
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Printed on numbered reseller statements. The Billing Email above supplies the contact address.</span>
+            </div>
+
+            <div class="cv-field">
                 <label class="cv-label">Billing Department</label>
                 <input class="cv-input" type="text" name="company_billing_dept" value="<?= e($companyDept ?? '') ?>" placeholder="Payments Dept.">
                 <span style="font-size:0.75rem;color:var(--cv-text-secondary);">Department name shown under company name on invoices.</span>

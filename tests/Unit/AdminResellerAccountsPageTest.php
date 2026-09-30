@@ -18,6 +18,8 @@ use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerLedgerRepository;
 use CodeVault\Reseller\ResellerLedgerService;
+use CodeVault\Reseller\ResellerStatementRepository;
+use CodeVault\Reseller\ResellerStatementService;
 use CodeVault\Reseller\ResellerStoreLocator;
 use CodeVault\Reseller\ResellerStoreRepository;
 use CodeVault\Reseller\ResellerStoreService;
@@ -54,6 +56,7 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
     private SettingsRepository $settings;
     private ClientRepository $clients;
     private ResellerLedgerService $ledger;
+    private ResellerStatementService $statements;
     private ResellerStoreRepository $storeRepo;
     private int $superAdminId;
     private int $plainAdminId;
@@ -128,6 +131,13 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
             $this->settings
         );
 
+        $this->statements = new ResellerStatementService(
+            new ResellerStatementRepository($this->db),
+            $this->ledger,
+            $this->settings,
+            $currency
+        );
+
         $this->controller = new AdminResellerAccountsController(
             new AuthGuard($this->session, $admins, new RoleRepository($this->db)),
             new View(dirname(__DIR__, 2) . '/resources/views'),
@@ -136,7 +146,8 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
             $this->ledger,
             $this->storeRepo,
             $currency,
-            new ActivityLogger($this->db)
+            new ActivityLogger($this->db),
+            $this->statements
         );
     }
 
@@ -326,7 +337,7 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         // every test above still passes while the page is unreachable.
         $routes = (string) file_get_contents(dirname(__DIR__, 2) . '/routes/reseller.php');
 
-        foreach (['index', 'show', 'saveSettings', 'export', 'statement'] as $method) {
+        foreach (['index', 'show', 'saveSettings', 'export', 'statement', 'issueStatement', 'showStatement'] as $method) {
             $this->assertStringContainsString(
                 'AdminResellerAccountsController::class, ' . "'" . $method . "'",
                 $routes,
@@ -646,6 +657,134 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
 
         $this->assertSame(302, $response->status());
         $this->assertStringContainsString('no store', (string) $this->session->pullFlash('reseller_error'));
+    }
+
+    // ------------------------------------------------- issued statements
+
+    public function test_issuing_a_statement_issues_the_period_that_was_posted(): void
+    {
+        $this->signInAsSuperAdmin();
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(80.0, '2026-08-10 09:00:00'), '2026-08-10 09:00:00');
+
+        // POSTED, as the issue button sends it. The period has to be read from the
+        // body: `query()` and `input()` are separate sources, so a controller that
+        // read only the query string would quietly issue the CURRENT month instead,
+        // which looks exactly like it worked.
+        $response = $this->controller->issueStatement(
+            $this->request(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        );
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString('/statements/', (string) $response->headers()['Location']);
+
+        $issued = $this->statements->listing($this->storeId);
+        $this->assertCount(1, $issued);
+        $this->assertSame('2026-08-01 00:00:00', $issued[0]['period_from'], 'the posted period must be the issued period');
+        $this->assertSame('2026-08-31 23:59:59', $issued[0]['period_to']);
+        $this->assertSame('STMT-2026-0001', (string) $issued[0]['number']);
+    }
+
+    public function test_issuing_the_same_period_twice_keeps_one_document_and_says_so(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $this->controller->issueStatement(
+            $this->request(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        );
+
+        // Cleared before the second call. A one-shot flash cannot distinguish "set
+        // earlier in this request" from "never rendered", so leaving it queued would
+        // silently discard the second message — the exact trap worth avoiding in a
+        // test that is about the second message.
+        $this->session->pullFlash('reseller_notice');
+
+        $this->controller->issueStatement(
+            $this->request(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        );
+
+        $this->assertStringContainsString(
+            'already issued',
+            strtolower((string) $this->session->pullFlash('reseller_notice'))
+        );
+        $this->assertCount(1, $this->statements->listing($this->storeId), 'a repeat must not mint a second number');
+    }
+
+    public function test_the_issued_list_appears_on_the_statement_page(): void
+    {
+        $this->signInAsSuperAdmin();
+        $issued = $this->statements->issue($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        $body = (string) $this->controller
+            ->statement($this->request(), ['clientId' => (string) $this->resellerClientId])
+            ->body();
+
+        $this->assertStringContainsString((string) $issued['number'], $body);
+        $this->assertStringContainsString('/statements/' . (int) $issued['id'], $body);
+    }
+
+    public function test_the_issued_document_renders_the_frozen_figures(): void
+    {
+        $this->signInAsSuperAdmin();
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(80.0, '2026-08-10 09:00:00'), '2026-08-10 09:00:00');
+        $issued = $this->statements->issue($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        $body = (string) $this->controller->showStatement($this->request(), [
+            'clientId' => (string) $this->resellerClientId,
+            'statementId' => (string) $issued['id'],
+        ])->body();
+
+        $this->assertStringContainsString((string) $issued['number'], $body);
+        $this->assertStringContainsString('80.00', $body);
+        $this->assertStringContainsString('2026-08-01', $body);
+    }
+
+    public function test_a_statement_cannot_be_opened_through_another_stores_url(): void
+    {
+        $this->signInAsSuperAdmin();
+        $issued = $this->statements->issue($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        // A second store, so there is a real "someone else's URL" to try. The pair
+        // (real statement id, real admin, wrong store) is the case an id-only check
+        // misses entirely.
+        //
+        // The store MUST exist: without one the controller bails out on "no store"
+        // before it ever reaches the ownership check, and the test would then be
+        // asserting a guard that never ran — which is exactly what the first version
+        // of this test did.
+        $otherClientId = $this->clients->create([
+            'email' => 'statement-idor@example.test',
+            'password' => 'correct-horse-battery',
+            'first_name' => 'Other',
+            'last_name' => 'Store',
+        ]);
+
+        $stores = new ResellerStoreService(
+            $this->storeRepo,
+            new ResellerStoreLocator($this->storeRepo, new Config(sys_get_temp_dir())),
+            new DomainVerifier()
+        );
+        $otherStoreId = (int) $stores->openForClient($otherClientId, 'Idor Target')['store']['id'];
+
+        $this->assertNotSame($this->storeId, $otherStoreId, 'the fixture needs two distinct stores');
+        $this->assertSame(
+            $this->storeId,
+            (int) $issued['reseller_id'],
+            'the statement must belong to the FIRST store, or there is nothing to protect'
+        );
+
+        $response = $this->controller->showStatement($this->request(), [
+            'clientId' => (string) $otherClientId,
+            'statementId' => (string) $issued['id'],
+        ]);
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString(
+            'does not belong',
+            (string) $this->session->pullFlash('reseller_error')
+        );
     }
 
     // -------------------------------------------------------------- helpers

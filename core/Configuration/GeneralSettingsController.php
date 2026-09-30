@@ -34,6 +34,14 @@ final class GeneralSettingsController
             'companyEmail' => $this->settings->get('company.email', ''),
             'companyDept' => $this->settings->get('company.billing_dept', ''),
             'whatsappNumber' => $this->settings->get('company.whatsapp', ''),
+            // Our own identity, for the numbered reseller statements. `company.name`
+            // and `company.email` above are reused rather than duplicated: a second
+            // "legal name" setting would be two answers to one question, and the
+            // statement reads the same values this page writes.
+            'companyTaxNumber' => $this->settings->get('company.tax_number', ''),
+            'companyRegistrationNumber' => $this->settings->get('company.registration_number', ''),
+            'companyAddress' => $this->settings->get('company.address', ''),
+            'companyPhone' => $this->settings->get('company.phone', ''),
             'lateFeePercentage' => $this->settings->get('billing.late_fee_percentage', '5.00'),
             'lateFeeGraceDays' => $this->settings->get('billing.late_fee_grace_days', '0'),
             'autoCancelUnpaidDays' => $this->settings->get('billing.auto_cancel_unpaid_days', '0'),
@@ -85,6 +93,15 @@ final class GeneralSettingsController
         $this->settings->set('company.email', trim((string) $request->input('company_email', '')));
         $this->settings->set('company.billing_dept', trim((string) $request->input('company_billing_dept', '')));
         $this->settings->set('company.whatsapp', trim((string) $request->input('whatsapp_number', '')));
+
+        // The identity a tax-grade statement is stamped with. Saved EXACTLY as typed
+        // -- trimmed, but never defaulted -- because a blank tax number has to stay
+        // blank: the statement reports which fields are missing instead, and a value
+        // invented here would be printed as though it were a real registration.
+        $this->settings->set('company.tax_number', trim((string) $request->input('company_tax_number', '')));
+        $this->settings->set('company.registration_number', trim((string) $request->input('company_registration_number', '')));
+        $this->settings->set('company.address', trim((string) $request->input('company_address', '')));
+        $this->settings->set('company.phone', trim((string) $request->input('company_phone', '')));
 
         $this->settings->set('billing.late_fee_percentage', (string) max(0.0, (float) $request->input('late_fee_percentage', 5.0)));
 
