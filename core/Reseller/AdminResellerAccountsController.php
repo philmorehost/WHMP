@@ -139,6 +139,77 @@ final class AdminResellerAccountsController
     }
 
     /**
+     * The ledger behind one store's balance, as a CSV (payout plan §10.3).
+     *
+     * Read-only, and gated on the same permission as the page it exports rather
+     * than a separate one: an export is a read with a different content type, and
+     * a distinct permission would let a staff member who may READ the account be
+     * unable to take a copy of what they just read. Nothing here is a mutation, so
+     * there is nothing an export could do that the show() page could not.
+     *
+     * Two departures from the screens, both taken deliberately from the plan:
+     *
+     *   - The ids are written as PLAIN IDS, not links. The point of the file is to
+     *     be joined against other records outside the system, where a URL is noise.
+     *   - NO TOTALS. The ledger is the authority and a spreadsheet can sum its own
+     *     column; a total in the export would invite someone to reconcile against
+     *     the file rather than against the account, and a wrong total that looks
+     *     authoritative is worse than no total at all.
+     *
+     * The amount is exported as `amount_base` and left unconverted. A store whose
+     * own currency differs from the base sees the same figure the account page
+     * shows, because there is no per-row rate at which each line was settled —
+     * that absence is precisely the reseller-carries-the-FX decision.
+     */
+    public function export(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash(
+                'reseller_error',
+                'Client #' . $clientId . ' has no store, so there is no account to export.'
+            );
+
+            return Response::redirect('/admin/resellers/accounts');
+        }
+
+        $stream = fopen('php://temp', 'r+');
+
+        fputcsv($stream, [
+            'created_at', 'kind', 'amount_base', 'withdrawable_at',
+            'order_id', 'invoice_id', 'payout_id', 'description',
+        ]);
+
+        foreach ($this->ledger->entriesForExport((int) $store['id']) as $entry) {
+            fputcsv($stream, [
+                $entry['created_at'],
+                $entry['kind'],
+                $entry['amount'],
+                $entry['withdrawable_at'] ?? '',
+                $entry['order_id'] ?? '',
+                $entry['invoice_id'] ?? '',
+                $entry['payout_id'] ?? '',
+                $entry['description'] ?? '',
+            ]);
+        }
+
+        rewind($stream);
+        $csv = stream_get_contents($stream);
+        fclose($stream);
+
+        return (new Response($csv, 200))
+            ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+            ->withHeader('Content-Disposition', 'attachment; filename="reseller-ledger-' . $clientId . '-' . date('Y-m-d') . '.csv"')
+            ->withHeader('Content-Length', (string) strlen($csv));
+    }
+
+    /**
      * The two numbers a payout is measured against.
      *
      * Both are floored rather than trusted from the form, for the same reason the

@@ -50,6 +50,22 @@ final class ResellerLedgerService
     }
 
     /**
+     * The whole account, oldest first, for the CSV export.
+     *
+     * A passthrough rather than a policy of its own: the export shows the same
+     * entries the account page shows, with no conversion and no total, so there
+     * is nothing to decide here that accountFor() has not already decided. It
+     * exists so the controller never touches the repository directly, which is
+     * the same rule every other reader of this account follows.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function entriesForExport(int $resellerId): array
+    {
+        return $this->ledger->entriesForExport($resellerId);
+    }
+
+    /**
      * Post the retail we collected for a store order, when that order's invoice is
      * PAID. Returns the new entry id, or null when there is nothing to do.
      *

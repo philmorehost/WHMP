@@ -48,7 +48,8 @@ foreach (array_reverse($entries) as $entry) {
     <h1 class="cv-card__title">Account — <?= e($storeName) ?></h1>
     <p><a href="/admin/resellers/accounts">&larr; All reseller accounts</a> &middot;
         <a href="/admin/resellers/<?= $clientId ?>/store">Store settings</a> &middot;
-        <a href="/admin/resellers/billing">Store cost billing</a></p>
+        <a href="/admin/resellers/billing">Store cost billing</a> &middot;
+        <a href="/admin/resellers/<?= $clientId ?>/account/export">Export CSV</a></p>
     <p style="color:var(--cv-text-secondary);">
         Every amount below is stored in <?= e($baseCode !== '' ? $baseCode : 'the base currency') ?>, at the rate that
         applied when the entry was posted. The reseller carries the exchange movement between the day we collect a

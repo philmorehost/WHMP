@@ -87,6 +87,11 @@ $router->post('/admin/resellers/{clientId}/store/verify', [AdminResellerControll
 $router->post('/admin/resellers/{clientId}/store/domain/override', [AdminResellerController::class, 'overrideStoreDomain']);
 $router->post('/admin/resellers/{clientId}/store/status', [AdminResellerController::class, 'setStoreStatus']);
 
+// The CSV of the same entries the account page shows (plan §10.3). Registered
+// BEFORE the account route below so the literal `export` segment is matched as a
+// path of its own rather than being read as part of the account path.
+$router->get('/admin/resellers/{clientId}/account/export', [AdminResellerAccountsController::class, 'export']);
+
 // One store's account and the entries behind it. Addressed by client id, like the
 // store routes above, so a client with no store still lands somewhere that can
 // explain why rather than on a 404.

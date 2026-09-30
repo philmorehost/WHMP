@@ -326,7 +326,7 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         // every test above still passes while the page is unreachable.
         $routes = (string) file_get_contents(dirname(__DIR__, 2) . '/routes/reseller.php');
 
-        foreach (['index', 'show', 'saveSettings'] as $method) {
+        foreach (['index', 'show', 'saveSettings', 'export'] as $method) {
             $this->assertStringContainsString(
                 'AdminResellerAccountsController::class, ' . "'" . $method . "'",
                 $routes,
@@ -352,9 +352,172 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
             $literal,
             'the literal accounts path must be registered before the parameterised one, or it can be read as a client id'
         );
+
+        // The export path is more specific than the per-store account path but
+        // shares its prefix, so it has to be registered first as well — otherwise
+        // a request for the export can be swallowed by the account route.
+        $export = strpos($routes, "'/admin/resellers/{clientId}/account/export'");
+
+        $this->assertNotFalse($export, 'the export path is not registered at all');
+        $this->assertLessThan(
+            $parameterised,
+            $export,
+            'the export path must be registered before the per-store account path'
+        );
+    }
+
+    // --------------------------------------------------------------- export
+
+    public function test_the_export_is_a_csv_of_the_ledger_with_plain_ids_and_no_totals(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $invoiceId = $this->paidStoreOrder(90.0, '2026-01-01 09:00:00');
+        $this->ledger->accrueStoreReceipt($invoiceId, '2026-01-01 09:00:00');
+
+        $response = $this->controller->export($this->request(), ['clientId' => (string) $this->resellerClientId]);
+        $body = (string) $response->body();
+        $headers = $response->headers();
+
+        $this->assertSame(200, $response->status());
+        $this->assertSame('text/csv; charset=utf-8', $headers['Content-Type']);
+        $this->assertStringContainsString('attachment;', $headers['Content-Disposition']);
+        $this->assertStringContainsString(
+            'reseller-ledger-' . $this->resellerClientId,
+            $headers['Content-Disposition'],
+            'the filename must identify which store the file belongs to'
+        );
+
+        $rows = $this->csvRows($body);
+
+        // The plan's column set, in the plan's order, with the amount named for
+        // its unit because the file has no screen to explain it.
+        $this->assertSame(
+            ['created_at', 'kind', 'amount_base', 'withdrawable_at', 'order_id', 'invoice_id', 'payout_id', 'description'],
+            $rows[0]
+        );
+        $this->assertCount(2, $rows, 'one header plus exactly one entry');
+
+        // By POSITION, not by substring: a shifted column would silently mis-pair
+        // every value with every other, which is worse than losing a row.
+        $this->assertSame('store_receipt', $rows[1][1]);
+        $this->assertEqualsWithDelta(90.0, (float) $rows[1][2], 0.0001, 'the amount must be the base figure, unconverted');
+        $this->assertNotSame('', $rows[1][3], 'a receipt must carry the date it becomes withdrawable');
+        $this->assertSame((string) $invoiceId, $rows[1][5]);
+        $this->assertSame('', $rows[1][6], 'a receipt has no payout yet');
+
+        // The two things the export must do that the screens do not: the ids are
+        // plain values (nothing to click, nothing to host) and there is no total
+        // to reconcile against — the ledger is the authority, and a spreadsheet
+        // can sum a column but cannot un-sum a wrong one.
+        $this->assertStringNotContainsString('href', $body);
+        $this->assertStringNotContainsString('Total', $body);
+        $this->assertStringNotContainsString('Balance', $body);
+    }
+
+    public function test_the_export_lists_the_entries_in_the_order_the_money_moved(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(10.0, '2026-02-01 09:00:00'), '2026-02-01 09:00:00');
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(20.0, '2026-03-01 09:00:00'), '2026-03-01 09:00:00');
+
+        $rows = $this->csvRows((string) $this->controller
+            ->export($this->request(), ['clientId' => (string) $this->resellerClientId])
+            ->body());
+
+        // OLDEST FIRST — the opposite of the page, which leads with the newest
+        // entry. A file a program reconciles against other records has to read in
+        // the order the money actually moved. ISO timestamps sort lexically, so
+        // the string comparison is a real ordering check and not a trick.
+        $this->assertEqualsWithDelta(10.0, (float) $rows[1][2], 0.0001);
+        $this->assertEqualsWithDelta(20.0, (float) $rows[2][2], 0.0001);
+        $this->assertLessThan($rows[2][0], $rows[1][0], 'the export must be oldest-first');
+    }
+
+    public function test_the_export_is_not_capped_at_the_page_size(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        // The account PAGE shows at most 200 entries. An export that inherited
+        // that cap would silently drop rows from a file someone reconciles money
+        // against, so the repository has a separate unlimited query — and this
+        // proves the export uses it rather than trusting the comment on it.
+        $repo = new ResellerLedgerRepository($this->db);
+
+        for ($i = 1; $i <= 205; $i++) {
+            $repo->append([
+                'reseller_id' => $this->storeId,
+                'client_id' => $this->resellerClientId,
+                'kind' => 'adjustment',
+                'amount' => 1.0,
+                'withdrawable_at' => null,
+                'order_id' => null,
+                'invoice_id' => null,
+                'payout_id' => null,
+                'description' => 'bulk ' . $i,
+                'admin_id' => null,
+                'created_at' => sprintf('2026-01-%02d 00:00:00', (($i - 1) % 28) + 1),
+            ]);
+        }
+
+        $rows = $this->csvRows((string) $this->controller
+            ->export($this->request(), ['clientId' => (string) $this->resellerClientId])
+            ->body());
+
+        // Header + 205. The page would have shown only 200 of them.
+        $this->assertCount(206, $rows, 'the export must not inherit the 200-row page cap');
+    }
+
+    public function test_the_export_is_forbidden_without_the_permission(): void
+    {
+        $this->signIn($this->plainAdminId);
+
+        $response = $this->controller->export($this->request(), ['clientId' => (string) $this->resellerClientId]);
+
+        // Gated on the same permission as show(): an export is a read with a
+        // different content type, so whoever may read the account may copy it —
+        // and whoever may not, may not.
+        $this->assertSame(403, $response->status());
+    }
+
+    public function test_the_export_redirects_when_the_client_has_no_store(): void
+    {
+        $this->signInAsSuperAdmin();
+        $storeless = $this->clients->create([
+            'email' => 'no-store-export@example.test',
+            'password' => 'correct-horse-battery',
+            'first_name' => 'No',
+            'last_name' => 'Store',
+        ]);
+
+        $response = $this->controller->export($this->request(), ['clientId' => (string) $storeless]);
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString('no store', (string) $this->session->pullFlash('reseller_error'));
     }
 
     // -------------------------------------------------------------- helpers
+
+    /**
+     * Parse a CSV body into rows with str_getcsv rather than exploding on
+     * commas: a description can legitimately contain one, and splitting naively
+     * would shift every later column by one.
+     *
+     * @return array<int, array<int, string|null>>
+     */
+    private function csvRows(string $body): array
+    {
+        $rows = [];
+
+        foreach (explode("\n", trim($body)) as $line) {
+            if ($line !== '') {
+                $rows[] = str_getcsv($line);
+            }
+        }
+
+        return $rows;
+    }
 
     private function signInAsSuperAdmin(): void
     {

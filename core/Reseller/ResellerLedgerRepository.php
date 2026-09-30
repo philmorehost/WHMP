@@ -126,6 +126,36 @@ final class ResellerLedgerRepository
     }
 
     /**
+     * Every entry in a store's account, oldest first, for the CSV export.
+     *
+     * A separate method from entries() for two reasons, both deliberate:
+     *
+     *   - entries() caps at 200 because it feeds a page. An export that silently
+     *     dropped rows past a page boundary would be a lie about a money figure,
+     *     so this one applies NO limit. A store with ten thousand entries is a
+     *     decade of trading, not a response that needs bounding.
+     *   - entries() returns newest-first because a person reads the top of a
+     *     statement. This is read left-to-right by a program reconciling against
+     *     other records, so it is returned in the order the money actually moved.
+     *
+     * `amount` is the BASE figure — see the class docblock — and is exported
+     * under that name so the unit is unambiguous in a file that has no screen to
+     * explain it.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function entriesForExport(int $resellerId): array
+    {
+        return $this->db->select(
+            'SELECT created_at, kind, amount, withdrawable_at, order_id, invoice_id, payout_id, description
+             FROM reseller_ledger
+             WHERE reseller_id = ?
+             ORDER BY created_at ASC, id ASC',
+            [$resellerId]
+        );
+    }
+
+    /**
      * What the account is made of, per kind — the "why" behind the number.
      *
      * @return array<string, array<string, mixed>>
