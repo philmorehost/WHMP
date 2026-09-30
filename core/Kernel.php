@@ -1041,6 +1041,35 @@ class Kernel
             }
         });
 
+        // The other side of the same account, and the one that carries real risk:
+        // a refund gives the customer their money back, so the receipt it funded
+        // must come off the reseller's balance. RefundService already fires this
+        // hook (for wallet and gateway refunds alike, partial or full), so the
+        // account is wired to the refund the same way it is wired to the payment.
+        //
+        // See reverseStoreReceipt() for why the reversal is NOT held again for the
+        // holding period: that period covers the chargeback window on money we are
+        // holding, and a refund is money we no longer hold. Held again, the receipt
+        // would stay withdrawable and the reseller could be paid it after the
+        // customer had been reimbursed.
+        //
+        // Wrapped like every listener here — the refund has already happened by the
+        // time this runs, so a bookkeeping failure must not surface as an error.
+        $hooks->register(HookPoints::INVOICE_REFUNDED, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $this->container->make(\CodeVault\Reseller\ResellerLedgerService::class)
+                    ->reverseStoreReceipt((int) $invoiceId, (float) ($payload['amount'] ?? 0.0));
+            } catch (\Throwable) {
+                // Reconciled by the account report, not by failing the refund.
+            }
+        });
+
         $this->container->singleton(AffiliateRepository::class, function (Container $c) {
             return new AffiliateRepository($c->make(Database::class));
         });

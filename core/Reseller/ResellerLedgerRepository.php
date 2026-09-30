@@ -78,6 +78,22 @@ final class ResellerLedgerRepository
     }
 
     /**
+     * The NET base amount posted against one order, across EVERY kind.
+     *
+     * Used only to bound a reversal. A refund may never take an order's net below
+     * zero, because that would debit the reseller for money we have already given
+     * back to the customer — so the ceiling on a reversal is this figure. Doing it
+     * as one SUM here means the caller does not have to know which kinds count.
+     */
+    public function netForOrder(int $orderId): float
+    {
+        return round((float) ($this->db->selectOne(
+            'SELECT COALESCE(SUM(amount), 0) AS total FROM reseller_ledger WHERE order_id = ?',
+            [$orderId]
+        )['total'] ?? 0.0), 2);
+    }
+
+    /**
      * The whole account, in the base currency. Not filtered by anything — a
      * negative balance is a real state (they priced below our cost) and must be
      * returned rather than clamped.

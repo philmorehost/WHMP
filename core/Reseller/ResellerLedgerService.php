@@ -208,6 +208,85 @@ final class ResellerLedgerService
     }
 
     /**
+     * Reverse part or all of a store receipt, because the sale was refunded
+     * (plan §9 decision 4: refunds append a reversing entry, they never edit the
+     * original). Returns the new entry id, or null when there is nothing to reverse.
+     *
+     * THE REVERSAL IS WITHDRAWABLE IMMEDIATELY, AND THAT IS THE WHOLE POINT.
+     *
+     * The holding period exists to cover the card chargeback window on money we are
+     * HOLDING. A refund is money we no longer hold, so it has to reduce the
+     * withdrawable figure at once rather than being held again for thirty days.
+     * Getting this wrong is not a display bug: the receipt would stay withdrawable
+     * and the reseller could be PAID OUT money we have already returned to the
+     * customer, with no entry left to claw back against.
+     *
+     * WHY IT IS BOUNDED BY THE ORDER'S NET
+     *
+     * Reversals are deliberately un-capped by the unique key, because a sale can be
+     * refunded in several parts. That makes the caller responsible for the ceiling,
+     * and the ceiling is the order's net: a refund may take it to zero but never
+     * below, or we would be debiting the reseller for money already given back. A
+     * hook that fires twice, or an over-large refund, therefore stops at the amount
+     * actually credited rather than silently inverting the account.
+     *
+     * Returns null when the invoice belongs to no store, when no receipt was ever
+     * posted (never paid, or refunded before the payment landed), or when the order
+     * has already been reversed in full.
+     */
+    public function reverseStoreReceipt(int $invoiceId, float $refundedAmount, ?string $now = null): ?int
+    {
+        $facts = $this->ledger->storeOrderForInvoice($invoiceId);
+
+        if ($facts === null) {
+            return null;
+        }
+
+        $orderId = (int) $facts['order_id'];
+
+        // Nothing was credited, so there is nothing to give back. Checking the
+        // RECEIPT rather than the invoice's status is deliberate: the receipt is the
+        // thing being reversed, and it is absent whenever the money never arrived.
+        if (!$this->ledger->hasEntryForOrder($orderId, 'store_receipt')) {
+            return null;
+        }
+
+        $net = $this->ledger->netForOrder($orderId);
+
+        if ($net <= 0.0) {
+            return null;
+        }
+
+        // Converted with the SAME invoice facts the receipt used, so a full refund
+        // cancels the original exactly instead of leaving a rounding tail behind.
+        $amount = min(
+            $this->baseAmount($refundedAmount, $facts['currency_id'], $facts['currency_rate']),
+            $net
+        );
+
+        if ($amount < 0.01) {
+            return null;
+        }
+
+        return $this->ledger->append([
+            'reseller_id' => (int) $facts['reseller_id'],
+            'client_id' => $facts['reseller_client_id'] === null ? null : (int) $facts['reseller_client_id'],
+            'kind' => 'receipt_reversal',
+            // Negative: this reduces what we owe. The sign is what makes it a
+            // reversal rather than a second credit.
+            'amount' => -round($amount, 2),
+            // NULL = immediate. See the docblock: this is the safety property.
+            'withdrawable_at' => null,
+            'order_id' => $orderId,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => 'Refund on store order #' . $orderId . ' — retail returned to the customer',
+            'admin_id' => null,
+            'created_at' => $now ?? $this->now(),
+        ]);
+    }
+
+    /**
      * Post the debit side: the cost invoice Phase 4 raised for a store.
      *
      * The amount is the INVOICE's total, read from the invoice rather than
