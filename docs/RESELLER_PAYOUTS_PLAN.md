@@ -267,11 +267,12 @@ rewrites `withdrawable_at`, not a side-effect of a settings form.
 - **Phase B — request and approve.** ✅ *Built.* Reseller payout requests; admin
   queue; approve/reject/mark-paid with a reference. Payment is **manual bank
   transfer** — the simplest thing that can be honest.
-- **Phase C — netting and statements.** ◐ *Partly built.* ✅ Cost invoices are settled
+- **Phase C — netting and statements.** ◐ *Mostly built.* ✅ Cost invoices are settled
   from the balance automatically (§10.1, commit 591fe99); ✅ the ledger exports as a
-  CSV for accounting (§10.3, commit 2696065). ⬜ The monthly **statement** itself is
-  not built: §10.2 leaves two decisions open deliberately — a numbered immutable PDF
-  versus a recomputable view, and whether a statement must serve as a tax document.
+  CSV for accounting (§10.3, commit 2696065); ✅ the period **statement** is built as
+  a view (§10.2, commit 376eb57). ⬜ Remaining: the NUMBERED, IMMUTABLE statement the
+  tax-document decision requires. The view already carries its content, so what is
+  left is the number sequence, the frozen copy and the legal layout — not a redesign.
 - **Phase D — methods and automation.** ⬜ *Not started.* Gateway payouts,
   automatic payouts above a threshold, and refund/chargeback handling. (The 30-day
   holding period is *not* deferred to here: it is a rule about what counts as
@@ -434,7 +435,7 @@ twice; it does not attempt to answer that question.
 paid us, ever", and for a reseller a netted cost invoice is a genuine charge to them, so
 excluding it would be a different claim than the one the widget makes.
 
-### 10.2 Statements
+### 10.2 ◐ VIEW BUILT (commit 376eb57) — Statements
 
 A statement is a period, a reseller, and the entries in it — with an **opening
 balance, the entries, and a closing balance**, plus the withdrawable figure as at
@@ -442,19 +443,44 @@ the period end. All of it derived from `reseller_ledger`; there is no balance
 column to drift, so a statement is a query and not a snapshot that has to be kept
 in step.
 
-Open questions, deliberately not answered yet:
+**DECISIONS (2026-09-30), which were the open questions below.** A statement must
+eventually work as a **tax document**, and is being built as **a view first, a
+numbered document later**. That ordering is deliberate: a view is recomputed on
+every read and can be corrected, while a tax document must be numbered and
+IMMUTABLE so two copies of "statement 12" can never disagree. Building the
+numbered document before its format is settled would mean reissuing documents,
+which is the one thing numbering exists to prevent.
 
-- **A document or a view?** A statement a reseller downloads and forwards should
-  probably be a numbered, immutable PDF like an invoice. A view can be recomputed
-  and corrected. These have different audit properties and it is worth deciding
-  rather than drifting into whichever is easier.
-- **Does it need to be a tax document?** §6 flags that paying a third party may
-  create reporting obligations (a statement, or a self-billed invoice). That is the
-  reason this is a design question and not a formatting one.
-- **Currency.** The statement's figures should be the base ones, with the
-  reseller-currency equivalents shown for the closing balance only — showing a
-  converted figure per line would imply each line was settled at that rate, which is
-  exactly what "the reseller carries the FX movement" denies.
+**Built** at `GET /admin/resellers/{clientId}/statement`, gated on
+`resellers.manage`, defaulting to the current calendar month. It carries the
+content a tax document needs — period, both parties, opening and closing balances
+— and says on the page that it is not yet the document of record.
+
+Two things the plan did not spell out, both of which would fail SILENTLY:
+
+- **The opening balance is taken strictly BEFORE the period.** On-or-before counts
+  the period's own first entry twice — once as opening and again among the entries
+  — making the closing balance wrong by that amount, and invisible in any month
+  whose first day saw no activity.
+- **The period end is normalised to the LAST DAY at 23:59:59, not to midnight.**
+  Midnight on the last day silently omits everything posted during it, which is
+  exactly the day a monthly billing run writes its entries.
+
+Both are pinned by tests with negative controls: normalising the end to midnight
+fails the boundary test, and taking the withdrawable figure at *now* rather than
+at the period end fails the maturity test (100 instead of 60, because an August
+receipt had not matured by 31 August).
+
+**Currency, as decided:** the statement's figures are the base ones, with the
+reseller-currency equivalents shown for the **closing balance only** — showing a
+converted figure per line would imply each line was settled at that rate, which is
+exactly what "the reseller carries the FX movement" denies. The withdrawable
+figure is likewise taken at the period END, so a receipt maturing later is not
+presented as having been available during the period.
+
+**Still to do for the tax-document decision:** a number sequence, a frozen copy,
+and the legal layout (our tax identity and the reseller's). The figures do not
+change.
 
 ### 10.3 ✅ BUILT (commit 2696065) — Export
 

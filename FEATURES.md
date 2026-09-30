@@ -116,7 +116,10 @@ answer it from a queue (**Admin → Resellers → Reseller Payouts**). Payment i
 reference the admin records: nothing in the system moves money. Each store's ledger can be downloaded as a
 CSV from its account page (**Export CSV**) for accounting done outside the system — base amounts, one row per
 entry, ids as plain values and no totals, because the ledger is the authority and a spreadsheet can sum a
-column but cannot un-sum a wrong one.
+column but cannot un-sum a wrong one. Each store also has a **period statement** (**Statement** on the account
+page) showing the opening balance, the entries, the closing balance and the withdrawable figure as at the period
+end. The statement is a live view today; the numbered, frozen copy that a tax document needs is the remaining
+piece of work.
 - **Email campaigns** — bulk marketing sends with per-recipient tracking.
 - **SEO tools** — canonical URLs, meta tags, and structured JSON-LD data.
 - **Promotions** — public deals page driven by active coupon campaigns.
