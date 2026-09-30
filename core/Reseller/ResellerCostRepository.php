@@ -22,6 +22,38 @@ use CodeVault\Database;
  */
 final class ResellerCostRepository
 {
+    /**
+     * What makes an order's cost billable at all: a store order with a cost, whose
+     * CUSTOMER invoice has not been refunded.
+     *
+     * DEFINED ONCE AND USED BY BOTH the billing query and the report, because those
+     * two have to agree. A report that counts an order the billing run refuses to
+     * bill is a report that makes somebody ask why a figure never turns into an
+     * invoice — and the usual cause is a filter added to one query and not the other.
+     *
+     * A REFUNDED SALE MUST NOT BE BILLED. Cost is billed monthly, so a refund that
+     * lands before the month closes is simply never billed: the receipt has already
+     * been reversed off the account (plan §9 decision 4), and charging the cost of a
+     * sale we refunded would debit the reseller for an order that un-wound.
+     *
+     * The refunded test is `NOT EXISTS` on the order's invoices rather than a flag on
+     * the order, because the refund is recorded against the INVOICE and the same
+     * refund path serves every invoice type.
+     *
+     * A refund arriving AFTER the month has already been invoiced is the other half of
+     * the same decision, and needs a reversing CREDIT rather than an exclusion. It is
+     * deliberately not built here: reversing one order's share of an invoice needs the
+     * per-order figure the invoice was built from, and invoice_items stores only a
+     * description, so there is no link to reverse against yet. Guessing it would
+     * leave a residual on a money path.
+     */
+    private const BILLABLE_ORDER = "reseller_id IS NOT NULL
+               AND cost_total IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM invoices ri
+                   WHERE ri.order_id = orders.id AND ri.status = 'refunded'
+               )";
+
     public function __construct(private readonly Database $db)
     {
     }
@@ -37,9 +69,8 @@ final class ResellerCostRepository
         return $this->db->select(
             'SELECT id, reseller_id, client_id, cost_total, currency_id, currency_rate, created_at
              FROM orders
-             WHERE reseller_id IS NOT NULL
+             WHERE ' . self::BILLABLE_ORDER . '
                AND reseller_cost_invoice_id IS NULL
-               AND cost_total IS NOT NULL
                AND created_at < ?
              ORDER BY reseller_id ASC, created_at ASC, id ASC',
             [$cutoff]
@@ -56,7 +87,7 @@ final class ResellerCostRepository
      */
     public function totals(?int $resellerId = null): array
     {
-        $where = 'reseller_id IS NOT NULL AND cost_total IS NOT NULL';
+        $where = self::BILLABLE_ORDER;
         $bindings = [];
 
         if ($resellerId !== null) {

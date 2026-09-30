@@ -9,6 +9,7 @@ use CodeVault\Billing\CurrencyService;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Database\Migrator;
+use CodeVault\Reseller\ResellerCostRepository;
 use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerLedgerRepository;
 use CodeVault\Reseller\ResellerLedgerService;
@@ -248,6 +249,43 @@ final class ResellerRefundReversalTest extends DatabaseTestCase
 
         $this->assertStringContainsString('HookPoints::INVOICE_REFUNDED', $refunds);
         $this->assertStringContainsString("'invoiceId'", $refunds, 'the payload the listener reads must be the one fired');
+    }
+
+    // ------------------------------------------------- the cost side of the same rule
+
+    public function test_a_refunded_order_is_excluded_from_cost_billing_and_from_the_report(): void
+    {
+        $repo = new ResellerCostRepository($this->db);
+        $cutoff = (new DateTimeImmutable('+1 day'))->format('Y-m-d H:i:s');
+
+        // Two orders from the same month. THE CONTRAST IS THE TEST: a filter that
+        // excluded nothing, or everything, would satisfy one half of this on its own.
+        $this->paidStoreOrder(100.0, '2026-01-05 09:00:00', '2026-01-05 09:00:00');
+        $refundedInvoice = $this->paidStoreOrder(100.0, '2026-01-06 09:00:00', '2026-01-06 09:00:00');
+
+        $refundedOrder = (int) $this->db->selectOne(
+            'SELECT order_id FROM invoices WHERE id = ?',
+            [$refundedInvoice]
+        )['order_id'];
+
+        // Cost is billed monthly, so a refund that lands before the month closes must
+        // simply never be billed — the receipt has already come off the account.
+        $this->db->update("UPDATE invoices SET status = 'refunded' WHERE id = ?", [$refundedInvoice]);
+
+        $billable = array_map(
+            static fn (array $row): int => (int) $row['id'],
+            $repo->unbilledBefore($cutoff)
+        );
+
+        $this->assertCount(1, $billable, 'only the order that was not refunded may be billed');
+        $this->assertNotContains($refundedOrder, $billable);
+
+        // And the REPORT must agree with the billing run, because they share one
+        // definition of billable. If the two could drift, this page would show cost
+        // that never becomes an invoice and nobody would know which was wrong.
+        $totals = $repo->totals();
+        $this->assertCount(1, $totals);
+        $this->assertSame(1, (int) $totals[0]['order_count'], 'the refunded order must not be counted either');
     }
 
     // -------------------------------------------------------------- fixtures

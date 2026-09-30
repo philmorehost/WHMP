@@ -328,6 +328,37 @@ its only output is a number we can check by hand against the orders.
    the reseller's problem" (a refunded sale simply un-winds) and it keeps the two
    sides of the ledger coherent.
 
+   **◐ Half built (commit 13e63c9).** The **receipt** side is done: a listener on
+   `HookPoints::INVOICE_REFUNDED` (which `RefundService` already fired) posts a
+   `receipt_reversal`, and — the part that carries the risk — the reversal is
+   **withdrawable immediately**. The holding period covers the chargeback window on
+   money we are HOLDING; a refund is money we no longer hold, so holding it again
+   would leave the receipt withdrawable and let a reseller be paid for a sale the
+   customer had been reimbursed for. Migration 0193 was required: the `kind` ENUM had
+   no reversal member, and `UNIQUE (kind, invoice_id)` capped reversals at one, so it
+   is replaced by `(kind, invoice_id, forward_flag)` — a generated discriminator that
+   keeps the forward "one posting per invoice" guarantee verbatim while leaving
+   reversals uncapped for partial refunds.
+
+   **◐ Cost side: the EXCLUSION is built; the CREDIT is blocked.** A refunded order
+   is now excluded from cost billing, so a refund that lands before the month closes
+   is simply never billed. The definition of "billable" lives in ONE place
+   (`ResellerCostRepository::BILLABLE_ORDER`) and is used by both the billing query
+   and the report, because a report that counts an order the billing run refuses to
+   bill is a report that makes someone ask why a figure never becomes an invoice.
+
+   **⬜ Blocked: a refund arriving AFTER the month was invoiced.** That case needs a
+   reversing `cost_reversal` credit rather than an exclusion, and it cannot be built
+   correctly yet: reversing one order's share of an invoice needs the per-order figure
+   the invoice was built from, and `ResellerCostBillingJob::raise()` writes each line
+   as a **description string** (`describe($order)`) into `invoice_items` — there is no
+   order id on the line. Worse, the figure round-trips through the reseller's currency
+   (order cost → converted for the invoice → back to base for the debit), and
+   `recordCostInvoice()`'s own docblock warns that round-trip is not exactly
+   invertible, so recomputing the share would leave a residual on every reversal. The
+   fix is a schema addition linking `invoice_items` to the order it came from, not an
+   approximation.
+
 **Decided 2026-09-28 (Phase B questions):**
 
 5. **Holding period** — *30 days.* A receipt becomes withdrawable 30 days after the
