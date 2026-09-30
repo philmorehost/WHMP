@@ -267,12 +267,11 @@ rewrites `withdrawable_at`, not a side-effect of a settings form.
 - **Phase B — request and approve.** ✅ *Built.* Reseller payout requests; admin
   queue; approve/reject/mark-paid with a reference. Payment is **manual bank
   transfer** — the simplest thing that can be honest.
-- **Phase C — netting and statements.** ◐ *Mostly built.* ✅ Cost invoices are settled
-  from the balance automatically (§10.1, commit 591fe99); ✅ the ledger exports as a
-  CSV for accounting (§10.3, commit 2696065); ✅ the period **statement** is built as
-  a view (§10.2, commit 376eb57). ⬜ Remaining: the NUMBERED, IMMUTABLE statement the
-  tax-document decision requires. The view already carries its content, so what is
-  left is the number sequence, the frozen copy and the legal layout — not a redesign.
+- **Phase C — netting and statements.** ✅ *Built.* Cost invoices are settled from
+  the balance automatically (§10.1, commit 591fe99); the ledger exports as a CSV for
+  accounting (§10.3, commit 2696065); and the period **statement** exists both as a
+  live view and as a NUMBERED, IMMUTABLE document (§10.2), with the reseller able to
+  read and keep their own.
 - **Phase D — methods and automation.** ⬜ *Not started.* Gateway payouts,
   automatic payouts above a threshold, and refund/chargeback handling. (The 30-day
   holding period is *not* deferred to here: it is a rule about what counts as
@@ -435,7 +434,7 @@ twice; it does not attempt to answer that question.
 paid us, ever", and for a reseller a netted cost invoice is a genuine charge to them, so
 excluding it would be a different claim than the one the widget makes.
 
-### 10.2 ◐ VIEW BUILT (commit 376eb57) — Statements
+### 10.2 ✅ BUILT (commits 376eb57, 09eada5, 29d3e22, edbda16) — Statements
 
 A statement is a period, a reseller, and the entries in it — with an **opening
 balance, the entries, and a closing balance**, plus the withdrawable figure as at
@@ -478,9 +477,51 @@ exactly what "the reseller carries the FX movement" denies. The withdrawable
 figure is likewise taken at the period END, so a receipt maturing later is not
 presented as having been available during the period.
 
-**Still to do for the tax-document decision:** a number sequence, a frozen copy,
-and the legal layout (our tax identity and the reseller's). The figures do not
-change.
+**What was built for the tax document.**
+
+A numbered, immutable document in `reseller_statements`, rendered from its own
+stored snapshot and never from the live ledger. What is frozen: the five money
+columns, the itemised lines (`line_items` JSON), the rate used, and **our tax
+identity as it stood on the day** — a company that later changes its VAT number
+must not retroactively restate documents it has already issued, or "issued by"
+describes whoever we are today rather than making a statement about the past.
+
+**Numbering: per store, per year (`STMT-2026-0001`).** Chosen because a statement
+is the reseller's own document and their bookkeeper expects to file their own
+sequence; a shared platform number would make their references non-contiguous.
+Per-store also leaks nothing — a global sequence would let every reseller read the
+platform's growth off their own statement number. The sequence is deliberately
+**not gapless**: gapless means reusing a number when a transaction rolls back, and
+a number that can be handed out twice is what makes a numbered document useless in
+an audit. A gap means something real happened.
+
+`(reseller_id, period_year, seq)` is the allocator, `(reseller_id, number)` is a
+backstop against a formatting bug, and `(reseller_id, period_from, period_to)` is
+**idempotency**: a repeat issue returns the existing document rather than minting a
+second number, because a duplicate number is indistinguishable from a lost one.
+
+**Viewing and issuing are different routes.** The live view is recomputed on every
+read and can be corrected; a document is frozen and can only be superseded. So
+issuing is an explicit POST — a document that numbers itself when you open it is a
+document nobody decided to send. The reseller has read-only access to their own;
+they cannot issue to themselves, because issuing stamps our identity and mints an
+irreversible number.
+
+**Our identity fields** live on General Settings → Company Information: tax/VAT
+number, registration number, registered address, contact phone. `company.name` and
+`company.email` are reused rather than duplicated. They are saved exactly as typed
+and never defaulted, and the statement page lists which are still blank BEFORE
+anything is issued — a tax document that prints an empty VAT number has already
+gone out by the time it is noticed, and a placeholder is worse than a blank.
+
+**Remaining, if you want it:** the field names are conventional (`company.tax_number`,
+etc.) but nothing prints a jurisdiction-specific legal layout — tax documents in
+some countries require a specific ordering, wording and registration references.
+The figures and the freeze do not need to change for that; only the rendering would.
+
+**Open permission question:** issuing is gated on `resellers.manage`, the same
+permission that merely READS the account. Issuing is write-and-irreversible, so it
+may deserve a narrower gate. Not changed unilaterally.
 
 ### 10.3 ✅ BUILT (commit 2696065) — Export
 

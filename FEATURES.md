@@ -118,9 +118,12 @@ CSV from its account page (**Export CSV**) for accounting done outside the syste
 entry, ids as plain values and no totals, because the ledger is the authority and a spreadsheet can sum a
 column but cannot un-sum a wrong one. Each store also has a **period statement** (**Statement** on the account
 page) showing the opening balance, the entries, the closing balance and the withdrawable figure as at the period
-end. The statement is a live view today; the numbered, frozen copy that a tax document needs is the remaining
-piece of work.
-- **Email campaigns** — bulk marketing sends with per-recipient tracking.
+end. A statement can be **issued as a numbered, frozen document** (`STMT-2026-0001`, per store per year) that
+never changes afterwards — the copy the reseller keeps and the copy we hold always agree, which is what makes it
+usable as an accounting or tax document. The reseller reads their own issued statements from the Reseller Area;
+issuing is an admin action. Our own tax identity (VAT number, registration number, registered address, contact
+details) is set under **Configuration → General Settings → Company Information** and is stamped onto each
+document as it stood when it was issued.- **Email campaigns** — bulk marketing sends with per-recipient tracking.
 - **SEO tools** — canonical URLs, meta tags, and structured JSON-LD data.
 - **Promotions** — public deals page driven by active coupon campaigns.
 
