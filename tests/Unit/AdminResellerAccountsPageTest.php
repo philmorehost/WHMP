@@ -326,7 +326,7 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         // every test above still passes while the page is unreachable.
         $routes = (string) file_get_contents(dirname(__DIR__, 2) . '/routes/reseller.php');
 
-        foreach (['index', 'show', 'saveSettings', 'export'] as $method) {
+        foreach (['index', 'show', 'saveSettings', 'export', 'statement'] as $method) {
             $this->assertStringContainsString(
                 'AdminResellerAccountsController::class, ' . "'" . $method . "'",
                 $routes,
@@ -497,6 +497,157 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         $this->assertStringContainsString('no store', (string) $this->session->pullFlash('reseller_error'));
     }
 
+    // ------------------------------------------------------------ statement
+
+    public function test_the_statement_carries_the_balance_in_and_out_across_the_period(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        // Before, inside, and AFTER the period. The third is the one that
+        // matters: a statement that leaked a later month would still look
+        // plausible, because every figure on it would be a real figure.
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(100.0, '2026-07-20 10:00:00'), '2026-07-20 10:00:00');
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(50.0, '2026-08-15 10:00:00'), '2026-08-15 10:00:00');
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(999.0, '2026-09-05 10:00:00'), '2026-09-05 10:00:00');
+
+        $statement = $this->ledger->statementFor($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        $this->assertNotNull($statement);
+        $this->assertEqualsWithDelta(100.0, (float) $statement['opening_base'], 0.001, 'only the July receipt is carried in');
+        $this->assertEqualsWithDelta(50.0, (float) $statement['credits_base'], 0.001);
+        $this->assertEqualsWithDelta(0.0, (float) $statement['debits_base'], 0.001);
+        $this->assertEqualsWithDelta(150.0, (float) $statement['closing_base'], 0.001);
+        $this->assertSame(1, $statement['entry_count'], 'only the August entry belongs in an August statement');
+    }
+
+    public function test_the_withdrawable_figure_is_taken_at_the_period_end_not_at_today(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        // 1 June matures on 1 July, so it IS withdrawable by 31 August.
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(60.0, '2026-06-01 09:00:00'), '2026-06-01 09:00:00');
+        // 15 August matures on 14 September: owed in August, not available in it.
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(40.0, '2026-08-15 09:00:00'), '2026-08-15 09:00:00');
+
+        $statement = $this->ledger->statementFor($this->storeId, '2026-08-01 00:00:00', '2026-08-31 23:59:59');
+
+        // 100 owed, 60 available — two figures neither of which can be produced
+        // by the other, so this cannot pass by printing one number twice.
+        $this->assertEqualsWithDelta(100.0, (float) $statement['closing_base'], 0.001);
+        $this->assertEqualsWithDelta(
+            60.0,
+            (float) $statement['withdrawable_base'],
+            0.001,
+            'the August receipt had not matured by 31 August and must not count as available in it'
+        );
+    }
+
+    public function test_the_statement_page_prints_the_period_it_was_asked_for(): void
+    {
+        $this->signInAsSuperAdmin();
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(100.0, '2026-07-20 10:00:00'), '2026-07-20 10:00:00');
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(50.0, '2026-08-15 10:00:00'), '2026-08-15 10:00:00');
+
+        $response = $this->controller->statement(
+            $this->queryRequest(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        );
+        $body = (string) $response->body();
+
+        $this->assertSame(200, $response->status());
+        $this->assertStringContainsString('2026-08-01', $body);
+        $this->assertStringContainsString('2026-08-31', $body);
+        // Opening in, the period's credit, and the sum a reader can check.
+        $this->assertStringContainsString('100.00', $body);
+        $this->assertStringContainsString('50.00', $body);
+        $this->assertStringContainsString('150.00', $body);
+    }
+
+    public function test_the_period_includes_its_final_day_to_the_last_second(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        // 23:30 on the 31st, driven through the CONTROLLER with a plain date, so
+        // this tests the period normalisation and not just the query. A period
+        // end left at midnight on the last day would silently drop every entry
+        // posted that day — which is the day a monthly billing run writes them.
+        $this->ledger->accrueStoreReceipt($this->paidStoreOrder(42.0, '2026-08-31 23:30:00'), '2026-08-31 23:30:00');
+
+        $body = (string) $this->controller->statement(
+            $this->queryRequest(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        )->body();
+
+        $this->assertStringContainsString(
+            '42.00',
+            $body,
+            'an entry posted during the final day of the period must be in the period'
+        );
+    }
+
+    public function test_the_statement_defaults_to_the_current_month(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $body = (string) $this->controller
+            ->statement($this->request(), ['clientId' => (string) $this->resellerClientId])
+            ->body();
+
+        $this->assertStringContainsString('value="' . date('Y-m-01') . '"', $body);
+        $this->assertStringContainsString('value="' . date('Y-m-t') . '"', $body);
+    }
+
+    public function test_a_nonsense_period_falls_back_to_the_current_month_rather_than_failing(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $nonsense = [
+            'a period that runs backwards' => ['from' => '2026-09-01', 'to' => '2026-08-01'],
+            'a date that does not exist' => ['from' => '2026-02-31', 'to' => '2026-08-01'],
+            'not dates at all' => ['from' => 'not-a-date', 'to' => 'yesterday'],
+        ];
+
+        foreach ($nonsense as $case => $query) {
+            $response = $this->controller->statement(
+                $this->queryRequest($query),
+                ['clientId' => (string) $this->resellerClientId]
+            );
+            $body = (string) $response->body();
+
+            $this->assertSame(200, $response->status(), $case . ': a bad period must not break the page');
+            $this->assertStringContainsString(
+                'value="' . date('Y-m-01') . '"',
+                $body,
+                $case . ': the current month should be shown instead'
+            );
+        }
+    }
+
+    public function test_the_statement_is_forbidden_without_the_permission(): void
+    {
+        $this->signIn($this->plainAdminId);
+
+        $response = $this->controller->statement($this->request(), ['clientId' => (string) $this->resellerClientId]);
+
+        $this->assertSame(403, $response->status());
+    }
+
+    public function test_the_statement_redirects_when_the_client_has_no_store(): void
+    {
+        $this->signInAsSuperAdmin();
+        $storeless = $this->clients->create([
+            'email' => 'no-store-statement@example.test',
+            'password' => 'correct-horse-battery',
+            'first_name' => 'No',
+            'last_name' => 'Store',
+        ]);
+
+        $response = $this->controller->statement($this->request(), ['clientId' => (string) $storeless]);
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString('no store', (string) $this->session->pullFlash('reseller_error'));
+    }
+
     // -------------------------------------------------------------- helpers
 
     /**
@@ -569,5 +720,18 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
     private function request(array $body = []): Request
     {
         return new Request([], $body, ['REQUEST_METHOD' => 'POST'], []);
+    }
+
+    /**
+     * A GET request carrying a query string, which is how the statement takes its
+     * period. Kept separate from request() so neither can be mistaken for the
+     * other: a period passed as a POST body would look like it worked and read
+     * the default month instead.
+     *
+     * @param array<string, string> $query
+     */
+    private function queryRequest(array $query): Request
+    {
+        return new Request($query, [], ['REQUEST_METHOD' => 'GET'], []);
     }
 }

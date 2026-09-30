@@ -66,6 +66,98 @@ final class ResellerLedgerService
     }
 
     /**
+     * One reseller's account for a period: the opening balance, the entries, the
+     * closing balance, and the withdrawable figure as at the period end (§10.2).
+     *
+     * Derived ENTIRELY from the ledger, so there is no snapshot to keep in step.
+     * The opening balance is a QUERY — everything posted before the period — and
+     * not a stored figure, for the same reason the balance itself is not stored:
+     * a number that is both recorded and derivable will eventually disagree with
+     * itself, and a statement that disagrees with its own ledger is worse than no
+     * statement at all.
+     *
+     * THE FIGURES ARE IN BASE UNITS, AND ONLY THE CLOSING BALANCE IS ALSO SHOWN IN
+     * THE RESELLER'S CURRENCY. Converting each line would imply that every line was
+     * settled at that rate, which is precisely what the reseller-carries-the-FX
+     * decision denies — a per-line conversion would be a false claim rather than a
+     * helpful extra, so the conversion is deliberately limited to the two closing
+     * totals.
+     *
+     * The withdrawable figure is taken AT THE PERIOD END, so a receipt that
+     * matures after the period is not presented as having been available during it.
+     *
+     * Returns null for a store that does not exist, like accountFor().
+     *
+     * @return array<string, mixed>|null
+     */
+    public function statementFor(int $resellerId, string $from, string $to): ?array
+    {
+        $store = $this->stores->find($resellerId);
+
+        if ($store === null) {
+            return null;
+        }
+
+        $client = $this->clients->find((int) $store['client_id']);
+        $currency = $this->currency->resolveForClient($client);
+
+        $opening = $this->ledger->balanceBefore($resellerId, $from);
+        $entries = $this->ledger->entriesBetween($resellerId, $from, $to);
+
+        $credits = 0.0;
+        $debits = 0.0;
+        $running = [];
+        $accumulated = $opening;
+
+        // Walked oldest-first, so each row shows the balance as it stood on that
+        // day. Computing it top-down would print a balance that never existed.
+        foreach ($entries as $entry) {
+            $amount = (float) $entry['amount'];
+            $accumulated += $amount;
+
+            if ($amount < 0) {
+                $debits += $amount;
+            } else {
+                $credits += $amount;
+            }
+
+            $running[(int) $entry['id']] = $accumulated;
+        }
+
+        $closing = round($accumulated, 2);
+        $withdrawable = $this->ledger->withdrawableBalance($resellerId, $to);
+
+        return [
+            'reseller_id' => $resellerId,
+            'store' => $store,
+            'client' => $client,
+            'currency' => $currency,
+            'currency_code' => (string) ($currency['code'] ?? ''),
+            'from' => $from,
+            'to' => $to,
+
+            'opening_base' => $opening,
+            'entries' => $entries,
+            'running' => $running,
+            'entry_count' => count($entries),
+            'credits_base' => round($credits, 2),
+            'debits_base' => round($debits, 2),
+            'closing_base' => $closing,
+
+            // As at the period end — not as at today, which would let a later
+            // maturity date make a past period look more available than it was.
+            'withdrawable_base' => $withdrawable,
+
+            // The closing figures only, deliberately. See the method docblock.
+            'closing' => $this->inResellerCurrency($closing, $currency),
+            'withdrawable' => $this->inResellerCurrency($withdrawable, $currency),
+
+            'holding_days' => $this->holdingDays(),
+            'in_arrears' => $closing < 0.0,
+        ];
+    }
+
+    /**
      * Post the retail we collected for a store order, when that order's invoice is
      * PAID. Returns the new entry id, or null when there is nothing to do.
      *

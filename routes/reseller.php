@@ -92,6 +92,11 @@ $router->post('/admin/resellers/{clientId}/store/status', [AdminResellerControll
 // path of its own rather than being read as part of the account path.
 $router->get('/admin/resellers/{clientId}/account/export', [AdminResellerAccountsController::class, 'export']);
 
+// The same account for a PERIOD — opening balance, entries, closing balance
+// (plan §10.2). A view, not yet the numbered tax document that section asks for;
+// see the controller method for why those are different things.
+$router->get('/admin/resellers/{clientId}/statement', [AdminResellerAccountsController::class, 'statement']);
+
 // One store's account and the entries behind it. Addressed by client id, like the
 // store routes above, so a client with no store still lands somewhere that can
 // explain why rather than on a 404.

@@ -49,6 +49,7 @@ foreach (array_reverse($entries) as $entry) {
     <p><a href="/admin/resellers/accounts">&larr; All reseller accounts</a> &middot;
         <a href="/admin/resellers/<?= $clientId ?>/store">Store settings</a> &middot;
         <a href="/admin/resellers/billing">Store cost billing</a> &middot;
+        <a href="/admin/resellers/<?= $clientId ?>/statement">Statement</a> &middot;
         <a href="/admin/resellers/<?= $clientId ?>/account/export">Export CSV</a></p>
     <p style="color:var(--cv-text-secondary);">
         Every amount below is stored in <?= e($baseCode !== '' ? $baseCode : 'the base currency') ?>, at the rate that

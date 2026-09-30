@@ -210,6 +210,113 @@ final class AdminResellerAccountsController
     }
 
     /**
+     * One store's account for a period: the opening balance, the entries, the
+     * closing balance and the withdrawable figure at the period end (§10.2).
+     *
+     * Defaults to the CURRENT CALENDAR MONTH, because the cost invoices are raised
+     * monthly and this page is read beside them.
+     *
+     * THIS IS NOT YET A TAX DOCUMENT, AND THAT IS A REAL DISTINCTION rather than a
+     * caveat. A statement must eventually serve as one (confirmed by the user), but
+     * the decision taken was to build the VIEW first, and the two differ in a way
+     * that matters: a view is recomputed on every read and can therefore be
+     * corrected, while a tax document has to be NUMBERED and IMMUTABLE, so that two
+     * copies of "statement 12" can never disagree. Building the numbered document
+     * before its format is settled would mean reissuing documents, which is the one
+     * thing numbering exists to prevent. So this page carries the CONTENT such a
+     * document needs — period, both parties, opening and closing balances — and
+     * says plainly that it is not the document of record yet.
+     */
+    public function statement(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash(
+                'reseller_error',
+                'Client #' . $clientId . ' has no store, so there is no statement to show.'
+            );
+
+            return Response::redirect('/admin/resellers/accounts');
+        }
+
+        [$from, $to] = $this->period($request);
+        $statement = $this->ledger->statementFor((int) $store['id'], $from, $to);
+
+        if ($statement === null) {
+            $this->session->flash('reseller_error', 'That store no longer exists.');
+
+            return Response::redirect('/admin/resellers/accounts');
+        }
+
+        return $this->render('reseller.admin-statement', [
+            'clientId' => $clientId,
+            'statement' => $statement,
+            'baseCode' => $this->baseCurrencyCode(),
+            'notice' => $this->session->pullFlash('reseller_notice'),
+            'error' => $this->session->pullFlash('reseller_error'),
+        ]);
+    }
+
+    /**
+     * The statement period from `?from=` and `?to=`, as a pair of datetimes.
+     *
+     * DEFAULTS TO THE CURRENT CALENDAR MONTH. The TO end is normalised to the LAST
+     * DAY at 23:59:59, not to midnight: a period ending at '2026-08-31 00:00:00'
+     * would silently omit everything posted on the final day, which is exactly the
+     * day a monthly billing run's entries land on.
+     *
+     * Anything unparseable — or a period that runs backwards — falls back to the
+     * default rather than erroring. A bad query string should give you this month,
+     * not a broken page; and a reversed period can only be a typo, so guessing at
+     * what was meant is worse than showing the obvious month.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function period(Request $request): array
+    {
+        $defaultFrom = date('Y-m-01 00:00:00');
+        $defaultTo = date('Y-m-t 23:59:59');
+
+        $from = $this->normaliseDate((string) $request->query('from', ''), false);
+        $to = $this->normaliseDate((string) $request->query('to', ''), true);
+
+        if ($from !== null && $to !== null && $from > $to) {
+            return [$defaultFrom, $defaultTo];
+        }
+
+        return [$from ?? $defaultFrom, $to ?? $defaultTo];
+    }
+
+    /**
+     * An ISO date from a query string, as a full datetime, or null if it is not a
+     * date at all. The round-trip comparison is what catches createFromFormat's
+     * habit of accepting overflow ('2026-02-31' becomes 3 March) instead of
+     * failing: only a value that formats back to itself was unambiguous.
+     */
+    private function normaliseDate(string $value, bool $endOfDay): ?string
+    {
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+
+        if ($date === false || $date->format('Y-m-d') !== $value) {
+            return null;
+        }
+
+        return $value . ($endOfDay ? ' 23:59:59' : ' 00:00:00');
+    }
+
+    /**
      * The two numbers a payout is measured against.
      *
      * Both are floored rather than trusted from the form, for the same reason the

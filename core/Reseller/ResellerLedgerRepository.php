@@ -156,6 +156,45 @@ final class ResellerLedgerRepository
     }
 
     /**
+     * The entries inside a period, oldest first — the body of a statement.
+     *
+     * BOTH ENDS ARE INCLUSIVE. A statement for "1 August to 31 August" has to
+     * include an entry posted at 23:59 on the 31st, so the caller passes a pair of
+     * datetimes rather than dates: '2026-08-31 23:59:59' has one meaning, whereas a
+     * bare date's meaning depends on who is comparing it.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function entriesBetween(int $resellerId, string $from, string $to): array
+    {
+        return $this->db->select(
+            'SELECT id, kind, amount, withdrawable_at, order_id, invoice_id, payout_id, description, created_at
+             FROM reseller_ledger
+             WHERE reseller_id = ? AND created_at >= ? AND created_at <= ?
+             ORDER BY created_at ASC, id ASC',
+            [$resellerId, $from, $to]
+        );
+    }
+
+    /**
+     * The balance carried INTO a period — everything posted strictly before it.
+     *
+     * STRICTLY before, not on-or-before: an entry posted during the period must
+     * not be counted twice, once in the opening figure and again in the entries.
+     * That double count would make the closing balance wrong by exactly the
+     * opening entry's amount, and it would be invisible on any month whose first
+     * day saw no activity.
+     */
+    public function balanceBefore(int $resellerId, string $from): float
+    {
+        return round((float) ($this->db->selectOne(
+            'SELECT COALESCE(SUM(amount), 0) AS total FROM reseller_ledger
+             WHERE reseller_id = ? AND created_at < ?',
+            [$resellerId, $from]
+        )['total'] ?? 0.0), 2);
+    }
+
+    /**
      * What the account is made of, per kind — the "why" behind the number.
      *
      * @return array<string, array<string, mixed>>

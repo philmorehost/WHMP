@@ -161,7 +161,10 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
                     <?php endif; ?>
                 </td>
                 <td><?= (int) ($account['entry_count'] ?? 0) ?></td>
-                <td><a class="cv-btn" href="/admin/resellers/<?= $clientId ?>/account">Ledger</a></td>
+                <td>
+                    <a class="cv-btn" href="/admin/resellers/<?= $clientId ?>/account">Ledger</a>
+                    <a class="cv-btn" href="/admin/resellers/<?= $clientId ?>/statement">Statement</a>
+                </td>
             </tr>
         <?php endforeach; ?>
         <?php if ($accounts === []): ?>
