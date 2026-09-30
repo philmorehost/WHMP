@@ -105,6 +105,36 @@ final class IntegrityManagerTest extends DatabaseTestCase
         $this->assertSame(IntegrityStatus::Suspended, $result['status']);
     }
 
+    public function test_a_body_shaped_like_valid_true_does_not_activate(): void
+    {
+        // THE CONTRACT, CONFIRMED AGAINST THE LIVE ENDPOINT rather than inferred:
+        // GET https://manager.pmhserver.name.ng/api.php answers
+        //   {"status":0,"message":"Missing key or domain parameter."}
+        // so the field is `status`, and a rejection carries `message` beside it --
+        // exactly what check() and validateKeyRemotely() read. There is no `valid`
+        // field anywhere in the contract.
+        //
+        // This pins the SHAPE instead of trusting it. These fixtures once sent
+        // `['valid' => true]`, and because that is not the field the code reads,
+        // every "valid" response fell through to the reachable-but-rejected branch
+        // and returned Suspended -- so the fixture was asserting the opposite of
+        // what its name claimed, and the explicit-rejection test passed for free.
+        // A response the server never sends must fail CLOSED: an unrecognised
+        // body silently counting as success is the one bug this class exists to
+        // prevent, and it would suspend every install the moment the shape drifted.
+        $http = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['valid' => true]]);
+        $manager = $this->manager($http);
+        $manager->storeActivationKey('CV-TEST-KEY');
+
+        $result = $manager->check();
+
+        $this->assertSame(
+            IntegrityStatus::Suspended,
+            $result['status'],
+            'a body with no `status` field must not activate the system'
+        );
+    }
+
     public function test_grace_when_server_unreachable_but_recently_valid(): void
     {
         $okHttp = new FakeIntegrityHttpClient(['ok' => true, 'status' => 200, 'body' => ['status' => 1]]);
