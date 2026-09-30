@@ -327,7 +327,12 @@ final class ClientController
             return Response::redirect("/admin/clients/{$id}?tab=message&error=" . urlencode('Subject and message body are required.'));
         }
 
-        $this->mail->sendRaw($subject, nl2br(e($message)), $client['email'], $id);
+        // The body is handed over UNCHANGED. sendRaw() converts plain text itself
+        // (wrapInModernLayout -> FormattedText::toHtml), so pre-converting it here
+        // converted it twice and the client received a literal `<br />` at the end of
+        // every line — the same defect as the admin cancellation report. See
+        // tests/Unit/EmailBodyRenderingTest.php.
+        $this->mail->sendRaw($subject, $message, $client['email'], $id);
 
         $admin = $this->guard->currentAdmin();
         $adminId = $admin ? (int) $admin['id'] : null;

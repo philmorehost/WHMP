@@ -297,9 +297,12 @@ final class OrderCancellationService
         $name = $client['first_name'] ?? 'A client';
         $admins = $this->db->select('SELECT email FROM admins', []);
         foreach ($admins as $admin) {
+            // Plain text, raw interpolation -- see the note in InvoiceCancellationService.
+            // Pre-escaping here converted the body twice, doubly escaping any name
+            // containing an apostrophe or ampersand.
             $this->mail->sendRaw(
                 "Order #$orderId Cancelled by Client",
-                htmlspecialchars("Client {$name} has cancelled order #$orderId. Please review in the admin dashboard.", ENT_QUOTES, 'UTF-8'),
+                "Client {$name} has cancelled order #$orderId. Please review in the admin dashboard.",
                 (string)$admin['email']
             );
         }
@@ -310,7 +313,7 @@ final class OrderCancellationService
         if (!$client) return;
         $this->mail->sendRaw(
             "Order Cancellation Confirmed",
-            htmlspecialchars("Your order #$orderId has been cancelled successfully.", ENT_QUOTES, 'UTF-8'),
+            "Your order #$orderId has been cancelled successfully.",
             (string)$client['email'],
             isset($client['id']) ? (int)$client['id'] : null
         );

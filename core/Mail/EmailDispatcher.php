@@ -55,6 +55,18 @@ final class EmailDispatcher
      * with no stored template — e.g. an admin-authored mass-mail campaign
      * (blueprint §5 marketing automation), where the subject/body come
      * straight from what staff typed, not a {{key}} template lookup.
+     *
+     * PASS THE BODY AS THE AUTHOR TYPED IT — plain text in, HTML out. Do NOT
+     * pre-escape it or pre-convert newlines to <br />: wrapInModernLayout()
+     * already converts plain prose through FormattedText::toHtml(), and converting
+     * it twice is a real, shipped bug rather than a theoretical one (commit: the
+     * admin cancellation report arrived showing a literal <br /> on every line and
+     * the client address as &lt;...&gt;).
+     *
+     * The reason a double conversion is so easy to introduce: FormattedText::
+     * toHtml() decides "already HTML, leave alone" from isHtml(), which matches
+     * only BLOCK tags (p, div, table, ...). A body whose only markup is <br />
+     * fails that test, so it gets escaped again — the tags become visible text.
      */
     public function sendRaw(string $subject, string $html, string $toEmail, ?int $clientId = null): int
     {

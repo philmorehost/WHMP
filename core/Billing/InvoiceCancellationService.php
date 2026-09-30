@@ -53,9 +53,17 @@ final class InvoiceCancellationService
         $name = $client['first_name'] ?? 'A client';
         $admins = $this->db->select('SELECT email FROM admins', []);
         foreach ($admins as $admin) {
+            // The body goes over as PLAIN TEXT, interpolated raw. It used to be wrapped
+            // in htmlspecialchars(), which converted it twice -- sendRaw() ->
+            // wrapInModernLayout() -> FormattedText::toHtml() escapes and formats it
+            // itself -- so a client whose name contains an apostrophe or ampersand
+            // arrived doubly escaped (O'Brien rendered as O&#039;Brien). Escaping the
+            // raw value here would be the bug, not the safety: toHtml() escapes the
+            // whole body exactly once, downstream.
+            // See tests/Unit/EmailBodyRenderingTest.php.
             $this->mail->sendRaw(
                 "Invoice #$invoiceId Cancelled by Client",
-                htmlspecialchars("Client {$name} has cancelled invoice #$invoiceId. This will prevent automated billing attempts.", ENT_QUOTES, 'UTF-8'),
+                "Client {$name} has cancelled invoice #$invoiceId. This will prevent automated billing attempts.",
                 (string)$admin['email']
             );
         }
@@ -66,7 +74,7 @@ final class InvoiceCancellationService
         if (!$client) return;
         $this->mail->sendRaw(
             "Invoice Cancellation Confirmed",
-            htmlspecialchars("Invoice #$invoiceId has been cancelled. You will not be billed for this invoice.", ENT_QUOTES, 'UTF-8'),
+            "Invoice #$invoiceId has been cancelled. You will not be billed for this invoice.",
             (string)$client['email'],
             isset($client['id']) ? (int)$client['id'] : null
         );

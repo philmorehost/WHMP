@@ -292,18 +292,23 @@ final class CancellationRequestService
      * Every notification below was written against `EmailDispatcher::send($to,
      * $subject, $body)`, which does not exist — the dispatcher's raw-content
      * entry point is `sendRaw($subject, $html, $to, $clientId)`, a different
-     * name *and* a different argument order. The bodies are authored as plain
-     * text, so they go through nl2br(htmlspecialchars(...)) before being
-     * handed over as HTML.
+     * name *and* a different argument order.
+     *
+     * The bodies are authored as PLAIN TEXT and are handed over UNCHANGED. They
+     * used to be pre-converted here with nl2br(htmlspecialchars(...)), which made
+     * them convert twice: sendRaw() -> wrapInModernLayout() -> FormattedText::
+     * toHtml() converts plain prose itself, and its isHtml() sniff matches only
+     * BLOCK tags (p, div, table, ...) — `br` is not among them — so a body whose
+     * only markup was <br /> was read as raw text and escaped a SECOND time. The
+     * admin cancellation report therefore arrived showing a literal `<br />` at the
+     * end of every line, with the client's address as `&lt;...&gt;`.
+     *
+     * Do not add escaping here. tests/Unit/EmailBodyRenderingTest.php fails if a
+     * sendRaw() call site converts its body first.
      */
     private function sendPlainText(string $subject, string $body, string $toEmail, ?int $clientId = null): void
     {
-        $this->mail->sendRaw(
-            $subject,
-            nl2br(htmlspecialchars($body, ENT_QUOTES, 'UTF-8')),
-            $toEmail,
-            $clientId
-        );
+        $this->mail->sendRaw($subject, $body, $toEmail, $clientId);
     }
 
     /** @return array<int, string> */
