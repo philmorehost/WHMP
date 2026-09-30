@@ -267,9 +267,11 @@ rewrites `withdrawable_at`, not a side-effect of a settings form.
 - **Phase B — request and approve.** ✅ *Built.* Reseller payout requests; admin
   queue; approve/reject/mark-paid with a reference. Payment is **manual bank
   transfer** — the simplest thing that can be honest.
-- **Phase C — netting and statements.** ⬜ *Not started.* Settle cost invoices from
-  the balance automatically; monthly statement per reseller; exportable for
-  accounting.
+- **Phase C — netting and statements.** ◐ *Partly built.* ✅ Cost invoices are settled
+  from the balance automatically (§10.1, commit 591fe99); ✅ the ledger exports as a
+  CSV for accounting (§10.3, commit 2696065). ⬜ The monthly **statement** itself is
+  not built: §10.2 leaves two decisions open deliberately — a numbered immutable PDF
+  versus a recomputable view, and whether a statement must serve as a tax document.
 - **Phase D — methods and automation.** ⬜ *Not started.* Gateway payouts,
   automatic payouts above a threshold, and refund/chargeback handling. (The 30-day
   holding period is *not* deferred to here: it is a rule about what counts as
@@ -454,7 +456,7 @@ Open questions, deliberately not answered yet:
   converted figure per line would imply each line was settled at that rate, which is
   exactly what "the reseller carries the FX movement" denies.
 
-### 10.3 Export
+### 10.3 ✅ BUILT (commit 2696065) — Export
 
 A CSV of ledger entries: `created_at, kind, amount_base, withdrawable_at, order_id,
 invoice_id, payout_id, description`. Base amounts only, one row per entry, no
@@ -464,4 +466,26 @@ reconcile against it when the ledger is the authority.
 The one thing an export must include that the screens do not: **`payout_id` and
 `invoice_id` as plain ids rather than links**, because the point of the export is to
 be joined against other records outside the system.
+
+**What was built.** One store's entries, at
+`GET /admin/resellers/{clientId}/account/export`, addressed by client id exactly like
+the account page it exports, with a link on that page. Gated on the same
+`resellers.manage` permission as the page — an export is a read with a different
+content type, and a separate permission would only stop a staff member who may read
+the account from copying it.
+
+Three things the plan did not spell out, decided here and worth knowing:
+
+- **The export does NOT reuse `entries()`.** That method caps at 200 because it
+  feeds a page; an export that inherited the cap would silently DROP ROWS from a
+  file someone reconciles money against. `entriesForExport()` has no limit and
+  orders **oldest first** — the order the money moved, the opposite of the page.
+  Pinned by a test that writes 205 entries and expects 206 rows, with a negative
+  control (re-adding `LIMIT 200` fails it, 201 vs 206).
+- **No per-row conversion**, so no currency column. There is no per-row rate at
+  which each line was settled; showing today's would contradict "the reseller
+  carries the FX movement".
+- **No totals, deliberately.** A total in the export would be a second source of
+  truth for the same number, and the one people reconcile against, because it is
+  the one that arrived in a file.
 
