@@ -20,6 +20,7 @@ Generated from the live codebase.
 ## Billing & Payments
 
 - **Invoicing** — auto-generated invoices with line items, PDF export, statuses (unpaid/paid/cancelled/refunded), per-invoice currency locking.
+- **Pay several invoices at once** 🆕 — clients select unpaid invoices and get one consolidated invoice covering them. Paying it settles every invoice inside it, and those invoices are shown as *included in* it rather than offered for payment again, so nothing is billed twice.
 - **Recurring billing** ⏱ — daily sweep generates renewal invoices ahead of the due date across every active service.
 - **Automatic card charging** 🆕 ⏱ — saved payment methods are charged automatically on the due date so renewals don't lapse; failures fall through to dunning.
 - **Dunning & reminders** ⏱ — overdue-invoice chasing and pre-renewal reminder emails.

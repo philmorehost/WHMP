@@ -526,7 +526,7 @@ $statusFilter = $statusFilter ?? '';
 
                         <div class="invoice-card__footer">
                             <a href="/client/invoices/<?= (int) $invoice['id'] ?>" class="invoice-card__action">View Details</a>
-                            <?php if ($invoice['status'] === 'unpaid'): ?>
+                            <?php if ($invoice['status'] === 'unpaid' && empty($invoice['parent_invoice_id'])): ?>
                                 <button type="submit" form="cancel-form-<?= (int) $invoice['id'] ?>" class="invoice-card__action" style="background: #dc2626; flex: 0 0 auto;">Cancel</button>
                                 <label class="invoice-card__checkbox">
                                     <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 18px; height: 18px;">
@@ -556,7 +556,7 @@ $statusFilter = $statusFilter ?? '';
                         <?php foreach ($invoices as $invoice): ?>
                             <tr style="border-bottom: 1px solid var(--cv-border-default); cursor:pointer;" data-open-url="/client/invoices/<?= (int) $invoice['id'] ?>">
                                 <td style="padding: 14px 16px; text-align: center;">
-                                    <?php if ($invoice['status'] === 'unpaid'): ?>
+                                    <?php if ($invoice['status'] === 'unpaid' && empty($invoice['parent_invoice_id'])): ?>
                                         <input type="checkbox" name="invoice_ids[]" value="<?= (int) $invoice['id'] ?>" class="inv-chk" style="cursor: pointer; width: 16px; height: 16px;">
                                     <?php endif; ?>
                                 </td>
@@ -568,6 +568,8 @@ $statusFilter = $statusFilter ?? '';
                                         <span style="color: #10b981; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(16,185,129,0.1); padding: 4px 8px; border-radius: 4px;">Paid</span>
                                     <?php elseif ($invoice['status'] === 'cancelled'): ?>
                                         <span style="color: #6b7280; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(107,114,128,0.1); padding: 4px 8px; border-radius: 4px;">Cancelled</span>
+                                    <?php elseif (!empty($invoice['parent_invoice_id'])): ?>
+                                        <span title="This invoice is part of a consolidated payment" style="color: #2563eb; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(37,99,235,0.1); padding: 4px 8px; border-radius: 4px;">Included in INV-<?= (int) $invoice['parent_invoice_id'] ?></span>
                                     <?php else: ?>
                                         <span style="color: #ef4444; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; background: rgba(239,68,68,0.1); padding: 4px 8px; border-radius: 4px;">Unpaid</span>
                                     <?php endif; ?>

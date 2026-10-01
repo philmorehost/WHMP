@@ -1323,6 +1323,55 @@ class Kernel
             );
         });
 
+        // A "Pay Selected Invoices" consolidation settles every invoice it absorbed.
+        //
+        // THIS IS THE HALF THAT WAS MISSING. ClientInvoiceController::massPay() built
+        // the consolidation from its sources' amounts and recorded nothing about which
+        // invoices they were, so paying it left every source `unpaid`: the customer was
+        // shown, and dunned for, money already collected. Paying once left them owing
+        // it twice.
+        //
+        // Registered at priority 5 so it runs BEFORE the provisioning and notification
+        // listeners on the same event, which act on "an invoice was paid" and would
+        // otherwise see the account mid-cascade.
+        //
+        // Guarded and idempotent on purpose: settleChildren() only touches children
+        // still `unpaid`, and the payment path is already idempotent against duplicate
+        // gateway deliveries (PaymentService::recordPayment swallows the duplicate
+        // transaction). A cascade that threw on the second delivery would undo exactly
+        // that protection.
+        $hooks->register(HookPoints::INVOICE_PAID, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $invoices = $this->container->make(InvoiceRepository::class);
+                $invoice = $invoices->find((int) $invoiceId);
+
+                if ($invoice === null) {
+                    return;
+                }
+
+                // The children are stamped with the PARENT's paid_at rather than NOW().
+                // That is what makes the cascade reversible: releaseChildren() reverts
+                // exactly the rows this settled, and leaves alone any invoice that
+                // became `paid` by some other route.
+                $paidAt = (string) ($invoice['paid_at'] ?? '');
+
+                $invoices->settleChildren(
+                    (int) $invoiceId,
+                    $paidAt !== '' ? $paidAt : date('Y-m-d H:i:s')
+                );
+            } catch (\Throwable) {
+                // A payment must never fail because a consolidation could not cascade —
+                // the child invoices stay `unpaid` and the account remains reconcilable,
+                // which is strictly better than losing the payment record.
+            }
+        }, 5);
+
         $hooks->register(HookPoints::INVOICE_PAID, function (array $payload) {
             $invoiceId = $payload['invoiceId'] ?? null;
 

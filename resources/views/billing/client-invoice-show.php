@@ -166,7 +166,17 @@ $companyDept ??= 'Payments Dept.';
         </table>
 
         <!-- Payment Methods & Gateways -->
-        <?php if ($invoice['status'] === 'unpaid'): ?>
+        <?php if (!empty($invoice['parent_invoice_id'])): ?>
+            <!-- This invoice was absorbed into a consolidation, so it is NOT separately
+                 payable and must not offer a gateway. Leaving the buttons here was the
+                 other half of the double-billing: the consolidation already asks for
+                 this invoice's total, and paying it here would ask for it again. -->
+            <div style="margin-top:var(--cv-space-6); padding:12px 16px; border-radius:8px; background:rgba(37,99,235,0.08); color:#1e40af; font-size:var(--cv-text-sm); line-height:1.5;">
+                This invoice is part of a consolidated payment.
+                <a href="/client/invoices/<?= (int) $invoice['parent_invoice_id'] ?>" style="color:#1d4ed8; font-weight:700;">Pay INV-<?= (int) $invoice['parent_invoice_id'] ?></a>
+                instead — settling that invoice settles this one too.
+            </div>
+        <?php elseif ($invoice['status'] === 'unpaid'): ?>
             <h3 style="font-family:'Hanken Grotesk',sans-serif; font-size:var(--cv-text-md); margin-top:var(--cv-space-6); border-bottom:1px solid #e5e7eb; padding-bottom:8px; color:#111827;">Choose Payment Method</h3>
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:var(--cv-space-4); margin-top:var(--cv-space-4);">
                 <?php foreach ($gateways as $gateway): ?>

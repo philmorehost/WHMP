@@ -360,7 +360,14 @@ final class ClientInvoiceController
         $grandTotal = 0.0;
 
         foreach ($clientInvoices as $inv) {
-            if ($inv['status'] === 'unpaid' && in_array((string) $inv['id'], array_map('strval', $invoiceIds), true)) {
+            // Only invoices that still stand on their own. An invoice already absorbed
+            // into another consolidation is represented by THAT invoice, so absorbing
+            // it again would ask the customer to pay it twice — and its checkbox being
+            // on screen at all is a bug in the view, defended against here because the
+            // form is client-supplied.
+            $alreadyAbsorbed = ($inv['parent_invoice_id'] ?? null) !== null;
+
+            if ($inv['status'] === 'unpaid' && !$alreadyAbsorbed && in_array((string) $inv['id'], array_map('strval', $invoiceIds), true)) {
                 $unpaidSelected[] = $inv;
                 $totalSubtotal += (float) $inv['subtotal'];
                 $totalTax += (float) $inv['tax_amount'];
@@ -422,6 +429,18 @@ final class ClientInvoiceController
                 [$massInvoiceId, "Mass Payment — Invoice #INV-{$inv['id']}", (float) $inv['total']]
             );
         }
+
+        // Record WHICH invoices this consolidation absorbed, which is the half that was
+        // missing: the lines carried the AMOUNTS but nothing carried the identity, so
+        // paying the consolidation settled nothing — every source stayed unpaid, the
+        // customer kept being shown and chased for money already collected, and this
+        // picker offered the same invoices again.
+        //
+        // Written after the consolidation exists, because the link points at it.
+        $this->invoices->linkToParent($massInvoiceId, array_map(
+            static fn (array $inv): int => (int) $inv['id'],
+            $unpaidSelected
+        ));
 
         return Response::redirect("/client/invoices/{$massInvoiceId}");
     }

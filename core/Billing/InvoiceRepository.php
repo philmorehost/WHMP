@@ -184,7 +184,7 @@ final class InvoiceRepository
     public function overdue(): array
     {
         return $this->db->select(
-            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date < ?",
+            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . self::standalone(),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
@@ -193,7 +193,7 @@ final class InvoiceRepository
     public function dueUnpaid(): array
     {
         return $this->db->select(
-            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date <= ? ORDER BY due_date ASC, id ASC",
+            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date <= ? AND " . self::standalone() . ' ORDER BY due_date ASC, id ASC',
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
@@ -207,7 +207,7 @@ final class InvoiceRepository
      */
     public function unpaidIds(): array
     {
-        $rows = $this->db->select("SELECT id FROM invoices WHERE status = 'unpaid' ORDER BY id DESC");
+        $rows = $this->db->select("SELECT id FROM invoices WHERE status = 'unpaid' AND " . self::standalone() . ' ORDER BY id DESC');
 
         return array_map(static fn (array $row): int => (int) $row['id'], $rows);
     }
@@ -224,10 +224,128 @@ final class InvoiceRepository
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
+        // Read the settlement timestamp BEFORE the status changes. It is what
+        // identifies the invoices this one settled — the cascade stamps its children
+        // with the consolidation's own paid_at — so it has to be captured while it is
+        // still there, or the reversal below cannot tell what to undo and would clear
+        // the links while leaving real debts looking settled.
+        $settledAt = (string) ($this->find($id)['paid_at'] ?? '');
+
         $this->db->update(
             'UPDATE invoices SET status = ?, is_cancelled = 1, cancelled_at = ?, updated_at = ? WHERE id = ?',
             ['cancelled', $now, $now, $id]
         );
+
+        // If this invoice was a "Pay Selected Invoices" consolidation, the invoices it
+        // absorbed have to become their own debts again — otherwise cancelling one
+        // payment demand would leave several real debts marked settled, which is the
+        // mirror image of the bug this link exists to fix and a worse one.
+        //
+        // Done HERE rather than from a hook because this method is the single choke
+        // point every cancellation flows through (AdminInvoiceController twice,
+        // ClientInvoiceController, OrderCancellationService), so the invariant holds
+        // whichever path cancelled it. Note `HookPoints::INVOICE_CANCELLED` would have
+        // been the tidier seam but is DECLARED AND NEVER FIRED anywhere in this
+        // codebase — firing it now would also switch on third-party listeners that
+        // have never once run, which is a behaviour change rather than a fix.
+        $this->releaseChildren($id, $settledAt !== '' ? $settledAt : null);
+    }
+
+    /**
+     * Point a set of invoices at the consolidation that absorbed them.
+     *
+     * Guarded on `parent_invoice_id IS NULL` so an invoice that is already part of a
+     * consolidation cannot be silently moved into a second one: absorbing it twice
+     * would make the customer pay for it twice, which is the original bug wearing a
+     * different hat.
+     *
+     * @param array<int, int|string> $ids
+     */
+    public function linkToParent(int $parentId, array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->update(
+            "UPDATE invoices SET parent_invoice_id = ?, updated_at = ?
+             WHERE id IN ({$placeholders}) AND parent_invoice_id IS NULL AND id <> ?",
+            array_merge([$parentId, $now], $ids, [$parentId])
+        );
+    }
+
+    /** @return array<int, array<string, mixed>> the invoices a consolidation absorbed */
+    public function childrenOf(int $parentId): array
+    {
+        return $this->db->select(
+            'SELECT * FROM invoices WHERE parent_invoice_id = ? ORDER BY id',
+            [$parentId]
+        );
+    }
+
+    /**
+     * Settle every still-unpaid invoice a consolidation absorbed.
+     *
+     * The `paid_at` is the CONSOLIDATION's own, not NOW(), and that is deliberate: it
+     * makes the cascade's children identifiable afterwards (see releaseChildren()),
+     * so undoing this payment can revert exactly the rows it settled and leave alone
+     * any invoice that became `paid` some other way.
+     *
+     * Guarded on `status = 'unpaid'` so a repeated call is a no-op. That matters
+     * because the payment path is already idempotent against duplicate gateway
+     * deliveries (PaymentService::recordPayment swallows the duplicate) and a cascade
+     * that threw or double-wrote on the second call would undo that protection.
+     *
+     * @return int rows settled
+     */
+    public function settleChildren(int $parentId, string $paidAt): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $this->db->update(
+            "UPDATE invoices SET status = 'paid', paid_at = ?, updated_at = ?
+             WHERE parent_invoice_id = ? AND status = 'unpaid'",
+            [$paidAt, $now, $parentId]
+        );
+    }
+
+    /**
+     * Undo a consolidation: un-settle what it settled, then set every child free.
+     *
+     * `$settledAt` is the `paid_at` the cascade stamped. Passing NULL (cancellation)
+     * reverts nothing but still frees the children — which is right, because a
+     * cancellation before payment has nothing to un-settle.
+     *
+     * Only children `paid` at exactly that timestamp are reverted. A child that is
+     * `paid` at any other time was settled by something else — an admin marking it
+     * paid by hand, say — and this method's job is to undo OUR payment, not to guess
+     * at someone else's.
+     *
+     * @return int rows reverted to unpaid
+     */
+    public function releaseChildren(int $parentId, ?string $settledAt): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $reverted = 0;
+
+        if ($settledAt !== null) {
+            $reverted = $this->db->update(
+                "UPDATE invoices SET status = 'unpaid', paid_at = NULL, updated_at = ?
+                 WHERE parent_invoice_id = ? AND status = 'paid' AND paid_at = ?",
+                [$now, $parentId, $settledAt]
+            );
+        }
+
+        $this->db->update(
+            'UPDATE invoices SET parent_invoice_id = NULL, updated_at = ? WHERE parent_invoice_id = ?',
+            [$now, $parentId]
+        );
+
+        return $reverted;
     }
 
     /**
@@ -471,7 +589,7 @@ final class InvoiceRepository
     public function countOverdue(): int
     {
         $row = $this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM invoices WHERE status = 'unpaid' AND due_date < ?",
+            "SELECT COUNT(*) AS c FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . self::standalone(),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
 
@@ -481,11 +599,35 @@ final class InvoiceRepository
     public function sumOverdue(): float
     {
         $row = $this->db->selectOne(
-            "SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE status = 'unpaid' AND due_date < ?",
+            "SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . self::standalone(),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
 
         return (float) ($row['total'] ?? 0);
+    }
+
+    /**
+     * "This invoice stands on its own" — the condition every PAYABLE-facing query
+     * needs, and the second half of the consolidation link (see migration 0196).
+     *
+     * A source invoice absorbed into a "Pay Selected Invoices" consolidation is NOT
+     * independently payable any more: the customer is being asked to pay the
+     * consolidation, which carries the sum of what it absorbed. The debt is real, but
+     * it is represented by the consolidation, so counting both would report it twice
+     * — and leaving the source payable WOULD let the customer be billed for it twice.
+     *
+     * It is expressed once, as a method taking the table alias, because these queries
+     * are aliased inconsistently (`i.` in some, bare in others) and five hand-written
+     * copies of the same money condition is exactly how the excluded-figure bug in
+     * ReportRepository::incomeByMonth() happened.
+     *
+     * Note this is a DIFFERENT exclusion from EXCLUDE_RESELLER_COST_INVOICE: that one
+     * hides a document that is not real revenue, this one hides a document that is
+     * real debt already counted elsewhere.
+     */
+    private static function standalone(string $alias = ''): string
+    {
+        return ($alias === '' ? '' : $alias . '.') . 'parent_invoice_id IS NULL';
     }
 
     /** Sum of invoices paid since the 1st of the current calendar month. */
@@ -523,7 +665,7 @@ final class InvoiceRepository
     public function overdueByCurrency(): array
     {
         return $this->sumByCurrency(
-            "i.status = 'unpaid' AND i.due_date < ?",
+            "i.status = 'unpaid' AND i.due_date < ? AND " . self::standalone('i'),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
