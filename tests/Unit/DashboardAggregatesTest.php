@@ -10,6 +10,7 @@ use CodeVault\Billing\ServiceRepository;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Database\Migrator;
 use CodeVault\Domains\DomainRepository;
+use CodeVault\Reports\ReportRepository;
 use CodeVault\Reports\SvgChartRenderer;
 use CodeVault\Support\TicketRepository;
 use CodeVault\Tests\Support\DatabaseTestCase;
@@ -28,6 +29,7 @@ final class DashboardAggregatesTest extends DatabaseTestCase
     private TicketRepository $tickets;
     private ServiceRepository $services;
     private DomainRepository $domains;
+    private ReportRepository $reports;
     private int $clientId;
 
     protected function setUp(): void
@@ -41,6 +43,7 @@ final class DashboardAggregatesTest extends DatabaseTestCase
         $this->tickets = new TicketRepository($this->db);
         $this->services = new ServiceRepository($this->db);
         $this->domains = new DomainRepository($this->db);
+        $this->reports = new ReportRepository($this->db);
 
         $this->clientId = $this->clients->create([
             'email' => 'dashboard-subject@example.test',
@@ -116,6 +119,51 @@ final class DashboardAggregatesTest extends DatabaseTestCase
         $this->db->update('UPDATE orders SET reseller_cost_invoice_id = NULL WHERE reseller_cost_invoice_id = ?', [$cost]);
 
         $this->assertEqualsWithDelta(500.00, $this->invoices->totalPaidThisMonth(), 0.001);
+    }
+
+    public function test_the_revenue_chart_agrees_with_the_income_tile_about_cost_invoices(): void
+    {
+        // THE BUG THIS PINS: the chart and the tile are on the SAME SCREEN.
+        //
+        // The dashboard's income tile excluded a reseller's store-cost invoice and the
+        // revenue chart did not, so the bar for a month with cost billing ran high by
+        // the cost of every store sale in it — two figures for the same month, one
+        // page, and only one of them right. Someone would eventually notice and have
+        // no way to tell which to trust, which is what makes a wrong figure worse on a
+        // page that also shows a right one.
+        //
+        // Asserting the two AGAINST EACH OTHER is the whole point. Asserting either on
+        // its own is precisely how they diverged: each was individually defensible,
+        // and the missing piece was a figure neither test compared itself to.
+        $now = new DateTimeImmutable();
+        $stamp = $now->format('Y-m-d H:i:s');
+
+        $ordinary = $this->insertInvoice('paid', 100.00, $now->format('Y-m-d'));
+        $this->db->update('UPDATE invoices SET paid_at = ? WHERE id = ?', [$stamp, $ordinary]);
+
+        // A reseller's store-cost invoice: paid, but no cash ever changed hands on it.
+        $cost = $this->insertInvoice('paid', 400.00, $now->format('Y-m-d'));
+        $this->db->update('UPDATE invoices SET paid_at = ? WHERE id = ?', [$stamp, $cost]);
+        $this->linkAsResellerCostInvoice($cost, 400.0);
+
+        $chartTotal = 0.0;
+        $thisMonth = $now->format('Y-m');
+
+        foreach ($this->reports->incomeByMonth((int) $now->format('Y')) as $row) {
+            if ($row['month'] === $thisMonth) {
+                $chartTotal += (float) $row['total'];
+            }
+        }
+
+        $this->assertEqualsWithDelta(
+            $this->invoices->totalPaidThisMonth(),
+            $chartTotal,
+            0.001,
+            'the chart bar and the income tile are the same figure and must never disagree'
+        );
+
+        // And the shared answer is the right one: the cash invoice alone.
+        $this->assertEqualsWithDelta(100.00, $chartTotal, 0.001);
     }
 
     public function test_ticket_count_open_excludes_closed(): void

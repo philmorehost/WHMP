@@ -627,3 +627,47 @@ Three things the plan did not spell out, decided here and worth knowing:
   truth for the same number, and the one people reconcile against, because it is
   the one that arrived in a file.
 
+### 10.4 ✅ FIXED — the revenue chart counted a netted cost invoice as income
+
+Found 2026-10-01 while auditing the dashboard's income figures, and it is the same
+class of mistake as §10.1: cost invoices exist, and one reporting query did not know
+it.
+
+The dashboard computed "income" in four places. Two of them excluded a reseller's
+store-cost invoice and two did not:
+
+| Figure | Backed by | Excluded it? |
+| --- | --- | --- |
+| Income this month (tile) | `InvoiceRepository::totalPaidThisMonth()` | yes |
+| Income by currency | `InvoiceRepository::paidThisMonthByCurrency()` | yes |
+| **Six-month revenue chart** | `ReportRepository::incomeByMonth()` | **no** |
+| **Reports page, by month** | same `incomeByMonth()` | **no** |
+
+A store-cost invoice is `status = 'paid'` with `paid_at` stamped — `ResellerCostBillingJob`
+settles it through a plain guarded `markPaid()` for exactly that reason — so it passes
+`incomeByMonth()`'s filter and inflates the chart. **The tile and the chart are on the
+SAME SCREEN**, so for any month with cost billing the bar ran high by the cost of every
+store sale in it, and only one of the two figures was right. A wrong number is bad; a
+wrong number next to a right one for the same month is worse, because there is no way to
+tell which to trust.
+
+**The fix is a shared predicate, not a third copy.** The exclusion had already been
+written out twice inside `InvoiceRepository` and was missing from the third place that
+needed it — which is precisely the drift that produced it. It now lives once, as
+`InvoiceRepository::EXCLUDE_RESELLER_COST_INVOICE`, and all three figures use it.
+
+**The test asserts the tile and the chart AGAINST EACH OTHER**, then asserts the shared
+answer (the cash invoice alone). Asserting either figure on its own is how they diverged:
+each was individually defensible. A negative control (removing the clause from the chart
+query) failed with `chart 500.0 vs tile 100.0` — the disagreement itself.
+
+**`taxLiabilityByMonth()` deliberately NOT changed.** It shares the same query shape but
+sums `i.tax_amount`, and a cost invoice is raised with zero tax, so it is numerically
+unaffected. Changing it would be scope creep with no observable difference; noted here so
+the next person does not "fix" it speculatively either.
+
+**Still open, and genuinely a product decision rather than a bug:** a store sale's
+CUSTOMER invoice is counted in full, but our revenue on that sale is the COST, because
+the retail is collected on the reseller's behalf. What "income" should mean once
+resellers exist is not a question code can answer.
+

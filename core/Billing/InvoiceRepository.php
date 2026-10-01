@@ -9,6 +9,38 @@ use DateTimeImmutable;
 
 final class InvoiceRepository
 {
+    /**
+     * Excludes a reseller's STORE-COST invoice from a "cash collected" figure.
+     *
+     * WHY THIS IS A SHARED PREDICATE AND NOT THREE COPIES OF A WHERE CLAUSE
+     *
+     * A store-cost invoice is raised for the cost of a reseller's sales and is
+     * settled from the reseller's running account, so NO cash changes hands on it.
+     * It is nevertheless `status = 'paid'` with `paid_at` stamped (see
+     * ResellerCostBillingJob, which settles it through a plain guarded markPaid()
+     * precisely so the reporting queries keyed on "paid AND paid_at" can see it).
+     * Any figure meaning "cash collected" therefore has to subtract it, or it
+     * counts one store sale twice: once as the customer's retail invoice and once
+     * as the reseller's cost invoice.
+     *
+     * A store-cost invoice is identified through orders.reseller_cost_invoice_id
+     * rather than a status or a flag, because that link is what MAKES it a cost
+     * invoice. InnoDB created an index for that foreign key
+     * (fk_orders_reseller_cost_invoice), so this stays a per-row index lookup
+     * rather than a scan of orders per invoice.
+     *
+     * The rule was copied twice inside this class and was MISSING from the third
+     * place that needed it, ReportRepository::incomeByMonth() — which backs the
+     * dashboard's revenue chart and the reports page. The result was the tile and
+     * the chart on the SAME SCREEN disagreeing, with only one of them right. That
+     * is the drift a shared constant prevents, so it is written once and shared
+     * across both repositories.
+     *
+     * Expects the surrounding query to alias the invoices table as `i`.
+     */
+    public const EXCLUDE_RESELLER_COST_INVOICE =
+        'NOT EXISTS (SELECT 1 FROM orders o WHERE o.reseller_cost_invoice_id = i.id)';
+
     public function __construct(
         private readonly Database $db
     ) {
@@ -482,9 +514,7 @@ final class InvoiceRepository
         // number twice otherwise -- once per side of one store sale.
         return $this->sumByCurrency(
             "i.status = 'paid' AND i.paid_at >= ?
-             AND NOT EXISTS (
-                 SELECT 1 FROM orders o WHERE o.reseller_cost_invoice_id = i.id
-             )",
+             AND " . self::EXCLUDE_RESELLER_COST_INVOICE,
             [(new DateTimeImmutable('first day of this month'))->format('Y-m-d 00:00:00')]
         );
     }
@@ -561,7 +591,9 @@ final class InvoiceRepository
      * flag column, because that link is what MAKES the invoice a cost invoice and it
      * already exists. InnoDB created an index for that foreign key
      * (fk_orders_reseller_cost_invoice), so this stays a per-row index lookup rather
-     * than a scan of the orders table per invoice.
+     * than a scan of the orders table per invoice. The predicate is shared with the
+     * other two figures that mean the same thing -- see
+     * EXCLUDE_RESELLER_COST_INVOICE for why it is not repeated here.
      *
      * Still overstated for store sales, and that part is pre-existing and NOT fixed
      * here: the customer's retail invoice counts in full, but our revenue on a store
@@ -574,9 +606,7 @@ final class InvoiceRepository
         $row = $this->db->selectOne(
             "SELECT COALESCE(SUM(i.total), 0) AS total FROM invoices i
              WHERE i.status = 'paid' AND i.paid_at >= ?
-               AND NOT EXISTS (
-                   SELECT 1 FROM orders o WHERE o.reseller_cost_invoice_id = i.id
-               )",
+               AND " . self::EXCLUDE_RESELLER_COST_INVOICE,
             [(new DateTimeImmutable('first day of this month'))->format('Y-m-d 00:00:00')]
         );
 

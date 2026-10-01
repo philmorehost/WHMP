@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Reports;
 
+use CodeVault\Billing\InvoiceRepository;
 use CodeVault\Database;
 
 /**
@@ -69,6 +70,14 @@ final class ReportRepository
     {
         $rate = sprintf(self::RATE, 'i', 'i');
 
+        // A reseller's store-cost invoice is `paid` with paid_at stamped but no cash
+        // ever changes hands on it, so it is excluded here exactly as it is from the
+        // dashboard's income tile. Leaving it in made this chart disagree with the
+        // tile on the SAME SCREEN -- the bar for a month with cost billing ran high
+        // by the cost of every store sale in it, and only one of the two was right.
+        // The predicate is shared rather than copied, so the two cannot drift again.
+        $excludeCostInvoices = InvoiceRepository::EXCLUDE_RESELLER_COST_INVOICE;
+
         return $this->normalise($this->db->select(
             <<<SQL
             SELECT DATE_FORMAT(i.paid_at, '%Y-%m') AS month,
@@ -77,6 +86,7 @@ final class ReportRepository
             FROM invoices i
             JOIN clients c ON c.id = i.client_id
             WHERE i.status = 'paid' AND YEAR(i.paid_at) = ?
+              AND {$excludeCostInvoices}
             GROUP BY DATE_FORMAT(i.paid_at, '%Y-%m'), COALESCE(i.currency_id, c.currency_id, ?)
             ORDER BY month
             SQL,
