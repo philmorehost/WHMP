@@ -253,6 +253,135 @@ final class ResellerRefundReversalTest extends DatabaseTestCase
 
     // ------------------------------------------------- the cost side of the same rule
 
+    public function test_a_refund_un_winds_both_the_receipt_and_the_cost_we_billed(): void
+    {
+        [$invoiceId] = $this->billableRefundable(100.0, 80.0);
+
+        // 100 retail in, 80 cost out: the reseller is 20 in front.
+        $this->assertEqualsWithDelta(20.0, (float) $this->ledger->accountFor($this->storeId)['balance_base'], 0.001);
+
+        $this->ledger->reverseStoreReceipt($invoiceId, 100.0);
+        $this->ledger->reverseCostForInvoice($invoiceId);
+
+        // The sale un-wound completely: it neither earned nor cost anything.
+        $this->assertEqualsWithDelta(
+            0.0,
+            (float) $this->ledger->accountFor($this->storeId)['balance_base'],
+            0.001,
+            'a fully refunded sale must net to zero on BOTH sides'
+        );
+    }
+
+    public function test_the_two_reversals_do_not_depend_on_which_runs_first(): void
+    {
+        // THE PROPERTY THAT IS EASY TO GET WRONG AND IMPOSSIBLE TO SEE IN A HAPPY PATH.
+        //
+        // If either ceiling is taken from the order's whole NET, then with a receipt of
+        // 100 and a cost debit of 80 the order sits at +20 — so the cost reversal finds
+        // a headroom of ZERO when it runs first and the account is left half-un-wound.
+        // Same refund, two call orders, and only one of them works. That is why each
+        // ceiling nets its OWN kind against its OWN reversal instead.
+        [$receiptFirstId] = $this->billableRefundable(100.0, 80.0);
+        $this->ledger->reverseStoreReceipt($receiptFirstId, 100.0);
+        $this->ledger->reverseCostForInvoice($receiptFirstId);
+
+        $this->assertEqualsWithDelta(
+            0.0,
+            (float) $this->ledger->accountFor($this->storeId)['balance_base'],
+            0.001,
+            'receipt-first must fully un-wind'
+        );
+
+        [$costFirstId] = $this->billableRefundable(100.0, 80.0);
+        $this->ledger->reverseCostForInvoice($costFirstId);
+        $this->ledger->reverseStoreReceipt($costFirstId, 100.0);
+
+        // The assertion measured on the BALANCE rather than on the order's ledger net,
+        // because the cost DEBIT is posted per invoice rather than per order and so is
+        // not in that net at all — the order's ledger sum reads +80 here even when the
+        // reversal worked. The balance includes every entry and is what the bug would
+        // actually get wrong: the buggy net-based ceiling leaves the cost standing, so
+        // the account ends at 20 instead of 0.
+        $this->assertEqualsWithDelta(
+            0.0,
+            (float) $this->ledger->accountFor($this->storeId)['balance_base'],
+            0.001,
+            'cost-first must fully un-wind too — the result must not depend on call order'
+        );
+    }
+
+    public function test_the_cost_reversal_credits_back_the_line_that_was_actually_billed(): void
+    {
+        [$invoiceId, $orderId] = $this->billableRefundable(100.0, 80.0);
+
+        $this->ledger->reverseCostForInvoice($invoiceId);
+
+        $row = $this->db->selectOne(
+            "SELECT amount, invoice_id, withdrawable_at FROM reseller_ledger
+             WHERE order_id = ? AND kind = 'cost_reversal' LIMIT 1",
+            [$orderId]
+        );
+
+        $this->assertNotNull($row, 'the cost reversal must be posted');
+        // POSITIVE: it reduces what the reseller owes, where the debit was negative.
+        $this->assertEqualsWithDelta(80.0, (float) $row['amount'], 0.001);
+        $this->assertNull($row['withdrawable_at'], 'a cost reversal is not held either');
+    }
+
+    public function test_a_cost_reversal_does_nothing_when_the_order_was_never_billed(): void
+    {
+        // The early-refund case: no cost invoice has been raised, so there is no line to
+        // reverse against. The exclusion means none ever will be — so "nothing to do"
+        // is the CORRECT outcome here, not a failure to reverse.
+        $invoiceId = $this->paidStoreOrder(100.0, '2026-01-01 09:00:00', '2026-01-01 09:00:00');
+        $this->ledger->accrueStoreReceipt($invoiceId, '2026-01-01 09:00:00');
+
+        $this->assertNull($this->ledger->reverseCostForInvoice($invoiceId));
+        $this->assertEqualsWithDelta(100.0, (float) $this->ledger->accountFor($this->storeId)['balance_base'], 0.001);
+    }
+
+    public function test_the_same_cost_is_not_credited_back_twice(): void
+    {
+        // The ceiling is the billed line LESS what has already been credited back, and
+        // this is why that subtraction has to be there: the listener fires once per
+        // refund EVENT, so a second partial refund on the same invoice reaches this
+        // method again. Without the subtraction it re-credits the whole line, and the
+        // reseller is handed the same cost back as many times as they refund in parts.
+        // Nothing else in the ledger would object — the duplicate guard is keyed on the
+        // INVOICE, and both reversals are against the same invoice.
+        [$invoiceId] = $this->billableRefundable(100.0, 80.0);
+
+        $this->assertNotNull($this->ledger->reverseCostForInvoice($invoiceId), 'the first reversal should post');
+        $this->assertNull($this->ledger->reverseCostForInvoice($invoiceId), 'the second must find nothing left to credit');
+
+        $this->assertEqualsWithDelta(
+            80.0,
+            (float) $this->db->selectOne(
+                "SELECT COALESCE(SUM(amount), 0) AS total FROM reseller_ledger WHERE kind = 'cost_reversal'"
+            )['total'],
+            0.001,
+            'exactly one reversal must exist'
+        );
+    }
+
+    public function test_the_billing_job_records_the_order_on_the_invoice_line(): void
+    {
+        // The seam the whole cost reversal depends on, and it fails SILENTLY: if the
+        // billing job does not write order_id, billedCostLineForOrder() returns null,
+        // the reversal reports "never billed", and the ledger simply looks untouched.
+        // No existing test would fail, and the reseller would keep being charged for a
+        // refunded sale with nothing anywhere to show it.
+        //
+        // Read from the source rather than asserted through a fixture, because the test
+        // fixture sets order_id itself and would therefore pass regardless.
+        $job = (string) file_get_contents(dirname(__DIR__, 2) . '/core/Reseller/ResellerCostBillingJob.php');
+
+        $this->assertStringContainsString('invoice_items (invoice_id, description, amount, order_id)', $job);
+        $this->assertStringContainsString("(int) \$order['id']", $job);
+    }
+
+    // ----------------------------------- and the cost that must never be raised at all
+
     public function test_a_refunded_order_is_excluded_from_cost_billing_and_from_the_report(): void
     {
         $repo = new ResellerCostRepository($this->db);
@@ -289,6 +418,50 @@ final class ResellerRefundReversalTest extends DatabaseTestCase
     }
 
     // -------------------------------------------------------------- fixtures
+
+    /**
+     * A store order with a receipt on the account AND an 80-ish cost already billed, so
+     * both reversals have something to undo. Returns [customer invoice id, order id].
+     *
+     * The cost is billed by hand rather than by running the monthly job, because the job
+     * is not what is under test: what matters here is that the debit exists, that it is
+     * linked to the order, and that it carries the figure actually billed. That last part
+     * is why the fixture writes order_id itself — and why a separate test asserts the JOB
+     * writes it, since a fixture that sets it would pass regardless.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function billableRefundable(float $retail, float $cost): array
+    {
+        $customerInvoice = $this->paidStoreOrder($retail, '2026-01-01 09:00:00', '2026-01-01 09:00:00');
+        $this->ledger->accrueStoreReceipt($customerInvoice, '2026-01-01 09:00:00');
+
+        $orderId = $this->orderIdForInvoice($customerInvoice);
+        $now = date('Y-m-d H:i:s');
+
+        $costInvoiceId = (int) $this->db->insert(
+            'INSERT INTO invoices (client_id, status, subtotal, tax_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, 0.0, ?, NULL, 1.000000, ?, ?, ?)',
+            [$this->resellerClientId, 'unpaid', $cost, $cost, substr($now, 0, 10), $now, $now]
+        );
+
+        // What the billing job does: stamp the order with the invoice that billed it,
+        // and record the ORDER ON THE LINE.
+        $this->db->update('UPDATE orders SET reseller_cost_invoice_id = ? WHERE id = ?', [$costInvoiceId, $orderId]);
+        $this->db->insert(
+            'INSERT INTO invoice_items (invoice_id, description, amount, order_id) VALUES (?, ?, ?, ?)',
+            [$costInvoiceId, 'Store order #' . $orderId, $cost, $orderId]
+        );
+
+        // And the debit itself, posted from the invoice the way the job posts it.
+        $this->ledger->recordCostInvoice($costInvoiceId);
+
+        return [$customerInvoice, $orderId];
+    }
+
+    private function orderIdForInvoice(int $invoiceId): int
+    {
+        return (int) $this->db->selectOne('SELECT order_id FROM invoices WHERE id = ?', [$invoiceId])['order_id'];
+    }
 
     /** A PAID (or other-status) store order and its invoice. Returns the invoice id. */
     private function paidStoreOrder(float $retail, string $at, ?string $invoiceAt = null): int

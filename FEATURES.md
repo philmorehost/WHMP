@@ -111,7 +111,10 @@ their customer's invoice is **paid** (never at order time), and the monthly cost
 the same balance. Balances are held in the base currency, because the reseller carries the exchange movement
 between collection and payout. A receipt becomes **withdrawable 30 days after payment** (the card chargeback
 window), so the pages always show two figures — what is owed and what can be taken today — and payouts are
-measured against the second. Resellers request a payout themselves (**Reseller Area → Your account**) and admins
+measured against the second. A **refund un-winds the sale on both sides**: the receipt is reversed and any cost
+already billed for that order is credited straight back, so a refunded order ends up neither earning nor costing
+anything. A refund that lands before the month is invoiced never billed it in the first place. Resellers request
+a payout themselves (**Reseller Area → Your account**) and admins
 answer it from a queue (**Admin → Resellers → Reseller Payouts**). Payment is a **manual bank transfer** whose
 reference the admin records: nothing in the system moves money. Each store's ledger can be downloaded as a
 CSV from its account page (**Export CSV**) for accounting done outside the system — base amounts, one row per

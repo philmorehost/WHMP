@@ -328,7 +328,7 @@ its only output is a number we can check by hand against the orders.
    the reseller's problem" (a refunded sale simply un-winds) and it keeps the two
    sides of the ledger coherent.
 
-   **◐ Half built (commit 13e63c9).** The **receipt** side is done: a listener on
+   **✅ Receipt side (commit 13e63c9).** The **receipt** side: a listener on
    `HookPoints::INVOICE_REFUNDED` (which `RefundService` already fired) posts a
    `receipt_reversal`, and — the part that carries the risk — the reversal is
    **withdrawable immediately**. The holding period covers the chargeback window on
@@ -340,24 +340,45 @@ its only output is a number we can check by hand against the orders.
    keeps the forward "one posting per invoice" guarantee verbatim while leaving
    reversals uncapped for partial refunds.
 
-   **◐ Cost side: the EXCLUSION is built; the CREDIT is blocked.** A refunded order
-   is now excluded from cost billing, so a refund that lands before the month closes
-   is simply never billed. The definition of "billable" lives in ONE place
-   (`ResellerCostRepository::BILLABLE_ORDER`) and is used by both the billing query
-   and the report, because a report that counts an order the billing run refuses to
-   bill is a report that makes someone ask why a figure never becomes an invoice.
+   **✅ Cost side: built — BOTH halves.** A refunded sale now un-winds completely, by
+   two different mechanisms because the two timings are genuinely different problems:
 
-   **⬜ Blocked: a refund arriving AFTER the month was invoiced.** That case needs a
-   reversing `cost_reversal` credit rather than an exclusion, and it cannot be built
-   correctly yet: reversing one order's share of an invoice needs the per-order figure
-   the invoice was built from, and `ResellerCostBillingJob::raise()` writes each line
-   as a **description string** (`describe($order)`) into `invoice_items` — there is no
-   order id on the line. Worse, the figure round-trips through the reseller's currency
-   (order cost → converted for the invoice → back to base for the debit), and
-   `recordCostInvoice()`'s own docblock warns that round-trip is not exactly
-   invertible, so recomputing the share would leave a residual on every reversal. The
-   fix is a schema addition linking `invoice_items` to the order it came from, not an
-   approximation.
+   *A refund BEFORE the month is invoiced* needs an **exclusion**, not a reversal — the
+   order is simply never billed. The definition of "billable" lives in ONE place
+   (`ResellerCostRepository::BILLABLE_ORDER`) and is used by both the billing query and
+   the report, because a report that counts an order the billing run refuses to bill is
+   a report that makes someone ask why a figure never becomes an invoice.
+
+   *A refund AFTER the month was invoiced* needs the reversing `cost_reversal` credit,
+   and this was unbuildable until the schema caught up. Reversing one order's share of
+   an invoice needs the per-order figure the invoice was built from, and
+   `ResellerCostBillingJob::raise()` wrote each line as a **description string** into
+   `invoice_items` with no order id — so there was nothing to reverse against. Migration
+   **0194** adds `invoice_items.order_id` (FK to `orders`, `ON DELETE SET NULL`) and the
+   job now records it. Recomputation was explicitly rejected: the figure round-trips
+   through the reseller's currency (order cost → converted for the invoice → back to base
+   for the debit) and `recordCostInvoice()`'s own docblock warns that round-trip is not
+   exactly invertible, so recomputing the share would leave a residual on every reversal.
+   The **billed line is therefore the authority** for the amount credited back, and it
+   is also the figure actually billed.
+
+   Two defects were found and fixed while verifying this, neither visible in a happy path:
+
+   1. **The ceiling was structurally wrong.** The cost debit is posted **per invoice**,
+      covering every order that invoice billed, so it carries no `order_id` and summing
+      by order finds nothing. The symptom was exact: the receipt reversed, the cost
+      silently didn't, and the balance sat at −80. The ceiling is now the billed line
+      *less what has already been credited back* (that half IS per order).
+   2. **A double-credit hole.** The listener fires once per refund **event**, so a second
+      partial refund reaches the reversal again; without the subtraction it re-credits
+      the whole line. The ledger's duplicate guard would not object — it is keyed on the
+      *invoice*, and both reversals are against the same invoice.
+
+   Each side is measured **per kind, not per sign**, so neither reversal's ceiling depends
+   on whether the other has already run. That is not a detail: a ceiling taken from the
+   order's whole net made a receipt-first refund succeed and a cost-first refund fail,
+   with the same input. A test pins that contrast, and a negative control confirmed it by
+   failing on exactly the cost-first case while receipt-first still passed.
 
 **Decided 2026-09-28 (Phase B questions):**
 

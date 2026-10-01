@@ -1063,8 +1063,15 @@ class Kernel
             }
 
             try {
-                $this->container->make(\CodeVault\Reseller\ResellerLedgerService::class)
-                    ->reverseStoreReceipt((int) $invoiceId, (float) ($payload['amount'] ?? 0.0));
+                $service = $this->container->make(\CodeVault\Reseller\ResellerLedgerService::class);
+
+                // Both sides, because the plan's decision is that a refunded sale
+                // un-winds: the receipt comes off the balance, and so does the cost we
+                // billed for it. Each is a no-op when there is nothing to reverse — a
+                // refunded order that was never billed writes no cost line, so the
+                // exclusion below already dealt with it.
+                $service->reverseStoreReceipt((int) $invoiceId, (float) ($payload['amount'] ?? 0.0));
+                $service->reverseCostForInvoice((int) $invoiceId);
             } catch (\Throwable) {
                 // Reconciled by the account report, not by failing the refund.
             }

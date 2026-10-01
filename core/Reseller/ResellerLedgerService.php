@@ -251,9 +251,12 @@ final class ResellerLedgerService
             return null;
         }
 
-        $net = $this->ledger->netForOrder($orderId);
+        // The ceiling is what is STILL CREDITED on the receipt side of this order, so
+        // repeated partial refunds shrink it. See outstandingForOrder() for why this is
+        // per kind rather than the order's whole net.
+        $outstanding = $this->ledger->outstandingForOrder($orderId);
 
-        if ($net <= 0.0) {
+        if ($outstanding['receipt_outstanding'] <= 0.0) {
             return null;
         }
 
@@ -261,7 +264,7 @@ final class ResellerLedgerService
         // cancels the original exactly instead of leaving a rounding tail behind.
         $amount = min(
             $this->baseAmount($refundedAmount, $facts['currency_id'], $facts['currency_rate']),
-            $net
+            $outstanding['receipt_outstanding']
         );
 
         if ($amount < 0.01) {
@@ -281,6 +284,86 @@ final class ResellerLedgerService
             'invoice_id' => $invoiceId,
             'payout_id' => null,
             'description' => 'Refund on store order #' . $orderId . ' — retail returned to the customer',
+            'admin_id' => null,
+            'created_at' => $now ?? $this->now(),
+        ]);
+    }
+
+    /**
+     * Reverse the COST side of a refunded sale: we no longer charge the reseller for an
+     * order that un-wound (plan §9 decision 4, confirmed by the user 2026-10-01).
+     *
+     * THE MIRROR OF reverseStoreReceipt(), BUT NOT A SYMMETRIC CEILING.
+     *
+     * The receipt reversal reduces credits and is capped by the receipt still standing on
+     * that order — receipts ARE per order, so that is a sum by order_id. This one reduces
+     * a debit that is NOT per order: `recordCostInvoice()` posts one entry for a whole
+     * cost invoice covering many orders, so there is no per-order amount to sum. The
+     * authority is the order's LINE on that invoice, which is also the figure actually
+     * billed, and the ceiling is that line less whatever has already been credited back.
+     *
+     * Both ceilings are per KIND rather than per sign, so neither depends on whether the
+     * other reversal has already run. A ceiling taken from the order's whole net would
+     * not be: with a receipt of 100 and a cost of 80 the order sits at +20, so a cost
+     * reversal capped by the net would find no headroom at all and quietly leave the
+     * account half-un-wound.
+     *
+     * Immediate (`withdrawable_at` NULL) for the same reason as the receipt reversal:
+     * this is money we are no longer owed, and holding it again would let the reseller
+     * withdraw against a cost that has already been given back.
+     *
+     * The figure comes from the invoice LINE, not from `orders.cost_total`: see
+     * billedCostLineForOrder(). Returns null when the invoice belongs to no store, when
+     * the order was never billed (an early refund — the exclusion means no line exists),
+     * or when there is no headroom left.
+     */
+    public function reverseCostForInvoice(int $invoiceId, ?string $now = null): ?int
+    {
+        $facts = $this->ledger->storeOrderForInvoice($invoiceId);
+
+        if ($facts === null) {
+            return null;
+        }
+
+        $orderId = (int) $facts['order_id'];
+        $line = $this->ledger->billedCostLineForOrder($orderId);
+
+        if ($line === null) {
+            // Never billed. Nothing to give back, and on a refund that arrived before
+            // the month closed that is the correct outcome rather than a miss.
+            return null;
+        }
+
+        $outstanding = $this->ledger->outstandingForOrder($orderId);
+
+        // The LINE is the authority for how much cost this order carried, because the
+        // debit itself is invoice-level and carries no order_id. So the ceiling is the
+        // line, less whatever has already been credited back for this order.
+        // The LINE is the authority for how much cost this order carried, because the
+        // debit itself is invoice-level and carries no order_id. So the ceiling is the
+        // line, less whatever has already been credited back for this order.
+        $amount = $this->baseAmount($line['amount'], $line['currency_id'], $line['currency_rate'])
+            - $outstanding['cost_reversed'];
+
+        if ($amount < 0.01) {
+            return null;
+        }
+
+        return $this->ledger->append([
+            'reseller_id' => (int) $facts['reseller_id'],
+            'client_id' => $facts['reseller_client_id'] === null ? null : (int) $facts['reseller_client_id'],
+            'kind' => 'cost_reversal',
+            // POSITIVE: this reduces what the reseller owes, where the original debit
+            // was negative for the same reason.
+            'amount' => round($amount, 2),
+            'withdrawable_at' => null,
+            'order_id' => $orderId,
+            // The COST invoice, not the customer's — this entry is about the bill we
+            // raised, and pointing it at the customer's invoice would make the two
+            // sides of the account indistinguishable in the ledger.
+            'invoice_id' => (int) $line['invoice_id'],
+            'payout_id' => null,
+            'description' => 'Cost refunded for store order #' . $orderId . ' — the sale was refunded',
             'admin_id' => null,
             'created_at' => $now ?? $this->now(),
         ]);

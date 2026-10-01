@@ -162,9 +162,13 @@ final class ResellerCostBillingJob implements CronJob
             );
 
             foreach ($orders as $order) {
+                // order_id is recorded so the cost can be REVERSED per order if the
+                // sale is later refunded. Without it the order is only identifiable
+                // from the description text, and there is nothing to reverse against.
+                // The tax line below leaves it NULL: it belongs to no order.
                 $this->db->insert(
-                    'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
-                    [$invoiceId, $this->describe($order), $order['converted_cost']]
+                    'INSERT INTO invoice_items (invoice_id, description, amount, order_id) VALUES (?, ?, ?, ?)',
+                    [$invoiceId, $this->describe($order), $order['converted_cost'], (int) $order['id']]
                 );
             }
 

@@ -78,19 +78,74 @@ final class ResellerLedgerRepository
     }
 
     /**
-     * The NET base amount posted against one order, across EVERY kind.
+     * What one order's cost was ACTUALLY billed at — its line on a cost invoice.
      *
-     * Used only to bound a reversal. A refund may never take an order's net below
-     * zero, because that would debit the reseller for money we have already given
-     * back to the customer — so the ceiling on a reversal is this figure. Doing it
-     * as one SUM here means the caller does not have to know which kinds count.
+     * Read from the invoice LINE rather than recomputed from `orders.cost_total`, and
+     * the difference is not academic: cost_total is denominated in the ORDER's
+     * currency and was converted to the reseller's currency at billing time, using
+     * that day's rate. Recomputing today would convert at today's rate and credit back
+     * a different figure than we charged — a silent, permanent difference on a money
+     * path. The line is the record of what we billed, so the line is what a reversal
+     * reads.
+     *
+     * Returns null when the order was never billed, which is the ordinary case for an
+     * order refunded before its month closed: the exclusion means no line was ever
+     * written, so there is nothing to reverse.
+     *
+     * @return array<string, mixed>|null
      */
-    public function netForOrder(int $orderId): float
+    public function billedCostLineForOrder(int $orderId): ?array
     {
-        return round((float) ($this->db->selectOne(
-            'SELECT COALESCE(SUM(amount), 0) AS total FROM reseller_ledger WHERE order_id = ?',
+        return $this->db->selectOne(
+            'SELECT ii.id AS line_id, ii.invoice_id, ii.amount, i.currency_id, i.currency_rate
+             FROM invoice_items ii
+             JOIN invoices i ON i.id = ii.invoice_id
+             WHERE ii.order_id = ?
+             ORDER BY ii.id ASC LIMIT 1',
             [$orderId]
-        )['total'] ?? 0.0), 2);
+        );
+    }
+
+    /**
+     * What is still standing on each side of one order: its un-reversed receipt, and how
+     * much cost has ALREADY been credited back.
+     *
+     * THE TWO SIDES ARE MEASURED DIFFERENTLY, BECAUSE THEY ARE STORED DIFFERENTLY, and
+     * conflating them is how this got written wrong once already:
+     *
+     *   receipt  IS per order in the ledger — a receipt is accrued for one order, so the
+     *            receipt and its reversals can simply be summed by order_id.
+     *   cost is NOT per order. `recordCostInvoice()` posts ONE debit for a whole cost
+     *            invoice, which covers every order that invoice billed, so it carries no
+     *            order_id and summing by order finds nothing. The authority for how much
+     *            cost an order carried is its LINE on that invoice, which is why the
+     *            caller subtracts from the line — and the only figure to subtract here is
+     *            what has already been credited back, which IS per order.
+     *
+     * PER KIND, NOT PER SIGN. Netting the order as a whole would make each reversal's
+     * ceiling depend on whether the other had already run: with a receipt of 100 and a
+     * cost debit of 80 the order sits at +20, so a cost reversal capped by the net would
+     * find a headroom of ZERO and leave the account half-un-wound — the same refund,
+     * two different balances, decided by call order. The `max(0.0, ...)` clamps a side
+     * that has somehow been over-reversed rather than reporting a negative ceiling.
+     *
+     * @return array{receipt_outstanding: float, cost_reversed: float}
+     */
+    public function outstandingForOrder(int $orderId): array
+    {
+        $row = $this->db->selectOne(
+            "SELECT
+                COALESCE(SUM(CASE WHEN kind = 'store_receipt' THEN amount ELSE 0 END), 0)
+              + COALESCE(SUM(CASE WHEN kind = 'receipt_reversal' THEN amount ELSE 0 END), 0) AS receipt,
+                COALESCE(SUM(CASE WHEN kind = 'cost_reversal' THEN amount ELSE 0 END), 0) AS cost_reversed
+             FROM reseller_ledger WHERE order_id = ?",
+            [$orderId]
+        );
+
+        return [
+            'receipt_outstanding' => max(0.0, round((float) ($row['receipt'] ?? 0.0), 2)),
+            'cost_reversed' => max(0.0, round((float) ($row['cost_reversed'] ?? 0.0), 2)),
+        ];
     }
 
     /**
