@@ -27,6 +27,7 @@ final class NotificationEndpointController
         HookPoints::INVOICE_PAID,
         HookPoints::TICKET_OPEN,
         HookPoints::ORDER_FRAUD_FLAGGED,
+        HookPoints::RESELLER_PAYOUT_REQUESTED,
     ];
 
     /** The two built-in providers — every other valid type is a registered NotificationModule slug (R24). */

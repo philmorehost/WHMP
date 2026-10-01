@@ -116,7 +116,10 @@ already billed for that order is credited straight back, so a refunded order end
 anything. A refund that lands before the month is invoiced never billed it in the first place. Resellers request
 a payout themselves (**Reseller Area → Your account**) and admins
 answer it from a queue (**Admin → Resellers → Reseller Payouts**). Payment is a **manual bank transfer** whose
-reference the admin records: nothing in the system moves money. Each store's ledger can be downloaded as a
+reference the admin records: nothing in the system moves money, so a request emails every admin who can release
+it — anyone holding the payout-queue permission, plus super admins — rather than sitting unnoticed in a queue.
+Resellers who want an automated rail instead need a payout destination stored and verified first, which does not
+exist yet. Each store's ledger can be downloaded as a
 CSV from its account page (**Export CSV**) for accounting done outside the system — base amounts, one row per
 entry, ids as plain values and no totals, because the ledger is the authority and a spreadsheet can sum a
 column but cannot un-sum a wrong one. Each store also has a **period statement** (**Statement** on the account

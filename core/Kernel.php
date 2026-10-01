@@ -1610,6 +1610,38 @@ class Kernel
                 ['orderId' => $orderId, 'score' => $score, 'reasons' => $payload['reasons'] ?? []]
             );
         });
+
+        // A reseller has asked for their money. Payouts are released by hand, so
+        // this is the trigger that tells somebody there is a transfer to make —
+        // and it is the one notification here that is about money WE owe rather
+        // than money owed to us, which is why it does double duty: an email to the
+        // admins who can actually release it, plus the usual Slack/webhook fan-out.
+        //
+        // The email list is DERIVED from the permission that gates the payout
+        // queue, not hard-coded to the super admin, so granting the queue to a
+        // finance role does not leave them able to pay and never told.
+        $hooks->register(HookPoints::RESELLER_PAYOUT_REQUESTED, function (array $payload) {
+            $payoutId = $payload['payoutId'] ?? null;
+
+            if ($payoutId === null) {
+                return;
+            }
+
+            $payout = $this->container->make(\CodeVault\Reseller\ResellerPayoutRepository::class)
+                ->find((int) $payoutId);
+
+            if ($payout === null) {
+                return;
+            }
+
+            $this->container->make(\CodeVault\Reseller\ResellerPayoutNotifier::class)->requested($payout);
+
+            $this->container->make(NotificationDispatcher::class)->dispatch(
+                HookPoints::RESELLER_PAYOUT_REQUESTED,
+                "Reseller payout request #{$payoutId} — {$payout['amount']} awaiting bank transfer",
+                ['payoutId' => $payoutId, 'amount' => $payout['amount'], 'resellerId' => $payout['reseller_id']]
+            );
+        });
     }
 
     public function loadRoutes(string ...$routeFiles): void

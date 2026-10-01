@@ -84,6 +84,20 @@ final class HookPoints
     public const AFFILIATE_SIGNUP = 'AffiliateSignup';
     public const AFFILIATE_COMMISSION_ACCRUED = 'AffiliateCommissionAccrued';
 
+    // --- Reseller programme -----------------------------------------------
+    /**
+     * A reseller has asked for their withdrawable balance and the funds are now
+     * set aside. Fired from ResellerPayoutService::request() AFTER the debit is
+     * written, so anything listening can rely on the payout row and the ledger
+     * entry both existing — and is therefore safe to link to either.
+     *
+     * Payouts are released by hand, so this is the trigger that tells somebody
+     * there is a transfer to make. Fired once per successful request, never on a
+     * refusal: a listener that fired on a rejected request would train its
+     * recipients to ignore it.
+     */
+    public const RESELLER_PAYOUT_REQUESTED = 'ResellerPayoutRequested';
+
     /**
      * @return array<int, string> every registered constant name, for
      *   an admin "hook catalog" debug page

@@ -9,6 +9,7 @@ use CodeVault\Billing\CurrencyService;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Database\Migrator;
+use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerLedgerRepository;
 use CodeVault\Reseller\ResellerLedgerService;
@@ -94,7 +95,8 @@ final class ResellerPayoutTest extends DatabaseTestCase
             $this->payouts,
             $this->ledger,
             $this->accounts,
-            $this->currency
+            $this->currency,
+            new HookDispatcher()
         );
 
         $this->resellerClientId = $this->clients->create([

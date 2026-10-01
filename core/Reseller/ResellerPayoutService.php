@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace CodeVault\Reseller;
 
 use CodeVault\Billing\CurrencyService;
+use CodeVault\Hooks\HookDispatcher;
+use CodeVault\Hooks\HookPoints;
 use DateTimeImmutable;
 use Throwable;
 
@@ -59,7 +61,8 @@ final class ResellerPayoutService
         private readonly ResellerPayoutRepository $payouts,
         private readonly ResellerLedgerRepository $ledger,
         private readonly ResellerLedgerService $accounts,
-        private readonly CurrencyService $currency
+        private readonly CurrencyService $currency,
+        private readonly HookDispatcher $hooks
     ) {
     }
 
@@ -150,7 +153,18 @@ final class ResellerPayoutService
             'created_at' => $now,
         ]);
 
-        return $this->ok($this->payouts->find($payoutId));
+        $payout = $this->payouts->find($payoutId);
+
+        // Fired LAST, so a listener sees the settled state: the payout row and the
+        // debit both exist, and either can be linked to. Every refusal above returns
+        // before this point, so nothing is announced for a request that was refused —
+        // a notification that fires on failures trains its recipients to ignore it.
+        $this->hooks->fire(HookPoints::RESELLER_PAYOUT_REQUESTED, [
+            'payoutId' => $payoutId,
+            'resellerId' => $resellerId,
+        ]);
+
+        return $this->ok($payout);
     }
 
     /**

@@ -75,6 +75,37 @@ final class AdminRepository
         return $admins === [] ? null : (int) $admins[0]['id'];
     }
 
+    /**
+     * Every admin who can actually act on something gated by `$permissionKey`.
+     *
+     * A super admin is included WITHOUT needing a grant row, because
+     * `is_super_admin = 1` bypasses the permission matrix entirely (migration
+     * 0012). That is not a shortcut, it is the whole point of the flag: joining
+     * the grant table alone and calling that "who can act" would silently omit
+     * the one account that always can, which is the account a payout is most
+     * likely waiting on.
+     *
+     * An admin with no role at all is excluded rather than included, because a
+     * null role grants nothing — they cannot open the page the notification is
+     * about, so telling them to go and look at it is noise.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function withPermission(string $permissionKey): array
+    {
+        return $this->db->select(
+            <<<'SQL'
+            SELECT DISTINCT a.*, r.name AS role_name, r.is_super_admin
+            FROM admins a
+            LEFT JOIN roles r ON r.id = a.role_id
+            LEFT JOIN role_permissions rp ON rp.role_id = a.role_id AND rp.permission_key = ?
+            WHERE r.is_super_admin = 1 OR rp.permission_key IS NOT NULL
+            ORDER BY a.display_name
+            SQL,
+            [$permissionKey]
+        );
+    }
+
     public function create(string $username, string $email, string $plainPassword, string $displayName, ?int $roleId): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');

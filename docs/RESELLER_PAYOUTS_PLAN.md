@@ -272,12 +272,31 @@ rewrites `withdrawable_at`, not a side-effect of a settings form.
   accounting (§10.3, commit 2696065); and the period **statement** exists both as a
   live view and as a NUMBERED, IMMUTABLE document (§10.2), with the reseller able to
   read and keep their own.
-- **Phase D — methods and automation.** ⬜ *Not started.* Gateway payouts,
-  automatic payouts above a threshold, and refund/chargeback handling. (The 30-day
-  holding period is *not* deferred to here: it is a rule about what counts as
-  withdrawable, so it belongs with the balance in Phase A. Since
-  `withdrawable_at` is written when the receipt is written, adding it later would
-  mean back-filling every existing entry.)
+- **Phase D — methods and automation.** ◐ *Partly built.* Paying a payout out is
+  still a manual bank transfer, but a request is no longer silent: requesting one
+  fires `HookPoints::RESELLER_PAYOUT_REQUESTED`, and the listener emails **every
+  admin who can release it** — derived from the permission that gates the payout
+  queue (`resellers.manage`), plus every super admin, because `is_super_admin`
+  bypasses the permission matrix. Deriving the list rather than hard-coding the
+  super admin is the point: grant the queue to a finance role and they start being
+  told, instead of being able to pay and never notified. The same hook is offered
+  in the Slack/webhook endpoint picker, since it is wired in the Kernel.
+
+  **Gateway payouts remain blocked, on the destination rather than the gateway.**
+  `GatewayModule` has no payout concept (only `capture`/`refund`/`void`/`tokenize`/
+  `chargeToken`/`handleCallback`), and `PayhubGateway` implements exactly that — so
+  there is no `disburse()`/`transfer()` to call. But the harder gap is that **no
+  payout destination is stored anywhere**: `resellers` holds branding and domain,
+  `reseller_payouts` holds `method`/`reference`/`note`, and there is no account
+  number, bank code or recipient token. There is nowhere to send the money. Manual
+  transfer works precisely because the admin supplies the destination from outside
+  the system, so any automatic rail needs a verified destination-recording step
+  first — which is needed for *every* gateway, not just PayHub.
+
+  (The 30-day holding period is deliberately *not* listed here as deferred: it is a
+  rule about what counts as withdrawable, so it belongs with the balance in Phase A.
+  Since `withdrawable_at` is written when the receipt is written, adding it later
+  would have meant back-filling every existing entry.)
 
 ### What Phase B settled (2026-09-28)
 

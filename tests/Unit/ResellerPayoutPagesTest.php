@@ -14,6 +14,7 @@ use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
 use CodeVault\Database\Migrator;
+use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Request;
 use CodeVault\Reseller\AdminResellerPayoutsController;
 use CodeVault\Reseller\ClientResellerAccountController;
@@ -138,7 +139,7 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         );
 
         $this->payouts = new ResellerPayoutRepository($this->db);
-        $this->service = new ResellerPayoutService($this->payouts, $this->ledger, $this->accounts, $currency);
+        $this->service = new ResellerPayoutService($this->payouts, $this->ledger, $this->accounts, $currency, new HookDispatcher());
 
         // The numbered statements are issued by the ADMIN, but the client controller
         // reads them, so it needs the service even though it can never write one.
