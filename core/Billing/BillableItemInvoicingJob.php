@@ -50,9 +50,31 @@ final class BillableItemInvoicingJob implements CronJob
             }
 
             $taxResult = $this->tax->calculate($client, (float) $item['amount']);
-            $invoiceId = $this->createInvoice($item, $taxResult, $this->currency->denominateFor($client));
+            $currencyLock = $this->currency->denominateFor($client);
 
-            $this->billableItems->markInvoiced((int) $item['id'], $invoiceId);
+            // BOTH WRITES, OR NEITHER.
+            //
+            // Creating the invoice and marking the item billed are two statements, and
+            // `uninvoiced()` selects on exactly the column the second one sets. A process
+            // that died between them would leave the item still pending, and the next
+            // daily sweep would raise a SECOND invoice for it — billing the client twice
+            // for one charge, with nothing in the data saying so.
+            //
+            // The window is narrow (a crash, not a logic error), which is why this has
+            // never been reported, but it is the same class as the "Pay Selected
+            // Invoices" consolidation that recorded NO link at all: a document carrying
+            // an amount without recording what it covers can always be raised twice.
+            // Here the fix is one transaction.
+            $invoiceId = (int) $this->db->transaction(function () use ($item, $taxResult, $currencyLock): int {
+                $invoiceId = $this->createInvoice($item, $taxResult, $currencyLock);
+                $this->billableItems->markInvoiced((int) $item['id'], $invoiceId);
+
+                return $invoiceId;
+            });
+
+            // Fired AFTER the commit — the same order QuoteService::accept() uses for
+            // QUOTE_ACCEPTED. A listener with side effects (provisioning, email) must not
+            // act on a state that could still roll back.
             $this->hooks->fire(HookPoints::INVOICE_CREATED, ['invoiceId' => $invoiceId, 'billableItemId' => $item['id']]);
         }
     }
