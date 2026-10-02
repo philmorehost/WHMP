@@ -212,8 +212,9 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <button class="cv-btn" type="submit">Verify domain now</button>
             </form>
             <p style="color:var(--cv-text-secondary);">Verification means DNS proves they control the domain. It does
-                NOT issue a TLS certificate — that is server configuration, and the store is not usable over https://
-                until it is done.</p>
+                NOT make the store reachable at it: the domain still has to be <strong>added to the web server</strong>
+                (cPanel: Domains → Create A New Domain, same document root) and given a TLS certificate. Until then the
+                server answers on that hostname as its default site.</p>
         <?php endif; ?>
     </div>
 

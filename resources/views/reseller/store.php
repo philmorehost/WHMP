@@ -252,9 +252,10 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 </tbody>
             </table>
             <p style="color:var(--cv-text-secondary);">The last two steps are server configuration, not something you or
-                this page can change: the domain has to point at the server running this platform, and that server needs
-                a TLS certificate for it. Once the domain is verified, ask support to finish those and your store will
-                answer on it.</p>
+                this page can change. Verifying the domain only proves it is yours. For your domain to actually open your
+                store, two more things have to happen on the server: the domain is <strong>added to the server</strong>
+                (so the server answers for that address) <em>and</em> its DNS points here. Ask support to finish those and
+                your store will answer on it.</p>
             <p style="color:var(--cv-text-secondary);">Until then your store keeps working at
                 <?php if ($platformUrl !== null): ?><code><?= e((string) $platformUrl) ?></code><?php else: ?>its platform address<?php endif; ?>
                 — you do not have to wait to start selling.</p>

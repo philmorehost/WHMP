@@ -107,9 +107,20 @@ Three screens, all under **Admin → Resellers** (Marketing group):
    `_codevault-verify.<domain>` containing `codevault-store-verify=<token>`, or by pointing the domain
    at the platform host. The nightly `reseller-domain-verification` job picks this up on its own;
    **Verify domain now** does it on demand.
-2. **On the server** — this application cannot do either step: point the domain's A/CNAME at this host,
-   then issue a TLS certificate for it. Until both are done the store is reachable only at
-   `{slug}.{platform host}`.
+2. **On the server** — this application cannot do any of it, and **DNS alone is not enough**:
+   1. **Add the domain to the web server** so the server answers for that hostname. cPanel →
+      *Domains → Create A New Domain*, with the **same document root** as the platform's own
+      domain. Skip this and a request for the domain never reaches the application at all —
+      the server serves its default site instead, which reads to everyone as "the domain does
+      not work".
+   2. **Point the domain's DNS here** — an `A` record to the server IP, or a `CNAME`.
+   3. **Issue a TLS certificate** — cPanel → *SSL/TLS Status → Run AutoSSL*. If the domain is
+      behind Cloudflare, set the record to **DNS only (grey cloud)** while AutoSSL runs, or the
+      proxy answers the challenge and issuance fails.
+
+   Until all three are done the store is reachable only at `{slug}.{platform host}`.
+   Full walkthrough, with a diagnostic for each failure and a reseller-facing version:
+   [`RESELLER_DOMAIN_SETUP.md`](RESELLER_DOMAIN_SETUP.md).
 3. A custom domain is only ever served once it is verified — that test is in the SQL, so no code path
    can serve an unverified domain. The check is **never** re-run against a verified store, so a resolver
    outage cannot black out a live storefront.

@@ -292,11 +292,19 @@ final class ResellerStoreService
             ],
             [
                 'key' => 'dns_points_here',
-                'label' => 'Domain points at this server',
+                'label' => 'Domain added on the server and pointed here',
                 'done' => null,
                 'manual' => true,
-                'detail' => 'On the server: point ' . ($domain !== '' ? $domain : 'the domain')
-                    . ' at this host (A or CNAME) so its requests arrive here.',
+                // Naming BOTH halves matters. "Point the DNS at us" reads as
+                // sufficient and is not: a record that resolves here does not make
+                // the web server ANSWER for the hostname. Until the domain is added
+                // to the server too, the server falls back to its default vhost and
+                // the browser shows an error or somebody else's page.
+                'detail' => 'On the server, and outside this application: add '
+                    . ($domain !== '' ? $domain : 'the domain')
+                    . ' to the web server that runs this platform (cPanel: Domains → Create A New Domain, with the'
+                    . ' same document root as the platform), AND point its DNS here — an A record to this server\'s'
+                    . ' IP, or a CNAME to ' . $this->locator->platformHost() . '.',
             ],
             [
                 'key' => 'tls_certificate',
@@ -304,7 +312,8 @@ final class ResellerStoreService
                 'done' => null,
                 'manual' => true,
                 'detail' => 'On the server: issue a certificate for ' . ($domain !== '' ? $domain : 'the domain')
-                    . ' once that record resolves, or browsers will refuse the connection.',
+                    . ' once it has been added and its DNS resolves (cPanel: SSL/TLS Status → Run AutoSSL),'
+                    . ' or browsers will refuse the connection.',
             ],
         ];
     }
