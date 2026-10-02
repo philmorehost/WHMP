@@ -19,11 +19,17 @@ final class LogMailer implements Mailer
     ) {
     }
 
-    public function send(string $to, string $subject, string $html): void
+    public function send(string $to, string $subject, string $html, ?array $from = null): void
     {
+        // The sender is logged, not just accepted: in development this file is the
+        // only record of what would have gone out, and a white-labelled message that
+        // silently kept the platform sender is precisely what you would need to see.
+        $fromEmail = trim((string) ($from['email'] ?? ''));
+
         $line = sprintf(
-            "[%s] To: %s | Subject: %s | Body: %s\n",
+            "[%s] From: %s | To: %s | Subject: %s | Body: %s\n",
             date('Y-m-d H:i:s'),
+            $fromEmail !== '' ? $fromEmail : '(configured sender)',
             $to,
             $subject,
             preg_replace('/\s+/', ' ', strip_tags($html))

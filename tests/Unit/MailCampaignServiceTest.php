@@ -164,7 +164,7 @@ final class MailCampaignServiceTest extends DatabaseTestCase
         $spy = new class implements Mailer {
             public array $sent = [];
 
-            public function send(string $to, string $subject, string $html): void
+            public function send(string $to, string $subject, string $html, ?array $from = null): void
             {
                 $this->sent[] = $html;
             }

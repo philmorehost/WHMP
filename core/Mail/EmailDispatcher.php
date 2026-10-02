@@ -29,7 +29,7 @@ final class EmailDispatcher
     /**
      * @param array<string, string> $variables substituted into {{key}} placeholders
      */
-    public function sendTemplate(string $templateKey, string $toEmail, array $variables = [], ?int $clientId = null): int
+    public function sendTemplate(string $templateKey, string $toEmail, array $variables = [], ?int $clientId = null, ?array $from = null): int
     {
         $template = $this->templates->findByKey($templateKey);
 
@@ -45,7 +45,7 @@ final class EmailDispatcher
         $logId = $this->log->create($toEmail, $subject, $templateKey, $clientId);
         $this->mirrorToNotifications($subject, $contentHtml, $clientId, $logId);
 
-        $this->queue->push(new SendEmailJob($logId, $toEmail, $subject, $html));
+        $this->queue->push(new SendEmailJob($logId, $toEmail, $subject, $html, $from));
 
         return $logId;
     }
@@ -68,14 +68,14 @@ final class EmailDispatcher
      * only BLOCK tags (p, div, table, ...). A body whose only markup is <br />
      * fails that test, so it gets escaped again — the tags become visible text.
      */
-    public function sendRaw(string $subject, string $html, string $toEmail, ?int $clientId = null): int
+    public function sendRaw(string $subject, string $html, string $toEmail, ?int $clientId = null, ?array $from = null): int
     {
         $wrappedHtml = $this->wrapInModernLayout($subject, $html);
 
         $logId = $this->log->create($toEmail, $subject, null, $clientId);
         $this->mirrorToNotifications($subject, $html, $clientId, $logId);
 
-        $this->queue->push(new SendEmailJob($logId, $toEmail, $subject, $wrappedHtml));
+        $this->queue->push(new SendEmailJob($logId, $toEmail, $subject, $wrappedHtml, $from));
 
         return $logId;
     }

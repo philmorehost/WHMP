@@ -186,8 +186,10 @@ use CodeVault\Backup\BackupRunRepository;
 use CodeVault\Backup\BackupService;
 use CodeVault\Security\SecurityHeaders;
 use CodeVault\Reseller\CurrentReseller;
+use CodeVault\Reseller\ResellerMailIdentity;
 use CodeVault\Reseller\ResellerRetailPricing;
 use CodeVault\Reseller\ResellerStoreLocator;
+use CodeVault\Reseller\ResellerStoreRepository;
 use CodeVault\Theme\ThemeSettings;
 use CodeVault\Support\TicketService;
 use CodeVault\Update\BackupManager;
@@ -1609,7 +1611,25 @@ class Kernel
 
             $dispatcher = $this->container->make(EmailDispatcher::class);
             $settings = $this->container->make(SettingsRepository::class);
-            $companyName = $settings->get('theme.brand_name', 'CodeVault') ?: 'CodeVault';
+            $platformName = $settings->get('theme.brand_name', 'CodeVault') ?: 'CodeVault';
+
+            // A ticket that belongs to a store is the STORE's conversation. The customer
+            // bought from the reseller and pays the reseller, so they must not be written
+            // to as us — and that holds when WE answer the ticket too, because the store
+            // passed it up precisely so the customer need never know we exist. Branding
+            // only our own replies would hand that customer our brand, and our address to
+            // reply to.
+            $store = null;
+
+            if (!empty($ticket['reseller_id'])) {
+                $store = $this->container->make(ResellerStoreRepository::class)->find((int) $ticket['reseller_id']);
+            }
+
+            $identity = ResellerMailIdentity::forStore($store, $platformName);
+
+            // Customer-facing mail is signed with the STORE's name; staff mail below is
+            // signed with ours, because the admins reading it are ours.
+            $companyName = $identity['name'];
 
             $clientName = $ticket['email'];
             if (!empty($ticket['client_id'])) {
@@ -1619,16 +1639,30 @@ class Kernel
                 }
             }
 
-            if ($authorType === 'admin') {
-                // Send reply notification to client
+            if ($authorType === 'reseller' || $authorType === 'admin') {
+                // Tell the customer. 'reseller' was MISSING from this condition, so a
+                // store answering its own customer notified nobody — the reply was
+                // recorded, the ticket moved to 'answered', and the customer was never
+                // told it existed. It is treated exactly as our own answer is, because
+                // functionally that is what it is.
                 $dispatcher->sendTemplate('ticket_reply', $ticket['email'], [
                     'ticket_id' => (string) $ticketId,
                     'ticket_subject' => $ticket['subject'],
                     'client_name' => $clientName,
                     'reply_message' => nl2br(e($reply['message'])),
                     'company_name' => $companyName,
-                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null);
+                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null, $identity);
             } elseif ($authorType === 'client') {
+                // A customer has written in. On a store's ticket that is the STORE's work,
+                // not ours, and mailing every admin about every reseller customer would
+                // pull our staff into conversations that are not theirs. We are told only
+                // when the store has actually asked for help — which is exactly what the
+                // escalation marker records. Platform tickets are unchanged: every
+                // customer reply still reaches staff.
+                if ($store !== null && ($ticket['escalated_at'] ?? null) === null) {
+                    return;
+                }
+
                 // Send reply notification to all admins
                 $admins = $this->container->make(AdminRepository::class)->all();
                 foreach ($admins as $admin) {
@@ -1638,7 +1672,7 @@ class Kernel
                             'ticket_subject' => $ticket['subject'],
                             'client_name' => $clientName,
                             'reply_message' => nl2br(e($reply['message'])),
-                            'company_name' => $companyName,
+                            'company_name' => $platformName,
                         ]);
                     }
                 }

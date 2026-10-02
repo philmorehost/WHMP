@@ -20,7 +20,12 @@ final class SendEmailJob implements Job
         public readonly int $logId,
         public readonly string $to,
         public readonly string $subject,
-        public readonly string $html
+        public readonly string $html,
+        // Appended last WITH a default, so a job already serialized in the queue by an
+        // earlier release still unserializes: a white-label message keeps the sender it
+        // was queued with, and every other message falls back to the configured one.
+        // Making this required would have turned a deploy into a queue of failed sends.
+        public readonly ?array $from = null
     ) {
     }
 
@@ -39,7 +44,7 @@ final class SendEmailJob implements Job
         $log = $container->make(EmailLogRepository::class);
 
         try {
-            $mailer->send($this->to, $this->subject, $this->html);
+            $mailer->send($this->to, $this->subject, $this->html, $this->from);
             $log->markSent($this->logId);
         } catch (Throwable $e) {
             $log->markFailed($this->logId, $e->getMessage());

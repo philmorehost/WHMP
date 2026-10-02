@@ -67,7 +67,7 @@ final class OrderAcceptanceIntegrationTest extends DatabaseTestCase
             {
             }
 
-            public function send(string $to, string $subject, string $html): void
+            public function send(string $to, string $subject, string $html, ?array $from = null): void
             {
                 $this->sink[] = ['to' => $to, 'subject' => $subject, 'html' => $html];
             }

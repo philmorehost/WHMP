@@ -16,7 +16,7 @@ final class SmtpMailer implements Mailer
     ) {
     }
 
-    public function send(string $to, string $subject, string $html): void
+    public function send(string $to, string $subject, string $html, ?array $from = null): void
     {
         // ── Address hygiene (security) ─────────────────────────────────────
         // The recipient must be one bare, well-formed address with no CR/LF.
@@ -36,6 +36,23 @@ final class SmtpMailer implements Mailer
         $defaultHost = $_SERVER['HTTP_HOST'] ?? 'philmorehost.com';
         $fromEmail = (string) ($this->settings->get('smtp.from_email') ?: $this->config->env('SMTP_FROM_EMAIL', 'noreply@' . $defaultHost));
         $fromName = (string) ($this->settings->get('smtp.from_name') ?: $this->config->env('SMTP_FROM_NAME', 'PhilmoreHost Support'));
+
+        // Per-message sender override, applied BEFORE the hygiene check below so a
+        // store's saved address gets exactly the same treatment as the configured
+        // one. This is user input (the reseller typed it) and it reaches MAIL FROM:
+        // and the From: header verbatim, so a stray newline here would corrupt the
+        // protocol exchange just as badly.
+        $overrideEmail = trim((string) ($from['email'] ?? ''));
+
+        if ($overrideEmail !== '') {
+            $fromEmail = $overrideEmail;
+        }
+
+        $overrideName = trim((string) ($from['name'] ?? ''));
+
+        if ($overrideName !== '') {
+            $fromName = $overrideName;
+        }
 
         // Same hygiene for the envelope/header From address: it is normally
         // admin-configured, but it still flows into `MAIL FROM:` and the
