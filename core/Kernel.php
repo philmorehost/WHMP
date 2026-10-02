@@ -186,6 +186,7 @@ use CodeVault\Backup\BackupRunRepository;
 use CodeVault\Backup\BackupService;
 use CodeVault\Security\SecurityHeaders;
 use CodeVault\Reseller\CurrentReseller;
+use CodeVault\Reseller\ResellerRetailPricing;
 use CodeVault\Reseller\ResellerStoreLocator;
 use CodeVault\Theme\ThemeSettings;
 use CodeVault\Support\TicketService;
@@ -1748,7 +1749,13 @@ class Kernel
             }
 
             try {
-                $this->container->make(Migrator::class)->run();
+                // run(true): on the boot path one broken migration is logged and
+                // skipped rather than aborting the run, because aborting leaves the
+                // schema short by that file AND by every migration after it — the
+                // cause of several unrelated "Table ... doesn't exist" fatals at
+                // once. bin/migrate.php calls run() WITHOUT it, so an operator still
+                // gets the error and a non-zero exit.
+                $this->container->make(Migrator::class)->run(true);
                 $this->container->make(AddonModuleService::class)->bootActiveAddons();
             } catch (\Throwable $e) {
                 // Not fatal on purpose — a boot that throws takes the whole site

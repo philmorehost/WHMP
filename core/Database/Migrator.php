@@ -19,6 +19,9 @@ use RuntimeException;
  */
 class Migrator
 {
+    /** @var array<string, string> filename => error, filled by run(true) */
+    private array $failures = [];
+
     public function __construct(
         private readonly Database $db,
         private readonly string $migrationsPath
@@ -54,51 +57,85 @@ class Migrator
     }
 
     /**
+     * @param bool $continueOnError when true a failing migration is logged and
+     *        skipped instead of aborting the whole run. The boot path passes true;
+     *        `bin/migrate.php` does NOT, so an operator sees the error and the
+     *        non-zero exit.
      * @return array<int, string> filenames that were applied by this call
      */
-    public function run(): array
+    public function run(bool $continueOnError = false): array
     {
         $this->ensureMigrationsTable();
+        $this->failures = [];
         $ran = [];
 
         foreach ($this->pending() as $filename) {
-            $definition = require $this->migrationsPath . '/' . $filename;
-
-            if (!is_array($definition) || !isset($definition['up']) || !is_array($definition['up'])) {
-                throw new RuntimeException("Migration [{$filename}] must return ['up' => [...sql statements]].");
-            }
-
-            // Not wrapped in a transaction: DDL (CREATE TABLE, etc.) causes
-            // an implicit commit in MySQL/MariaDB, which would leave a
-            // later commit()/rollback() call with no active transaction.
-            //
-            // A statement may be a raw SQL string, or a closure(Database $db)
-            // for migrations that need to branch on current schema state
-            // (e.g. "add this column only if it's missing") — needed because
-            // `ADD COLUMN IF NOT EXISTS` is MySQL 8.0.29+/MariaDB-only syntax
-            // and isn't safe to rely on across hosts (see migration 0117).
-            foreach ($definition['up'] as $statement) {
-                if ($statement instanceof \Closure) {
-                    $statement($this->db);
-                    continue;
+            try {
+                $this->apply($filename);
+                $ran[] = $filename;
+            } catch (\Throwable $e) {
+                if (!$continueOnError) {
+                    throw $e;
                 }
 
-                // Use prepared statement to ensure proper buffering and result cleanup
-                $stmt = $this->db->connection()->prepare($statement);
-                $stmt->execute();
-                // Explicitly close the statement to release any locks
-                $stmt = null;
+                // ONE broken migration must not block EVERY later one. Aborting
+                // the run leaves the schema short by this file AND by every
+                // migration after it — which is exactly how a live site came to
+                // be missing several unrelated tables (reseller_payouts among
+                // them) at the same time, each surfacing as its own
+                // "Table ... doesn't exist" fatal on a different admin page.
+                //
+                // The file is deliberately NOT recorded as applied, so it is
+                // retried on the next boot; it is collected and logged so the
+                // cause is visible rather than silent (see Migrator::failures()).
+                $this->failures[$filename] = $e->getMessage();
+                error_log("[CodeVault] migration {$filename} failed: " . $e->getMessage());
             }
-
-            $this->db->insert(
-                'INSERT INTO migrations (migration, run_at) VALUES (?, NOW())',
-                [$filename]
-            );
-
-            $ran[] = $filename;
         }
 
         return $ran;
+    }
+
+    /** @return array<string, string> filename => error from the most recent run() */
+    public function failures(): array
+    {
+        return $this->failures;
+    }
+
+    private function apply(string $filename): void
+    {
+        $definition = require $this->migrationsPath . '/' . $filename;
+
+        if (!is_array($definition) || !isset($definition['up']) || !is_array($definition['up'])) {
+            throw new RuntimeException("Migration [{$filename}] must return ['up' => [...sql statements]].");
+        }
+
+        // Not wrapped in a transaction: DDL (CREATE TABLE, etc.) causes
+        // an implicit commit in MySQL/MariaDB, which would leave a
+        // later commit()/rollback() call with no active transaction.
+        //
+        // A statement may be a raw SQL string, or a closure(Database $db)
+        // for migrations that need to branch on current schema state
+        // (e.g. "add this column only if it's missing") — needed because
+        // `ADD COLUMN IF NOT EXISTS` is MySQL 8.0.29+/MariaDB-only syntax
+        // and isn't safe to rely on across hosts (see migration 0117).
+        foreach ($definition['up'] as $statement) {
+            if ($statement instanceof \Closure) {
+                $statement($this->db);
+                continue;
+            }
+
+            // Use prepared statement to ensure proper buffering and result cleanup
+            $stmt = $this->db->connection()->prepare($statement);
+            $stmt->execute();
+            // Explicitly close the statement to release any locks
+            $stmt = null;
+        }
+
+        $this->db->insert(
+            'INSERT INTO migrations (migration, run_at) VALUES (?, NOW())',
+            [$filename]
+        );
     }
 
     /** @return array<int, string> */
