@@ -82,6 +82,12 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <?= $content ?>
 </main>
 <?= $view->partial('partials.footer', ['t' => $t, 'theme' => $theme]) ?>
-<?= $view->partial('partials.tawk-widget') ?>
+<?php
+// Which chat this page gets is a decision, not an include: a host that matched a
+// store must show the STORE's chat and never the platform's. That rule lives in
+// one partial rather than here, because the admin layout includes the platform's
+// widget directly and the two must not drift.
+?>
+<?= $view->partial('partials.live-chat') ?>
 </body>
 </html>

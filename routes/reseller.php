@@ -52,6 +52,7 @@ $router->get('/client/reseller/statements/{statementId}', [ClientResellerAccount
 $router->get('/client/reseller/store', [ClientResellerController::class, 'store']);
 $router->post('/client/reseller/store', [ClientResellerController::class, 'openStore']);
 $router->post('/client/reseller/store/brand', [ClientResellerController::class, 'saveStoreBrand']);
+$router->post('/client/reseller/store/chat', [ClientResellerController::class, 'saveStoreChat']);
 $router->post('/client/reseller/store/domain', [ClientResellerController::class, 'claimStoreDomain']);
 $router->post('/client/reseller/store/verify', [ClientResellerController::class, 'verifyStoreDomain']);
 
@@ -110,6 +111,7 @@ $router->post('/admin/resellers/domains/{storeId}/provision', [AdminResellerDoma
 $router->get('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'store']);
 $router->post('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'openStore']);
 $router->post('/admin/resellers/{clientId}/store/brand', [AdminResellerController::class, 'saveStoreBrand']);
+$router->post('/admin/resellers/{clientId}/store/chat', [AdminResellerController::class, 'saveStoreChat']);
 $router->post('/admin/resellers/{clientId}/store/domain', [AdminResellerController::class, 'claimStoreDomain']);
 $router->post('/admin/resellers/{clientId}/store/verify', [AdminResellerController::class, 'verifyStoreDomain']);
 // Forcing a domain verification (or taking it back) when DNS cannot be queried

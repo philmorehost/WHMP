@@ -108,6 +108,28 @@ final class ResellerStoreRepository
         );
     }
 
+    /**
+     * The store's own support chat. Empty strings are stored as NULL so "not set"
+     * is one value rather than two — the difference between '' and NULL would
+     * otherwise have to be handled at every read, including in the widget partial
+     * that decides whether to render anything at all.
+     *
+     * @param array<string, mixed> $chat already normalised by ResellerStoreService
+     */
+    public function saveChat(int $id, array $chat): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET support_whatsapp = ?, tawk_property_id = ?, tawk_widget_id = ?, updated_at = ? WHERE id = ?',
+            [
+                $this->nullIfBlank($chat['support_whatsapp'] ?? null),
+                $this->nullIfBlank($chat['tawk_property_id'] ?? null),
+                $this->nullIfBlank($chat['tawk_widget_id'] ?? null),
+                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                $id,
+            ]
+        );
+    }
+
     public function renameSlug(int $id, string $slug): void
     {
         $this->db->update(

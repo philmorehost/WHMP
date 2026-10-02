@@ -195,6 +195,41 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         </form>
     </div>
 
+    <div class="cv-card" style="max-width:56rem;margin:0 auto;">
+        <h2 class="cv-card__title">Your support chat</h2>
+        <p>This is the chat button on your storefront. Our own chat never appears there — your customers talk to
+            <strong>you</strong>, and reach your prices and your team.</p>
+
+        <form method="post" action="/client/reseller/store/chat"><?= csrf_field() ?>
+            <p>
+                <label for="support_whatsapp">WhatsApp number</label><br>
+                <input class="cv-input" type="text" id="support_whatsapp" name="support_whatsapp" maxlength="32"
+                       placeholder="+234 801 234 5678"
+                       value="<?= e($chat['support_whatsapp'] !== '' ? $chat['support_whatsapp'] : $phoneHint) ?>">
+                <br><span style="color:var(--cv-text-secondary);">Include the country code. This becomes your default
+                    chat button — it works straight away, and there is nothing to sign up for. Leave both fields blank
+                    to show no chat at all.</span>
+            </p>
+            <p>
+                <label for="tawk_property_id">Tawk.To property id <em>(optional)</em></label><br>
+                <input class="cv-input" type="text" id="tawk_property_id" name="tawk_property_id" maxlength="64"
+                       value="<?= e($chat['tawk_property_id']) ?>">
+                <br><span style="color:var(--cv-text-secondary);">If you use Tawk.To, this <strong>replaces</strong> the
+                    WhatsApp button with your own live chat. Paste only the <strong>id</strong> from the address Tawk
+                    gives you — <code>embed.tawk.to/&lt;id&gt;/&lt;widget&gt;</code> — not the whole code block; we add
+                    the code ourselves.</span>
+            </p>
+            <p>
+                <label for="tawk_widget_id">Tawk.To widget id <em>(optional)</em></label><br>
+                <input class="cv-input" type="text" id="tawk_widget_id" name="tawk_widget_id" maxlength="64"
+                       value="<?= e($chat['tawk_widget_id']) ?>">
+                <br><span style="color:var(--cv-text-secondary);">Leave blank unless your Tawk.To property has more than
+                    one widget.</span>
+            </p>
+            <button class="cv-btn" type="submit">Save chat settings</button>
+        </form>
+    </div>
+
     <?php
     // What the SERVER has, which is not the same question as what the store is
     // allowed to use. The reseller cannot infer this from the field below, and it

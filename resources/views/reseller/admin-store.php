@@ -187,6 +187,37 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
     </div>
 
     <div class="cv-card">
+        <h2 class="cv-card__title">Support chat</h2>
+        <p style="color:var(--cv-text-secondary);">
+            What this store's customers see. The platform's own chatbox is never shown on a store's domain — a store
+            either has its own chat here or none at all. The reseller can change this themselves from their portal.
+        </p>
+        <form method="post" action="/admin/resellers/<?= (int) $clientId ?>/store/chat"><?= csrf_field() ?>
+            <p>
+                <label for="support_whatsapp">WhatsApp number</label><br>
+                <input class="cv-input" type="text" id="support_whatsapp" name="support_whatsapp" maxlength="32"
+                       placeholder="+234 801 234 5678" value="<?= e($chat['support_whatsapp']) ?>">
+                <br><span style="color:var(--cv-text-secondary);">Include the country code. The default chat button;
+                    no account needed.</span>
+            </p>
+            <p>
+                <label for="tawk_property_id">Tawk.To property id <em>(optional)</em></label><br>
+                <input class="cv-input" type="text" id="tawk_property_id" name="tawk_property_id" maxlength="64"
+                       value="<?= e($chat['tawk_property_id']) ?>">
+                <br><span style="color:var(--cv-text-secondary);">Replaces the WhatsApp button with the store's own live
+                    chat. The <strong>id only</strong> — <code>embed.tawk.to/&lt;id&gt;/&lt;widget&gt;</code>; a pasted
+                    code block is refused rather than stored, because we build the script ourselves.</span>
+            </p>
+            <p>
+                <label for="tawk_widget_id">Tawk.To widget id <em>(optional)</em></label><br>
+                <input class="cv-input" type="text" id="tawk_widget_id" name="tawk_widget_id" maxlength="64"
+                       value="<?= e($chat['tawk_widget_id']) ?>">
+            </p>
+            <button class="cv-btn" type="submit">Save chat settings</button>
+        </form>
+    </div>
+
+    <div class="cv-card">
         <h2 class="cv-card__title">Custom domain</h2>
         <form method="post" action="/admin/resellers/<?= (int) $clientId ?>/store/domain"><?= csrf_field() ?>
             <p>

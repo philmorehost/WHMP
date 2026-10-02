@@ -33,15 +33,9 @@ try {
 
     // The pasted snippet is an inline <script>, and script-src carries no
     // 'unsafe-inline' — stamp the per-request nonce onto inline script tags
-    // so the embed is actually allowed to run.
-    $nonce = SecurityHeaders::nonce();
-    $widgetCode = (string) preg_replace(
-        '/<script(?![^>]*\bsrc=)([^>]*)>/i',
-        '<script$1 nonce="' . $nonce . '">',
-        $widgetCode
-    );
-
-    echo $widgetCode;
+    // so the embed is actually allowed to run. Shared with the per-store chat
+    // partial, which needs exactly the same rule.
+    echo SecurityHeaders::stampInlineScripts($widgetCode);
 } catch (\Throwable) {
     // No container/DB yet (installer, CLI bootstrap), or the table is missing
     // mid-migration — a missing widget is never worth breaking the page over.

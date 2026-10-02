@@ -476,6 +476,53 @@ final class AdminResellerController
         return Response::redirect('/admin/resellers/' . $clientId . '/store');
     }
 
+    /**
+     * The store's support chat, set on the reseller's behalf.
+     *
+     * Exists mostly for support: a reseller who cannot work the field can be walked
+     * through it, and their live store does not have to wait on them. The reseller
+     * owns the page and can change it again afterwards.
+     */
+    public function saveStoreChat(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $clientId = (int) ($params['clientId'] ?? 0);
+        $store = $this->stores->forClient($clientId);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That client does not have a store.');
+
+            return Response::redirect('/admin/resellers');
+        }
+
+        $result = $this->stores->saveChat((int) $store['id'], [
+            'support_whatsapp' => $request->input('support_whatsapp', ''),
+            'tawk_property_id' => $request->input('tawk_property_id', ''),
+            'tawk_widget_id' => $request->input('tawk_widget_id', ''),
+        ]);
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.store.chat',
+            'reseller',
+            (int) $store['id'],
+            'Set the support chat for store #' . (int) $store['id']
+                . ($result['success'] ? '' : ' — refused: ' . (string) $result['error']),
+            $request->ip()
+        );
+
+        $this->session->flash(
+            $result['success'] ? 'reseller_notice' : 'reseller_error',
+            $result['success'] ? 'Support chat saved.' : (string) $result['error']
+        );
+
+        return Response::redirect('/admin/resellers/' . $clientId . '/store');
+    }
+
     /** @param array<string, mixed>|null $store */
     private function renderStorePage(int $clientId, ?array $store, Request $request): Response
     {
@@ -492,6 +539,7 @@ final class AdminResellerController
                 ? null
                 : '_codevault-verify.' . $store['custom_domain'],
             'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
+            'chat' => ResellerChat::formValues($store),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),

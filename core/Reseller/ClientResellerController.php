@@ -259,6 +259,11 @@ final class ClientResellerController
             'cost' => $summaries[0] ?? null,
             'arrears' => $storeId === null ? [] : $this->costs->arrears($storeId),
             'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
+            'chat' => ResellerChat::formValues($store),
+            // The reseller's own account phone, offered as the number their store's
+            // chat button would use — so it works out of the box rather than waiting
+            // for them to retype a number we already have.
+            'phoneHint' => ResellerChat::normaliseWhatsapp((string) ($client['phone'] ?? '')) ?? '',
             'platformHost' => $this->locator->platformHost(),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
@@ -269,6 +274,45 @@ final class ClientResellerController
             'verification' => $this->session->pullFlash('reseller_verification'),
             'docsUrl' => '/client/reseller/docs',
         ]);
+    }
+
+    /**
+     * The store's own support chat — WhatsApp by default, Tawk.To optionally.
+     *
+     * A reseller may change this whenever they like: it is their support channel,
+     * and the only one their customers ever see. Ours must never appear there, which
+     * is the whole reason the store has its own.
+     */
+    public function saveStoreChat(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $result = $this->stores->saveChat((int) $store['id'], [
+            'support_whatsapp' => $request->input('support_whatsapp', ''),
+            'tawk_property_id' => $request->input('tawk_property_id', ''),
+            'tawk_widget_id' => $request->input('tawk_widget_id', ''),
+        ]);
+
+        $this->session->flash(
+            $result['success'] ? 'reseller_notice' : 'reseller_error',
+            $result['success']
+                ? 'Support chat saved — this is what your customers see on your storefront.'
+                : (string) $result['error']
+        );
+
+        return Response::redirect('/client/reseller/store');
     }
 
     /** Opens the store. The address label is derived from the name, and can be changed after. */

@@ -61,6 +61,28 @@ final class SecurityHeaders
         return self::$nonce ??= base64_encode(random_bytes(16));
     }
 
+    /**
+     * Stamp the per-response nonce onto inline `<script>` tags.
+     *
+     * `script-src` carries no 'unsafe-inline', so a script we emit ourselves does
+     * not run unless it carries the nonce. Only tags with NO `src` are touched:
+     * external scripts are allowed by origin instead, and a nonce on one would
+     * mean nothing. A tag that already has a nonce is left alone, so this is safe
+     * to apply to markup that has been through it before.
+     *
+     * Shared rather than repeated because it is the same rule for every widget the
+     * application embeds itself, and a second copy of a security regex is a copy
+     * that eventually stops matching the first.
+     */
+    public static function stampInlineScripts(string $html): string
+    {
+        return (string) preg_replace(
+            '/<script(?![^>]*\bsrc=)(?![^>]*\bnonce=)([^>]*)>/i',
+            '<script$1 nonce="' . self::nonce() . '">',
+            $html
+        );
+    }
+
     public static function apply(Response $response): Response
     {
         // merchant.payhub.com.ng is allowed as a script/frame/connect

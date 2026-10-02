@@ -101,6 +101,70 @@ final class ResellerStoreService
         return ['success' => true, 'error' => null];
     }
 
+    /**
+     * The store's own support chat.
+     *
+     * Every value is validated here rather than in the form, because the Tawk id
+     * is interpolated into JavaScript the application generates: a form-only check
+     * would be bypassed by any other caller, and the consequence is a reseller's
+     * script running on a page we serve.
+     *
+     * Refusals explain WHAT to paste, not just that it was wrong. The id field is
+     * the obvious place to paste Tawk's whole embed — their own instructions tell
+     * you to copy a block — so the common mistake is named specifically.
+     *
+     * @param array<string, mixed> $chat
+     * @return array{success: bool, error: ?string}
+     */
+    public function saveChat(int $storeId, array $chat): array
+    {
+        $whatsappRaw = trim((string) ($chat['support_whatsapp'] ?? ''));
+        $propertyRaw = trim((string) ($chat['tawk_property_id'] ?? ''));
+        $widgetRaw = trim((string) ($chat['tawk_widget_id'] ?? ''));
+
+        $whatsapp = ResellerChat::normaliseWhatsapp($whatsappRaw);
+
+        if ($whatsappRaw !== '' && $whatsapp === null) {
+            return [
+                'success' => false,
+                'error' => 'That is not a WhatsApp number — include the country code, like +234 801 234 5678 '
+                    . '(8 to 15 digits).',
+            ];
+        }
+
+        $property = ResellerChat::normaliseTawkProperty($propertyRaw);
+
+        if ($propertyRaw !== '' && $property === null) {
+            return [
+                'success' => false,
+                'error' => ResellerChat::looksLikePastedEmbed($propertyRaw)
+                    ? 'That is Tawk.To\'s whole embed code. Paste only the property id from the address they give you '
+                        . '— embed.tawk.to/<id>/<widget> — and we add the code ourselves.'
+                    : 'That is not a Tawk.To property id. It is the long id in the address Tawk gives you: '
+                        . 'embed.tawk.to/<id>/<widget>.',
+            ];
+        }
+
+        $widget = ResellerChat::normaliseTawkWidget($widgetRaw);
+
+        if ($widgetRaw !== '' && $widget === null) {
+            return [
+                'success' => false,
+                'error' => 'That is not a valid widget id — letters, numbers, dash and underscore only.',
+            ];
+        }
+
+        $this->stores->saveChat($storeId, [
+            'support_whatsapp' => $whatsapp,
+            'tawk_property_id' => $property,
+            // Cleared with the property, so removing Tawk.To cannot leave a widget
+            // id behind that would attach itself to whatever property is set next.
+            'tawk_widget_id' => $property === null ? null : $widget,
+        ]);
+
+        return ['success' => true, 'error' => null];
+    }
+
     /** @return array{success: bool, error: ?string} */
     public function rename(int $storeId, string $slug): array
     {
