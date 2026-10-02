@@ -357,17 +357,65 @@ final class ResellerDomainProvisioner
         // fallback the approval uses, so a red row here is exactly why an
         // approval failed — reported here with the panel's own wording.
         $list = $this->listResult($server, $account);
-        $hosts = $list['success'] ? $this->addonHosts($list['data'] ?? null) : null;
+        $addons = $list['success'] ? $this->addonRows($list['data'] ?? null) : null;
 
         $rows[] = [
             'label' => 'Addon domains readable',
-            'ok' => $list['success'] && $hosts !== null,
+            'ok' => $list['success'] && $addons !== null,
             'detail' => $list['success']
-                ? ($hosts === null
+                ? ($addons === null
                     ? 'The panel answered, but the list was not in a shape we recognise. Raw: ' . $this->shorten($list['data'])
                     : 'Yes, over API ' . (string) ($list['api_version'] ?? '?') . ' — this account currently has '
-                        . count($hosts) . ': ' . ($hosts === [] ? 'none' : implode(', ', $hosts)))
+                        . count($addons) . ': '
+                        . ($addons === []
+                            ? 'none'
+                            : implode(', ', array_map(static fn (array $row): string => $row['domain'], $addons))))
                 : (string) $list['message'],
+        ];
+
+        if ($addons === null || $addons === []) {
+            return $rows;
+        }
+
+        // The failure this catches LOOKS LIKE SUCCESS: the domain was created and
+        // the panel parked it on a folder with no application in it, so the address
+        // answers with the panel's own error page instead of the store. Nothing in
+        // the application can read the account's filesystem, so the panel's own idea
+        // of each document root is the only evidence available.
+        //
+        // Matched by SUFFIX, not substring, and that is the whole point: a domain
+        // parked on `/home/user/public_html/domain.example.com` CONTAINS
+        // "public_html", so a substring test would call it correct. It has to END
+        // with the configured folder to be serving the same files.
+        $expected = rtrim(str_replace('\\', '/', trim($docroot)), '/');
+        $mismatched = [];
+        $unknown = [];
+
+        foreach ($addons as $addon) {
+            if ($addon['root'] === null) {
+                $unknown[] = $addon['domain'];
+
+                continue;
+            }
+
+            $root = rtrim(str_replace('\\', '/', (string) $addon['root']), '/');
+
+            if ($expected !== '' && $root !== $expected && !str_ends_with($root, '/' . $expected)) {
+                $mismatched[] = $addon['domain'] . ' → ' . $root;
+            }
+        }
+
+        $rows[] = [
+            'label' => 'Domains serve this application',
+            'ok' => $mismatched !== [] ? false : ($unknown !== [] ? null : true),
+            'detail' => $mismatched !== []
+                ? 'These are NOT serving this application — the panel put them in a different folder. Change their '
+                    . 'document root to "' . $docroot . '" (cPanel → Domains), the folder that serves this platform: '
+                    . implode('; ', $mismatched)
+                : ($unknown !== []
+                    ? 'The panel did not report a document root for: ' . implode(', ', $unknown)
+                        . '. Compare each with "' . $docroot . '" under cPanel → Domains.'
+                    : 'Every addon domain ends at ' . $docroot . '.'),
         ];
 
         return $rows;
@@ -423,13 +471,19 @@ final class ResellerDomainProvisioner
     }
 
     /**
-     * Pull the hostnames out of a listaddondomains payload, or NULL if the shape
-     * is not one we recognise. Unwraps the `payload` / `data` envelopes cPanel
-     * varies between versions before looking for rows.
+     * Pull the addon domains out of a listing payload, or NULL if the shape is not
+     * one we recognise. Unwraps the `payload` / `data` envelopes cPanel varies
+     * between versions before looking for rows.
      *
-     * @return array<int, string>|null
+     * The document root is carried because it is the difference between a working
+     * domain and one sitting on an empty folder. Different cPanel versions call it
+     * different things and we cannot see the account's filesystem to work it out, so
+     * it is NULL when the panel did not name it rather than guessed — a wrong
+     * "matches" verdict here would be worse than no verdict.
+     *
+     * @return array<int, array{domain: string, root: ?string}>|null
      */
-    private function addonHosts(mixed $data): ?array
+    private function addonRows(mixed $data): ?array
     {
         if (!is_array($data)) {
             return null;
@@ -437,11 +491,11 @@ final class ResellerDomainProvisioner
 
         foreach (['payload', 'data'] as $key) {
             if (is_array($data[$key] ?? null)) {
-                return $this->addonHosts($data[$key]);
+                return $this->addonRows($data[$key]);
             }
         }
 
-        $hosts = [];
+        $rows = [];
 
         foreach ($data as $row) {
             if (!is_array($row)) {
@@ -454,10 +508,36 @@ final class ResellerDomainProvisioner
                 return null;
             }
 
-            $hosts[] = ResellerStoreLocator::normaliseHost($host);
+            $root = null;
+
+            foreach (['documentroot', 'docroot', 'reldir', 'dir', 'basedir'] as $key) {
+                $candidate = $row[$key] ?? null;
+
+                if (is_string($candidate) && trim($candidate) !== '') {
+                    $root = trim($candidate);
+
+                    break;
+                }
+            }
+
+            $rows[] = ['domain' => ResellerStoreLocator::normaliseHost($host), 'root' => $root];
         }
 
-        return $hosts;
+        return $rows;
+    }
+
+    /**
+     * Just the hostnames from the same listing.
+     *
+     * @return array<int, string>|null
+     */
+    private function addonHosts(mixed $data): ?array
+    {
+        $rows = $this->addonRows($data);
+
+        return $rows === null
+            ? null
+            : array_map(static fn (array $row): string => $row['domain'], $rows);
     }
 
     /**

@@ -458,6 +458,59 @@ final class ResellerDomainSyncTest extends DatabaseTestCase
         $this->assertSame([], $this->http->requests, 'an unconfigured panel must not be contacted.');
     }
 
+    public function test_the_diagnostic_flags_a_domain_parked_on_its_own_folder(): void
+    {
+        // The failure that LOOKS LIKE SUCCESS: the domain was created, and the
+        // panel put it in its own folder rather than the one holding the
+        // application. The address then answers with the panel's error page.
+        //
+        // The path CONTAINS the configured document root (public_html/whmp/public)
+        // in full, which is why this is the sharp version of the case: a substring
+        // test would call it correct. Only a suffix match catches it.
+        $this->http->respondInSequence([
+            $this->httpOk($this->whmVersion('11.134.0.44')),
+            $this->httpOk($this->ok($this->addonListWithRoots([
+                'domain.pmhserver.name.ng' => '/home/clientmore/public_html/whmp/public/domain.pmhserver.name.ng',
+            ]))),
+        ]);
+
+        $row = $this->checkRow($this->provisioner()->diagnose(), 'Domains serve this application');
+
+        $this->assertFalse($row['ok'], 'a domain on its own subfolder does not serve this application.');
+        $this->assertStringContainsString('domain.pmhserver.name.ng', (string) $row['detail']);
+    }
+
+    public function test_the_diagnostic_accepts_a_domain_pointed_at_the_platforms_folder(): void
+    {
+        // The fixture configures public_html/whmp/public, so a domain that ENDS
+        // there is serving the same files as the platform.
+        $this->http->respondInSequence([
+            $this->httpOk($this->whmVersion('11.134.0.44')),
+            $this->httpOk($this->ok($this->addonListWithRoots([
+                'domain.pmhserver.name.ng' => '/home/clientmore/public_html/whmp/public',
+            ]))),
+        ]);
+
+        $row = $this->checkRow($this->provisioner()->diagnose(), 'Domains serve this application');
+
+        $this->assertTrue($row['ok'], (string) $row['detail']);
+    }
+
+    public function test_the_diagnostic_says_so_when_the_panel_does_not_report_a_document_root(): void
+    {
+        // Unknown, not "fine" and not "wrong". A verdict we cannot support is
+        // worse than none: this row is what tells somebody where to look.
+        $this->http->respondInSequence([
+            $this->httpOk($this->whmVersion('11.134.0.44')),
+            $this->httpOk($this->ok($this->addonPayload(['domain.pmhserver.name.ng']))),
+        ]);
+
+        $row = $this->checkRow($this->provisioner()->diagnose(), 'Domains serve this application');
+
+        $this->assertNull($row['ok']);
+        $this->assertStringContainsString('did not report a document root', (string) $row['detail']);
+    }
+
     // --- helpers ----------------------------------------------------------
 
     private function provisioner(): ResellerDomainProvisioner
@@ -498,6 +551,23 @@ final class ResellerDomainSyncTest extends DatabaseTestCase
             static fn (string $domain): string => '{"domain":"' . $domain . '"}',
             $domains
         )) . ']';
+    }
+
+    /**
+     * A listing that reports document roots, keyed domain => absolute path — the
+     * shape the document-root check reads.
+     *
+     * @param array<string, string> $roots
+     */
+    private function addonListWithRoots(array $roots): string
+    {
+        $rows = [];
+
+        foreach ($roots as $domain => $root) {
+            $rows[] = '{"domain":"' . $domain . '","documentroot":"' . $root . '"}';
+        }
+
+        return '[' . implode(',', $rows) . ']';
     }
 
     private function enableProvisioning(): void

@@ -128,6 +128,20 @@ Two failures it names directly:
 - **Anything that is not a UAPI envelope** — the panel answered with something unexpected. The
   message now quotes what it actually sent, because the wording is the diagnosis; it used to say
   only "unrecognized response shape", which told you nothing.
+- **`Domains serve this application`** — a check on *where each addon domain points*. The failure it
+  catches looks exactly like success: the domain is created, and the panel parks it on its own
+  folder (`public_html/domain.example.com`) instead of the folder holding the application — so the
+  address answers with cPanel's own **Internal Server Error** page rather than the store. The check
+  compares against your configured document root by **path suffix**, deliberately: that parked path
+  *contains* `public_html`, so a substring test would wave it through.
+
+  This is the row to look at when a domain is created and then returns **500 Internal Server
+  Error**. If it is red, correct the domain's document root in cPanel → Domains (or delete the
+  addon domain, fix `reseller.cpanel_docroot`, and press **Create on server** again) so it points at
+  the same folder as the platform.
+
+  A third verdict is possible here, and it is not a pass: if the panel did not report a document
+  root, the row says so and names the domains. That means compare them by hand.
 
 **If provisioning fails, the approval is not undone.** The decision stands and the failure is
 recorded next to it, and a **Create on server** button appears on that store's row so you can retry
