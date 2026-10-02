@@ -513,12 +513,21 @@ final class ClientRepository
      * Records the client's preferred currency WITHOUT touching a single stored
      * amount.
      *
-     * The storefront currency widget calls this. Picking a different currency
-     * in the header is a change of *view* — it re-prices the catalog for that
-     * visitor and persists as the client's preference — but routing it through
-     * updateCurrency() also re-denominated the whole account, and back again on
-     * the next click, losing a little to rounding on every round trip. Only the
-     * deliberate admin change converts.
+     * NOT USED BY THE STOREFRONT CURRENCY WIDGET ANY MORE, and deliberately not
+     * called from CurrencySwitchController. `clients.currency_id` is not a free
+     * display preference: it is the ACCOUNT currency, the same column
+     * updateCurrency() reads to decide whether anything needs converting, and
+     * the one an unlocked (NULL-currency) document falls back to for display.
+     * Writing it from a browse toggle therefore left the account half-changed —
+     * the column said naira while the amounts it labelled were still the base
+     * figures — and a later deliberate conversion then saw "already naira" and
+     * converted nothing. The browse toggle is now session-only
+     * (CurrencySelection); the account currency changes only through
+     * updateCurrency(), which moves the amounts with it.
+     *
+     * Kept because it is a correct, side-effect-free setter for callers that
+     * genuinely mean "change the preference and nothing else"; if you reach for
+     * it from a currency switcher, you almost certainly want updateCurrency().
      */
     public function setCurrencyPreference(int $id, int $currencyId): void
     {

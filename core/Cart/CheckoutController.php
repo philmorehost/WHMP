@@ -320,6 +320,14 @@ final class CheckoutController
             'loggedIn' => $this->guard->check(),
             'upsells' => $this->products->upsellProducts($inCart),
             'currency' => $currency,
+            // The account's OWN currency, which is not necessarily the one the
+            // page is showing (a signed-in client can browse in another). The
+            // cart page uses this to offer the deliberate account conversion
+            // and to tell the client which currency they are actually billed in.
+            'accountCurrency' => $this->currency->resolveForClient($client),
+            'currencyNotice' => $this->session->pullFlash('currency_notice'),
+            'currencyError' => $this->session->pullFlash('currency_error'),
+            'currencies' => $this->currencies->all(),
             'savedEmail' => (string) $this->session->get('cart_reminder_email', ''),
             'error' => $request->query('error'),
             'msg' => $request->query('msg'),

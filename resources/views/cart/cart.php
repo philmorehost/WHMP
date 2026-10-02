@@ -600,6 +600,68 @@
         </div>
     <?php endif; ?>
 
+    <!--
+        Account currency.
+
+        The header widget changes only how prices are PREVIEWED; this is the
+        deliberate operation that rewrites the client's outstanding balances,
+        so it takes a confirmation and spells out the consequences. It is
+        shown only to a signed-in client: a guest has no account to change,
+        and the header picker is the whole answer for them.
+    -->
+    <?php if ($loggedIn): ?>
+        <?php
+        $acctId = (int) ($accountCurrency['id'] ?? 0);
+        $viewId = (int) ($currency['id'] ?? 0);
+        $acctCode = strtoupper((string) ($accountCurrency['code'] ?? ''));
+        $viewCode = strtoupper((string) ($currency['code'] ?? ''));
+        $currencyOptions = is_array($currencies ?? null) ? $currencies : [];
+        ?>
+        <div class="items-card" style="margin-bottom:24px;">
+            <div class="items-card__header">
+                <span>💱</span>
+                <h3 class="items-card__title">Billing currency</h3>
+            </div>
+            <div class="items-card__body">
+                <?php if (!empty($currencyError)): ?>
+                    <div class="alert" style="margin-bottom:16px;"><?= e((string) $currencyError) ?></div>
+                <?php endif; ?>
+                <?php if (!empty($currencyNotice)): ?>
+                    <div class="alert alert--success" style="margin-bottom:16px;"><?= e((string) $currencyNotice) ?></div>
+                <?php endif; ?>
+
+                <p style="margin-top:0;">
+                    Your account is billed in <strong><?= e($acctCode !== '' ? $acctCode : 'the base currency') ?></strong><?php if ($viewId !== $acctId && $viewCode !== ''): ?>, while the prices shown on this page are in <strong><?= e($viewCode) ?></strong><?php endif; ?>.
+                </p>
+                <p style="color:var(--cv-text-secondary);">
+                    <strong>Changing your account currency recalculates every amount you still owe</strong> — unpaid
+                    invoices, orders in progress, and what you will be billed next. Invoices you have already paid keep
+                    the currency they were billed in. Converted amounts are rounded, so switching back and forth may not
+                    land on exactly the original figure.
+                </p>
+                <form method="post" action="/currency/account" style="margin:0;">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="redirect" value="/cart">
+                    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                        <label for="account-currency" style="font-weight:600;">Change to</label>
+                        <select name="currency_id" id="account-currency" style="padding:8px 10px;border-radius:8px;">
+                            <?php foreach ($currencyOptions as $option): ?>
+                                <option value="<?= (int) $option['id'] ?>"<?= (int) $option['id'] === $acctId ? ' selected' : '' ?>>
+                                    <?= e(strtoupper((string) $option['code'])) ?> (<?= e((string) $option['symbol']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <label style="display:flex;gap:8px;align-items:center;font-weight:500;">
+                            <input type="checkbox" name="confirm" value="1">
+                            I understand this recalculates what I owe.
+                        </label>
+                        <button type="submit" class="cv-btn cv-btn--secondary" style="padding:8px 16px;">Update account currency</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <!-- Empty Cart State -->
     <?php if ($priced['lines'] === []): ?>
         <div class="items-card">

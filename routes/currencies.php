@@ -15,3 +15,8 @@ $router->post('/admin/currencies/{id}/pricing', [CurrencyController::class, 'set
 $router->post('/admin/currencies/{id}/delete', [CurrencyController::class, 'destroy']);
 
 $router->post('/currency', [CurrencySwitchController::class, 'select']);
+
+// The deliberate counterpart to the browse toggle above: change the ACCOUNT's
+// currency, re-denominating every live amount. A separate endpoint because it
+// is a money operation, not a display preference — see the controller.
+$router->post('/currency/account', [CurrencySwitchController::class, 'applyToAccount']);
