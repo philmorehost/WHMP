@@ -15,26 +15,26 @@ use CodeVault\View;
 // WebP image pipeline — /img?path=/assets/uploads/photo.jpg&w=400
 $router->get('/img', [ImageController::class, 'serve']);
 
-$router->get('/db-debug', function (Request $request, array $params, Container $container): Response {
-    /** @var CodeVault\Database $db */
-    $db = $container->make(CodeVault\Database::class);
-    
-    $currencies = $db->select("SELECT * FROM currencies");
-    $clients = $db->select("SELECT id, currency_id FROM clients LIMIT 5");
-    $invoices = $db->select("SELECT id, subtotal, total, currency_id, currency_rate FROM invoices LIMIT 5");
-    $pricing = $db->select("SELECT * FROM product_pricing LIMIT 5");
-    $services = $db->select("SELECT id, amount, billing_cycle FROM services LIMIT 5");
-
-    return Response::json([
-        'currencies' => $currencies,
-        'clients' => $clients,
-        'invoices' => $invoices,
-        'pricing' => $pricing,
-        'services' => $services,
-    ]);
-});
-
 $router->get('/', function (Request $request, array $params, Container $container): Response {
+    // On a reseller's OWN host, "/" must be THEIR storefront.
+    //
+    // This closure reads product_groups/products/product_pricing and renders the
+    // platform's home page with the platform's prices — with no tenant check at
+    // all. So a store reached at its own domain showed the reseller's brand (that
+    // comes from CurrentReseller, which IS host-aware) above OUR catalogue at OUR
+    // prices: the one combination a white-label store must never show, because the
+    // customer cannot tell they are being quoted the platform's retail.
+    //
+    // The storefront itself (/store) is already tenant-aware end to end — its
+    // catalogue index, its cache key and its retail pricing all key off the
+    // resolved store — so the fix is to send the apex there rather than to
+    // reproduce any of that here.
+    $tenant = $container->make(\CodeVault\Reseller\CurrentReseller::class);
+
+    if ($tenant->get() !== null) {
+        return Response::redirect('/store');
+    }
+
     /** @var View $view */
     $view = $container->make(View::class);
     /** @var SeoTags $seo */
