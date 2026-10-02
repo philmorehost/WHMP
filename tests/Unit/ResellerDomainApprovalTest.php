@@ -5,10 +5,17 @@ declare(strict_types=1);
 namespace CodeVault\Tests\Unit;
 
 use CodeVault\Clients\ClientRepository;
+use CodeVault\Config;
+use CodeVault\Container;
 use CodeVault\Database\Migrator;
 use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerStoreRepository;
+use CodeVault\Security\CsrfToken;
+use CodeVault\Session\SessionManager;
+use CodeVault\Settings\SettingsRepository;
+use CodeVault\Support\App;
 use CodeVault\Tests\Support\DatabaseTestCase;
+use CodeVault\View;
 
 /**
  * Custom-domain approval (migration 0198).
@@ -183,6 +190,62 @@ final class ResellerDomainApprovalTest extends DatabaseTestCase
                 "No route is declared for AdminResellerDomainController::{$method}()."
             );
         }
+    }
+
+    /**
+     * A view and the controller that fills it are deployed as SEPARATE files, and
+     * this happened for real: the template shipped, the controller did not, and a
+     * live admin page printed `Undefined variable $panelCheck` three times.
+     *
+     * Two things have to hold in that state, and they pull in different
+     * directions. No PHP diagnostics — a warning printed before a `header()`
+     * breaks the redirect, which turns one missing array into "the feature is
+     * broken". And no ALL-CLEAR: an empty outstanding list means "nothing of ours
+     * is left on the hosting panel", so a MISSING list rendered as empty would
+     * report the all-clear about hostnames that are still answering out there.
+     * The reassuring reading of a missing list is the wrong one.
+     */
+    public function test_the_page_neither_warns_nor_claims_all_clear_when_the_outstanding_list_is_missing(): void
+    {
+        $configDir = sys_get_temp_dir() . '/codevault-domain-page-' . uniqid();
+        mkdir($configDir);
+        $_SESSION = [];
+
+        $session = new SessionManager(new Config($configDir));
+
+        $container = new Container();
+        $container->instance(\CodeVault\Database::class, $this->db);
+        $container->instance(SettingsRepository::class, new SettingsRepository($this->db));
+        $container->instance(SessionManager::class, $session);
+        // The page renders forms, so csrf_field() has to resolve a token.
+        $container->bind(CsrfToken::class);
+        App::setContainer($container);
+
+        $diagnostics = [];
+        set_error_handler(static function (int $number, string $message) use (&$diagnostics): bool {
+            $diagnostics[] = $message;
+
+            return true;
+        });
+
+        try {
+            $html = (new View(dirname(__DIR__, 2) . '/resources/views'))->render('reseller.admin-domains', [
+                'pending' => [],
+                'decided' => [],
+                'servers' => [],
+                'settings' => ['mode' => 'off', 'server_id' => '', 'account' => '', 'docroot' => ''],
+                'notice' => null,
+                'error' => null,
+                // $outstanding and $panelCheck deliberately omitted — this is the
+                // older-controller deployment.
+            ]);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $diagnostics, 'The view must not raise diagnostics when a variable is missing.');
+        $this->assertStringContainsString('could not be loaded', $html);
+        $this->assertStringNotContainsString('Nothing is outstanding', $html, 'a missing list must not read as the all-clear.');
     }
 
     private function submit(?string $domain): void

@@ -12,6 +12,19 @@
  * @var string|null $error
  */
 
+// Defaulted because a view and the controller that renders it are deployed as
+// separate files, and this release added two variables to both. Uploading the
+// view without the controller used to spray `Undefined variable` warnings across
+// a live admin page, and a warning printed before a redirect breaks the redirect
+// — which turns one missing array into "the feature is broken".
+//
+// `$outstanding` defaults to NULL and not [], deliberately: an empty list here
+// reads as "nothing is outstanding", so treating a MISSING list that way would
+// report the all-clear about hostnames that are still answering on the server.
+// The wrong reassurance is worse than a visible error.
+$outstanding = $outstanding ?? null;
+$panelCheck = $panelCheck ?? [];
+
 $statusLabels = [
     'none' => 'Not requested',
     'pending' => 'Awaiting review',
@@ -219,7 +232,13 @@ $statusBadge = static function (string $status): string {
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Still on the server, but no store should use it</h2>
 
-    <?php if ($outstanding === []): ?>
+    <?php if ($outstanding === null): ?>
+        <div class="cv-alert cv-alert--error">
+            This list could not be loaded, so it is <strong>not</strong> reporting that everything is fine. The
+            deployed files are out of step — this template is newer than the controller that fills it. Re-deploy
+            the application files (and clear the opcode cache if the server has one), then reload.
+        </div>
+    <?php elseif ($outstanding === []): ?>
         <p style="color:var(--cv-text-secondary);">
             Nothing is outstanding — every hostname on the hosting panel belongs to a store that is approved for it.
         </p>
