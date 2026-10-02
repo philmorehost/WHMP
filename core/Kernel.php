@@ -1751,7 +1751,14 @@ class Kernel
                 $this->container->make(Migrator::class)->run();
                 $this->container->make(AddonModuleService::class)->bootActiveAddons();
             } catch (\Throwable $e) {
-                // Prevent database failures from crashing the system during early bootstrap
+                // Not fatal on purpose — a boot that throws takes the whole site
+                // down, and a database blip must not do that. But it must not be
+                // SILENT either: a failed migration is never recorded, so the schema
+                // quietly lags the code and whatever needs the new column dies later
+                // with an error pointing at a query rather than at the migration.
+                // That is exactly how "Unknown column 'i.parent_invoice_id'" reached
+                // production with no trace of the failed 0196 anywhere.
+                error_log('[CodeVault] boot step failed (migrations/addons): ' . $e->getMessage());
             }
         }
 

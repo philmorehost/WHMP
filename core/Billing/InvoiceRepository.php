@@ -6,6 +6,7 @@ namespace CodeVault\Billing;
 
 use CodeVault\Database;
 use DateTimeImmutable;
+use RuntimeException;
 
 final class InvoiceRepository
 {
@@ -40,6 +41,17 @@ final class InvoiceRepository
      */
     public const EXCLUDE_RESELLER_COST_INVOICE =
         'NOT EXISTS (SELECT 1 FROM orders o WHERE o.reseller_cost_invoice_id = i.id)';
+
+    /**
+     * Cached per instance: does invoices.parent_invoice_id exist yet?
+     *
+     * Asked rather than assumed, because the migration that adds it (0196) runs
+     * through a boot step whose failures are deliberately NOT fatal (see
+     * Kernel::handle), so this code can be live against a schema that has not
+     * caught up — and has been. The admin dashboard died on
+     * `Unknown column 'i.parent_invoice_id' in 'where clause'`.
+     */
+    private ?bool $parentColumn = null;
 
     public function __construct(
         private readonly Database $db
@@ -184,7 +196,7 @@ final class InvoiceRepository
     public function overdue(): array
     {
         return $this->db->select(
-            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . self::standalone(),
+            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . $this->standalone(),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
@@ -193,7 +205,7 @@ final class InvoiceRepository
     public function dueUnpaid(): array
     {
         return $this->db->select(
-            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date <= ? AND " . self::standalone() . ' ORDER BY due_date ASC, id ASC',
+            "SELECT * FROM invoices WHERE status = 'unpaid' AND due_date <= ? AND " . $this->standalone() . ' ORDER BY due_date ASC, id ASC',
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
@@ -207,7 +219,7 @@ final class InvoiceRepository
      */
     public function unpaidIds(): array
     {
-        $rows = $this->db->select("SELECT id FROM invoices WHERE status = 'unpaid' AND " . self::standalone() . ' ORDER BY id DESC');
+        $rows = $this->db->select("SELECT id FROM invoices WHERE status = 'unpaid' AND " . $this->standalone() . ' ORDER BY id DESC');
 
         return array_map(static fn (array $row): int => (int) $row['id'], $rows);
     }
@@ -265,6 +277,16 @@ final class InvoiceRepository
     {
         if ($ids === []) {
             return;
+        }
+
+        // The write half of the missing-column guard: nothing can be absorbed
+        // without the column, so say that plainly rather than letting a raw
+        // "Unknown column" surface from deep in the payment path.
+        if (!$this->hasParentColumn()) {
+            throw new RuntimeException(
+                'Cannot consolidate invoices: invoices.parent_invoice_id is missing. '
+                . 'Apply migration 0196 (php bin/migrate.php) and try again.'
+            );
         }
 
         $ids = array_values(array_unique(array_map('intval', $ids)));
@@ -589,7 +611,7 @@ final class InvoiceRepository
     public function countOverdue(): int
     {
         $row = $this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . self::standalone(),
+            "SELECT COUNT(*) AS c FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . $this->standalone(),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
 
@@ -599,7 +621,7 @@ final class InvoiceRepository
     public function sumOverdue(): float
     {
         $row = $this->db->selectOne(
-            "SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . self::standalone(),
+            "SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE status = 'unpaid' AND due_date < ? AND " . $this->standalone(),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
 
@@ -625,9 +647,65 @@ final class InvoiceRepository
      * hides a document that is not real revenue, this one hides a document that is
      * real debt already counted elsewhere.
      */
-    private static function standalone(string $alias = ''): string
+    private function standalone(string $alias = ''): string
     {
+        if (!$this->hasParentColumn()) {
+            // An install that has this code but not yet migration 0196's column.
+            // Without the column no consolidation can exist, so there is nothing
+            // to exclude and the query must not mention it at all: `1 = 1` is not
+            // a fallback fudge, it is the accurate condition. This is also what
+            // keeps the dashboard alive instead of throwing a fatal error on the
+            // admin home page.
+            return '1 = 1';
+        }
+
         return ($alias === '' ? '' : $alias . '.') . 'parent_invoice_id IS NULL';
+    }
+
+    private function hasParentColumn(): bool
+    {
+        if ($this->parentColumn !== null) {
+            return $this->parentColumn;
+        }
+
+        if ($this->columnExists('parent_invoice_id')) {
+            return $this->parentColumn = true;
+        }
+
+        // Missing: try the repair once for this instance, then report the truth.
+        $this->ensureParentColumn();
+
+        return $this->parentColumn = $this->columnExists('parent_invoice_id');
+    }
+
+    private function columnExists(string $column): bool
+    {
+        return $this->db->selectOne(
+            'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+            ['invoices', $column]
+        ) !== null;
+    }
+
+    /**
+     * Last-resort repair for an install whose schema has not caught up.
+     *
+     * The same defensive shape ServiceRepository::ensureSchema() uses for the
+     * columns it needs: TRY to add the column, ignore a failure (usually "already
+     * there", or a database user that may not ALTER), and let hasParentColumn()
+     * report what is actually true afterwards. Adding a trailing NULLable column
+     * is instant on MariaDB 10.3+, so the healthy path pays nothing.
+     *
+     * This is a repair, not a strategy: the migration is still the mechanism, and
+     * a failed migration is now logged rather than swallowed (Kernel::handle).
+     */
+    private function ensureParentColumn(): void
+    {
+        try {
+            $this->db->statement('ALTER TABLE invoices ADD COLUMN parent_invoice_id INT UNSIGNED NULL');
+        } catch (\Throwable) {
+            // Left to the INFORMATION_SCHEMA check.
+        }
     }
 
     /** Sum of invoices paid since the 1st of the current calendar month. */
@@ -665,7 +743,7 @@ final class InvoiceRepository
     public function overdueByCurrency(): array
     {
         return $this->sumByCurrency(
-            "i.status = 'unpaid' AND i.due_date < ? AND " . self::standalone('i'),
+            "i.status = 'unpaid' AND i.due_date < ? AND " . $this->standalone('i'),
             [(new DateTimeImmutable())->format('Y-m-d')]
         );
     }
