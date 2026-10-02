@@ -128,6 +128,18 @@ Two failures it names directly:
 - **Anything that is not a UAPI envelope** — the panel answered with something unexpected. The
   message now quotes what it actually sent, because the wording is the diagnosis; it used to say
   only "unrecognized response shape", which told you nothing.
+- **`Document root is where this app runs`** — the check on your own setting, and the one to look at
+  *first*. It compares `reseller.cpanel_docroot` with the folder that actually serves this platform
+  (the request's own `DOCUMENT_ROOT`), because those two being different is a silent disaster:
+  **cPanel creates the document root you hand it**, so a wrong value does not report an error — it
+  quietly builds an empty folder, the addon domain is created successfully, and the address then
+  answers with cPanel's **Internal Server Error** page instead of the store.
+
+  In practice the right value is usually just **`public_html`**. Read the real one from cPanel →
+  Domains → the **Document Root** column for the platform's own domain, relative to the account's
+  home (so `/public_html` means the setting is `public_html`).
+
+  Outside the web server (a cron run) the row says it cannot tell rather than guessing.
 - **`Domains serve this application`** — a check on *where each addon domain points*. The failure it
   catches looks exactly like success: the domain is created, and the panel parks it on its own
   folder (`public_html/domain.example.com`) instead of the folder holding the application — so the

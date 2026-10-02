@@ -55,6 +55,20 @@ final class ResellerDomainSyncTest extends DatabaseTestCase
     private int $storeId;
     private int $serverId;
 
+    /** Whatever DOCUMENT_ROOT was before setUp() replaced it. */
+    private ?string $originalDocumentRoot = null;
+
+    protected function tearDown(): void
+    {
+        if ($this->originalDocumentRoot === null) {
+            unset($_SERVER['DOCUMENT_ROOT']);
+        } else {
+            $_SERVER['DOCUMENT_ROOT'] = $this->originalDocumentRoot;
+        }
+
+        parent::tearDown();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -62,6 +76,14 @@ final class ResellerDomainSyncTest extends DatabaseTestCase
 
         $this->settings = new SettingsRepository($this->db);
         $this->http = new FakeHttpClient();
+
+        // The document-root check compares the setting with the folder serving the
+        // request, so it has to be pinned rather than inherited from whatever the
+        // CLI session happens to have. This matches the fixture's configured
+        // document root, so these tests describe a CORRECTLY configured install
+        // unless they say otherwise.
+        $this->originalDocumentRoot = $_SERVER['DOCUMENT_ROOT'] ?? null;
+        $_SERVER['DOCUMENT_ROOT'] = '/home/clientmore/public_html/whmp/public';
 
         $this->clients = new ClientRepository($this->db);
         $this->clientId = $this->clients->create([
@@ -447,13 +469,49 @@ final class ResellerDomainSyncTest extends DatabaseTestCase
         $this->assertStringContainsString('API 2 is not available', (string) $row['detail']);
     }
 
+    public function test_the_diagnostic_flags_a_document_root_that_is_not_where_the_app_runs(): void
+    {
+        // The exact mistake that put a live install on an empty folder: the value
+        // saved was the form's example rather than the folder serving the app. Its
+        // own dedicated directory, so cPanel happily created it, and the address
+        // then answered with the panel's error page.
+        $_SERVER['DOCUMENT_ROOT'] = '/home/clientmore/public_html';
+
+        $row = $this->checkRow($this->provisioner()->diagnose(), 'Document root is where this app runs');
+
+        $this->assertFalse($row['ok'], 'a document root the app is not served from must be reported.');
+        $this->assertStringContainsString('/home/clientmore/public_html', (string) $row['detail']);
+        $this->assertStringContainsString('public_html/whmp/public', (string) $row['detail']);
+    }
+
+    public function test_the_diagnostic_accepts_the_folder_the_app_is_served_from(): void
+    {
+        $row = $this->checkRow($this->provisioner()->diagnose(), 'Document root is where this app runs');
+
+        $this->assertTrue($row['ok'], (string) $row['detail']);
+    }
+
+    public function test_the_document_root_check_admits_uncertainty_outside_the_web_server(): void
+    {
+        // Under cron there is no DOCUMENT_ROOT. That has to read as "cannot tell",
+        // because a check that guesses here would either pass a broken install or
+        // fail a working one, and both cost more than saying nothing.
+        unset($_SERVER['DOCUMENT_ROOT']);
+
+        $row = $this->checkRow($this->provisioner()->diagnose(), 'Document root is where this app runs');
+
+        $this->assertNull($row['ok']);
+        $this->assertStringContainsString('Cannot tell', (string) $row['detail']);
+    }
+
     public function test_the_diagnostic_stops_before_calling_anything_when_the_settings_are_missing(): void
     {
         $this->settings->set(self::KEY_SERVER, '');
 
         $rows = $this->provisioner()->diagnose();
 
-        $this->assertCount(2, $rows, 'settings and mode are reported; nothing is called.');
+        // mode, settings, document root — all decided locally, so nothing is sent.
+        $this->assertCount(3, $rows);
         $this->assertFalse($this->checkRow($rows, 'Settings')['ok']);
         $this->assertSame([], $this->http->requests, 'an unconfigured panel must not be contacted.');
     }

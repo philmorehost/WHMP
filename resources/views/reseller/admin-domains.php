@@ -170,11 +170,15 @@ $statusBadge = static function (string $status): string {
             <tr>
                 <th>Document root</th>
                 <td>
-                    <input class="cv-input" name="docroot" maxlength="191" value="<?= e($settings['docroot']) ?>" placeholder="public_html/whm/public">
+                    <input class="cv-input" name="docroot" maxlength="191" value="<?= e($settings['docroot']) ?>" placeholder="public_html">
                     <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
-                        The folder that already serves this platform, relative to the account's home. The reseller's
-                        domain is pointed at the <strong>same</strong> folder, so the store is served by this same
-                        application rather than a copy of it. Wrong or empty = the domain is parked on an empty folder.
+                        The folder that already serves this platform, relative to the account's home — read it from
+                        cPanel → <strong>Domains → Document Root</strong> for the platform's own domain. Store domains
+                        are pointed at the <strong>same</strong> folder, so this one application serves them.
+                        <br>
+                        <strong>cPanel creates this folder if it does not exist</strong>, so a wrong value does not
+                        report an error — it silently builds an empty folder, and the store's address then answers with
+                        a server error page. Check the row below before approving anything.
                     </span>
                 </td>
             </tr>

@@ -320,6 +320,8 @@ final class ResellerDomainProvisioner
                 . ', document root "' . ($docroot !== '' ? $docroot : '(none)') . '"',
         ];
 
+        $rows[] = $this->documentRootRow($docroot);
+
         if ($serverId <= 0) {
             return $rows;
         }
@@ -419,6 +421,62 @@ final class ResellerDomainProvisioner
         ];
 
         return $rows;
+    }
+
+    /**
+     * Is the configured document root actually the folder that serves THIS
+     * application?
+     *
+     * This is the check for the mistake that produced a brand-new empty folder on
+     * a live panel. cPanel CREATES the document root it is handed, so a wrong value
+     * looks like a clean success: the addon domain is created, and the address then
+     * answers with the panel's own error page because the folder is empty. Nothing
+     * is logged and nothing fails.
+     *
+     * `DOCUMENT_ROOT` is the folder serving THIS request, which is by definition the
+     * folder that serves the platform — and therefore the one every store domain has
+     * to be pointed at. Suffix-matched, so it holds without knowing where the
+     * account's home directory is.
+     *
+     * @return array{label: string, ok: ?bool, detail: string}
+     */
+    private function documentRootRow(string $docroot): array
+    {
+        $serving = rtrim(str_replace('\\', '/', (string) ($_SERVER['DOCUMENT_ROOT'] ?? '')), '/');
+        $expected = rtrim(str_replace('\\', '/', trim($docroot)), '/');
+
+        // No verdict rather than a guess. DOCUMENT_ROOT is absent outside the web
+        // server (cron, a queue worker), and an unset document root is already
+        // reported by the row above.
+        if ($serving === '' || $expected === '') {
+            return [
+                'label' => 'Document root is where this app runs',
+                'ok' => null,
+                'detail' => $serving === ''
+                    ? 'Cannot tell from here — this request has no DOCUMENT_ROOT, which happens outside the web '
+                        . 'server. Compare the setting with cPanel → Domains yourself.'
+                    : 'No document root is set.',
+            ];
+        }
+
+        if ($serving === $expected || str_ends_with($serving, '/' . $expected)) {
+            return [
+                'label' => 'Document root is where this app runs',
+                'ok' => true,
+                'detail' => 'Yes — this application is served from ' . $serving . ' and the setting is "' . $docroot
+                    . '", so a store domain will be given the same folder.',
+            ];
+        }
+
+        return [
+            'label' => 'Document root is where this app runs',
+            'ok' => false,
+            'detail' => 'NO. This application is served from ' . $serving . ', but the setting says "' . $docroot
+                . '" — a store domain would be created in a DIFFERENT folder and would answer with an error page '
+                . 'instead of the store. cPanel creates that folder when it does not exist, which is why this looks '
+                . 'like success. Set it to the folder serving this platform (usually "public_html"), then change '
+                . 'each store domain\'s document root under cPanel → Domains, or remove and re-create it.',
+        ];
     }
 
     /** Collapse a raw panel payload into something that fits on one line. */
