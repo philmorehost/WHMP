@@ -156,6 +156,11 @@ final class ResellerMailboxProvisioner
                     'message' => $address . ' already exists on the panel.',
                     'address' => $address,
                     'password' => null,
+                    // Checked here too, deliberately: a mailbox created BEFORE piping was
+                    // configured has no forwarder, and this is the only path that would ever
+                    // revisit it. Without this the store's mail never becomes a ticket and
+                    // nothing reports that.
+                    'piping' => $this->ensurePiping($target['server'], $target['account'], $name, $domain),
                 ];
             }
 
@@ -174,6 +179,74 @@ final class ResellerMailboxProvisioner
             'message' => $address . ' is ready.',
             'address' => $address,
             'password' => $password,
+            // Whether the store's mail will also REACH us, which is what turns a customer's
+            // email into a ticket on the store's desk. Reported rather than assumed.
+            'piping' => $this->ensurePiping($target['server'], $target['account'], $name, $domain),
+        ];
+    }
+
+    /**
+     * Point the store's support address at the mailbox this platform already reads.
+     *
+     * WHY A FORWARDER RATHER THAN READING EACH STORE'S MAILBOX
+     *
+     * The password for a store's mailbox is generated, shown once and stored nowhere —
+     * nothing here needs it, because we hand mail to the local MTA rather than logging in to
+     * send. Reading each store's mailbox would need that password kept, and would mean one
+     * IMAP connection per store per sweep. Forwarding into the single mailbox the piping job
+     * already sweeps avoids both, and the RECIPIENT ADDRESS is what tells the job which store
+     * a message belongs to (see MailPipingJob).
+     *
+     * cPanel delivers to the local mailbox AND forwards, so the reseller keeps their copy and
+     * we get one for ticketing — this does not move their mail anywhere.
+     *
+     * NOTHING IS CREATED WHEN NOBODY IS READING. If piping is off, or no mailbox is configured
+     * for it, a forwarder would send the store's support mail to an address nothing sweeps —
+     * mail that appears to have been received and is then lost. That is worse than no forwarder,
+     * so it is reported as skipped with the reason instead.
+     *
+     * @return array{ok: bool, skipped: bool, message: string}
+     */
+    private function ensurePiping(array $server, string $account, string $localPart, string $domain): array
+    {
+        $destination = strtolower(trim((string) $this->settings->get('mail_piping.username', '')));
+        $pipingOn = trim((string) $this->settings->get('mail_piping.enabled', '0')) === '1';
+
+        if (!$pipingOn || $destination === '') {
+            return [
+                'ok' => false,
+                'skipped' => true,
+                'message' => 'Mail sent to ' . $localPart . '@' . $domain . ' is not piped into tickets, because '
+                    . 'mail piping is off or has no mailbox configured. Turn it on under Configuration → Mail '
+                    . 'so your customers\' emails open tickets for you.',
+            ];
+        }
+
+        $result = $this->uapi->call($server, $account, 'Email', 'add_forwarder', [
+            'domain' => $domain,
+            'email' => $localPart,
+            'fwdopt' => 'fwd',
+            'fwdemail' => $destination,
+        ]);
+
+        $message = (string) ($result['message'] ?? '');
+
+        // Already forwarded is the post-condition we wanted, not a failure — the same
+        // idempotency the mailbox creation has, and for the same reason: a retry, or a
+        // forwarder an admin added by hand, must not read as broken.
+        if (!$result['success'] && stripos($message, 'already exist') === false) {
+            return [
+                'ok' => false,
+                'skipped' => false,
+                'message' => 'The mailbox was created, but the forwarder to ' . $destination . ' failed: '
+                    . ($message !== '' ? $message : 'the panel refused it'),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'skipped' => false,
+            'message' => 'Mail to ' . $localPart . '@' . $domain . ' is forwarded to ' . $destination . ', so it opens tickets.',
         ];
     }
 

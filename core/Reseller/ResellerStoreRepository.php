@@ -251,6 +251,35 @@ final class ResellerStoreRepository
     }
 
     /**
+     * The store that owns this support address, if any.
+     *
+     * Used by mail piping. A message delivered TO a store's support address belongs to that
+     * store, not to us: the store's own customer must reach the store's desk rather than
+     * our queue, and the store must be able to see it. Without this the ticket would have no
+     * client to derive an owner from and would land on the platform — the isolation failure
+     * this whole programme exists to avoid.
+     *
+     * Compared case-INSENSITIVELY with LOWER() on the column, which gives up the index. That
+     * is deliberate: the domain part of an address is case-insensitive by definition, so a
+     * case-sensitive compare would silently fail to match a message addressed to
+     * Support@Shop.example against a stored support@shop.example, and the symptom would be a
+     * ticket in the wrong queue rather than an error. `resellers` is a small table.
+     */
+    public function forSupportEmail(string $email): ?array
+    {
+        $email = strtolower(trim($email));
+
+        if ($email === '') {
+            return null;
+        }
+
+        return $this->db->selectOne(
+            'SELECT * FROM resellers WHERE LOWER(support_email) = ? LIMIT 1',
+            [$email]
+        );
+    }
+
+    /**
      * The store-wide markup over our list price — the default retail for every
      * item the reseller has not priced by hand. Clamped by the caller
      * (ResellerRetailPricing::clampMarkup) because that is where the rule and

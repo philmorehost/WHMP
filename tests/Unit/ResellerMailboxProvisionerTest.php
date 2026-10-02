@@ -291,4 +291,103 @@ final class ResellerMailboxProvisionerTest extends DatabaseTestCase
         $this->assertStringContainsString('not a usable mailbox name', $result['message']);
         $this->assertSame([], $this->http->requests);
     }
+
+    // ---------------------------------------------------------------- piping ---
+
+    /** @return array<int, array{method: string, url: string, headers: array<string, string>, body: ?string}> */
+    private function forwarderRequests(): array
+    {
+        return array_values(array_filter(
+            $this->http->requests,
+            static fn (array $r): bool => str_contains((string) $r['url'], 'add_forwarder')
+        ));
+    }
+
+    private function enablePiping(string $destination = 'pipe@platform.test'): void
+    {
+        $this->settings->set('mail_piping.enabled', '1');
+        $this->settings->set('mail_piping.username', $destination);
+    }
+
+    /**
+     * A store's mail has to REACH us for a customer's email to become a ticket on the store's
+     * desk — which is what the recipient address is matched against.
+     */
+    public function test_the_store_address_is_forwarded_into_the_mailbox_we_sweep(): void
+    {
+        $this->configure();
+        $this->enablePiping('pipe@platform.test');
+        $this->http->respondWith(200, $this->ok());
+
+        $result = $this->provisioner()->provision($this->storeWithLiveDomain());
+
+        $forwards = $this->forwarderRequests();
+        $this->assertCount(1, $forwards, 'the support address must be forwarded, or the store never sees its customers');
+
+        // urldecode() first: the arguments travel in the query string, where the `@` in an
+        // address is percent-encoded as %40. Asserting the raw URL for a literal address fails
+        // on a correct request — the same shape of mistake as checking the wrong transport.
+        $payload = urldecode((string) $forwards[0]['url'] . ' ' . (string) $forwards[0]['body']);
+
+        // Parameter NAMES asserted, not just the values: `fwdopt=fwd` is what distinguishes a
+        // forward-to-address from cPanel's other delivery options, and a value-only check would
+        // pass against a request that quietly did something else.
+        $this->assertStringContainsString('email=support', $payload, 'URL was: ' . $forwards[0]['url']);
+        $this->assertStringContainsString('domain=shop.example.com', $payload, 'URL was: ' . $forwards[0]['url']);
+        $this->assertStringContainsString('fwdopt=fwd', $payload, 'URL was: ' . $forwards[0]['url']);
+        $this->assertStringContainsString('fwdemail=pipe@platform.test', $payload, 'URL was: ' . $forwards[0]['url']);
+        $this->assertTrue($result['piping']['ok']);
+    }
+
+    /**
+     * The failure this prevents is a BLACK HOLE: a forwarder pointing at an address nothing
+     * sweeps means mail that looks delivered and is then lost. Reported as skipped with the
+     * reason, rather than created.
+     */
+    public function test_no_forwarder_is_created_when_nobody_is_reading(): void
+    {
+        $this->configure();
+        $this->http->respondWith(200, $this->ok());
+        // Piping left off entirely.
+
+        $result = $this->provisioner()->provision($this->storeWithLiveDomain());
+
+        $this->assertTrue($result['ok'], 'the mailbox itself must still be created');
+        $this->assertSame([], $this->forwarderRequests(), 'nothing should be forwarded into a mailbox nobody sweeps');
+        $this->assertTrue($result['piping']['skipped']);
+        $this->assertStringContainsString('not piped into tickets', $result['piping']['message']);
+    }
+
+    public function test_no_forwarder_is_created_when_piping_has_no_mailbox(): void
+    {
+        // Enabled but unconfigured is the state that reads as "piping is on" while nothing
+        // is actually read.
+        $this->configure();
+        $this->settings->set('mail_piping.enabled', '1');
+        $this->settings->set('mail_piping.username', '');
+        $this->http->respondWith(200, $this->ok());
+
+        $result = $this->provisioner()->provision($this->storeWithLiveDomain());
+
+        $this->assertSame([], $this->forwarderRequests());
+        $this->assertTrue($result['piping']['skipped']);
+    }
+
+    /**
+     * A mailbox created BEFORE piping was configured has no forwarder, and the "already
+     * exists" path is the only one that would ever revisit it. Without this the store's mail
+     * silently never becomes a ticket.
+     */
+    public function test_an_existing_mailbox_still_gets_its_forwarder(): void
+    {
+        $this->configure();
+        $this->enablePiping('pipe@platform.test');
+        $this->http->respondWith(200, '{"result":{"status":0,"errors":["The email account already exists."]}}');
+
+        $result = $this->provisioner()->provision($this->storeWithLiveDomain());
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(1, $this->forwarderRequests(), 'an existing mailbox must still be made reachable');
+        $this->assertNull($result['password'], 'and still must not reveal a password it did not set');
+    }
 }

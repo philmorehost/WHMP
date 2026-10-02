@@ -6,6 +6,7 @@ namespace CodeVault\Support;
 
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Cron\CronJob;
+use CodeVault\Reseller\ResellerStoreRepository;
 use CodeVault\Settings\SettingsRepository;
 
 /**
@@ -32,7 +33,10 @@ final class MailPipingJob implements CronJob
         private readonly TicketRepository $tickets,
         private readonly TicketService $ticketService,
         private readonly ClientRepository $clients,
-        private readonly BlockedEmailSenderRepository $blockedSenders
+        private readonly BlockedEmailSenderRepository $blockedSenders,
+        // Appended last on purpose: MailPipingJobTest builds this by hand, and a new
+        // dependency in the middle would silently rebind every argument after it.
+        private readonly ResellerStoreRepository $stores
     ) {
     }
 
@@ -113,7 +117,19 @@ final class MailPipingJob implements CronJob
             return;
         }
 
-        $department = $this->departments->findByEmail($this->extractEmail($message['to'])) ?? $this->firstDepartment();
+        $recipient = $this->extractEmail($message['to']);
+
+        // WHICH STORE THIS BELONGS TO, IF ANY.
+        //
+        // A customer who emails support@their-store-domain is the STORE's customer, so the
+        // ticket has to appear on the store's desk rather than ours. It also has no client
+        // account to derive an owner from, which is precisely the case the repository's usual
+        // derivation cannot cover — so the recipient address is the only thing that says whose
+        // it is. That is why a store's support address is forwarded into this mailbox rather
+        // than read directly: one mailbox to sweep, and the address does the routing.
+        $store = $this->stores->forSupportEmail($recipient);
+
+        $department = $this->departments->findByEmail($recipient) ?? $this->firstDepartment();
 
         if ($department === null) {
             return;
@@ -137,7 +153,11 @@ final class MailPipingJob implements CronJob
             (int) $department['id'],
             $subject,
             $fromEmail,
-            $message['body']
+            $message['body'],
+            // Trailing nulls are the service/domain ids, which a piped message never has.
+            null,
+            null,
+            $store !== null ? (int) $store['id'] : null
         );
     }
 

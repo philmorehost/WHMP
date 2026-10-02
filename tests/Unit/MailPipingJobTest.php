@@ -54,7 +54,18 @@ final class MailPipingJobTest extends DatabaseTestCase
 
     private function job(FakeMailboxClient $mailbox): MailPipingJob
     {
-        return new MailPipingJob($mailbox, $this->settings, $this->departments, $this->tickets, $this->ticketService, $this->clients, $this->blockedSenders);
+        return new MailPipingJob(
+            $mailbox,
+            $this->settings,
+            $this->departments,
+            $this->tickets,
+            $this->ticketService,
+            $this->clients,
+            $this->blockedSenders,
+            // Appended last on the job, so it goes last here. Fully qualified to keep this
+            // edit to one place — the class lives in a different namespace.
+            new \CodeVault\Reseller\ResellerStoreRepository($this->db)
+        );
     }
 
     public function test_disabled_setting_skips_processing_entirely(): void
@@ -68,6 +79,85 @@ final class MailPipingJobTest extends DatabaseTestCase
 
         $this->assertSame([], $this->tickets->all());
         $this->assertSame([], $mailbox->markedSeen);
+    }
+
+    // ------------------------------------------------------- store attribution ---
+
+    /**
+     * A store's OWN customer must reach the store's desk, not ours.
+     *
+     * The message has no client account to derive an owner from — that is precisely the case
+     * the repository's usual derivation cannot cover — so the recipient address is the only
+     * thing that says whose it is. It is why a store's support address is forwarded into this
+     * mailbox rather than read on its own: one mailbox to sweep, and the address does the
+     * routing.
+     */
+    public function test_a_message_to_a_stores_support_address_lands_on_that_stores_desk(): void
+    {
+        $storeId = $this->storeWithSupportAddress('help@shop.example.test');
+
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 1, 'from' => 'Stranger <someone@elsewhere.test>', 'to' => 'help@shop.example.test', 'subject' => 'Broken', 'body' => 'It is broken.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $tickets = $this->tickets->all();
+        $this->assertCount(1, $tickets);
+        $this->assertSame($storeId, (int) $tickets[0]['reseller_id'], 'the store owns this ticket, not the platform');
+    }
+
+    /**
+     * The other half of the pair. Alone, the test above would pass if EVERY opened ticket
+     * were attributed to the most recently created store.
+     */
+    public function test_a_message_to_an_ordinary_address_still_lands_on_the_platform(): void
+    {
+        $this->storeWithSupportAddress('help@shop.example.test');
+
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 1, 'from' => 'Jane <jane@example.com>', 'to' => 'support@example.test', 'subject' => 'Help', 'body' => 'I need help.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $tickets = $this->tickets->all();
+        $this->assertCount(1, $tickets);
+        $this->assertNull($tickets[0]['reseller_id'], 'a message to our own address is still ours');
+    }
+
+    public function test_a_store_address_is_matched_regardless_of_casing(): void
+    {
+        // The domain part of an address is case-insensitive by definition, so a case-sensitive
+        // compare would put the ticket in the WRONG QUEUE rather than reporting an error — a
+        // silent isolation failure, which is the worst shape this can take.
+        $storeId = $this->storeWithSupportAddress('help@shop.example.test');
+
+        $mailbox = new FakeMailboxClient([
+            ['uid' => 1, 'from' => 'Stranger <someone@elsewhere.test>', 'to' => 'Help@Shop.Example.TEST', 'subject' => 'Broken', 'body' => 'It is broken.'],
+        ]);
+
+        $this->job($mailbox)->handle();
+
+        $tickets = $this->tickets->all();
+        $this->assertCount(1, $tickets);
+        $this->assertSame($storeId, (int) $tickets[0]['reseller_id']);
+    }
+
+    private function storeWithSupportAddress(string $address): int
+    {
+        $clientId = $this->clients->create([
+            'email' => 'owner-' . uniqid() . '@example.test',
+            'password' => 'secret123',
+            'first_name' => 'Store',
+            'last_name' => 'Owner',
+        ]);
+
+        $stores = new \CodeVault\Reseller\ResellerStoreRepository($this->db);
+        $storeId = $stores->create($clientId, 'shop-' . substr(uniqid(), -6), 'Shop Hosting');
+        $stores->setSupportEmail($storeId, $address);
+
+        return $storeId;
     }
 
     public function test_new_message_creates_a_ticket_routed_by_the_to_address(): void

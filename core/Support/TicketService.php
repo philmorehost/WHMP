@@ -38,9 +38,9 @@ final class TicketService
      * notification centre don't have to care, and the ids are the caller's
      * responsibility to authorise: this method trusts them.
      */
-    public function open(?int $clientId, string $email, int $departmentId, string $subject, string $authorName, string $message, ?int $serviceId = null, ?int $domainId = null): int
+    public function open(?int $clientId, string $email, int $departmentId, string $subject, string $authorName, string $message, ?int $serviceId = null, ?int $domainId = null, ?int $resellerId = null): int
     {
-        $ticketId = $this->tickets->create([
+        $fields = [
             'client_id' => $clientId,
             'email' => $email,
             'department_id' => $departmentId,
@@ -48,7 +48,17 @@ final class TicketService
             'domain_id' => $domainId,
             'subject' => $subject,
             'status' => 'open',
-        ]);
+        ];
+
+        // Set ONLY when the caller already knows the store — a message piped to a store's own
+        // support address has no client to look up, so the repository's usual derivation (from
+        // the client) cannot find one. Passing null leaves that derivation in charge, which is
+        // what every other caller wants; passing a value here would wrongly override it.
+        if ($resellerId !== null) {
+            $fields['reseller_id'] = $resellerId;
+        }
+
+        $ticketId = $this->tickets->create($fields);
 
         $this->replies->create($ticketId, 'client', $clientId, $authorName, $message);
 
