@@ -266,16 +266,37 @@ final class TicketRepository
      * by a non-portal flow leave them NULL — so callers that don't know about
      * them keep working unchanged.
      *
+     * `reseller_id` is DERIVED, not passed: the ticket belongs to whichever store
+     * owns the client, which is the single attribution rule this platform already
+     * uses (`clients.reseller_id`). Deriving it here rather than taking it as an
+     * argument is what makes every creation path — the portal form, an
+     * admin-created ticket, mail piping — stamp it without remembering to.
+     *
+     * The subselect joins `resellers` rather than reading `clients.reseller_id`
+     * directly, so a stale value on the client cannot violate the new foreign key;
+     * it simply resolves to NULL and the ticket lands on the platform's desk.
+     *
      * @param array<string, mixed> $fields
      */
     public function create(array $fields): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $clientId = isset($fields['client_id']) && (int) $fields['client_id'] > 0 ? (int) $fields['client_id'] : null;
+        $explicit = isset($fields['reseller_id']) && (int) $fields['reseller_id'] > 0 ? (int) $fields['reseller_id'] : null;
 
         return (int) $this->db->insert(
-            'INSERT INTO tickets (client_id, email, department_id, service_id, domain_id, subject, status, priority, last_reply_at, last_reply_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            // Counting note, because this bit me: `reseller_id` is ONE value slot
+            // even though its COALESCE contains TWO placeholders. So the value list
+            // below is one slot fewer than the placeholder count, and the 11 `?`
+            // after the COALESCE are the 11 columns that follow reseller_id.
+            'INSERT INTO tickets (client_id, reseller_id, email, department_id, service_id, domain_id, subject, status, priority, last_reply_at, last_reply_by, created_at, updated_at)
+             VALUES (?, COALESCE(?, (SELECT r.id FROM clients c JOIN resellers r ON r.id = c.reseller_id WHERE c.id = ?)), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
-                $fields['client_id'] ?? null,
+                $clientId,
+                // A caller that already knows the store wins — a message piped to a
+                // store's own support address has no client to look up.
+                $explicit,
+                $clientId ?? 0,
                 // Emails are stored lowercased so sender lookups (the mail-
                 // piping flood guard) can use the email index.
                 strtolower(trim((string) ($fields['email'] ?? ''))),
@@ -290,6 +311,122 @@ final class TicketRepository
                 $now,
                 $now,
             ]
+        );
+    }
+
+    /**
+     * One store's tickets.
+     *
+     * Ordered exactly like the platform's queue (open, then customer-reply, then
+     * answered, then closed) rather than by a second convention of our own — a
+     * reseller and an admin looking at the same ticket should not disagree about
+     * which one needs attention.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function forReseller(int $resellerId, int $limit = 200): array
+    {
+        return $this->db->select(
+            "SELECT t.*, d.name AS department_name,
+                    c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
+             FROM tickets t
+             JOIN departments d ON d.id = t.department_id
+             LEFT JOIN clients c ON c.id = t.client_id
+             WHERE t.reseller_id = ?
+             ORDER BY CASE t.status
+                        WHEN 'open' THEN 1
+                        WHEN 'customer-reply' THEN 2
+                        WHEN 'answered' THEN 3
+                        ELSE 4
+                      END ASC,
+                      t.updated_at DESC
+             LIMIT " . max(1, $limit),
+            [$resellerId]
+        );
+    }
+
+    /**
+     * One ticket, but only if it belongs to that store.
+     *
+     * The ownership test is part of the QUERY, not an `if` a caller has to
+     * remember: a store's portal takes the ticket id from the URL, so there is no
+     * shape of request that can read another store's conversation.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function forResellerTicket(int $ticketId, int $resellerId): ?array
+    {
+        return $this->db->selectOne(
+            'SELECT t.*, d.name AS department_name,
+                    c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
+             FROM tickets t
+             JOIN departments d ON d.id = t.department_id
+             LEFT JOIN clients c ON c.id = t.client_id
+             WHERE t.id = ? AND t.reseller_id = ?',
+            [$ticketId, $resellerId]
+        );
+    }
+
+    /**
+     * Pass a ticket up to the platform. FALSE when it is not this store's ticket
+     * or is already escalated, so a double-click cannot overwrite the first note.
+     */
+    public function escalateForReseller(int $ticketId, int $resellerId, ?string $note): bool
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $this->db->update(
+            'UPDATE tickets SET escalated_at = ?, escalated_note = ?, updated_at = ?
+             WHERE id = ? AND reseller_id = ? AND escalated_at IS NULL',
+            [$now, $note, $now, $ticketId, $resellerId]
+        ) > 0;
+    }
+
+    /** The store takes it back — it resolved the ticket itself after all. */
+    public function withdrawEscalationForReseller(int $ticketId, int $resellerId): bool
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $this->db->update(
+            'UPDATE tickets SET escalated_at = NULL, escalated_note = NULL, updated_at = ?
+             WHERE id = ? AND reseller_id = ? AND escalated_at IS NOT NULL',
+            [$now, $ticketId, $resellerId]
+        ) > 0;
+    }
+
+    /**
+     * Drop the escalation without going through a store — used when the platform
+     * answers, which is the thing the escalation was asking for.
+     */
+    public function clearEscalation(int $ticketId): void
+    {
+        $this->db->update(
+            'UPDATE tickets SET escalated_at = NULL, escalated_note = NULL, updated_at = ?
+             WHERE id = ? AND escalated_at IS NOT NULL',
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $ticketId]
+        );
+    }
+
+    /**
+     * What a store has handed up and nobody has answered — the platform's queue.
+     *
+     * Oldest first, because this is a work list and the one waiting longest is the
+     * one costing the most.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function escalatedToPlatform(int $limit = 100): array
+    {
+        return $this->db->select(
+            "SELECT t.*, d.name AS department_name, r.brand_name, r.slug,
+                    c.first_name AS client_first_name, c.last_name AS client_last_name, c.email AS client_email
+             FROM tickets t
+             JOIN departments d ON d.id = t.department_id
+             JOIN resellers r ON r.id = t.reseller_id
+             LEFT JOIN clients c ON c.id = t.client_id
+             WHERE t.escalated_at IS NOT NULL AND t.status <> 'closed'
+             ORDER BY t.escalated_at ASC
+             LIMIT " . max(1, $limit)
         );
     }
 

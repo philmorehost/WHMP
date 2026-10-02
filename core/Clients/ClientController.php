@@ -593,7 +593,14 @@ final class ClientController
         $transcript = [];
 
         foreach ($conversation as $turn) {
-            $speaker = $turn['author'] === 'admin' ? 'Support' : 'Customer';
+            // A store's reply is support, not the customer — see
+            // TicketService::isSupportAuthor(). Labelling it 'Customer' would have
+            // the AI draft a reply as though the customer had just written it.
+            // Fully qualified on purpose: this file does not import TicketService
+            // (its constructor names it in full), and an un-imported class name in a
+            // static call is silently resolved against THIS namespace — a fatal that
+            // no lint catches.
+            $speaker = \CodeVault\Support\TicketService::isSupportAuthor((string) $turn['author']) ? 'Support' : 'Customer';
             $transcript[] = "{$speaker}: " . PiiRedactor::redact($turn['message']);
         }
 

@@ -458,7 +458,9 @@ final class TicketController
         $transcript = [];
 
         foreach ($conversation as $turn) {
-            $speaker = $turn['author'] === 'admin' ? 'Support' : 'Customer';
+            // A store's reply is support, not the customer — see
+            // TicketService::isSupportAuthor().
+            $speaker = TicketService::isSupportAuthor((string) $turn['author']) ? 'Support' : 'Customer';
             $transcript[] = "{$speaker}: " . PiiRedactor::redact($turn['message']);
         }
 

@@ -89,13 +89,39 @@ final class TicketService
         }
     }
 
+    /**
+     * Who counts as SUPPORT on a ticket, as opposed to the customer.
+     *
+     * Two kinds of people answer a customer: the platform's staff, and the store
+     * that owns the customer ('reseller'). Everything that interprets an author
+     * type goes through here, because the several places that need the answer — the
+     * status transition below, the AI transcript labelling, the staff/customer
+     * split in the reply list — must not each decide it separately. Reading a
+     * store's reply as a customer's is not a cosmetic slip: it sets the ticket back
+     * to "customer replied" when the person who was meant to answer just did.
+     */
+    public static function isSupportAuthor(string $authorType): bool
+    {
+        return in_array($authorType, ['admin', 'reseller'], true);
+    }
+
     public function reply(int $ticketId, string $authorType, ?int $authorId, string $authorName, string $message, bool $isPrivate = false): int
     {
         $replyId = $this->replies->create($ticketId, $authorType, $authorId, $authorName, $message, $isPrivate);
 
         if (!$isPrivate) {
-            $newStatus = $authorType === 'admin' ? 'answered' : 'customer-reply';
+            $newStatus = self::isSupportAuthor($authorType) ? 'answered' : 'customer-reply';
+
             $this->tickets->recordReply($ticketId, $authorType, $newStatus);
+
+            // An escalation is a store asking US for help, so only OUR answer closes
+            // it. The store replying to its own customer is not a reply to its own
+            // request, and clearing it there would silently drop the request while
+            // the ticket still needed us.
+            if ($authorType === 'admin') {
+                $this->tickets->clearEscalation($ticketId);
+            }
+
             $this->hooks->fire(HookPoints::TICKET_REPLY, ['ticketId' => $ticketId, 'authorType' => $authorType]);
         }
 

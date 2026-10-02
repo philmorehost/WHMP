@@ -983,7 +983,7 @@ $id = (int) $client['id'];
                     <summary style="cursor:pointer;font-weight:700;font-size:.85rem;margin-bottom:10px;">Conversation (<?= count($activeTicketReplies) ?> messages)</summary>
                     <div style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px;">
                         <?php foreach ($activeTicketReplies as $reply): ?>
-                            <?php $isStaff = ($reply['author_type'] ?? '') === 'admin'; ?>
+                            <?php $isStaff = \CodeVault\Support\TicketService::isSupportAuthor((string) ($reply['author_type'] ?? '')); ?>
                             <div style="border:1px solid var(--cv-border-default);border-left:3px solid <?= $isStaff ? '#3b82f6' : '#10b981' ?>;border-radius:8px;padding:10px 12px;background:<?= $isStaff ? 'rgba(59,130,246,.06)' : 'rgba(16,185,129,.06)' ?>;">
                                 <div style="font-size:.75rem;color:var(--cv-text-secondary);margin-bottom:6px;">
                                     <strong><?= e((string) ($reply['author_name'] ?? ($isStaff ? 'Support' : 'Client'))) ?></strong>
