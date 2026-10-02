@@ -281,6 +281,119 @@ final class ResellerDomainProvisioner
     }
 
     /**
+     * Ask the panel what it can actually do.
+     *
+     * This exists because a failure here is otherwise nearly undiagnosable: the
+     * only symptom is an approval that records an error, and the interesting
+     * information (which module file is missing, which API version answered,
+     * whether the account is even reachable) is in the panel's reply, not in
+     * anything the application knows.
+     *
+     * It deliberately reports the RAW replies. A "connection failed" summary
+     * would hide the one detail that matters, which is usually the panel naming
+     * a file it could not load.
+     *
+     * @return array<int, array{label: string, ok: ?bool, detail: string}>
+     */
+    public function diagnose(): array
+    {
+        $rows = [];
+
+        $mode = $this->mode();
+        $rows[] = [
+            'label' => 'Automatic provisioning',
+            'ok' => $mode === self::MODE_CPANEL,
+            'detail' => $mode === self::MODE_CPANEL
+                ? 'On — approvals will call the hosting panel.'
+                : 'Off — nothing is sent to the panel, and domains must be added and removed by hand.',
+        ];
+
+        $serverId = (int) trim((string) $this->settings->get('reseller.cpanel_server_id', ''));
+        $account = trim((string) $this->settings->get('reseller.cpanel_account_user', ''));
+        $docroot = trim((string) $this->settings->get('reseller.cpanel_docroot', ''));
+
+        $rows[] = [
+            'label' => 'Settings',
+            'ok' => $serverId > 0 && $account !== '' && $docroot !== '',
+            'detail' => 'server #' . ($serverId > 0 ? $serverId : '(none)')
+                . ', cPanel account "' . ($account !== '' ? $account : '(none)') . '"'
+                . ', document root "' . ($docroot !== '' ? $docroot : '(none)') . '"',
+        ];
+
+        if ($serverId <= 0) {
+            return $rows;
+        }
+
+        $server = $this->servers->find($serverId);
+
+        if ($server === null) {
+            $rows[] = ['label' => 'WHM server', 'ok' => false, 'detail' => 'Server #' . $serverId . ' no longer exists.'];
+
+            return $rows;
+        }
+
+        $rows[] = [
+            'label' => 'WHM server',
+            'ok' => true,
+            'detail' => (string) $server['hostname'] . ':' . (string) ($server['api_port'] ?? 2087),
+        ];
+
+        // A reachability check the WHM API 1 `version` function answers, which is
+        // the one cPanel call this codebase has confirmed against a live server.
+        $version = $this->uapi->callWhm($server, 'version');
+        $rows[] = [
+            'label' => 'WHM reachable',
+            'ok' => $version['success'],
+            'detail' => $version['success']
+                ? 'Yes — ' . (string) ($version['data']['version'] ?? 'version not reported')
+                : (string) $version['message'],
+        ];
+
+        if ($account === '') {
+            return $rows;
+        }
+
+        // The decisive check. It exercises the SAME module and API-version
+        // fallback the approval uses, so a red row here is exactly why an
+        // approval failed — reported here with the panel's own wording.
+        $list = $this->listResult($server, $account);
+        $hosts = $list['success'] ? $this->addonHosts($list['data'] ?? null) : null;
+
+        $rows[] = [
+            'label' => 'Addon domains readable',
+            'ok' => $list['success'] && $hosts !== null,
+            'detail' => $list['success']
+                ? ($hosts === null
+                    ? 'The panel answered, but the list was not in a shape we recognise. Raw: ' . $this->shorten($list['data'])
+                    : 'Yes, over API ' . (string) ($list['api_version'] ?? '?') . ' — this account currently has '
+                        . count($hosts) . ': ' . ($hosts === [] ? 'none' : implode(', ', $hosts)))
+                : (string) $list['message'],
+        ];
+
+        return $rows;
+    }
+
+    /** Collapse a raw panel payload into something that fits on one line. */
+    private function shorten(mixed $data): string
+    {
+        $json = is_string($data) ? $data : (string) json_encode($data);
+
+        return strlen($json) > 300 ? substr($json, 0, 300) . '…' : $json;
+    }
+
+    /**
+     * The addon-domain listing, in one place so the removal check and the
+     * diagnostic can never disagree about what the account holds.
+     *
+     * @param array<string, mixed> $server
+     * @return array<string, mixed>
+     */
+    private function listResult(array $server, string $account): array
+    {
+        return $this->uapi->call($server, $account, 'AddonDomain', 'listaddondomains', []);
+    }
+
+    /**
      * Is the domain still on the panel? TRUE / FALSE, or NULL when the panel's
      * answer could not be read.
      *
@@ -294,7 +407,7 @@ final class ResellerDomainProvisioner
      */
     private function stillListed(array $server, string $account, string $domain): ?bool
     {
-        $result = $this->uapi->call($server, $account, 'AddonDomain', 'listaddondomains', []);
+        $result = $this->listResult($server, $account);
 
         if (!$result['success']) {
             return null;

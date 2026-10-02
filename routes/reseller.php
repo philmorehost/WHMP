@@ -93,12 +93,17 @@ $router->post('/admin/resellers/payouts/{payoutId}/reject', [AdminResellerPayout
 // account pairs, so 'domains' is never read as a client id.
 $router->get('/admin/resellers/domains', [AdminResellerDomainController::class, 'index']);
 $router->post('/admin/resellers/domains/settings', [AdminResellerDomainController::class, 'saveSettings']);
+// Two segments like /settings, so it cannot be read as a store id.
+$router->post('/admin/resellers/domains/diagnose', [AdminResellerDomainController::class, 'runDiagnostic']);
 $router->post('/admin/resellers/domains/{storeId}/approve', [AdminResellerDomainController::class, 'approve']);
 $router->post('/admin/resellers/domains/{storeId}/reject', [AdminResellerDomainController::class, 'reject']);
 // Take a hostname back off the hosting panel. Registered for the same reason the
 // approve/reject pair is: it acts on a store, but it belongs to the domain queue
 // that is where an outstanding removal is visible.
 $router->post('/admin/resellers/domains/{storeId}/unprovision', [AdminResellerDomainController::class, 'unprovision']);
+// Create it on the panel again — for an approval the panel refused, or one that
+// could not reach it. Same page, because that is where the failure is visible.
+$router->post('/admin/resellers/domains/{storeId}/provision', [AdminResellerDomainController::class, 'provisionNow']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

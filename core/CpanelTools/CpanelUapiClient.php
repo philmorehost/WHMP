@@ -28,6 +28,26 @@ final class CpanelUapiClient
 {
     private const DEFAULT_PORT = 2087;
 
+    /** The modern (UAPI) API version. */
+    private const API_VERSION = '3';
+
+    /**
+     * The legacy API 2 version, tried only when the UAPI module is missing.
+     *
+     * This exists because of a real server. Asking for
+     * `AddonDomain::addaddondomain` over UAPI came back with:
+     *
+     *   Failed to load module "AddonDomain": ... Can't locate
+     *   Cpanel/API/AddonDomain.pm in @INC
+     *
+     * i.e. the panel answered, and simply does not have that UAPI module
+     * installed. The same operations have existed for years as API 2 modules
+     * (`Cpanel/API2/...`), which older builds ship and newer ones kept for
+     * compatibility, so the fallback is worth trying before giving up and
+     * making an administrator do it by hand.
+     */
+    private const LEGACY_API_VERSION = '2';
+
     public function __construct(
         private readonly HttpClient $http
     ) {
@@ -36,18 +56,79 @@ final class CpanelUapiClient
     /**
      * @param array<string, mixed> $server
      * @param array<string, mixed> $params
-     * @return array{success: bool, message: string, data: mixed}
+     * @return array{success: bool, message: string, data: mixed, api_version: string}
      */
     public function call(array $server, string $cpanelUser, string $module, string $func, array $params = []): array
     {
+        $result = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::API_VERSION);
+
+        if (!$result['success'] && self::moduleUnavailable((string) $result['message'])) {
+            $legacy = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::LEGACY_API_VERSION);
+
+            if ($legacy['success']) {
+                return $legacy;
+            }
+
+            // BOTH failed, and the two messages name different things: the first
+            // says which module file is missing, the second says what the legacy
+            // route made of the same request. Report both rather than only the
+            // last one, because the first is the one an administrator can act on.
+            return [
+                'success' => false,
+                'message' => 'The hosting panel does not have the ' . $module . ' module for UAPI ('
+                    . $result['message'] . '), and the legacy API 2 equivalent failed too ('
+                    . $legacy['message'] . ').',
+                'data' => [],
+                'api_version' => self::LEGACY_API_VERSION,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * One attempt at one API version. Split out so the fallback above cannot
+     * drift from the primary path — they differ in exactly one parameter.
+     *
+     * @param array<string, mixed> $server
+     * @param array<string, mixed> $params
+     * @return array{success: bool, message: string, data: mixed, api_version: string}
+     */
+    private function callWithVersion(
+        array $server,
+        string $cpanelUser,
+        string $module,
+        string $func,
+        array $params,
+        string $apiVersion
+    ): array {
         $query = array_merge($params, [
             'cpanel_jsonapi_user' => $cpanelUser,
-            'cpanel_jsonapi_apiversion' => '3',
+            'cpanel_jsonapi_apiversion' => $apiVersion,
             'cpanel_jsonapi_module' => $module,
             'cpanel_jsonapi_func' => $func,
         ]);
 
-        return $this->decodeUapi($this->request($server, 'cpanel', $query));
+        $decoded = $this->decodeUapi($this->request($server, 'cpanel', $query));
+        $decoded['api_version'] = $apiVersion;
+
+        return $decoded;
+    }
+
+    /**
+     * Does this message mean "the panel does not have that module"? Matched on
+     * the panel's own wording, which is all we get: cPanel reports a missing
+     * UAPI module as a Perl compile failure, not as a structured error.
+     */
+    private static function moduleUnavailable(string $message): bool
+    {
+        foreach (['failed to load module', "can't locate", 'begin failed', 'module not found'] as $needle) {
+            if (stripos($message, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -104,7 +185,16 @@ final class CpanelUapiClient
         $decoded = json_decode($response['body'], true);
 
         if (!is_array($decoded)) {
-            return ['success' => false, 'message' => "Unexpected response (HTTP {$response['status']}).", 'data' => []];
+            // Include what the panel actually sent. "Unexpected response" alone is
+            // useless precisely when it matters: cPanel reports a missing module
+            // as a Perl compile failure, and if that arrives outside a JSON
+            // envelope the wording is the only clue there is — and it is also
+            // what makes moduleUnavailable() fire, so the API 2 retry happens.
+            return [
+                'success' => false,
+                'message' => "Unexpected response (HTTP {$response['status']})." . self::excerpt($response['body']),
+                'data' => [],
+            ];
         }
 
         // Documented shape: the raw UAPI envelope ({status, errors, data, ...})
@@ -133,7 +223,25 @@ final class CpanelUapiClient
             ];
         }
 
-        return ['success' => false, 'message' => "Unrecognized UAPI response shape (HTTP {$response['status']}).", 'data' => []];
+        return ['success' => false, 'message' => "Unrecognized UAPI response shape (HTTP {$response['status']})." . self::excerpt($response['body']), 'data' => []];
+    }
+
+    /**
+     * A short, single-line excerpt of a raw reply, for error messages.
+     *
+     * Truncated and newline-collapsed because these land in a flash message, an
+     * activity log row and a database column — a 40-line Perl stack trace pasted
+     * into all three helps nobody.
+     */
+    private static function excerpt(string $body): string
+    {
+        $body = trim((string) preg_replace('~\s+~', ' ', $body));
+
+        if ($body === '') {
+            return '';
+        }
+
+        return ' Panel said: ' . (strlen($body) > 300 ? substr($body, 0, 300) . '…' : $body);
     }
 
     /**
@@ -157,7 +265,11 @@ final class CpanelUapiClient
         $decoded = json_decode($response['body'], true);
 
         if (!is_array($decoded)) {
-            return ['success' => false, 'message' => "Unexpected response (HTTP {$response['status']}).", 'data' => []];
+            return [
+                'success' => false,
+                'message' => "Unexpected response (HTTP {$response['status']})." . self::excerpt($response['body']),
+                'data' => [],
+            ];
         }
 
         if (isset($decoded['metadata'])) {

@@ -51,7 +51,10 @@ final class AdminResellerDomainController
         private readonly ResellerDomainSync $domainSync,
         private readonly ServerRepository $servers,
         private readonly SettingsRepository $settings,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        // Appended last: taken directly for the panel DIAGNOSTIC, which is a
+        // property of the panel rather than of any one store.
+        private readonly ResellerDomainProvisioner $provisioner
     ) {
     }
 
@@ -69,6 +72,9 @@ final class AdminResellerDomainController
             // being off). Listed separately because they are the dangerous ones:
             // they answer for a host that resolves to the PLATFORM shop.
             'outstanding' => $this->stores->outstandingPanelDomains(),
+            // One-shot: only present when somebody pressed the button, because
+            // the checks below actually call the hosting panel.
+            'panelCheck' => $this->session->pullFlash('reseller_panel_check', []),
             'servers' => $this->servers->all(),
             'settings' => [
                 'mode' => $this->domainSync->mode(),
@@ -209,6 +215,104 @@ final class AdminResellerDomainController
             'reseller_notice',
             'Refused ' . (string) $store['custom_domain'] . '. The reseller can see the reason and submit again. '
                 . $outcome['message']
+        );
+
+        return Response::redirect('/admin/resellers/domains');
+    }
+
+    /**
+     * Create the domain on the hosting panel, again.
+     *
+     * The retry lever for the case this feature kept getting wrong: an approval
+     * that could not reach the panel, or that the panel refused, leaves the
+     * decision recorded and the domain NOT created. Nothing used to be able to
+     * try again other than saving the whole approval over.
+     *
+     * Refuses unless the domain is APPROVED, because approval is the human gate
+     * (migration 0198) and a manual button that bypassed it would make the gate
+     * decorative. It goes through the same reconciliation as an approval, so if
+     * the store's previous domain is somehow still on the panel it comes off
+     * first rather than ending up alongside the new one.
+     */
+    public function provisionNow(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $store = $this->stores->find((int) ($params['storeId'] ?? 0));
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That store no longer exists.');
+
+            return Response::redirect('/admin/resellers/domains');
+        }
+
+        $domain = trim((string) ($store['custom_domain'] ?? ''));
+
+        if ($domain === '') {
+            $this->session->flash('reseller_error', 'That store has no custom domain to create.');
+
+            return Response::redirect('/admin/resellers/domains');
+        }
+
+        if ((string) ($store['domain_status'] ?? 'none') !== 'approved') {
+            $this->session->flash(
+                'reseller_error',
+                $domain . ' has not been approved, so it will not be sent to the hosting panel. '
+                    . 'Approve the request first — that is the gate that exists to stop a hostname we have not '
+                    . 'reviewed being served.'
+            );
+
+            return Response::redirect('/admin/resellers/domains');
+        }
+
+        $outcome = $this->domainSync->syncStore((int) $store['id']);
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.domain.provision_retry',
+            null,
+            null,
+            'Manual panel provisioning for store #' . (int) $store['id'] . ' (' . $domain . '): ' . $outcome['message'],
+            $request->ip()
+        );
+
+        $this->session->flash($outcome['ok'] ? 'reseller_notice' : 'reseller_error', $outcome['message']);
+
+        return Response::redirect('/admin/resellers/domains');
+    }
+
+    /**
+     * Ask the hosting panel what it can actually do.
+     *
+     * A failure here is otherwise nearly undiagnosable from inside the
+     * application: the only symptom is an approval carrying an error message,
+     * and the information that identifies the problem — a missing module file, a
+     * refused API version, an unreachable server — lives in the panel's reply.
+     * So this is a button that reports the raw answers.
+     */
+    public function runDiagnostic(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $rows = $this->provisioner->diagnose();
+
+        $this->session->flash('reseller_panel_check', $rows);
+
+        $failed = count(array_filter($rows, static fn (array $row): bool => $row['ok'] === false));
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.domain.diagnostic',
+            null,
+            null,
+            'Ran the reseller domain panel check: ' . count($rows) . ' check(s), ' . $failed . ' failed.',
+            $request->ip()
         );
 
         return Response::redirect('/admin/resellers/domains');

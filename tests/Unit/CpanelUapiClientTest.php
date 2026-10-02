@@ -122,6 +122,87 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertSame('Could not reach the WHM server.', $result['message']);
     }
 
+    // --- the API 2 fallback, and the real server that forced it -----------
+
+    public function test_a_missing_uapi_module_falls_back_to_the_legacy_api_2(): void
+    {
+        // Verbatim shape of what a real cPanel answered for
+        // AddonDomain::addaddondomain: it understood the request and simply does
+        // not have the module installed.
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['Failed to load module "AddonDomain": The system failed to load the module '
+                        . '"Cpanel::API::AddonDomain" because of an error: Can\'t locate '
+                        . 'Cpanel/API/AddonDomain.pm in @INC'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, ['cpanelresult' => ['data' => [['domain' => 'shop.example.com']]]]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'AddonDomain', 'listaddondomains');
+
+        $this->assertTrue($result['success'], $result['message']);
+        $this->assertSame('2', $result['api_version']);
+
+        $this->assertCount(2, $this->http->requests);
+        $this->assertStringContainsString('cpanel_jsonapi_apiversion=3', $this->http->requests[0]['url']);
+        $this->assertStringContainsString('cpanel_jsonapi_apiversion=2', $this->http->requests[1]['url']);
+    }
+
+    public function test_a_module_error_outside_a_json_envelope_is_still_recognised(): void
+    {
+        // The same failure, but the panel answered with plain text instead of a
+        // JSON envelope. Without quoting it back, the message would read
+        // "Unexpected response" and the retry would never happen — the wording
+        // IS the signal.
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => 'Failed to load module "AddonDomain": Can\'t locate Cpanel/API/AddonDomain.pm'],
+            $this->json(200, ['cpanelresult' => ['data' => []]]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'AddonDomain', 'listaddondomains');
+
+        $this->assertTrue($result['success'], $result['message']);
+        $this->assertSame('2', $result['api_version']);
+        $this->assertCount(2, $this->http->requests);
+    }
+
+    public function test_when_both_api_versions_fail_the_message_names_both(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, ['result' => ['status' => 0, 'errors' => ['Failed to load module "AddonDomain".'], 'data' => null]]),
+            $this->json(200, ['cpanelresult' => ['error' => 'API 2 is not available on this server.']]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'AddonDomain', 'listaddondomains');
+
+        $this->assertFalse($result['success']);
+        // The FIRST message is the actionable one (it names the module), so both
+        // have to be present rather than only the fallback's.
+        $this->assertStringContainsString('AddonDomain', $result['message']);
+        $this->assertStringContainsString('Failed to load module', $result['message']);
+        $this->assertStringContainsString('API 2 is not available on this server.', $result['message']);
+    }
+
+    public function test_an_ordinary_uapi_error_does_not_trigger_the_fallback(): void
+    {
+        // The fallback must be NARROW. A domain that simply does not exist is a
+        // real answer, and re-asking over a different API version would double
+        // the calls to say the same thing.
+        $this->http->respondWith(200, json_encode([
+            'result' => ['status' => 0, 'errors' => ['The addon domain does not exist.'], 'data' => null],
+        ]));
+
+        $result = $this->client->call($this->server, 'cvuser1', 'AddonDomain', 'deladdondomain');
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('The addon domain does not exist.', $result['message']);
+        $this->assertCount(1, $this->http->requests, 'a plain error must not be retried over API 2.');
+    }
+
     public function test_call_whm_builds_a_direct_non_proxied_request(): void
     {
         $this->http->respondWith(200, json_encode(['metadata' => ['result' => 1, 'reason' => 'OK'], 'data' => ['url' => 'https://whm.example.test/sso']]));
@@ -145,5 +226,11 @@ final class CpanelUapiClientTest extends TestCase
 
         $this->assertFalse($result['success']);
         $this->assertSame('Access denied', $result['message']);
+    }
+
+    /** @param array<string, mixed> $body */
+    private function json(int $status, array $body): array
+    {
+        return ['status' => $status, 'body' => (string) json_encode($body)];
     }
 }

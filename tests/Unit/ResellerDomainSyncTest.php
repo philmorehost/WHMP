@@ -406,7 +406,99 @@ final class ResellerDomainSyncTest extends DatabaseTestCase
         $this->assertSame('old.example.com', (string) $outstanding[0]['domain_provisioned_host']);
     }
 
+    // --- the panel diagnostic --------------------------------------------
+
+    public function test_the_diagnostic_reports_what_the_panel_supports(): void
+    {
+        $this->provisionApproved('shop.example.com');
+
+        $this->http->respondInSequence([
+            $this->httpOk($this->whmVersion('11.134.0.44')),          // WHM API 1 `version`
+            $this->httpOk($this->ok($this->addonPayload(['shop.example.com']))), // listaddondomains
+        ]);
+
+        $rows = $this->provisioner()->diagnose();
+
+        foreach ($rows as $row) {
+            $this->assertNotFalse($row['ok'], $row['label'] . ' should have passed: ' . $row['detail']);
+        }
+
+        $this->assertStringContainsString('11.134.0.44', (string) $this->checkRow($rows, 'WHM reachable')['detail']);
+        $this->assertStringContainsString('shop.example.com', (string) $this->checkRow($rows, 'Addon domains readable')['detail']);
+    }
+
+    public function test_the_diagnostic_quotes_the_panel_when_a_module_is_missing(): void
+    {
+        $this->http->respondInSequence([
+            $this->httpOk($this->whmVersion('11.134.0.44')),
+            // UAPI: as a real panel answered.
+            $this->httpOk($this->uapiFailure('Failed to load module "AddonDomain": Can\'t locate Cpanel/API/AddonDomain.pm in @INC')),
+            // The API 2 retry also refused.
+            $this->httpOk($this->uapiFailure('API 2 is not available on this server.')),
+        ]);
+
+        $rows = $this->provisioner()->diagnose();
+        $row = $this->checkRow($rows, 'Addon domains readable');
+
+        $this->assertFalse($row['ok'], 'a module the panel does not have must not be reported as working.');
+        // The panel's own words have to survive: they name the file, which is the
+        // only thing that tells an administrator what to do next.
+        $this->assertStringContainsString('AddonDomain', (string) $row['detail']);
+        $this->assertStringContainsString('API 2 is not available', (string) $row['detail']);
+    }
+
+    public function test_the_diagnostic_stops_before_calling_anything_when_the_settings_are_missing(): void
+    {
+        $this->settings->set(self::KEY_SERVER, '');
+
+        $rows = $this->provisioner()->diagnose();
+
+        $this->assertCount(2, $rows, 'settings and mode are reported; nothing is called.');
+        $this->assertFalse($this->checkRow($rows, 'Settings')['ok']);
+        $this->assertSame([], $this->http->requests, 'an unconfigured panel must not be contacted.');
+    }
+
     // --- helpers ----------------------------------------------------------
+
+    private function provisioner(): ResellerDomainProvisioner
+    {
+        return new ResellerDomainProvisioner(
+            new CpanelUapiClient($this->http),
+            new ServerRepository($this->db),
+            $this->settings
+        );
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<string, mixed>
+     */
+    private function checkRow(array $rows, string $label): array
+    {
+        foreach ($rows as $row) {
+            if ((string) $row['label'] === $label) {
+                return $row;
+            }
+        }
+
+        $this->fail('No ' . $label . ' row in the diagnostic. Got: '
+            . implode(', ', array_map(static fn (array $r): string => (string) $r['label'], $rows)));
+    }
+
+    /** The legacy shape the WHM API 1 `version` function is confirmed to return. */
+    private function whmVersion(string $version): string
+    {
+        return '{"cpanelresult":{"apiversion":"2","data":{"version":"' . $version . '"},"type":"text"}}';
+    }
+
+    /** @param array<int, string> $domains */
+    private function addonPayload(array $domains): string
+    {
+        return '[' . implode(',', array_map(
+            static fn (string $domain): string => '{"domain":"' . $domain . '"}',
+            $domains
+        )) . ']';
+    }
 
     private function enableProvisioning(): void
     {

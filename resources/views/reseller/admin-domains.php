@@ -5,6 +5,7 @@
  * @var array<int, array<string, mixed>> $pending
  * @var array<int, array<string, mixed>> $decided
  * @var array<int, array<string, mixed>> $outstanding
+ * @var array<int, array{label: string, ok: bool|null, detail: string}> $panelCheck
  * @var array<int, array<string, mixed>> $servers
  * @var array{mode: string, server_id: string, account: string, docroot: string} $settings
  * @var string|null $notice
@@ -173,6 +174,49 @@ $statusBadge = static function (string $status): string {
 </div>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Is the hosting panel actually working?</h2>
+    <p style="color:var(--cv-text-secondary);">
+        This asks the panel what it can do and shows you its own words. Run it first whenever an approval
+        reports a problem — the answer is usually the panel naming a module file it could not load, or refusing
+        one of the API versions. It reports the raw reply rather than a summary, because the detail is the answer.
+    </p>
+    <form method="post" action="/admin/resellers/domains/diagnose"><?= csrf_field() ?>
+        <button class="cv-btn" type="submit">Test the hosting panel</button>
+    </form>
+
+    <?php if ($panelCheck !== []): ?>
+        <table class="cv-table" style="margin-top:var(--cv-space-3);">
+            <thead>
+            <tr><th>Check</th><th>Result</th><th>What the panel said</th></tr>
+            </thead>
+            <tbody>
+            <?php foreach ($panelCheck as $row): ?>
+                <tr>
+                    <td><?= e((string) $row['label']) ?></td>
+                    <td>
+                        <?php if ($row['ok'] === true): ?>
+                            <span class="cv-badge cv-badge--success">OK</span>
+                        <?php elseif ($row['ok'] === false): ?>
+                            <span class="cv-badge cv-badge--error">Failed</span>
+                        <?php else: ?>
+                            <span class="cv-badge">Unknown</span>
+                        <?php endif; ?>
+                    </td>
+                    <td style="font-size:var(--cv-text-sm);word-break:break-word;"><?= e((string) $row['detail']) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:var(--cv-space-2);">
+            A failed <em>Addon domains readable</em> check is why an approval cannot create a domain. If it names a
+            missing <code>Cpanel/API/AddonDomain.pm</code>, the panel does not have the modern AddonDomain module;
+            the application already retries the operation over the older API 2, so if BOTH are refused the account
+            has to be handled by hand.
+        </p>
+    <?php endif; ?>
+</div>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Still on the server, but no store should use it</h2>
 
     <?php if ($outstanding === []): ?>
@@ -207,6 +251,11 @@ $statusBadge = static function (string $status): string {
                     </td>
                     <td style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e((string) ($row['domain_provision_error'] ?? 'not recorded')) ?></td>
                     <td>
+                        <?php if ((string) ($row['domain_status'] ?? 'none') === 'approved'): ?>
+                            <form method="post" action="/admin/resellers/domains/<?= (int) $row['id'] ?>/provision" style="margin-bottom:var(--cv-space-1);"><?= csrf_field() ?>
+                                <button class="cv-btn" type="submit">Create on server</button>
+                            </form>
+                        <?php endif; ?>
                         <form method="post" action="/admin/resellers/domains/<?= (int) $row['id'] ?>/unprovision"><?= csrf_field() ?>
                             <button class="cv-btn" type="submit">Remove from server</button>
                         </form>
@@ -243,9 +292,10 @@ $statusBadge = static function (string $status): string {
                     <td><?= e((string) ($row['domain_reviewed_at'] ?? '—')) ?></td>
                     <td>
                         <?php $onServer = trim((string) ($row['domain_provisioned_host'] ?? '')); ?>
+                        <?php $onServerMatches = $onServer !== '' && $onServer === trim((string) $row['custom_domain']); ?>
                         <?php if ($onServer !== ''): ?>
-                            <span class="cv-badge <?= $onServer === trim((string) $row['custom_domain']) ? 'cv-badge--success' : 'cv-badge--warning' ?>">
-                                <?= $onServer === trim((string) $row['custom_domain']) ? 'Added' : 'Old name still there' ?>
+                            <span class="cv-badge <?= $onServerMatches ? 'cv-badge--success' : 'cv-badge--warning' ?>">
+                                <?= $onServerMatches ? 'Added' : 'Old name still there' ?>
                             </span>
                             <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e($onServer) ?> — <?= e((string) ($row['domain_provisioned_at'] ?? '')) ?></span>
                         <?php elseif (!empty($row['domain_provision_error'])): ?>
@@ -253,6 +303,12 @@ $statusBadge = static function (string $status): string {
                             <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e((string) $row['domain_provision_error']) ?></span>
                         <?php else: ?>
                             <span style="color:var(--cv-text-secondary);">—</span>
+                        <?php endif; ?>
+
+                        <?php if ($status === 'approved' && !$onServerMatches): ?>
+                            <form method="post" action="/admin/resellers/domains/<?= (int) $row['id'] ?>/provision" style="margin-top:var(--cv-space-1);"><?= csrf_field() ?>
+                                <button class="cv-btn" type="submit">Create on server</button>
+                            </form>
                         <?php endif; ?>
                     </td>
                 </tr>

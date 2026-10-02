@@ -112,6 +112,35 @@ at `/admin/resellers/domains` under **"Still on the server, but no store should 
 it"**, with a **Remove from server** button on each row. Check that list after
 turning provisioning off or after any panel outage.
 
+**When the panel refuses, test it rather than guessing.** `/admin/resellers/domains` has a
+**Test the hosting panel** button. It asks the panel what it can do and prints the panel's own
+words, so run it first whenever an approval reports a problem. It checks: provisioning on/off, the
+settings, WHM reachability (the API 1 `version` call), and whether the account's addon domains can
+be listed at all — which is the same call an approval makes, so a red row there is exactly why the
+approval failed.
+
+Two failures it names directly:
+
+- **`Failed to load module "AddonDomain": Can't locate Cpanel/API/AddonDomain.pm`** — the panel
+  does understand the request and simply does not have the modern UAPI AddonDomain module
+  installed. The application retries the same operation over the older API 2 automatically. If the
+  diagnostic shows *both* versions failing, the domain has to be added in cPanel by hand.
+- **Anything that is not a UAPI envelope** — the panel answered with something unexpected. The
+  message now quotes what it actually sent, because the wording is the diagnosis; it used to say
+  only "unrecognized response shape", which told you nothing.
+
+**If provisioning fails, the approval is not undone.** The decision stands and the failure is
+recorded next to it, and a **Create on server** button appears on that store's row so you can retry
+after fixing whatever was wrong. Nothing has to be re-approved, and the retry is the same
+reconciliation as an approval — so a previous domain still on the panel comes off first.
+
+**Order matters when DNS is not in place yet.** cPanel generally wants the domain to resolve to the
+server before it will accept it as an addon domain, so point the `A` record at the server *before*
+approving — or approve, then fix the DNS, then press **Create on server** to retry.
+
+The last two go-live steps (domain pointed here, certificate issued) are still yours; this page only
+ever manages the panel side.
+
 **Two names that must not be confused.** `custom_domain` is what a store is *allowed*
 to be served on, and it is only actually served there once `domain_verified_at` is
 set. What is on the *panel* is tracked separately, which is what makes a replaced
