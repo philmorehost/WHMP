@@ -1,0 +1,170 @@
+/* ============================================================================
+ * Reseller area — portal chrome.
+ *
+ * The reseller area is a CLIENT area: the reseller is our customer, logged into the
+ * platform's own host, so this uses the platform theme. It must still never hard-code a
+ * brand colour, because the same theme block is set per tenant elsewhere and a literal here
+ * would be the one surface that ignores it.
+ *
+ * Only --cv-color-brand-500/600 are overridden per tenant, so anything tinted is mixed
+ * against 500 rather than using --cv-color-brand-100, which still describes the platform
+ * palette. Same rule as the storefront (see docs/STOREFRONT_DESIGN.md).
+ * ========================================================================== */
+
+/* ------------------------------------------------------------------ shell --- */
+
+.rs-shell {
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 clamp(0.75rem, 3vw, 1.5rem);
+}
+
+/* -------------------------------------------------------------- navigation --- */
+
+/* ONE nav for the whole area. It used to be an inline list of <a> tags repeated in eight
+ * views, each with its own subset — so a new page meant editing several files and a wrong
+ * edit silently produced a dead link only on one page.
+ *
+ * No background or border on the container: the links carry their own pill styling, which
+ * means the nav reads as a toolbar wherever it sits — including inside a cv-card, which is
+ * where most of these views already were before the nav was extracted. */
+.rs-nav {
+    margin-bottom: var(--cv-space-4);
+    max-width: 64rem;
+    margin-inline: auto;
+}
+
+.rs-nav__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.rs-nav__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    /* Touch target: a reseller checking a ticket on a phone should not need to aim. */
+    min-height: 2.25rem;
+    padding: 0.45rem 0.8rem;
+    border-radius: var(--cv-radius-md);
+    font-size: var(--cv-text-sm);
+    font-weight: 600;
+    color: var(--cv-text-secondary);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background var(--cv-transition-fast), color var(--cv-transition-fast);
+}
+
+.rs-nav__link:hover {
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+}
+
+.rs-nav__link:focus-visible {
+    outline: 2px solid var(--cv-color-brand-500);
+    outline-offset: 2px;
+}
+
+/* The current page, marked with BOTH a tint and a weight change — colour alone is not a
+ * reliable signal for anyone with a colour-vision deficiency, and browser default link
+ * underlines are gone here. */
+.rs-nav__link--active {
+    background: color-mix(in srgb, var(--cv-color-brand-500) 14%, var(--cv-bg-surface));
+    color: color-mix(in srgb, var(--cv-color-brand-600) 90%, var(--cv-text-primary));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cv-color-brand-500) 28%, transparent);
+}
+
+/* ------------------------------------------------------------- page header --- */
+
+.rs-head {
+    margin-bottom: var(--cv-space-5);
+}
+
+.rs-head__title {
+    margin: 0 0 var(--cv-space-2);
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: clamp(1.35rem, 3vw, 1.85rem);
+    font-weight: 800;
+    line-height: 1.25;
+    color: var(--cv-text-primary);
+    overflow-wrap: anywhere;
+}
+
+.rs-head__lede {
+    margin: 0;
+    max-width: 70ch;
+    font-size: var(--cv-text-base);
+    line-height: 1.6;
+    color: var(--cv-text-secondary);
+}
+
+/* ------------------------------------------------------------------ cards --- */
+
+/* A grid of small figures. Compared with a table of the same numbers it survives a narrow
+ * screen without a horizontal scrollbar, which is most of what was wrong with the portal. */
+.rs-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    gap: var(--cv-space-3);
+}
+
+.rs-stat {
+    padding: var(--cv-space-4);
+    border: 1px solid var(--cv-border-default);
+    border-radius: var(--cv-radius-md);
+    background: var(--cv-bg-surface-sunken);
+}
+
+.rs-stat__label {
+    font-size: var(--cv-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--cv-text-secondary);
+}
+
+.rs-stat__value {
+    margin-top: 0.2rem;
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: var(--cv-text-2xl);
+    font-weight: 800;
+    color: var(--cv-text-primary);
+    overflow-wrap: anywhere;
+}
+
+.rs-stat__note {
+    margin-top: 0.15rem;
+    font-size: var(--cv-text-xs);
+    color: var(--cv-text-tertiary);
+}
+
+/* Actions that belong to a card, kept on one row until they cannot fit. */
+.rs-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cv-space-3);
+    align-items: center;
+}
+
+/* --------------------------------------------------------------- responsive --- */
+
+@media (max-width: 640px) {
+    .rs-nav {
+        padding: var(--cv-space-1);
+    }
+
+    .rs-nav__link {
+        padding: 0.4rem 0.6rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rs-nav__link {
+        transition: none;
+    }
+}

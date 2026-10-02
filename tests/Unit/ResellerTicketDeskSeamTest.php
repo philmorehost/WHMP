@@ -103,17 +103,22 @@ final class ResellerTicketDeskSeamTest extends TestCase
     }
 
     /**
-     * A desk nobody can navigate to is not a feature. The reseller area's hub is the
-     * only route into it, so it must carry the link.
+     * A desk nobody can navigate to is not a feature.
+     *
+     * This used to read client-index.php, because that is where the link lived. It lives in
+     * the shared nav partial now — the links were hand-written in eight views, each with its
+     * own subset, and this desk plus the support-address page shipped with only a partial set
+     * between them. Asserting against the partial is what makes the check cover EVERY page
+     * rather than the one the link happened to be typed into.
      */
-    public function test_the_ticket_desk_is_linked_from_the_reseller_area(): void
+    public function test_the_ticket_desk_is_linked_from_the_reseller_navigation(): void
     {
-        $hub = (string) file_get_contents(dirname(__DIR__, 2) . '/resources/views/reseller/client-index.php');
+        $nav = (string) file_get_contents(dirname(__DIR__, 2) . '/resources/views/partials/reseller-nav.php');
 
         $this->assertStringContainsString(
             '/client/reseller/tickets',
-            $hub,
-            'The reseller area does not link to the support desk, so nothing can reach it.'
+            $nav,
+            'The reseller navigation does not link to the support desk, so nothing can reach it.'
         );
     }
 

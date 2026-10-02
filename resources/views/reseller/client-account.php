@@ -37,11 +37,7 @@ $kindLabels = [
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Your account</h1>
-    <p><a href="/client/reseller">&larr; Back to the reseller area</a> &middot;
-        <a href="/client/reseller/store">Your store</a> &middot;
-        <a href="/client/reseller/tickets">Your support queue</a> &middot;
-        <a href="/client/reseller/mail">Your support address</a> &middot;
-        <a href="/client/reseller/prices">Your prices</a></p>
+    <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary);">
         Every sale at your store credits this account when your customer's invoice is <strong>paid</strong>, and the
         cost of what they bought is debited against it. Nothing is credited at order time — an unpaid order has put
@@ -58,39 +54,41 @@ $kindLabels = [
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Balance</h2>
-    <table class="cv-table">
-        <thead>
-        <tr>
-            <th>What you have earned</th>
-            <th>Available to withdraw</th>
-            <th>In <?= e($baseCode !== '' ? $baseCode : 'base currency') ?></th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr>
-            <td>
-                <strong><?= e($money((float) $account['balance'], $theirCode)) ?></strong>
-                <?php if ($inArrears): ?>
-                    <br><span class="cv-badge cv-badge--error">You currently owe us more than we owe you.</span>
-                <?php endif; ?>
-            </td>
-            <td>
-                <?= e($money((float) $account['withdrawable'], $theirCode)) ?>
-                <?php if (($account['can_withdraw'] ?? false) === true): ?>
-                    <br><span class="cv-badge cv-badge--success">above the <?= e($money((float) $account['minimum'], $theirCode)) ?> minimum</span>
-                <?php elseif ((float) $account['withdrawable'] > 0): ?>
-                    <br><span class="cv-badge">below the <?= e($money((float) $account['minimum'], $theirCode)) ?> minimum for a payout</span>
-                <?php endif; ?>
-            </td>
-            <td>
-                <?= e($money((float) $account['balance_base'], $baseCode)) ?>
-                <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
-                    withdrawable <?= e($money((float) $account['withdrawable_base'], $baseCode)) ?>
-                </span>
-            </td>
-        </tr>
-        </tbody>
-    </table>
+    <?php
+    // Was a three-column table. On a phone that needed a horizontal scrollbar to reach the
+    // third figure — and the third figure is the base-currency amount, the one that does NOT
+    // move when the exchange rate does, so it is arguably the most important of the three.
+    // A grid reflows to one column and each figure keeps its own label.
+    ?>
+    <div class="rs-stats">
+        <div class="rs-stat">
+            <div class="rs-stat__label">What you have earned</div>
+            <div class="rs-stat__value"><?= e($money((float) $account['balance'], $theirCode)) ?></div>
+            <?php if ($inArrears): ?>
+                <div class="rs-stat__note">
+                    <span class="cv-badge cv-badge--error">You currently owe us more than we owe you.</span>
+                </div>
+            <?php endif; ?>
+        </div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">Available to withdraw</div>
+            <div class="rs-stat__value"><?= e($money((float) $account['withdrawable'], $theirCode)) ?></div>
+            <?php if (($account['can_withdraw'] ?? false) === true): ?>
+                <div class="rs-stat__note">
+                    <span class="cv-badge cv-badge--success">above the <?= e($money((float) $account['minimum'], $theirCode)) ?> minimum</span>
+                </div>
+            <?php elseif ((float) $account['withdrawable'] > 0): ?>
+                <div class="rs-stat__note">
+                    <span class="cv-badge">below the <?= e($money((float) $account['minimum'], $theirCode)) ?> minimum for a payout</span>
+                </div>
+            <?php endif; ?>
+        </div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">In <?= e($baseCode !== '' ? $baseCode : 'base currency') ?></div>
+            <div class="rs-stat__value"><?= e($money((float) $account['balance_base'], $baseCode)) ?></div>
+            <div class="rs-stat__note">withdrawable <?= e($money((float) $account['withdrawable_base'], $baseCode)) ?></div>
+        </div>
+    </div>
     <p style="color:var(--cv-text-secondary);margin-top:var(--cv-space-2);">
         <strong>Your account is held in <?= e($baseCode !== '' ? $baseCode : 'the base currency') ?></strong>, so the
         figure in your own currency is a conversion at today's rate and it can go down without a single sale or

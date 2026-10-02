@@ -31,9 +31,7 @@ $status = (string) ($store['support_email_status'] ?? '');
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Your support address</h1>
-    <p><a href="/client/reseller">&larr; Back to the reseller area</a> &middot;
-        <a href="/client/reseller/store">Your store</a> &middot;
-        <a href="/client/reseller/tickets">Your support queue</a></p>
+    <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary);">
         This is the address your customers see when your store replies to a support ticket.
         <?php if ($address === null): ?>

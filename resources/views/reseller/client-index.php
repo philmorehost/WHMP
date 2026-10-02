@@ -14,7 +14,14 @@ $servicePct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['se
 $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain']);
 ?>
 <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Reseller Area</h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">Reseller area</h1>
+        <p class="rs-head__lede">
+            Sell our services and domain names as your own. Your discounts are already applied to the
+            reseller prices shown on every page here, so the figures you see are the figures you pay.
+        </p>
+    </header>
+
     <p><a href="/client/dashboard">&larr; Back to dashboard</a></p>
 
     <?php if ($error !== null && $error !== ''): ?>
@@ -24,14 +31,35 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
         <div class="cv-alert cv-alert--success"><?= e((string) $notice) ?></div>
     <?php endif; ?>
 
-    <p>Resell our services and domain names. Your reseller discounts are currently
-        <strong><?= e($servicePct) ?>%</strong> on services and
-        <strong><?= e($domainPct) ?>%</strong> on domains — the reseller prices below already include them.</p>
-    <p><a href="<?= e($docsUrl) ?>">API documentation &rarr;</a> &middot;
-        <a href="/client/reseller/store">Your store &amp; branding &rarr;</a> &middot;
-        <a href="/client/reseller/account">Your account &amp; earnings &rarr;</a> &middot;
-        <a href="/client/reseller/tickets">Your support queue &rarr;</a> &middot;
-        <a href="/client/reseller/mail">Your support address &rarr;</a></p>
+    <?php
+    // The discounts were a sentence with two bolded percentages in it, which is the one thing
+    // on this page a reseller actually quotes to their own customers. As figures they are
+    // scannable, and the grid reflows instead of wrapping awkwardly mid-sentence.
+    $apiState = match ($state) {
+        'active' => ['Active', 'Your key works now.'],
+        'none' => ['Not requested', 'Request one below to start.'],
+        default => ['Disabled', 'Submit your reselling domain below.'],
+    };
+    ?>
+    <div class="rs-stats">
+        <div class="rs-stat">
+            <div class="rs-stat__label">Service discount</div>
+            <div class="rs-stat__value"><?= e($servicePct) ?>%</div>
+            <div class="rs-stat__note">off our list prices</div>
+        </div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">Domain discount</div>
+            <div class="rs-stat__value"><?= e($domainPct) ?>%</div>
+            <div class="rs-stat__note">off our list prices</div>
+        </div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">API key</div>
+            <div class="rs-stat__value" style="font-size:var(--cv-text-lg);"><?= e($apiState[0]) ?></div>
+            <div class="rs-stat__note"><?= e($apiState[1]) ?></div>
+        </div>
+    </div>
+
+    <?= $view->render('partials.reseller-nav') ?>
 </div>
 
 <?php if (is_array($issued)): ?>

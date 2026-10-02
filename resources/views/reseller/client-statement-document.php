@@ -38,8 +38,7 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Statement <?= e((string) $document['number']) ?></h1>
-    <p><a href="/client/reseller/statements">&larr; All your statements</a> &middot;
-        <a href="/client/reseller/account">Your account</a></p>
+    <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary);">
         <strong><?= e((string) ($identity['legal_name'] ?? '') !== '' ? (string) $identity['legal_name'] : brand_name()) ?></strong>
         &middot; issued <?= e(substr((string) $document['issued_at'], 0, 10)) ?> &middot;

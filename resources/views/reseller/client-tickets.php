@@ -27,11 +27,7 @@ $needsReply = static fn (string $status): bool => in_array($status, ['open', 'cu
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Support for your customers</h1>
-    <p><a href="/client/reseller">&larr; Back to the reseller area</a> &middot;
-        <a href="/client/reseller/store">Your store</a> &middot;
-        <a href="/client/reseller/prices">Your prices</a> &middot;
-        <a href="/client/reseller/mail">Your support address</a> &middot;
-        <a href="/client/reseller/account">Your account</a></p>
+    <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary);">
         These are tickets raised by <strong>your</strong> customers at
         <?= e((string) ($store['brand_name'] ?? 'your store')) ?>.

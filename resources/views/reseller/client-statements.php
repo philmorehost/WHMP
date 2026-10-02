@@ -19,7 +19,7 @@ $issued = is_array($issued ?? null) ? $issued : [];
 
 <div class="cv-card">
     <h1 class="cv-card__title">Your statements</h1>
-    <p><a href="/client/reseller/account">&larr; Back to your account</a></p>
+    <?= $view->render('partials.reseller-nav') ?>
 
     <p style="color:var(--cv-text-secondary);">
         A statement is a frozen copy of your account for a period. Unlike your account page, which always shows the
