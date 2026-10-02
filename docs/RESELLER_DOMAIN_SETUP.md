@@ -123,10 +123,29 @@ Work through this once per reseller domain. Roughly five minutes each.
 9. **Troubleshooting, if it still does not work:**
    - *Domain shows a certificate warning* → step 6 not done, or done while
      Cloudflare was proxied.
-   - *Shows the platform's own shop at our prices* → that is a **suspended** store, by
-     design (503 would be shown for a suspended one; if you see our shop, the domain
-     is probably not the one that verified — check it matches exactly, no `www.`).
-   - *Shows cPanel's default page* → step 4 missing or wrong document root.
+   - *Shows the platform's own shop at our prices* → almost certainly the wrong host
+     matched: check the domain on the store page is character-for-character the one
+     being requested (`www.` and `https://` excluded), and that it is verified on the
+     store you expect — a domain can only be claimed once.
+   - **The cPanel "SORRY!" page (`/cgi-sys/defaultwebpage.cgi`) → the request reached
+     the server, but no vhost matches that hostname, so Apache served its default
+     site. This is the signature of "resolves here, not configured here."** In order
+     of likelihood:
+     1. **The domain was never added in cPanel.** Adding DNS records alone produces
+        exactly this page. Step 4 is the fix. Confirm under cPanel → *Domains* that
+        the hostname is listed.
+     2. **It was added to the wrong cPanel account.** It must be the account that owns
+        the platform's own domain, or it gets its own (empty) vhost.
+     3. **It was added as an addon domain with the default document root**
+        (`public_html/<domain>`), so it serves an empty folder rather than the app.
+        Set its document root to the platform's.
+     4. **It resolves to a different IP than this account's.** Compare cPanel →
+        *Server Information → Shared IP Address* with `dig +short <domain>`. A host
+        can run several accounts with different IPs, each with its own default vhost.
+     5. **It was only just added.** Apache may not have picked the vhost up, and your
+        browser or resolver may still hold the old answer. Test what the server
+        actually does regardless of DNS cache:
+        `curl -I -H "Host: <domain>" http://<server-ip>/`.
    - *Nothing resolves* → step 5, or the record is proxied at a different level.
    - *Wrong store appears* → the name is verified on a different store; a domain can
      only be claimed once.
