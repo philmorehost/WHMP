@@ -210,6 +210,31 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <button class="cv-btn" type="submit"><?= $customDomain === null ? 'Claim this domain' : 'Update domain' ?></button>
         </form>
 
+        <?php
+        // The admin's decision, shown to the reseller. A refusal without the
+        // reason on screen is a dead end, and the reseller cannot resubmit
+        // anything sensible without knowing what to change.
+        $reviewStatus = (string) ($store['domain_status'] ?? 'none');
+        $reviewLabels = [
+            'none' => 'Not requested',
+            'pending' => 'Waiting for review',
+            'approved' => 'Approved',
+            'rejected' => 'Refused',
+        ];
+        ?>
+        <?php if ($customDomain !== null): ?>
+            <p style="margin-top:var(--cv-space-3);">
+                Review status: <strong><?= e($reviewLabels[$reviewStatus] ?? $reviewStatus) ?></strong>
+                <?php if ($reviewStatus === 'pending'): ?>
+                    — an administrator has to approve the domain before it can be set up on our server.
+                <?php elseif ($reviewStatus === 'rejected'): ?>
+                    <br><span style="color:#b91c1c;">Reason: <?= e((string) ($store['domain_review_note'] ?? 'no reason given')) ?></span>
+                    <br><span style="color:var(--cv-text-secondary);">Change the domain above and save to submit it
+                        again — a new submission is reviewed from scratch.</span>
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
+
         <?php if ($customDomain !== null): ?>
             <h3>Prove you control it</h3>
             <p>Create this DNS record, then press Verify. It does not affect your website, email or any other

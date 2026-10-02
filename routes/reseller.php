@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
+use CodeVault\Reseller\AdminResellerDomainController;
 use CodeVault\Reseller\AdminResellerPayoutsController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
@@ -86,6 +87,14 @@ $router->post('/admin/resellers/payouts/settings', [AdminResellerAccountsControl
 $router->get('/admin/resellers/payouts', [AdminResellerPayoutsController::class, 'index']);
 $router->post('/admin/resellers/payouts/{payoutId}/paid', [AdminResellerPayoutsController::class, 'markPaid']);
 $router->post('/admin/resellers/payouts/{payoutId}/reject', [AdminResellerPayoutsController::class, 'reject']);
+
+// Custom-domain REQUESTS: the reseller asks, an admin decides. Registered as a
+// literal path before the parameterised store routes below, like the billing and
+// account pairs, so 'domains' is never read as a client id.
+$router->get('/admin/resellers/domains', [AdminResellerDomainController::class, 'index']);
+$router->post('/admin/resellers/domains/settings', [AdminResellerDomainController::class, 'saveSettings']);
+$router->post('/admin/resellers/domains/{storeId}/approve', [AdminResellerDomainController::class, 'approve']);
+$router->post('/admin/resellers/domains/{storeId}/reject', [AdminResellerDomainController::class, 'reject']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

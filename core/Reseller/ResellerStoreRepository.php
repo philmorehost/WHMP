@@ -140,9 +140,33 @@ final class ResellerStoreRepository
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
+        // Submitting a domain is a REQUEST, so it returns the row to 'pending'
+        // and clears the previous decision: a reseller correcting a refusal must
+        // not keep the old approval (or the old reason). Releasing the domain
+        // (null) resets everything.
         $this->db->update(
-            'UPDATE resellers SET custom_domain = ?, domain_verification_token = ?, domain_verified_at = NULL, updated_at = ? WHERE id = ?',
-            [$domain, $token, $now, $id]
+            'UPDATE resellers SET
+                custom_domain = ?,
+                domain_verification_token = ?,
+                domain_verified_at = NULL,
+                domain_verification_method = NULL,
+                domain_status = ?,
+                domain_requested_at = ?,
+                domain_reviewed_at = NULL,
+                domain_reviewed_by = NULL,
+                domain_review_note = NULL,
+                domain_provisioned_at = NULL,
+                domain_provision_error = NULL,
+                updated_at = ?
+             WHERE id = ?',
+            [
+                $domain,
+                $token,
+                $domain === null ? 'none' : 'pending',
+                $domain === null ? null : $now,
+                $now,
+                $id,
+            ]
         );
     }
 
@@ -180,6 +204,112 @@ final class ResellerStoreRepository
         $this->db->update(
             'UPDATE resellers SET domain_verified_at = NULL, domain_verification_method = NULL, updated_at = ? WHERE id = ?',
             [$now, $id]
+        );
+    }
+
+    /**
+     * An admin approves the request.
+     *
+     * Guarded on `domain_status = 'pending'` inside the UPDATE, so two admins
+     * deciding at the same moment cannot both succeed and the second one is
+     * reported rather than silently overwriting the first. Approving does not by
+     * itself serve the domain — it authorises PROVISIONING (asking the web server
+     * to answer for the hostname); `domain_verified_at` still gates serving, and
+     * the two are deliberately separate (see migration 0198).
+     */
+    public function approveDomain(int $id, ?int $adminId, ?string $note = null): bool
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $this->db->update(
+            "UPDATE resellers SET
+                domain_status = 'approved',
+                domain_reviewed_at = ?,
+                domain_reviewed_by = ?,
+                domain_review_note = ?,
+                domain_provision_error = NULL,
+                updated_at = ?
+             WHERE id = ? AND domain_status = 'pending'",
+            [$now, $adminId, $this->nullIfBlank($note), $now, $id]
+        ) > 0;
+    }
+
+    /**
+     * An admin refuses the request, with a reason the reseller is shown.
+     *
+     * The verification is CLEARED as well as the status changed. A refusal has to
+     * stop the domain being served if it was somehow already serving — otherwise
+     * "rejected" would be a label with no effect, and a domain whose DNS proof we
+     * no longer stand behind would keep answering.
+     *
+     * The claim itself is left in place so the reseller can see what was refused
+     * and correct it; submitting again returns the row to 'pending'.
+     */
+    public function rejectDomain(int $id, ?int $adminId, string $reason): bool
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $this->db->update(
+            "UPDATE resellers SET
+                domain_status = 'rejected',
+                domain_reviewed_at = ?,
+                domain_reviewed_by = ?,
+                domain_review_note = ?,
+                domain_verified_at = NULL,
+                domain_verification_method = NULL,
+                domain_provisioned_at = NULL,
+                updated_at = ?
+             WHERE id = ? AND domain_status = 'pending'",
+            [$now, $adminId, $reason, $now, $id]
+        ) > 0;
+    }
+
+    /** The hosting panel accepted the domain — record when, and clear any old error. */
+    public function markDomainProvisioned(int $id): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->update(
+            'UPDATE resellers SET domain_provisioned_at = ?, domain_provision_error = NULL, updated_at = ? WHERE id = ?',
+            [$now, $now, $id]
+        );
+    }
+
+    /**
+     * The panel refused the call (or we never got an answer). Stored next to the
+     * approval so "approved, but the server would not take it" is a visible
+     * state with an owner rather than a silent failure.
+     */
+    public function recordDomainProvisionError(int $id, string $error): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET domain_provision_error = ?, updated_at = ? WHERE id = ?',
+            [$error, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    /** Requests awaiting an admin's decision, oldest first (the work list). */
+    public function pendingDomainRequests(): array
+    {
+        return $this->db->select(
+            "SELECT r.*, c.first_name, c.last_name, c.email
+             FROM resellers r
+             JOIN clients c ON c.id = r.client_id
+             WHERE r.domain_status = 'pending' AND r.custom_domain IS NOT NULL
+             ORDER BY r.domain_requested_at ASC, r.id ASC"
+        );
+    }
+
+    /** Recently decided requests, newest first — the admin's history of decisions. */
+    public function decidedDomainRequests(int $limit = 50): array
+    {
+        return $this->db->select(
+            "SELECT r.*, c.first_name, c.last_name, c.email
+             FROM resellers r
+             JOIN clients c ON c.id = r.client_id
+             WHERE r.domain_status IN ('approved', 'rejected') AND r.custom_domain IS NOT NULL
+             ORDER BY r.domain_reviewed_at DESC, r.id DESC
+             LIMIT " . max(1, $limit)
         );
     }
 
