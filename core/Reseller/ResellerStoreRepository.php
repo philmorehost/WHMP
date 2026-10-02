@@ -144,6 +144,14 @@ final class ResellerStoreRepository
         // and clears the previous decision: a reseller correcting a refusal must
         // not keep the old approval (or the old reason). Releasing the domain
         // (null) resets everything.
+        //
+        // `domain_provisioned_host` / `domain_provisioned_at` are deliberately
+        // NOT cleared. They describe what is ON THE HOSTING PANEL, not what the
+        // store is allowed to be served on, and this is the one moment the two
+        // facts come apart. Wiping them here would destroy the only record that
+        // the previous domain needs taking back off the panel — see migration
+        // 0199. Removal is driven by the difference, and ResellerDomainSync is
+        // what acts on it.
         $this->db->update(
             'UPDATE resellers SET
                 custom_domain = ?,
@@ -155,7 +163,6 @@ final class ResellerStoreRepository
                 domain_reviewed_at = NULL,
                 domain_reviewed_by = NULL,
                 domain_review_note = NULL,
-                domain_provisioned_at = NULL,
                 domain_provision_error = NULL,
                 updated_at = ?
              WHERE id = ?',
@@ -244,6 +251,12 @@ final class ResellerStoreRepository
      *
      * The claim itself is left in place so the reseller can see what was refused
      * and correct it; submitting again returns the row to 'pending'.
+     *
+     * The panel record is NOT cleared here either, for the same reason as in
+     * setCustomDomain(): the refusal is a decision, and the hostname still sitting
+     * on the hosting panel is an outstanding action. Clearing it would make an
+     * approved-then-refused domain permanently un-removable. ResellerDomainSync
+     * takes it off.
      */
     public function rejectDomain(int $id, ?int $adminId, string $reason): bool
     {
@@ -257,21 +270,67 @@ final class ResellerStoreRepository
                 domain_review_note = ?,
                 domain_verified_at = NULL,
                 domain_verification_method = NULL,
-                domain_provisioned_at = NULL,
                 updated_at = ?
              WHERE id = ? AND domain_status = 'pending'",
             [$now, $adminId, $reason, $now, $id]
         ) > 0;
     }
 
-    /** The hosting panel accepted the domain — record when, and clear any old error. */
-    public function markDomainProvisioned(int $id): void
+    /**
+     * The hosting panel accepted this hostname — record which one, and when, and
+     * clear any old error.
+     *
+     * The host is stored rather than assumed to be `custom_domain`, because the
+     * two are allowed to differ (that difference is what drives removal). Written
+     * together with the timestamp: a host with no timestamp, or a timestamp with
+     * no host, cannot be reconciled.
+     */
+    public function markDomainProvisioned(int $id, string $host): void
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         $this->db->update(
-            'UPDATE resellers SET domain_provisioned_at = ?, domain_provision_error = NULL, updated_at = ? WHERE id = ?',
-            [$now, $now, $id]
+            'UPDATE resellers SET domain_provisioned_host = ?, domain_provisioned_at = ?, '
+                . 'domain_provision_error = NULL, updated_at = ? WHERE id = ?',
+            [$host, $now, $now, $id]
+        );
+    }
+
+    /**
+     * That hostname is no longer on the panel. Both halves go together — a
+     * leftover timestamp would claim a host is on the panel when nothing is,
+     * which is what the sync logic reads to decide whether to try removing.
+     */
+    public function markDomainUnprovisioned(int $id): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET domain_provisioned_host = NULL, domain_provisioned_at = NULL, updated_at = ? WHERE id = ?',
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    /**
+     * Stores with a hostname on the hosting panel that is NOT the one they are
+     * approved to be served on — i.e. removals that are still outstanding.
+     *
+     * This is the visible half of the automation: a removal that failed, or one
+     * skipped because provisioning is switched off, has to be findable by an
+     * administrator rather than only written into a log line.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function outstandingPanelDomains(): array
+    {
+        return $this->db->select(
+            "SELECT r.*, c.first_name, c.last_name, c.email
+             FROM resellers r
+             JOIN clients c ON c.id = r.client_id
+             WHERE r.domain_provisioned_host IS NOT NULL
+               AND r.domain_provisioned_host <> ''
+               AND (r.custom_domain IS NULL
+                    OR r.custom_domain <> r.domain_provisioned_host
+                    OR r.domain_status <> 'approved')
+             ORDER BY r.id ASC"
         );
     }
 

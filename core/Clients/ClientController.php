@@ -58,7 +58,11 @@ final class ClientController
         // same reply is sent from the ticket page.
         private readonly \CodeVault\Support\TicketService $ticketService,
         private readonly AiProvider $aiProvider,
-        private readonly AiSettings $aiSettings
+        private readonly AiSettings $aiSettings,
+        // Appended last, as always here: this controller has ~26 dependencies and
+        // is built by the container, but the rule is that a new one goes on the
+        // end so no existing call site can silently rebind the rest.
+        private readonly \CodeVault\Reseller\ResellerDomainSync $domainSync
     ) {
     }
 
@@ -856,6 +860,17 @@ final class ClientController
         return Response::redirect('/client/dashboard');
     }
 
+    /**
+     * Delete an account, taking anything it had on the hosting panel with it.
+     *
+     * THE PANEL STEP RUNS FIRST, and that ordering is not a preference.
+     * `resellers.client_id` is `ON DELETE CASCADE`, so the moment the client row
+     * goes, the store row holding `custom_domain` and `domain_provisioned_host`
+     * goes with it — and with it the only record of which hostname we added to the
+     * server. After the delete there is nothing left to remove, so the addon
+     * domain would sit there answering for a hostname no store claims, which
+     * resolves to our own shop at our own prices.
+     */
     public function delete(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission(PermissionRegistry::CLIENTS_MANAGE)) {
@@ -864,15 +879,24 @@ final class ClientController
 
         $id = (int) $params['id'];
         $client = $this->clients->find($id);
+        $notice = '';
 
         if ($client !== null) {
+            $outcome = $this->domainSync->removeForClient($id);
+
+            // Only worth saying when something actually came off, or when it did
+            // not and somebody has to finish the job by hand.
+            $notice = $outcome['changed'] || !$outcome['ok'] ? (string) $outcome['message'] : '';
+
             $this->clients->delete($id);
             $admin = $this->guard->currentAdmin();
             $adminId = $admin ? (int) $admin['id'] : null;
-            $this->activity->log('admin', $adminId, 'client.delete', 'client', $id, "Deleted client account #{$id} ({$client['first_name']} {$client['last_name']} <{$client['email']}>)");
+            $this->activity->log('admin', $adminId, 'client.delete', 'client', $id, "Deleted client account #{$id} ({$client['first_name']} {$client['last_name']} <{$client['email']}>)" . ($notice !== '' ? ' — ' . $notice : ''));
         }
 
-        return Response::redirect('/admin/clients?msg=' . urlencode('Client account deleted successfully.'));
+        return Response::redirect('/admin/clients?msg=' . urlencode(
+            'Client account deleted successfully.' . ($notice !== '' ? ' ' . $notice : '')
+        ));
     }
 
     public function bulkDelete(Request $request): Response
@@ -890,12 +914,46 @@ final class ClientController
             return Response::redirect('/admin/clients?msg=' . urlencode('No client accounts were selected for deletion.'));
         }
 
+        // Same ordering as delete(), for the same reason: the store rows are about
+        // to cascade away, so every hostname we put on the server has to be read
+        // and removed while it still exists.
+        $removedCount = 0;
+        $problems = [];
+
+        foreach ($ids as $id) {
+            $outcome = $this->domainSync->removeForClient((int) $id);
+
+            if (!$outcome['ok']) {
+                $problems[] = (string) $outcome['message'];
+            } elseif (!empty($outcome['changed'])) {
+                $removedCount++;
+            }
+        }
+
         $deletedCount = $this->clients->bulkDelete($ids);
         $admin = $this->guard->currentAdmin();
         $adminId = $admin ? (int) $admin['id'] : null;
-        $this->activity->log('admin', $adminId, 'client.bulk_delete', 'client', null, "Bulk deleted {$deletedCount} client account(s).");
+        $this->activity->log(
+            'admin',
+            $adminId,
+            'client.bulk_delete',
+            'client',
+            null,
+            "Bulk deleted {$deletedCount} client account(s)."
+                . ($removedCount > 0 ? " {$removedCount} store domain(s) removed from the hosting panel." : '')
+                . ($problems !== [] ? ' Outstanding: ' . implode(' ', $problems) : '')
+        );
 
-        return Response::redirect('/admin/clients?msg=' . urlencode("Successfully deleted {$deletedCount} client account(s)."));
+        return Response::redirect('/admin/clients?msg=' . urlencode(
+            "Successfully deleted {$deletedCount} client account(s)."
+                . ($removedCount > 0 ? " {$removedCount} store domain(s) were taken off the hosting panel." : '')
+                // Name the first problem on screen rather than only in the log: a
+                // hostname left on the server is the part somebody has to act on,
+                // and it is invisible until then.
+                . ($problems !== []
+                    ? ' ' . $problems[0] . (count($problems) > 1 ? ' (' . (count($problems) - 1) . ' more — see the activity log.)' : '')
+                    : '')
+        ));
     }
 
     private function requirePermission(string $permissionKey): ?Response

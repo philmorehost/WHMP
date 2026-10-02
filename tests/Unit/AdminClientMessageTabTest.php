@@ -14,11 +14,16 @@ use CodeVault\Clients\ClientController;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Config;
 use CodeVault\Container;
+use CodeVault\CpanelTools\CpanelUapiClient;
 use CodeVault\Database;
 use CodeVault\Database\Migrator;
+use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Queue\QueueInterface;
 use CodeVault\Queue\SyncQueue;
 use CodeVault\Request;
+use CodeVault\Reseller\ResellerDomainProvisioner;
+use CodeVault\Reseller\ResellerDomainSync;
+use CodeVault\Reseller\ResellerStoreRepository;
 use CodeVault\Security\CsrfToken;
 use CodeVault\Session\SessionManager;
 use CodeVault\Settings\SettingsRepository;
@@ -121,6 +126,20 @@ final class AdminClientMessageTabTest extends DatabaseTestCase
         // VatLookupService is an interface (Kernel binds it to the VIES client),
         // so a container that isn't the Kernel's has to bind it here.
         $container->instance(VatLookupService::class, new ViesVatLookupService(new FakeHttpClient()));
+        // Same reason: the store-domain sync reached from ClientController::delete()
+        // bottoms out at the HttpClient INTERFACE, which a bare container cannot
+        // instantiate. Provisioning is off by default, so this fake is never called.
+        $container->instance(
+            ResellerDomainSync::class,
+            new ResellerDomainSync(
+                new ResellerStoreRepository($this->db),
+                new ResellerDomainProvisioner(
+                    new CpanelUapiClient(new FakeHttpClient()),
+                    new ServerRepository($this->db),
+                    $this->settings
+                )
+            )
+        );
         // csrf_field() in the rendered view resolves CsrfToken through App.
         $container->bind(CsrfToken::class);
         App::setContainer($container);

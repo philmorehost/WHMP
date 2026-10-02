@@ -69,6 +69,54 @@ Both work. What matters is the cPanel step.
 
 Work through this once per reseller domain. Roughly five minutes each.
 
+### Automation: what the server side does by itself
+
+Turn this on once per install at **`/admin/resellers/domains` → Automatic
+provisioning**, and fill in the three settings below it. After that:
+
+| When | What happens to the hosting panel |
+|---|---|
+| A reseller submits a domain | nothing — it is only a request |
+| You **approve** it | it is added as an addon domain, pointed at the platform's document root |
+| You **refuse** it | anything that was on the panel for that store comes off |
+| A reseller **replaces** their domain | the OLD name comes off **first**, then the new one goes on once you approve it |
+| A reseller **clears** their domain | it comes off |
+| The reseller's **account is deleted** | it comes off — the removal runs *before* the account row goes, because that row is the only record of the hostname |
+
+Three things about that table are worth understanding, because they are where the
+danger is.
+
+**Removal is verified; addition is not.** After asking cPanel to remove a domain, the
+application re-reads the account's addon domains and refuses to report success while
+the name is still listed. If the panel's answer cannot be read, the removal is
+reported as **unconfirmed**, not as done. The asymmetry is deliberate: a domain that
+was never added simply does not serve, and somebody notices within minutes. A domain
+that was never *removed* keeps answering for a hostname no store claims — which shows
+**this** platform's shop at **this** platform's prices — and can stay that way
+indefinitely.
+
+**The old name comes off before the new one goes on.** Removing first cannot lose
+anything (the old name is already dead once the claim moves away from it). Adding
+first would leave the panel holding two hostnames whenever the second step failed, and
+the stale one is the dangerous one.
+
+**Saving the same domain again changes nothing.** Re-submitting an identical name is
+not a new request, so it does not drop the store back to *pending*, clear its DNS
+proof, or take the domain off the server. Only a genuinely different name does that.
+
+**If provisioning is off**, none of this happens and the application never touches the
+panel — including on account deletion. One switch covers both directions on purpose: a
+switch that added domains but would not take them away leaves leftovers nobody can
+see. Instead, everything that had to be skipped, or that the panel refused, is listed
+at `/admin/resellers/domains` under **"Still on the server, but no store should use
+it"**, with a **Remove from server** button on each row. Check that list after
+turning provisioning off or after any panel outage.
+
+**Two names that must not be confused.** `custom_domain` is what a store is *allowed*
+to be served on, and it is only actually served there once `domain_verified_at` is
+set. What is on the *panel* is tracked separately, which is what makes a replaced
+name findable and removable after the claim has moved on.
+
 ### Before anything: two settings to confirm once per install
 
 1. **`APP_URL` must be the real platform address.** In `.env`, it should be
@@ -86,7 +134,9 @@ Work through this once per reseller domain. Roughly five minutes each.
 
 3. **The reseller claims the domain and verifies it** (their step — see §4). You can
    also do both from `/admin/resellers/{clientId}/store`.
-4. **Add the domain to cPanel.** cPanel → **Domains** → **Create A New Domain**:
+4. **Add the domain to cPanel** — *skipped entirely if you turned on automatic
+   provisioning above; approving the request does this for you.* Otherwise:
+   cPanel → **Domains** → **Create A New Domain**:
    - Domain: `reseller.pmhserver.name.ng`
    - Untick *Share document root* and set **Document Root** to the path from step 2
      (the one serving `client.philmorehost.com`). If the platform's own document
@@ -181,9 +231,10 @@ Give this to the reseller. It assumes they own the domain and can edit its DNS.
 
    (A `CNAME` to `client.philmorehost.com` also works. Do **not** CNAME it to your own
    `reseller.client.philmorehost.com` store address.)
-6. **Tell support you have done both**, and include the domain name. The last two
-   things are not something your portal can do — support has to add the domain on the
-   server and issue its security certificate.
+6. **Tell support you have done both**, and include the domain name. Support has to
+   add the domain on the server and issue its security certificate — unless your
+   platform has switched on automatic provisioning, in which case the domain is added
+   for you as soon as your request is approved and only the certificate is left.
 7. **Wait for support to confirm**, then open `https://reseller.pmhserver.name.ng`.
    Your store is live there.
 
@@ -201,25 +252,36 @@ load, which is the part that surprises people.
   want the whole site to be the store — use a subdomain like `reseller.` so your
   normal website keeps working.
 - **Changing your domain later** clears the verification, because the proof applied
-  to the old name. You will have to repeat step 3 for the new one.
+  to the old name. You will have to repeat step 3 for the new one. **Saving a
+  different name also takes the old one off the server immediately**, and the new one
+  is only added once an administrator approves it — so your store stops opening at the
+  old address the moment you save. If you are only checking what the box says, save it
+  unchanged: an identical name changes nothing.
 - Removing the domain does not delete your sales, orders or customers.
 
 ---
 
-## 5. Why the application cannot do this part
+## 5. What the application can and cannot do
 
-Worth stating plainly, because the checklist says *manual* rather than pretending:
+Worth stating plainly, because the go-live checklist marks the last two steps
+*manual* rather than pretending:
 
-- It **cannot** add a domain to cPanel — that is a hosting-panel action, outside the
-  application, and cPanel has no supported API for it that we can call safely from a
-  request.
-- It **cannot** issue a TLS certificate — that is the web server's/edge's job.
-- It **can** prove control of a domain (that is DNS lookups, which PHP can do), and
-  it **does** serve the right store once a verified hostname reaches it. That is the
-  whole of its responsibility, and it is tested.
+- It **can** prove control of a domain — that is DNS lookups, which PHP can do — and
+  it **does** serve the right store once a verified hostname reaches it.
+- It **can** add and remove a domain on the hosting panel, through the same WHM API
+  token this platform already uses for provisioning and its cPanel tools. That is
+  **off by default**, because it edits a hosting account on somebody else's behalf;
+  see §3.
+- It **cannot** issue a TLS certificate. That is the web server's job — ask cPanel's
+  AutoSSL to run after the domain has been added.
+- It **cannot** confirm that a certificate exists or that DNS resolves *from outside*.
+  Those are the two steps that stay *Ask support* / *manual* on the checklist on
+  purpose: a process running on this server, observing itself, is not evidence about
+  the internet.
 
-If you ever want the panel step automated, the honest route is an edge proxy
-(Cloudflare for SaaS / a wildcard reverse proxy) that terminates TLS for reseller
-domains and forwards with the original Host — then no per-domain cPanel change is
-needed, at the cost of running that proxy. That is a deliberate infrastructure
-decision, not something this application can quietly assume.
+The alternative to the panel step is an edge proxy (Cloudflare for SaaS, or a wildcard
+reverse proxy) that terminates TLS for reseller domains and forwards with the original
+Host — then no per-domain cPanel change is needed at all, at the cost of running that
+proxy, and TLS stops being a manual step too. That is a deliberate infrastructure
+decision, and the automation above is not a substitute for it: taking a domain off the
+panel does not take it out of a proxy's configuration.

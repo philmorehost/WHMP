@@ -130,7 +130,19 @@ final class ResellerStoreService
      * API key's declared domain already uses — one definition of "a domain name"
      * across the whole reseller feature.
      *
-     * @return array{success: bool, error: ?string, domain: ?string}
+     * SAVING THE SAME DOMAIN AGAIN IS NOT A NEW REQUEST. Submitting resets a
+     * store to 'pending' and clears the DNS proof (a proof belongs to a specific
+     * domain), so treating an unchanged value as a fresh claim would take a live
+     * store dark — and now would also take its domain back off the hosting panel
+     * — just because someone pressed "Update domain" twice. Refusing to do that
+     * is why this returns `unchanged`.
+     *
+     * A REFUSED domain is the exception, and is deliberately given a SECOND
+     * CHANCE: the rejection reason tells the reseller to change something and try
+     * again, so submitting again has to put it back in the queue rather than
+     * bounce off the guard.
+     *
+     * @return array{success: bool, error: ?string, domain: ?string, unchanged?: bool}
      */
     public function claimDomain(int $storeId, string $domain): array
     {
@@ -150,9 +162,22 @@ final class ResellerStoreService
             return ['success' => false, 'error' => 'That domain belongs to the platform.', 'domain' => null];
         }
 
+        $existing = $this->stores->find($storeId);
+        $current = $existing === null
+            ? ''
+            : ResellerStoreLocator::normaliseHost((string) ($existing['custom_domain'] ?? ''));
+
+        if ($existing !== null
+            && $current !== ''
+            && $normalised === $current
+            && (string) ($existing['domain_status'] ?? 'none') !== 'rejected'
+        ) {
+            return ['success' => true, 'error' => null, 'domain' => $normalised, 'unchanged' => true];
+        }
+
         $this->stores->setCustomDomain($storeId, $normalised, DomainVerifier::newToken());
 
-        return ['success' => true, 'error' => null, 'domain' => $normalised];
+        return ['success' => true, 'error' => null, 'domain' => $normalised, 'unchanged' => false];
     }
 
     /** @return array{success: bool, error: ?string} */

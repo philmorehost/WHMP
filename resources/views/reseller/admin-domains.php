@@ -4,6 +4,7 @@
  *
  * @var array<int, array<string, mixed>> $pending
  * @var array<int, array<string, mixed>> $decided
+ * @var array<int, array<string, mixed>> $outstanding
  * @var array<int, array<string, mixed>> $servers
  * @var array{mode: string, server_id: string, account: string, docroot: string} $settings
  * @var string|null $notice
@@ -37,6 +38,12 @@ $statusBadge = static function (string $status): string {
         <em>Control of the domain</em> is a fact, proved by DNS, and is what actually allows the store to be served
         at that address. A refused request has its DNS proof cleared as well, so refusing always stops the domain
         being served.
+    </p>
+    <p style="color:var(--cv-text-secondary);">
+        The server is kept in step with the decision: approving a new name <strong>takes the old one off</strong>
+        the hosting panel first, and refusing or releasing one removes it too. A hostname left behind answers for a
+        domain no store claims, which shows <em>this</em> shop at <em>these</em> prices — so anything the automation
+        could not finish is listed below with a button to retry it.
     </p>
 </div>
 
@@ -165,6 +172,52 @@ $statusBadge = static function (string $status): string {
     </form>
 </div>
 
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Still on the server, but no store should use it</h2>
+
+    <?php if ($outstanding === []): ?>
+        <p style="color:var(--cv-text-secondary);">
+            Nothing is outstanding — every hostname on the hosting panel belongs to a store that is approved for it.
+        </p>
+    <?php else: ?>
+        <p style="color:var(--cv-text-secondary);">
+            These hostnames are on the hosting panel but no store is approved to use them. Until they come off they
+            answer with this platform's own shop at this platform's own prices. Removal is attempted automatically;
+            this list is what is left when the panel refused, could not be reached, or automatic provisioning was off.
+        </p>
+        <table class="cv-table">
+            <thead>
+            <tr><th>Store</th><th>On the server</th><th>Store uses</th><th>Why it is still there</th><th></th></tr>
+            </thead>
+            <tbody>
+            <?php foreach ($outstanding as $row): ?>
+                <tr>
+                    <td><a href="/admin/resellers/<?= (int) $row['client_id'] ?>/store"><?= e((string) $row['slug']) ?></a></td>
+                    <td><strong><?= e((string) $row['domain_provisioned_host']) ?></strong><br>
+                        <span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">since <?= e((string) ($row['domain_provisioned_at'] ?? '—')) ?></span>
+                    </td>
+                    <td>
+                        <?php $claim = trim((string) ($row['custom_domain'] ?? '')); ?>
+                        <?php if ($claim === ''): ?>
+                            <span style="color:var(--cv-text-secondary);">no domain claimed</span>
+                        <?php else: ?>
+                            <?= e($claim) ?>
+                            <span class="cv-badge <?= $statusBadge((string) ($row['domain_status'] ?? 'none')) ?>"><?= e($statusLabels[(string) ($row['domain_status'] ?? 'none')] ?? '') ?></span>
+                        <?php endif; ?>
+                    </td>
+                    <td style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e((string) ($row['domain_provision_error'] ?? 'not recorded')) ?></td>
+                    <td>
+                        <form method="post" action="/admin/resellers/domains/<?= (int) $row['id'] ?>/unprovision"><?= csrf_field() ?>
+                            <button class="cv-btn" type="submit">Remove from server</button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+</div>
+
 <div class="cv-card">
     <h2 class="cv-card__title">Recent decisions</h2>
 
@@ -189,9 +242,12 @@ $statusBadge = static function (string $status): string {
                     </td>
                     <td><?= e((string) ($row['domain_reviewed_at'] ?? '—')) ?></td>
                     <td>
-                        <?php if (!empty($row['domain_provisioned_at'])): ?>
-                            <span class="cv-badge cv-badge--success">Added</span>
-                            <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e((string) $row['domain_provisioned_at']) ?></span>
+                        <?php $onServer = trim((string) ($row['domain_provisioned_host'] ?? '')); ?>
+                        <?php if ($onServer !== ''): ?>
+                            <span class="cv-badge <?= $onServer === trim((string) $row['custom_domain']) ? 'cv-badge--success' : 'cv-badge--warning' ?>">
+                                <?= $onServer === trim((string) $row['custom_domain']) ? 'Added' : 'Old name still there' ?>
+                            </span>
+                            <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e($onServer) ?> — <?= e((string) ($row['domain_provisioned_at'] ?? '')) ?></span>
                         <?php elseif (!empty($row['domain_provision_error'])): ?>
                             <span class="cv-badge cv-badge--error">Panel refused</span>
                             <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);"><?= e((string) $row['domain_provision_error']) ?></span>

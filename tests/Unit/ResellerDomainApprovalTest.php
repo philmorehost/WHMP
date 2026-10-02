@@ -176,7 +176,7 @@ final class ResellerDomainApprovalTest extends DatabaseTestCase
     {
         $routes = (string) file_get_contents(dirname(__DIR__, 2) . '/routes/reseller.php');
 
-        foreach (['index', 'approve', 'reject', 'saveSettings'] as $method) {
+        foreach (['index', 'approve', 'reject', 'saveSettings', 'unprovision'] as $method) {
             $this->assertStringContainsString(
                 'AdminResellerDomainController::class, ' . "'" . $method . "'",
                 $routes,

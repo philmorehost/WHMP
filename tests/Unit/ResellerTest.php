@@ -25,6 +25,8 @@ use CodeVault\Reseller\ApiDocumentation;
 use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\DomainVerifier;
 use CodeVault\Reseller\ResellerCredentialService;
+use CodeVault\Reseller\ResellerDomainProvisioner;
+use CodeVault\Reseller\ResellerDomainSync;
 use CodeVault\Reseller\ResellerPricing;
 use CodeVault\Reseller\ResellerRetailPriceRepository;
 use CodeVault\Reseller\ResellerRetailPricing;
@@ -35,6 +37,7 @@ use CodeVault\Reseller\ResellerStoreService;
 use CodeVault\Session\SessionManager;
 use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\App;
+use CodeVault\Tests\Fixtures\FakeHttpClient;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use CodeVault\View;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -140,6 +143,16 @@ final class ResellerTest extends DatabaseTestCase
                 new \CodeVault\Reseller\ResellerStoreRepository($this->db),
                 new \CodeVault\Clients\ClientRepository($this->db),
                 new CurrencyService(new CurrencyRepository($this->db))
+            ),
+            // Appended last on the controller, so it goes last here. Provisioning
+            // is OFF by default, so the fake HTTP client is never reached.
+            new ResellerDomainSync(
+                new ResellerStoreRepository($this->db),
+                new ResellerDomainProvisioner(
+                    new \CodeVault\CpanelTools\CpanelUapiClient(new FakeHttpClient()),
+                    new \CodeVault\Provisioning\ServerRepository($this->db),
+                    $this->settings
+                )
             )
         );
     }

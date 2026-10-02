@@ -45,6 +45,20 @@ use CodeVault\Settings\SettingsRepository;
  * which records it on the store (`domain_provision_error`). An approval that the
  * panel refused is a state the admin has to fix, and it must be visible rather
  * than looking like an approval that worked.
+ *
+ * THE SWITCH COVERS REMOVAL TOO, DELIBERATELY. Off means "this application does
+ * not touch the hosting panel". A switch that added domains but refused to take
+ * them away would be the worst of both, because the leftovers are the part
+ * nobody can see. So when it is off a removal reports itself as SKIPPED with the
+ * hostname named, rather than nothing appearing to happen.
+ *
+ * REMOVAL IS VERIFIED, ADDITION IS NOT. Both directions can fail quietly, but
+ * only one of them is invisible in use: a domain that was never added does not
+ * serve, and somebody notices within minutes. A domain that was never REMOVED
+ * keeps answering for a hostname no store claims, which falls through to the
+ * platform shop at platform prices — the tenant-isolation failure — and can stay
+ * that way indefinitely. So `remove()` re-reads the account's addon domains
+ * afterwards rather than trusting the reply.
  */
 final class ResellerDomainProvisioner
 {
@@ -85,40 +99,16 @@ final class ResellerDomainProvisioner
             return $this->fail('That store has no custom domain.');
         }
 
-        if (!$this->enabled()) {
-            return [
-                'ok' => false,
-                'skipped' => true,
-                'message' => 'Automatic provisioning is off — add ' . $domain
-                    . ' to the hosting panel yourself, then point its DNS here and issue a certificate '
-                    . '(see docs/RESELLER_DOMAIN_SETUP.md).',
-            ];
+        $target = $this->target($domain, 'add');
+
+        if (!$target['ready']) {
+            return ['ok' => false, 'skipped' => $target['skipped'], 'message' => $target['message']];
         }
 
-        $serverId = (int) trim((string) $this->settings->get('reseller.cpanel_server_id', ''));
-        $account = trim((string) $this->settings->get('reseller.cpanel_account_user', ''));
-        $docroot = trim((string) $this->settings->get('reseller.cpanel_docroot', ''));
-
-        // Refuse before calling out rather than sending a half-formed request:
-        // a missing document root would otherwise silently park the domain on a
-        // fresh empty folder, which looks like success and serves nothing.
-        if ($serverId <= 0 || $account === '' || $docroot === '') {
-            return $this->fail(
-                'Provisioning is switched on but not configured: set the server, the cPanel account and the '
-                . 'document root under Reseller store provisioning settings.'
-            );
-        }
-
-        $server = $this->servers->find($serverId);
-
-        if ($server === null) {
-            return $this->fail('The configured server (id ' . $serverId . ') no longer exists.');
-        }
-
-        $result = $this->uapi->call($server, $account, 'AddonDomain', 'addaddondomain', [
+        $result = $this->uapi->call($target['server'], $target['account'], 'AddonDomain', 'addaddondomain', [
             'newdomain' => $domain,
             'subdomain' => $this->subdomainLabel($domain),
-            'dir' => ltrim($docroot, '/'),
+            'dir' => ltrim($target['docroot'], '/'),
         ]);
 
         $message = (string) ($result['message'] ?? '');
@@ -143,9 +133,228 @@ final class ResellerDomainProvisioner
     }
 
     /**
+     * Take the domain back off the panel.
+     *
+     * One method for all four reasons it is ever needed — the reseller replaced
+     * their domain, released it, an admin refused it, or the account was deleted
+     * outright. They are the same operation, and four call sites each doing their
+     * own removal is how one of them ends up subtly different.
+     *
+     * @return array{ok: bool, skipped: bool, message: string}
+     */
+    public function remove(string $domain): array
+    {
+        $domain = ResellerStoreLocator::normaliseHost($domain);
+
+        if ($domain === '') {
+            return $this->fail('There is no domain name to remove.');
+        }
+
+        $target = $this->target($domain, 'remove');
+
+        if (!$target['ready']) {
+            return ['ok' => false, 'skipped' => $target['skipped'], 'message' => $target['message']];
+        }
+
+        $result = $this->uapi->call($target['server'], $target['account'], 'AddonDomain', 'deladdondomain', [
+            'domain' => $domain,
+            'subdomain' => $this->subdomainLabel($domain),
+        ]);
+
+        $message = trim((string) ($result['message'] ?? ''));
+
+        if (!$result['success'] && !$this->looksMissing($message)) {
+            return $this->fail($message !== '' ? $message : 'The hosting panel refused the request.');
+        }
+
+        // Verify rather than trust. A domain an administrator added by hand in
+        // cPanel is NOT under our derived subdomain label, so the panel can
+        // answer "does not exist" while the name is still listed and still
+        // answering — the removal reporting success is precisely the failure
+        // that would never be noticed.
+        $stillListed = $this->stillListed($target['server'], $target['account'], $domain);
+
+        if ($stillListed === true) {
+            return $this->fail(
+                $domain . ' is still on the hosting panel after the removal call'
+                . ($message !== '' && !$result['success'] ? ' ("' . $message . '")' : '')
+                . ' — remove it by hand under cPanel → Addon Domains.'
+            );
+        }
+
+        return [
+            'ok' => true,
+            'skipped' => false,
+            'message' => $domain . ($stillListed === null
+                // Say so rather than implying we checked, and do not treat an
+                // unreadable answer as proof of anything in either direction.
+                ? ' was removed from the hosting panel, but the panel did not confirm it — worth a look under Addon Domains.'
+                : ' was removed from the hosting panel.'),
+        ];
+    }
+
+    /**
+     * Resolve and check the panel target, so both directions refuse for the same
+     * reasons and neither can send a half-formed request.
+     *
+     * @return array{ready: bool, skipped: bool, message: string, server: array<string, mixed>, account: string, docroot: string}
+     */
+    private function target(string $domain, string $action): array
+    {
+        if (!$this->enabled()) {
+            return [
+                'ready' => false,
+                'skipped' => true,
+                // Worded per direction: "point its DNS here and issue a
+                // certificate" is meaningless advice for a domain being removed,
+                // and a skipped removal is the one case where the message IS the
+                // only thing that stops a hostname being forgotten — the row that
+                // records it is about to disappear.
+                'message' => $action === 'remove'
+                    ? 'Automatic provisioning is off — ' . $domain . ' is still on the hosting panel and has to be '
+                        . 'removed there by hand (see docs/RESELLER_DOMAIN_SETUP.md).'
+                    : 'Automatic provisioning is off — add ' . $domain . ' to the hosting panel yourself, then point '
+                        . 'its DNS here and issue a certificate (see docs/RESELLER_DOMAIN_SETUP.md).',
+                'server' => [],
+                'account' => '',
+                'docroot' => '',
+            ];
+        }
+
+        $serverId = (int) trim((string) $this->settings->get('reseller.cpanel_server_id', ''));
+        $account = trim((string) $this->settings->get('reseller.cpanel_account_user', ''));
+        $docroot = trim((string) $this->settings->get('reseller.cpanel_docroot', ''));
+
+        // Refuse before calling out rather than sending a half-formed request:
+        // a missing document root would otherwise silently park the domain on a
+        // fresh empty folder, which looks like success and serves nothing.
+        if ($serverId <= 0 || $account === '' || $docroot === '') {
+            return [
+                'ready' => false,
+                'skipped' => false,
+                'message' => 'Provisioning is switched on but not configured: set the server, the cPanel account and the '
+                    . 'document root under Reseller store provisioning settings.',
+                'server' => [],
+                'account' => '',
+                'docroot' => '',
+            ];
+        }
+
+        $server = $this->servers->find($serverId);
+
+        if ($server === null) {
+            return [
+                'ready' => false,
+                'skipped' => false,
+                'message' => 'The configured server (id ' . $serverId . ') no longer exists.',
+                'server' => [],
+                'account' => '',
+                'docroot' => '',
+            ];
+        }
+
+        return [
+            'ready' => true,
+            'skipped' => false,
+            'message' => '',
+            'server' => $server,
+            'account' => $account,
+            'docroot' => $docroot,
+        ];
+    }
+
+    /**
+     * Panel wording that means "it is not there". For a removal that is the
+     * post-condition we wanted rather than an error — otherwise a retry, or a
+     * domain an administrator already deleted by hand, would report failure
+     * forever and block the step after it.
+     */
+    private function looksMissing(string $message): bool
+    {
+        foreach (['does not exist', 'not exist', 'not found', 'no such', 'no addon', 'nothing to delete'] as $needle) {
+            if (stripos($message, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Is the domain still on the panel? TRUE / FALSE, or NULL when the panel's
+     * answer could not be read.
+     *
+     * NULL is not "no". It is reported to the administrator as an UNCONFIRMED
+     * removal, because reading an unreadable answer as success is exactly how a
+     * leftover hostname stays on the server unnoticed. Same rule the payment
+     * webhooks follow: an unreadable outcome is not a failed outcome, and it is
+     * certainly not a successful one.
+     *
+     * @param array<string, mixed> $server
+     */
+    private function stillListed(array $server, string $account, string $domain): ?bool
+    {
+        $result = $this->uapi->call($server, $account, 'AddonDomain', 'listaddondomains', []);
+
+        if (!$result['success']) {
+            return null;
+        }
+
+        $hosts = $this->addonHosts($result['data'] ?? null);
+
+        if ($hosts === null) {
+            return null;
+        }
+
+        return in_array($domain, $hosts, true);
+    }
+
+    /**
+     * Pull the hostnames out of a listaddondomains payload, or NULL if the shape
+     * is not one we recognise. Unwraps the `payload` / `data` envelopes cPanel
+     * varies between versions before looking for rows.
+     *
+     * @return array<int, string>|null
+     */
+    private function addonHosts(mixed $data): ?array
+    {
+        if (!is_array($data)) {
+            return null;
+        }
+
+        foreach (['payload', 'data'] as $key) {
+            if (is_array($data[$key] ?? null)) {
+                return $this->addonHosts($data[$key]);
+            }
+        }
+
+        $hosts = [];
+
+        foreach ($data as $row) {
+            if (!is_array($row)) {
+                return null;
+            }
+
+            $host = $row['domain'] ?? $row['addon_domain'] ?? null;
+
+            if (!is_string($host) || trim($host) === '') {
+                return null;
+            }
+
+            $hosts[] = ResellerStoreLocator::normaliseHost($host);
+        }
+
+        return $hosts;
+    }
+
+    /**
      * A subdomain label cPanel will accept, derived from the domain so a retry
      * asks for the same one, but suffixed to make an accidental clash with an
      * existing subdomain very unlikely.
+     *
+     * MUST stay a pure function of the domain. cPanel keys `deladdondomain` on
+     * this label, so changing the derivation would strand every domain already on
+     * the panel — unremovable, and answering as the platform shop.
      */
     private function subdomainLabel(string $domain): string
     {

@@ -46,7 +46,11 @@ final class ClientResellerController
         private readonly ResellerPricing $pricing,
         private readonly CurrencyService $currency,
         private readonly ActivityLogger $activity,
-        private readonly ResellerCostService $costs
+        private readonly ResellerCostService $costs,
+        // Appended last on purpose: this controller is constructed BY HAND in two
+        // test files, and a new dependency in the middle would silently rebind
+        // every argument after it.
+        private readonly ResellerDomainSync $domainSync
     ) {
     }
 
@@ -357,6 +361,25 @@ final class ClientResellerController
     }
 
     /** Claims the domain the store will be served on. Nothing is served there until it verifies. */
+    /**
+     * The reseller's own domain: claim it, replace it, or take it away.
+     *
+     * REPLACING IS THE INTERESTING CASE, and it is a swap rather than an edit.
+     * Both halves take effect as soon as the new name is saved, not when it is
+     * approved:
+     *
+     *   - the old name stops being SERVED, because claiming a new domain clears
+     *     the DNS proof — a proof belongs to a domain, so the new one earns its
+     *     own;
+     *   - the old name comes off the HOSTING PANEL, so it cannot keep answering
+     *     for a hostname no store claims any more, which would resolve to OUR
+     *     shop at OUR prices.
+     *
+     * The reseller is told about both: on the page before they save, and in the
+     * notice afterwards naming the domain that came off. A store that silently
+     * goes dark at its old address is a support ticket; one that silently keeps
+     * answering is worse than that.
+     */
     public function claimStoreDomain(Request $request): Response
     {
         $client = $this->guard->currentClient();
@@ -377,7 +400,12 @@ final class ClientResellerController
 
         if ($domain === '') {
             $this->stores->releaseDomain((int) $store['id']);
-            $this->session->flash('reseller_notice', 'Custom domain removed. Your store is back on its platform address only.');
+            $outcome = $this->domainSync->syncStore((int) $store['id']);
+
+            $this->session->flash(
+                'reseller_notice',
+                'Custom domain removed. Your store is back on its platform address only. ' . $outcome['message']
+            );
 
             return Response::redirect('/client/reseller/store');
         }
@@ -390,10 +418,27 @@ final class ClientResellerController
             return Response::redirect('/client/reseller/store');
         }
 
+        // An unchanged domain is not a new request, so nothing is reconciled: the
+        // claim is the same and, if it was approved, it is still on the panel.
+        if (($result['unchanged'] ?? false) === true) {
+            $this->session->flash(
+                'reseller_notice',
+                'That is already the domain your store uses — nothing was changed.'
+            );
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $outcome = $this->domainSync->syncStore((int) $store['id']);
+        $removed = (string) ($outcome['removed'] ?? '');
+
         $this->session->flash(
             'reseller_notice',
-            'Domain saved. Create the DNS record shown below and press Verify — we cannot serve your store on '
-            . $result['domain'] . ' until the record is live.'
+            ($removed !== ''
+                ? 'Saved. ' . $removed . ' has been removed from our server and ' . $result['domain'] . ' replaces it. '
+                : 'Domain saved. ')
+            . 'Create the DNS record shown below and press Verify — an administrator also has to approve '
+            . $result['domain'] . ' before we set it up, and your store is not served on it until the record is live.'
         );
 
         return Response::redirect('/client/reseller/store');

@@ -341,6 +341,52 @@ final class ResellerStoreTest extends DatabaseTestCase
         $this->assertNull($this->locator->resolve('first.acme-host.com'), 'the released domain must stop resolving');
     }
 
+    public function test_saving_the_same_domain_again_is_not_a_new_request(): void
+    {
+        $service = $this->service();
+        $store = $service->openForClient($this->clientId, 'Acme')['store'];
+        $id = (int) $store['id'];
+
+        $service->claimDomain($id, 'shop.acme-host.com');
+        $this->stores->approveDomain($id, null, null);
+        $row = $this->stores->find($id);
+        $this->txtAnswers['_codevault-verify.shop.acme-host.com'] = [
+            ['type' => 'TXT', 'txt' => 'codevault-store-verify=' . $row['domain_verification_token']],
+        ];
+        $this->assertTrue($service->verifyDomain($id)['verified']);
+
+        // The reseller presses "Update domain" without changing anything. That is
+        // not a new request: treating it as one would drop the store back to
+        // 'pending', clear the DNS proof, and take the domain off the hosting
+        // panel — a live store taken dark by a no-op.
+        $result = $service->claimDomain($id, 'shop.acme-host.com');
+
+        $this->assertTrue($result['success']);
+        $this->assertTrue($result['unchanged'] ?? false, 'an identical domain must be reported as unchanged.');
+        $this->assertSame('approved', (string) $this->stores->find($id)['domain_status']);
+        $this->assertNotNull($this->stores->find($id)['domain_verified_at'], 'the proof must survive a no-op save');
+        $this->assertNotNull($this->locator->resolve('shop.acme-host.com'), 'and the store must stay live');
+    }
+
+    public function test_a_refused_domain_can_be_submitted_again_unchanged(): void
+    {
+        $service = $this->service();
+        $store = $service->openForClient($this->clientId, 'Acme')['store'];
+        $id = (int) $store['id'];
+
+        $service->claimDomain($id, 'shop.acme-host.com');
+        $this->assertTrue($this->stores->rejectDomain($id, null, 'Prove it is yours first'));
+
+        // A refusal is the one state where saving the SAME name is a deliberate
+        // second attempt rather than an accident — the reseller is told to fix
+        // something and try again, so it has to go back into the queue.
+        $result = $service->claimDomain($id, 'shop.acme-host.com');
+
+        $this->assertTrue($result['success']);
+        $this->assertFalse($result['unchanged'] ?? true, 'a refused domain must return to the queue.');
+        $this->assertSame('pending', (string) $this->stores->find($id)['domain_status']);
+    }
+
     public function test_a_domain_another_store_already_claimed_is_refused(): void
     {
         $service = $this->service();

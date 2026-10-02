@@ -48,7 +48,7 @@ final class AdminResellerDomainController
         private readonly View $view,
         private readonly SessionManager $session,
         private readonly ResellerStoreRepository $stores,
-        private readonly ResellerDomainProvisioner $provisioner,
+        private readonly ResellerDomainSync $domainSync,
         private readonly ServerRepository $servers,
         private readonly SettingsRepository $settings,
         private readonly ActivityLogger $activity
@@ -64,9 +64,14 @@ final class AdminResellerDomainController
         return $this->render('reseller.admin-domains', [
             'pending' => $this->stores->pendingDomainRequests(),
             'decided' => $this->stores->decidedDomainRequests(30),
+            // Hostnames on the panel that no store is approved to use — removals
+            // the automation could not finish (a failed call, or provisioning
+            // being off). Listed separately because they are the dangerous ones:
+            // they answer for a host that resolves to the PLATFORM shop.
+            'outstanding' => $this->stores->outstandingPanelDomains(),
             'servers' => $this->servers->all(),
             'settings' => [
-                'mode' => $this->provisioner->mode(),
+                'mode' => $this->domainSync->mode(),
                 'server_id' => (string) ($this->settings->get(self::SETTING_SERVER, '') ?? ''),
                 'account' => (string) ($this->settings->get(self::SETTING_ACCOUNT, '') ?? ''),
                 'docroot' => (string) ($this->settings->get(self::SETTING_DOCROOT, '') ?? ''),
@@ -77,11 +82,17 @@ final class AdminResellerDomainController
     }
 
     /**
-     * Approve the request, then try to add the domain on the hosting panel.
+     * Approve the request, then bring the hosting panel into line with it.
      *
      * The approval is committed FIRST and separately: if the panel call fails,
      * the decision is not rolled back — it happened, and the error is recorded
      * next to it so the admin can act on it.
+     *
+     * The panel step is a RECONCILIATION, not an add. If this store previously
+     * had a different domain approved and provisioned, approving a new one takes
+     * the old hostname off before the new one goes on — see ResellerDomainSync.
+     * Adding without removing is how a replaced domain ends up permanently on the
+     * server, answering as the platform shop.
      */
     public function approve(Request $request, array $params): Response
     {
@@ -110,13 +121,10 @@ final class AdminResellerDomainController
             return Response::redirect('/admin/resellers/domains');
         }
 
-        $outcome = $this->provisioner->provision($store);
-
-        if ($outcome['ok']) {
-            $this->stores->markDomainProvisioned((int) $store['id']);
-        } elseif (!($outcome['skipped'] ?? false)) {
-            $this->stores->recordDomainProvisionError((int) $store['id'], $outcome['message']);
-        }
+        // Re-read the store: the decision above is this step's INPUT, and the row
+        // in hand still says 'pending'. Syncing against that would refuse to
+        // provision the domain the admin just approved.
+        $outcome = $this->domainSync->syncStore((int) $store['id']);
 
         $this->activity->log(
             'admin',
@@ -180,6 +188,12 @@ final class AdminResellerDomainController
             return Response::redirect('/admin/resellers/domains');
         }
 
+        // A refusal has to take the domain OFF the panel too, not merely stop it
+        // being served. Anything added while the domain was approved would keep
+        // answering for a hostname no store claims any more, and would resolve to
+        // the platform shop at platform prices.
+        $outcome = $this->domainSync->syncStore((int) $store['id']);
+
         $this->activity->log(
             'admin',
             $this->adminId(),
@@ -187,11 +201,56 @@ final class AdminResellerDomainController
             null,
             null,
             'Rejected custom domain ' . (string) $store['custom_domain'] . ' for store #' . (int) $store['id']
-                . ': ' . $reason,
+                . ': ' . $reason . ' — ' . $outcome['message'],
             $request->ip()
         );
 
-        $this->session->flash('reseller_notice', 'Refused ' . (string) $store['custom_domain'] . '. The reseller can see the reason and submit again.');
+        $this->session->flash(
+            'reseller_notice',
+            'Refused ' . (string) $store['custom_domain'] . '. The reseller can see the reason and submit again. '
+                . $outcome['message']
+        );
+
+        return Response::redirect('/admin/resellers/domains');
+    }
+
+    /**
+     * Take a store's domain back off the hosting panel.
+     *
+     * The manual lever for the two cases the automation cannot finish by itself:
+     * a removal that FAILED, and one that was SKIPPED because provisioning is
+     * switched off. Both leave a hostname on the server that no store is approved
+     * to use, so there has to be a button rather than a line in a log — the whole
+     * risk of that state is that nobody notices it.
+     */
+    public function unprovision(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $store = $this->stores->find((int) ($params['storeId'] ?? 0));
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'That store no longer exists.');
+
+            return Response::redirect('/admin/resellers/domains');
+        }
+
+        $outcome = $this->domainSync->removeStoreDomain($store);
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.domain.unprovisioned',
+            null,
+            null,
+            'Removed the panel domain for store #' . (int) $store['id']
+                . ' (' . (string) ($store['domain_provisioned_host'] ?? '') . '): ' . $outcome['message'],
+            $request->ip()
+        );
+
+        $this->session->flash($outcome['ok'] ? 'reseller_notice' : 'reseller_error', $outcome['message']);
 
         return Response::redirect('/admin/resellers/domains');
     }

@@ -33,6 +33,7 @@ use CodeVault\Reseller\CurrentReseller;
 use CodeVault\Session\SessionManager;
 use CodeVault\Settings\SettingsRepository;
 use CodeVault\Support\App;
+use CodeVault\Tests\Fixtures\FakeHttpClient;
 use CodeVault\Tests\Support\DatabaseTestCase;
 use CodeVault\Theme\ThemeSettings;
 use CodeVault\View;
@@ -122,6 +123,19 @@ final class ResellerRetailPricingTest extends DatabaseTestCase
                 $storeRepo,
                 new \CodeVault\Clients\ClientRepository($this->db),
                 new CurrencyService(new CurrencyRepository($this->db))
+            ),
+            // Appended last on the controller, so it goes last here. Provisioning
+            // is OFF by default, so the fake HTTP client is never reached.
+            // NOTE: the provisioner wants the raw SettingsRepository, which in
+            // this class is the LOCAL `$settings` — `$this->settings` is the
+            // ResellerSettings wrapper and does not satisfy the type.
+            new \CodeVault\Reseller\ResellerDomainSync(
+                $storeRepo,
+                new \CodeVault\Reseller\ResellerDomainProvisioner(
+                    new \CodeVault\CpanelTools\CpanelUapiClient(new FakeHttpClient()),
+                    new \CodeVault\Provisioning\ServerRepository($this->db),
+                    $settings
+                )
             )
         );
     }

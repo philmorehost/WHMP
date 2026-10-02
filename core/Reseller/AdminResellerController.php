@@ -41,7 +41,11 @@ final class AdminResellerController
         private readonly ResellerRetailPricing $retail,
         private readonly ResellerRetailPriceRepository $priceOverrides,
         private readonly ClientRepository $clients,
-        private readonly ActivityLogger $activity
+        private readonly ActivityLogger $activity,
+        // Appended last: this controller is autowired, but keeping new deps at the
+        // end is the standing rule here so a hand-built site can never silently
+        // rebind the arguments after it.
+        private readonly ResellerDomainSync $domainSync
     ) {
     }
 
@@ -261,6 +265,14 @@ final class AdminResellerController
         return Response::redirect('/admin/resellers/' . $clientId . '/store');
     }
 
+    /**
+     * An admin setting or clearing a store's domain from the store page.
+     *
+     * Reconciles the hosting panel as well, for the same reason the approval
+     * queue does: a store whose domain changes must not be left with the OLD
+     * hostname still on the server. That hostname would no longer match any
+     * store, so it would answer with our own shop at our own prices.
+     */
     public function claimStoreDomain(Request $request, array $params): Response
     {
         if ($denied = $this->requirePermission()) {
@@ -280,18 +292,36 @@ final class AdminResellerController
 
         if ($domain === '') {
             $this->stores->releaseDomain((int) $store['id']);
-            $this->session->flash('reseller_notice', 'Custom domain released.');
+            $outcome = $this->domainSync->syncStore((int) $store['id']);
+
+            $this->session->flash('reseller_notice', 'Custom domain released. ' . $outcome['message']);
 
             return Response::redirect('/admin/resellers/' . $clientId . '/store');
         }
 
         $result = $this->stores->claimDomain((int) $store['id'], $domain);
 
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        if (($result['unchanged'] ?? false) === true) {
+            $this->session->flash('reseller_notice', 'That is already the store\'s domain — nothing was changed.');
+
+            return Response::redirect('/admin/resellers/' . $clientId . '/store');
+        }
+
+        $outcome = $this->domainSync->syncStore((int) $store['id']);
+        $removed = (string) ($outcome['removed'] ?? '');
+
         $this->session->flash(
-            $result['success'] ? 'reseller_notice' : 'reseller_error',
-            $result['success']
-                ? 'Domain claimed. It will not be served until the DNS record below is verified.'
-                : (string) $result['error']
+            'reseller_notice',
+            ($removed !== ''
+                ? 'Domain claimed. ' . $removed . ' was removed from the hosting panel and ' . $result['domain'] . ' replaces it. '
+                : 'Domain claimed. ')
+            . 'It will not be served until the DNS record below is verified and the request is approved.'
         );
 
         return Response::redirect('/admin/resellers/' . $clientId . '/store');

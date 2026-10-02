@@ -95,6 +95,10 @@ $router->get('/admin/resellers/domains', [AdminResellerDomainController::class, 
 $router->post('/admin/resellers/domains/settings', [AdminResellerDomainController::class, 'saveSettings']);
 $router->post('/admin/resellers/domains/{storeId}/approve', [AdminResellerDomainController::class, 'approve']);
 $router->post('/admin/resellers/domains/{storeId}/reject', [AdminResellerDomainController::class, 'reject']);
+// Take a hostname back off the hosting panel. Registered for the same reason the
+// approve/reject pair is: it acts on a store, but it belongs to the domain queue
+// that is where an outstanding removal is visible.
+$router->post('/admin/resellers/domains/{storeId}/unprovision', [AdminResellerDomainController::class, 'unprovision']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

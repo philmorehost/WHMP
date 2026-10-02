@@ -195,6 +195,14 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         </form>
     </div>
 
+    <?php
+    // What the SERVER has, which is not the same question as what the store is
+    // allowed to use. The reseller cannot infer this from the field below, and it
+    // is the state that decides whether their old address is still answering.
+    $panelHost = trim((string) ($store['domain_provisioned_host'] ?? ''));
+    $panelMatches = $panelHost !== '' && $panelHost === trim((string) ($customDomain ?? ''));
+    ?>
+
     <div class="cv-card" style="max-width:56rem;margin:0 auto;">
         <h2 class="cv-card__title">Your own domain</h2>
         <p>Point a domain you own at your store and your customers never see us. We check that you control the
@@ -207,8 +215,28 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                        placeholder="shop.example.com" value="<?= e((string) ($customDomain ?? '')) ?>">
                 <br><span style="color:var(--cv-text-secondary);">Leave blank and save to remove it.</span>
             </p>
+
+            <?php if ($customDomain !== null): ?>
+                <p class="cv-alert cv-alert--warning">
+                    <strong>Saving a different name replaces this one.</strong>
+                    <?= e((string) $customDomain) ?> stops being served immediately and is taken off our server, and
+                    the new name has to be proved and approved before your store opens on it.
+                    <?php if ($panelMatches): ?>
+                        Right now <strong><?= e($panelHost) ?></strong> is set up on our server.
+                    <?php endif; ?>
+                    Save the same name again and nothing changes.
+                </p>
+            <?php endif; ?>
+
             <button class="cv-btn" type="submit"><?= $customDomain === null ? 'Claim this domain' : 'Update domain' ?></button>
         </form>
+
+        <?php if ($panelHost !== '' && !$panelMatches): ?>
+            <p style="margin-top:var(--cv-space-3);color:#b91c1c;">
+                <strong><?= e($panelHost) ?></strong> is still set up on our server from a previous name and has to
+                come off. Ask support if it is still there after you save.
+            </p>
+        <?php endif; ?>
 
         <?php
         // The admin's decision, shown to the reseller. A refusal without the
