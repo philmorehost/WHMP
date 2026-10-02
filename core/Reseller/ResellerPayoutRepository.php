@@ -24,7 +24,7 @@ final class ResellerPayoutRepository
 {
     /** The columns every reader gets, so no query accidentally exposes open_flag. */
     private const COLUMNS = 'id, reseller_id, client_id, amount, currency_id, currency_rate, '
-        . 'amount_base, status, method, reference, note, requested_at, decided_at, decided_by';
+        . 'amount_base, status, method, reference, note, destination_snapshot, requested_at, decided_at, decided_by';
 
     public function __construct(
         private readonly Database $db
@@ -100,8 +100,8 @@ final class ResellerPayoutRepository
         return (int) $this->db->insert(
             'INSERT INTO reseller_payouts
                 (reseller_id, client_id, amount, currency_id, currency_rate, amount_base,
-                 status, method, reference, note, requested_at, decided_at, decided_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 status, method, reference, note, destination_snapshot, requested_at, decided_at, decided_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 (int) $row['reseller_id'],
                 $row['client_id'] === null ? null : (int) $row['client_id'],
@@ -113,6 +113,9 @@ final class ResellerPayoutRepository
                 (string) $row['method'],
                 $row['reference'] ?? null,
                 $row['note'] ?? null,
+                // Frozen at request time. A later change to the stored
+                // destination must not restate where this money was sent.
+                $row['destination_snapshot'] ?? null,
                 (string) $row['requested_at'],
                 $row['decided_at'] ?? null,
                 $row['decided_by'] === null ? null : (int) $row['decided_by'],

@@ -76,9 +76,17 @@ final class ResellerPayoutService
      * wants a smaller transfer, the honest answer is that the minimum already
      * decides whether a transfer is worth making at all.
      *
+     * $destination is the store's bank details, passed in by the caller rather
+     * than looked up here, and it is only ever READ — describe()ed onto the row as
+     * an immutable snapshot, so a payout records where the money was sent even
+     * after the reseller moves bank. Whether a destination must exist at all is a
+     * workflow decision and is enforced by the client-facing controller; this
+     * method's contract is about money, not paperwork.
+     *
+     * @param array<string, mixed>|null $destination
      * @return array{ok: bool, error: string|null, payout: array<string, mixed>|null}
      */
-    public function request(int $resellerId, ?string $now = null): array
+    public function request(int $resellerId, ?string $now = null, ?array $destination = null): array
     {
         $now ??= $this->now();
         $account = $this->accounts->accountFor($resellerId, $now);
@@ -123,6 +131,10 @@ final class ResellerPayoutService
                 'method' => self::METHOD_BANK_TRANSFER,
                 'reference' => null,
                 'note' => null,
+                // The destination as it reads NOW, frozen onto the row. If the
+                // reseller moves bank later, this payout's record still says
+                // where the money actually went (payout plan §8 Phase D).
+                'destination_snapshot' => ResellerPayoutDestinationRepository::describe($destination),
                 'requested_at' => $now,
                 'decided_at' => null,
                 'decided_by' => null,

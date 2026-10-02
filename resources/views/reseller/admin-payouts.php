@@ -105,6 +105,17 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
             <tr>
                 <td colspan="7" style="background:var(--cv-surface-2);">
                     <div style="display:flex;gap:var(--cv-space-4);flex-wrap:wrap;align-items:flex-start;">
+                        <!-- Where the money goes, frozen when the request was made. Shown
+                             next to the "record as paid" form so the admin pays the account
+                             the reseller named rather than one from memory. -->
+                        <div style="min-width:220px;">
+                            <span style="font-size:var(--cv-text-sm);">Send to</span><br>
+                            <?php if ((string) ($row['destination_snapshot'] ?? '') !== ''): ?>
+                                <strong><?= e((string) $row['destination_snapshot']) ?></strong>
+                            <?php else: ?>
+                                <span class="cv-badge cv-badge--error">No destination on file</span>
+                            <?php endif; ?>
+                        </div>
                         <form method="post" action="/admin/resellers/payouts/<?= (int) $row['id'] ?>/paid"
                               style="display:flex;gap:var(--cv-space-2);align-items:flex-end;">
                             <?= csrf_field() ?>

@@ -61,6 +61,7 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
     private ResellerLedgerRepository $ledger;
     private ResellerLedgerService $accounts;
     private ResellerPayoutRepository $payouts;
+    private \CodeVault\Reseller\ResellerPayoutDestinationRepository $destinationRepo;
     private ResellerPayoutService $service;
     private ResellerStoreRepository $storeRepo;
     private \CodeVault\Reseller\ResellerStatementService $statements;
@@ -141,6 +142,18 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         $this->payouts = new ResellerPayoutRepository($this->db);
         $this->service = new ResellerPayoutService($this->payouts, $this->ledger, $this->accounts, $currency, new HookDispatcher());
 
+        // A destination must be on file before a payout can be requested, so the
+        // fixture records one — exactly what a real reseller does first.
+        $this->destinationRepo = new \CodeVault\Reseller\ResellerPayoutDestinationRepository($this->db);
+        $this->destinationRepo->save($this->storeId, $this->resellerClientId, [
+            'method' => 'bank_transfer',
+            'account_name' => 'Acme Ltd',
+            'account_number' => '0123456789',
+            'bank_name' => 'Test Bank',
+            'bank_code' => '000',
+            'currency_id' => null,
+        ]);
+
         // The numbered statements are issued by the ADMIN, but the client controller
         // reads them, so it needs the service even though it can never write one.
         $this->statements = new \CodeVault\Reseller\ResellerStatementService(
@@ -172,7 +185,8 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
             $this->storeRepo,
             $currency,
             new ActivityLogger($this->db),
-            $this->statements
+            $this->statements,
+            $this->destinationRepo
         );
     }
 
@@ -359,6 +373,92 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         $this->assertSame(0, $this->payoutRowCount());
     }
 
+    // ------------------------------------------------- payout destination
+
+    public function test_the_account_page_shows_the_destination_on_file(): void
+    {
+        $this->signInAsClient();
+
+        $body = (string) $this->client->index($this->request())->body();
+
+        $this->assertStringContainsString('Acme Ltd', $body);
+        $this->assertStringContainsString('0123456789', $body);
+    }
+
+    public function test_a_payout_cannot_be_requested_without_a_destination(): void
+    {
+        $this->signInAsClient();
+        $this->earn(100.0, 60);
+        $this->destinationRepo->forget($this->storeId);
+
+        $response = $this->client->requestPayout($this->request());
+
+        $this->assertSame(302, $response->status());
+        $this->assertSame(0, $this->payoutRowCount(), 'A payout with nowhere to send it must not be created.');
+    }
+
+    public function test_saving_a_destination_requires_a_name_and_a_number(): void
+    {
+        $this->signInAsClient();
+        $this->destinationRepo->forget($this->storeId);
+
+        $this->client->savePayoutMethod($this->request(['account_name' => 'Acme Ltd', 'account_number' => '']));
+
+        $this->assertNull($this->destinationRepo->find($this->storeId));
+    }
+
+    public function test_saving_a_destination_records_it_and_clears_a_previous_verification(): void
+    {
+        $this->signInAsClient();
+        $this->destinationRepo->markVerified($this->storeId, null);
+        $this->assertNotNull($this->destinationRepo->find($this->storeId)['verified_at']);
+
+        $this->client->savePayoutMethod($this->request([
+            'account_name' => 'Acme Ltd',
+            'account_number' => '9999999999',
+            'bank_name' => 'Other Bank',
+        ]));
+
+        $destination = $this->destinationRepo->find($this->storeId);
+        $this->assertSame('9999999999', (string) $destination['account_number']);
+        $this->assertNull($destination['verified_at'], 'Changing the account number must un-verify it.');
+    }
+
+    public function test_a_request_freezes_the_destination_so_a_later_edit_cannot_restate_it(): void
+    {
+        $this->signInAsClient();
+        $this->earn(100.0, 60);
+        $this->client->requestPayout($this->request());
+
+        $payoutId = (int) $this->payouts->openForReseller($this->storeId)['id'];
+
+        // The reseller moves bank AFTER asking to be paid.
+        $this->destinationRepo->save($this->storeId, $this->resellerClientId, [
+            'method' => 'bank_transfer',
+            'account_name' => 'Acme Ltd',
+            'account_number' => '5555555555',
+            'bank_name' => 'New Bank',
+            'bank_code' => '111',
+            'currency_id' => null,
+        ]);
+
+        $snapshot = (string) $this->payouts->find($payoutId)['destination_snapshot'];
+
+        $this->assertStringContainsString('0123456789', $snapshot, 'The payout must keep where the money was actually sent.');
+        $this->assertStringNotContainsString('5555555555', $snapshot);
+    }
+
+    public function test_the_admin_queue_shows_where_to_send_the_money(): void
+    {
+        $this->signInAsSuperAdmin();
+        $this->earn(100.0, 60);
+        $this->service->request($this->storeId, null, $this->destinationRepo->find($this->storeId));
+
+        $body = (string) $this->admin->index($this->request())->body();
+
+        $this->assertStringContainsString('0123456789', $body);
+    }
+
     // ------------------------------------------------------------------ seam
 
     public function test_the_payout_routes_are_declared_for_their_controllers(): void
@@ -370,7 +470,7 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
 
         foreach ([
             'AdminResellerPayoutsController' => ['index', 'markPaid', 'reject'],
-            'ClientResellerAccountController' => ['requestPayout', 'cancelPayout'],
+            'ClientResellerAccountController' => ['requestPayout', 'cancelPayout', 'savePayoutMethod', 'removePayoutMethod'],
         ] as $class => $methods) {
             foreach ($methods as $method) {
                 $this->assertStringContainsString(

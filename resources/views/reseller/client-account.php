@@ -9,6 +9,8 @@
  * @var array<string, mixed> $account
  * @var string $baseCode
  * @var array{open: array<string, mixed>|null, history: array<int, array<string, mixed>>} $payout
+ * @var array<string, mixed>|null $destination
+ * @var string|null $destinationText
  * @var array<string, string> $labels
  * @var string|null $notice
  * @var string|null $error
@@ -112,6 +114,68 @@ $kindLabels = [
         Requesting a payout is coming next — this page currently shows the figures a payout will be able to draw on.
         Nothing on this page moves money.
     </p>
+</div>
+
+<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Where we pay you</h2>
+
+    <?php if ($destinationText !== null && $destinationText !== ''): ?>
+        <p style="margin-top:0;">
+            Payouts are sent to <strong><?= e($destinationText) ?></strong>
+            <?php if (($destination['verified_at'] ?? null) !== null): ?>
+                <span class="cv-badge cv-badge--success">checked</span>
+            <?php else: ?>
+                <span class="cv-badge">not yet checked</span>
+            <?php endif; ?>
+        </p>
+        <p style="color:var(--cv-text-secondary);">
+            A payout request keeps a copy of these details as they were when you asked, so changing them later does not
+            alter where an earlier payout was sent.
+        </p>
+    <?php else: ?>
+        <p style="margin-top:0;">
+            <strong>No payout destination is on file.</strong> Add the bank account we should pay into; a payout cannot
+            be requested until we know where to send it.
+        </p>
+    <?php endif; ?>
+
+    <form method="post" action="/client/reseller/account/payout-method" style="margin:0;">
+        <?= csrf_field() ?>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <label style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-weight:600;">Account name</span>
+                <input type="text" name="account_name" required maxlength="191"
+                       value="<?= e((string) ($destination['account_name'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-weight:600;">Account number</span>
+                <input type="text" name="account_number" required maxlength="64"
+                       value="<?= e((string) ($destination['account_number'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-weight:600;">Bank</span>
+                <input type="text" name="bank_name" maxlength="191"
+                       value="<?= e((string) ($destination['bank_name'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-weight:600;">Bank code (optional)</span>
+                <input type="text" name="bank_code" maxlength="32"
+                       value="<?= e((string) ($destination['bank_code'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+            </label>
+        </div>
+        <p style="margin:var(--cv-space-2) 0 0;">
+            <button type="submit" class="cv-btn cv-btn--secondary" style="padding:8px 16px;">
+                <?= ($destinationText !== null && $destinationText !== '') ? 'Save new details' : 'Save payout destination' ?>
+            </button>
+        </p>
+    </form>
+
+    <?php if ($destinationText !== null && $destinationText !== ''): ?>
+        <form method="post" action="/client/reseller/account/payout-method/remove" style="margin-top:var(--cv-space-2);">
+            <?= csrf_field() ?>
+            <button type="submit" class="cv-btn cv-btn--secondary" style="padding:6px 12px;font-size:var(--cv-text-sm);">Remove destination</button>
+        </form>
+    <?php endif; ?>
 </div>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">

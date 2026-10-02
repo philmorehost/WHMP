@@ -293,6 +293,25 @@ rewrites `withdrawable_at`, not a side-effect of a settings form.
   the system, so any automatic rail needs a verified destination-recording step
   first — which is needed for *every* gateway, not just PayHub.
 
+  **✅ The destination-recording step is BUILT (migration 0197).** One destination per
+  store (`reseller_payout_destinations`, `UNIQUE (reseller_id)`): account name, account
+  number, bank name/code, plus an optional human `verified_at`/`verified_by`
+  attestation — nothing in the application can prove a bank account exists, so it is
+  recorded as an attestation rather than dressed up as a check. The reseller manages it
+  on `/client/reseller/account`, and a payout **cannot be requested until one is on
+  file**: a request with nowhere to send the money is a note, not a request.
+  `reseller_payouts.destination_snapshot` freezes the details as they read when the
+  request was made, so a reseller who moves bank afterwards cannot restate where an
+  earlier payout was sent; editing the stored destination also clears its verification,
+  because a changed account number has not been checked by whoever checked the last one.
+  The queue shows the frozen destination beside the "record as paid" form, so the admin
+  pays the account the reseller named rather than one from memory.
+
+  **Still NOT built, and now unblocked on the schema side only:** the
+  `disburse()`/`transfer()` half itself. `GatewayModule` still has no payout concept, so
+  an automatic rail remains a separate piece of work — but the missing *destination* it
+  was blocked on is no longer missing.
+
   (The 30-day holding period is deliberately *not* listed here as deferred: it is a
   rule about what counts as withdrawable, so it belongs with the balance in Phase A.
   Since `withdrawable_at` is written when the receipt is written, adding it later

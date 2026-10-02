@@ -32,6 +32,12 @@ $router->get('/client/reseller/account', [ClientResellerAccountController::class
 $router->post('/client/reseller/account/payouts', [ClientResellerAccountController::class, 'requestPayout']);
 $router->post('/client/reseller/account/payouts/{payoutId}/cancel', [ClientResellerAccountController::class, 'cancelPayout']);
 
+// Where the money is sent. Recorded BEFORE a payout can be requested, and
+// frozen onto the payout row when it is, so a later change of bank cannot
+// restate where an earlier payout went (payout plan §8 Phase D).
+$router->post('/client/reseller/account/payout-method', [ClientResellerAccountController::class, 'savePayoutMethod']);
+$router->post('/client/reseller/account/payout-method/remove', [ClientResellerAccountController::class, 'removePayoutMethod']);
+
 // The numbered statements issued to this reseller (plan §10.2). Read-only: a
 // reseller cannot issue one to themselves, because issuing freezes our tax
 // identity and mints a number, and both are our decision rather than theirs.

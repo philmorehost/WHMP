@@ -51,7 +51,8 @@ final class ClientResellerAccountController
         private readonly ResellerStoreRepository $stores,
         private readonly CurrencyService $currency,
         private readonly ActivityLogger $activity,
-        private readonly ResellerStatementService $documents
+        private readonly ResellerStatementService $documents,
+        private readonly ResellerPayoutDestinationRepository $destinations
     ) {
     }
 
@@ -78,10 +79,14 @@ final class ClientResellerAccountController
             return Response::redirect('/client/reseller');
         }
 
+        $destination = $this->destinations->find((int) $store['id']);
+
         return $this->page('reseller.client-account', [
             'account' => $account,
             'baseCode' => strtoupper(trim($this->currency->codeFor(null))),
             'payout' => $this->withAmountCodes($this->payouts->summaryFor((int) $store['id'])),
+            'destination' => $destination,
+            'destinationText' => ResellerPayoutDestinationRepository::describe($destination),
             'labels' => ResellerPayoutService::STATUS_LABELS,
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
@@ -140,7 +145,21 @@ final class ClientResellerAccountController
             return Response::redirect('/client/reseller');
         }
 
-        $result = $this->payouts->request((int) $store['id']);
+        // A payout with nowhere to send it is not a request, it is a note. The
+        // destination is captured onto the payout row, so this has to exist
+        // BEFORE the request is made rather than being filled in at payment.
+        $destination = $this->destinations->find((int) $store['id']);
+
+        if ($destination === null) {
+            $this->session->flash(
+                'reseller_error',
+                'Tell us which bank account to pay into before requesting a payout — without it there is nowhere to send the money.'
+            );
+
+            return Response::redirect('/client/reseller/account');
+        }
+
+        $result = $this->payouts->request((int) $store['id'], null, $destination);
 
         if (!$result['ok']) {
             $this->session->flash('reseller_error', (string) $result['error']);
@@ -217,6 +236,90 @@ final class ClientResellerAccountController
             'reseller_notice',
             'Payout request cancelled and the funds returned to your available balance.'
         );
+
+        return Response::redirect('/client/reseller/account');
+    }
+
+    /**
+     * Record (or replace) the bank account payouts are sent to.
+     *
+     * The store comes from the session guard, never from the form, so one
+     * reseller cannot write another store's destination. An edit clears any
+     * existing verification inside the repository — a changed account number has
+     * not been checked by whoever checked the last one.
+     */
+    public function savePayoutMethod(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            return Response::redirect('/client/reseller');
+        }
+
+        $name = trim((string) $request->input('account_name', ''));
+        $number = trim((string) $request->input('account_number', ''));
+
+        if ($name === '' || $number === '') {
+            $this->session->flash('reseller_error', 'An account name and account number are both required.');
+
+            return Response::redirect('/client/reseller/account');
+        }
+
+        $this->destinations->save((int) $store['id'], (int) $client['id'], [
+            'method' => ResellerPayoutDestinationRepository::METHOD_BANK_TRANSFER,
+            'account_name' => $name,
+            'account_number' => $number,
+            'bank_name' => trim((string) $request->input('bank_name', '')),
+            'bank_code' => trim((string) $request->input('bank_code', '')),
+            // The destination is not denominated: the payout decides the currency
+            // and the rate at request time, and a bank account is not a currency.
+            'currency_id' => null,
+        ]);
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'reseller.payout_method.saved',
+            null,
+            null,
+            'Updated the reseller payout destination for store #' . (int) $store['id'],
+            $request->ip()
+        );
+
+        $this->session->flash(
+            'reseller_notice',
+            'Payout destination saved. Any earlier confirmation of your bank details no longer applies, so it will be checked again before the next payout.'
+        );
+
+        return Response::redirect('/client/reseller/account');
+    }
+
+    /** Remove the destination, so no further payout can be requested. */
+    public function removePayoutMethod(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            return Response::redirect('/client/reseller');
+        }
+
+        // A request that is already open keeps its FROZEN destination, so
+        // removing the stored one cannot change where an in-flight payout goes.
+        $this->destinations->forget((int) $store['id']);
+
+        $this->session->flash('reseller_notice', 'Payout destination removed.');
 
         return Response::redirect('/client/reseller/account');
     }
