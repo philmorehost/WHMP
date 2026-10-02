@@ -84,6 +84,29 @@ return [
                      FOREIGN KEY (domain_reviewed_by) REFERENCES admins(id) ON DELETE SET NULL'
                 );
             }
+
+            // BACKFILL, because the column defaults to 'none' and 'none' is not
+            // a reachable state for a claim that already exists: it would be
+            // invisible in the review queue AND unapprovable (approveDomain() is
+            // guarded on 'pending'), which reads as "the button does nothing".
+            //
+            // A domain that is already VERIFIED was accepted in fact — we serve
+            // it — so record that as the decision it was, rather than inventing a
+            // queue item for something already working. A claim with no proof is
+            // genuinely undecided, so it becomes a pending request.
+            $db->statement(
+                "UPDATE resellers SET domain_status = 'approved',
+                        domain_reviewed_at = COALESCE(domain_reviewed_at, domain_verified_at)
+                 WHERE domain_verified_at IS NOT NULL AND domain_status = 'none'"
+            );
+
+            $db->statement(
+                "UPDATE resellers SET domain_status = 'pending',
+                        domain_requested_at = COALESCE(domain_requested_at, updated_at)
+                 WHERE domain_verified_at IS NULL
+                   AND custom_domain IS NOT NULL AND custom_domain <> ''
+                   AND domain_status = 'none'"
+            );
         },
     ],
 ];
