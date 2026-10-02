@@ -1,0 +1,505 @@
+/* ============================================================================
+ * Storefront stylesheet — the customer-facing front page of every store.
+ *
+ * This is the first thing a visitor sees on a reseller's own domain, so:
+ *
+ *  1. NOTHING here may hard-code a brand colour. The active store's accent
+ *     arrives as --cv-color-brand-500/600 (see layouts/client.php, which sets
+ *     those two custom properties per tenant). The previous storefront carried
+ *     38 literal hex values and used the token twice, so a reseller who chose
+ *     red still got the platform's navy-and-gold — the same class of white-label
+ *     leak as the platform chat widget appearing on a store.
+ *
+ *  2. Only two brand steps are tenant-overridden (500 and 600). The other steps
+ *     (-50, -100, ...) still describe the PLATFORM palette, so they must never
+ *     be used for a tinted surface. Use color-mix() against brand-500 instead.
+ *
+ *  3. It must be genuinely responsive. The old version had a single media query
+ *     for 449 lines of layout.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------- shell --- */
+
+.store-shell {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    /* Belt and braces: phones in landscape and small tablets get breathing room
+       without a media query. */
+    padding: 0 clamp(1rem, 4vw, 2.5rem);
+}
+
+/* ----------------------------------------------------------------- hero --- */
+
+.store-hero {
+    position: relative;
+    overflow: hidden;
+    margin: 0 0 var(--cv-space-8);
+    padding: clamp(2rem, 6vw, 4rem) clamp(1.25rem, 5vw, 3.5rem);
+    border-radius: var(--cv-radius-xl);
+    /*
+     * A deep gradient built from the tenant's own two brand steps, darkened
+     * towards near-black so white text stays legible whatever hue the reseller
+     * picked. A pastel brand colour must not produce white-on-pastel.
+     */
+    background:
+        linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--cv-color-brand-600) 78%, #0a0d16) 0%,
+            color-mix(in srgb, var(--cv-color-brand-500) 55%, #0a0d16) 55%,
+            color-mix(in srgb, var(--cv-color-brand-600) 70%, #0a0d16) 100%
+        );
+    color: #fff;
+    box-shadow: var(--cv-shadow-lg);
+}
+
+/* A soft brand wash so the gradient does not read as a flat rectangle. */
+.store-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+        ellipse at 78% 30%,
+        color-mix(in srgb, var(--cv-color-brand-500) 45%, transparent) 0%,
+        transparent 68%
+    );
+}
+
+.store-hero__inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: clamp(1.5rem, 5vw, 3rem);
+    flex-wrap: wrap;
+}
+
+.store-hero__content {
+    flex: 1 1 22rem;
+    min-width: 0;
+}
+
+.store-hero__eyebrow {
+    display: inline-block;
+    margin: 0 0 var(--cv-space-3);
+    padding: 0.35rem 0.8rem;
+    border-radius: var(--cv-radius-full);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    font-size: var(--cv-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.store-hero__title {
+    margin: 0 0 var(--cv-space-3);
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: clamp(1.75rem, 4.5vw, 3rem);
+    font-weight: 900;
+    line-height: 1.15;
+    color: #fff;
+    /* A long brand name in a narrow column must not overflow the hero. */
+    overflow-wrap: anywhere;
+}
+
+.store-hero__subtitle {
+    margin: 0 0 var(--cv-space-6);
+    max-width: 46ch;
+    font-size: clamp(1rem, 1.6vw, 1.15rem);
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.store-hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cv-space-3);
+    align-items: center;
+}
+
+/* Primary hero action: solid white on brand, so it contrasts with the hero in
+   both light and dark themes. */
+.store-hero__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    /* Touch target: never below 44px tall. */
+    min-height: 2.75rem;
+    padding: 0.7rem 1.4rem;
+    border-radius: var(--cv-radius-md);
+    background: #fff;
+    color: color-mix(in srgb, var(--cv-color-brand-600) 80%, #0a0d16);
+    font-weight: 700;
+    font-size: var(--cv-text-base);
+    text-decoration: none;
+    transition: transform var(--cv-transition-fast), box-shadow var(--cv-transition-fast);
+}
+
+.store-hero__cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.store-hero__cta:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.85);
+    outline-offset: 2px;
+}
+
+/* Secondary hero action: a quiet ghost button. */
+.store-hero__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.75rem;
+    padding: 0.7rem 1.1rem;
+    border-radius: var(--cv-radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #fff;
+    font-weight: 600;
+    font-size: var(--cv-text-sm);
+    text-decoration: none;
+    transition: background var(--cv-transition-fast), gap var(--cv-transition-fast);
+}
+
+.store-hero__link:hover {
+    background: rgba(255, 255, 255, 0.14);
+    gap: 0.75rem;
+}
+
+.store-hero__link:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.85);
+    outline-offset: 2px;
+}
+
+/* Decorative panel. Hidden below the stacking breakpoint so it never squeezes
+   the copy into a sliver. */
+.store-hero__aside {
+    flex: 0 0 auto;
+    display: grid;
+    gap: var(--cv-space-3);
+    padding: var(--cv-space-5);
+    border-radius: var(--cv-radius-lg);
+    background: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.20);
+    backdrop-filter: blur(6px);
+}
+
+.store-hero__aside-label {
+    font-size: var(--cv-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+/* These are anchors, not list items, so they must not inherit link chrome. */
+.store-hero__aside-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 2rem;
+    padding: 0.3rem 0.5rem;
+    margin-inline: -0.5rem;
+    border-radius: var(--cv-radius-sm);
+    font-size: var(--cv-text-sm);
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    text-decoration: none;
+    transition: background var(--cv-transition-fast);
+}
+
+.store-hero__aside-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.store-hero__aside-item:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.85);
+    outline-offset: 2px;
+}
+
+.store-hero__aside-icon {
+    width: 1.9rem;
+    height: 1.9rem;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border-radius: var(--cv-radius-sm);
+    background: rgba(255, 255, 255, 0.16);
+    font-size: 0.95rem;
+}
+
+/* ------------------------------------------------------- section headers --- */
+
+.store-group {
+    margin-bottom: clamp(2.5rem, 6vw, 4rem);
+    /* Keeps the heading clear of a sticky header when jumped to by anchor. */
+    scroll-margin-top: 5rem;
+}
+
+.store-group__header {
+    margin-bottom: var(--cv-space-5);
+    max-width: 62ch;
+}
+
+.store-group__title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0 0 var(--cv-space-2);
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: clamp(1.3rem, 2.6vw, 1.75rem);
+    font-weight: 800;
+    color: var(--cv-text-primary);
+}
+
+/* Tinted with the tenant's own accent, not --cv-color-brand-100 (which stays
+   the platform's colour). */
+.store-group__count {
+    display: inline-block;
+    padding: 0.25rem 0.7rem;
+    border-radius: var(--cv-radius-full);
+    background: color-mix(in srgb, var(--cv-color-brand-500) 12%, var(--cv-bg-surface));
+    border: 1px solid color-mix(in srgb, var(--cv-color-brand-500) 26%, transparent);
+    color: color-mix(in srgb, var(--cv-color-brand-600) 88%, var(--cv-text-primary));
+    font-size: var(--cv-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.store-group__description {
+    margin: 0;
+    font-size: var(--cv-text-base);
+    line-height: 1.65;
+    color: var(--cv-text-secondary);
+}
+
+/* --------------------------------------------------------------- grid ----- */
+
+.store-grid {
+    display: grid;
+    /*
+     * min(100%, 18rem) lets a single column shrink below 18rem on a narrow
+     * phone instead of forcing a horizontal scrollbar.
+     */
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+    gap: clamp(1rem, 2.5vw, 1.5rem);
+    align-items: stretch;
+}
+
+/* --------------------------------------------------------------- cards ---- */
+
+.store-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: var(--cv-space-5);
+    border-radius: var(--cv-radius-lg);
+    border: 1px solid var(--cv-border-default);
+    background: var(--cv-bg-surface);
+    box-shadow: var(--cv-shadow-xs);
+    transition: transform var(--cv-transition-base), box-shadow var(--cv-transition-base),
+        border-color var(--cv-transition-base);
+}
+
+.store-card:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--cv-color-brand-500) 45%, var(--cv-border-default));
+    box-shadow: var(--cv-shadow-lg);
+}
+
+/* Keyboard users get the same cue as mouse users. */
+.store-card:focus-within {
+    border-color: var(--cv-color-brand-500);
+    box-shadow: var(--cv-shadow-lg);
+}
+
+.store-card__name {
+    margin: 0 0 var(--cv-space-2);
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: var(--cv-text-xl);
+    font-weight: 800;
+    line-height: 1.3;
+    color: var(--cv-text-primary);
+    overflow-wrap: anywhere;
+}
+
+.store-card__description {
+    flex: 1 1 auto;
+    margin-bottom: var(--cv-space-4);
+    font-size: var(--cv-text-sm);
+    line-height: 1.65;
+    color: var(--cv-text-secondary);
+    /* Long unbroken words (a pasted URL) must wrap, not widen the card. */
+    overflow-wrap: anywhere;
+}
+
+.store-card__description > :first-child { margin-top: 0; }
+.store-card__description > :last-child { margin-bottom: 0; }
+
+/* Price block — the single most-scanned element, so it gets its own surface. */
+.store-card__price {
+    margin-bottom: var(--cv-space-4);
+    padding: var(--cv-space-4);
+    border-radius: var(--cv-radius-md);
+    border: 1px solid var(--cv-border-default);
+    background: var(--cv-bg-surface-sunken);
+    text-align: center;
+}
+
+.store-card__price-label {
+    font-size: var(--cv-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--cv-text-secondary);
+}
+
+.store-card__price-amount {
+    margin: 0.15rem 0;
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: clamp(1.4rem, 3vw, 1.7rem);
+    font-weight: 900;
+    /* The tenant accent, so the price reads as part of this store's identity. */
+    color: color-mix(in srgb, var(--cv-color-brand-600) 88%, var(--cv-text-primary));
+    overflow-wrap: anywhere;
+}
+
+.store-card__price-cycle {
+    font-size: var(--cv-text-xs);
+    font-weight: 600;
+    color: var(--cv-text-secondary);
+}
+
+.store-card__cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0.7rem 1.2rem;
+    border-radius: var(--cv-radius-md);
+    background: var(--cv-color-brand-500);
+    color: #fff;
+    font-weight: 700;
+    font-size: var(--cv-text-sm);
+    text-decoration: none;
+    transition: background var(--cv-transition-fast), box-shadow var(--cv-transition-fast);
+}
+
+.store-card__cta:hover {
+    background: var(--cv-color-brand-600);
+    box-shadow: var(--cv-shadow-accent);
+}
+
+.store-card__cta:focus-visible {
+    outline: 3px solid var(--cv-color-brand-500);
+    outline-offset: 2px;
+}
+
+/* --------------------------------------------------------- empty states --- */
+
+.store-empty {
+    padding: clamp(2.5rem, 7vw, 4rem) var(--cv-space-5);
+    border-radius: var(--cv-radius-lg);
+    border: 1px dashed var(--cv-border-default);
+    background: var(--cv-bg-surface-sunken);
+    text-align: center;
+}
+
+.store-empty__icon {
+    font-size: 2.5rem;
+    line-height: 1;
+    margin-bottom: var(--cv-space-3);
+}
+
+.store-empty__title {
+    margin: 0 0 var(--cv-space-2);
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: var(--cv-text-xl);
+    font-weight: 800;
+    color: var(--cv-text-primary);
+}
+
+.store-empty__text {
+    margin: 0;
+    font-size: var(--cv-text-sm);
+    color: var(--cv-text-secondary);
+    /* Keeps a short "no products" line from stretching the full width. */
+    max-width: 44ch;
+    margin-inline: auto;
+}
+
+/* ----------------------------------------------------------- responsive --- */
+
+/* Tablet: the hero art panel starts competing with the headline. */
+@media (max-width: 900px) {
+    .store-hero__aside {
+        display: none;
+    }
+
+    .store-hero__content {
+        flex: 1 1 100%;
+    }
+}
+
+/* Phone: tighten the hero and let the primary action go full width. */
+@media (max-width: 640px) {
+    .store-hero {
+        border-radius: var(--cv-radius-lg);
+        padding: clamp(1.5rem, 7vw, 2.25rem) clamp(1rem, 5vw, 1.5rem);
+    }
+
+    .store-hero__actions {
+        width: 100%;
+    }
+
+    .store-hero__cta,
+    .store-hero__link {
+        flex: 1 1 100%;
+        justify-content: center;
+    }
+}
+
+/* Very narrow phones: force one card per row even if 18rem would still fit. */
+@media (max-width: 400px) {
+    .store-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Wide screens: allow a slightly larger gutter between cards. */
+@media (min-width: 1400px) {
+    .store-grid {
+        gap: var(--cv-space-6);
+    }
+}
+
+/* --------------------------------------------------------- preferences --- */
+
+@media (prefers-reduced-motion: reduce) {
+    .store-card,
+    .store-card__cta,
+    .store-hero__cta,
+    .store-hero__link {
+        transition: none;
+    }
+
+    .store-card:hover,
+    .store-hero__cta:hover {
+        transform: none;
+    }
+}
+
+/* Dark theme: the sunken price panel and the hero wash need a touch more
+   separation from the surrounding surface. */
+@media (prefers-color-scheme: dark) {
+    .store-card__price {
+        background: color-mix(in srgb, var(--cv-color-brand-500) 6%, var(--cv-bg-surface-sunken));
+    }
+}
