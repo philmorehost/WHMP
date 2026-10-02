@@ -6,9 +6,11 @@ use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
 use CodeVault\Reseller\AdminResellerDomainController;
 use CodeVault\Reseller\AdminResellerPayoutsController;
+use CodeVault\Reseller\AdminResellerTicketController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerController;
+use CodeVault\Reseller\ClientResellerTicketController;
 
 /** @var CodeVault\Router $router */
 
@@ -45,6 +47,18 @@ $router->post('/client/reseller/account/payout-method/remove', [ClientResellerAc
 // Neither route carries a store id — the store comes from the session guard.
 $router->get('/client/reseller/statements', [ClientResellerAccountController::class, 'statements']);
 $router->get('/client/reseller/statements/{statementId}', [ClientResellerAccountController::class, 'showStatement']);
+
+// The store's own support desk: its customers' tickets, and a way to hand one up to
+// us. No store id is carried in any of these paths — the store is resolved from the
+// session guard, and each ticket is then matched against it INSIDE the query
+// (TicketRepository::forResellerTicket), so a ticket id in the URL is one that has
+// already been checked rather than a claim about ownership.
+$router->get('/client/reseller/tickets', [ClientResellerTicketController::class, 'index']);
+$router->get('/client/reseller/tickets/{ticketId}', [ClientResellerTicketController::class, 'show']);
+$router->post('/client/reseller/tickets/{ticketId}/reply', [ClientResellerTicketController::class, 'reply']);
+$router->post('/client/reseller/tickets/{ticketId}/escalate', [ClientResellerTicketController::class, 'escalate']);
+// Taking a request back before we answer it — the store resolved it itself after all.
+$router->post('/client/reseller/tickets/{ticketId}/withdraw', [ClientResellerTicketController::class, 'withdraw']);
 
 // The white-label store. Claiming a domain and proving control of it are
 // separate steps on purpose: nothing is served on a claimant's domain until
@@ -105,6 +119,10 @@ $router->post('/admin/resellers/domains/{storeId}/unprovision', [AdminResellerDo
 // Create it on the panel again — for an approval the panel refused, or one that
 // could not reach it. Same page, because that is where the failure is visible.
 $router->post('/admin/resellers/domains/{storeId}/provision', [AdminResellerDomainController::class, 'provisionNow']);
+
+// Tickets the stores have handed up to us. A literal path, registered before the
+// parameterised store routes below so 'escalations' is never read as a client id.
+$router->get('/admin/resellers/escalations', [AdminResellerTicketController::class, 'index']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

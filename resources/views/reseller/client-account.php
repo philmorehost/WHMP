@@ -39,6 +39,7 @@ $kindLabels = [
     <h1 class="cv-card__title">Your account</h1>
     <p><a href="/client/reseller">&larr; Back to the reseller area</a> &middot;
         <a href="/client/reseller/store">Your store</a> &middot;
+        <a href="/client/reseller/tickets">Your support queue</a> &middot;
         <a href="/client/reseller/prices">Your prices</a></p>
     <p style="color:var(--cv-text-secondary);">
         Every sale at your store credits this account when your customer's invoice is <strong>paid</strong>, and the

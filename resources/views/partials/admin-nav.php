@@ -70,6 +70,7 @@ $groups = [
         '/admin/resellers/accounts' => 'Reseller Accounts',
         '/admin/resellers/domains' => 'Store Domains',
         '/admin/resellers/payouts' => 'Reseller Payouts',
+    '/admin/resellers/escalations' => 'Store Escalations',
         '/admin/resellers/docs' => 'Reseller API Docs',
         '/admin/ai-visibility' => 'AI Visibility',
         '/admin/ask-ai' => 'Ask AI',

@@ -29,7 +29,8 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
         <strong><?= e($domainPct) ?>%</strong> on domains — the reseller prices below already include them.</p>
     <p><a href="<?= e($docsUrl) ?>">API documentation &rarr;</a> &middot;
         <a href="/client/reseller/store">Your store &amp; branding &rarr;</a> &middot;
-        <a href="/client/reseller/account">Your account &amp; earnings &rarr;</a></p>
+        <a href="/client/reseller/account">Your account &amp; earnings &rarr;</a> &middot;
+        <a href="/client/reseller/tickets">Your support queue &rarr;</a></p>
 </div>
 
 <?php if (is_array($issued)): ?>
