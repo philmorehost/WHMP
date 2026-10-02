@@ -15,7 +15,9 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
 $currencyCode = (string) $currency['code'];
 ?>
 <div class="cv-card" style="max-width:64rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Your Prices</h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">Your prices</h1>
+    </header>
     <?= $view->render('partials.reseller-nav') ?>
 
     <?php if ($error !== null && $error !== ''): ?>

@@ -36,7 +36,9 @@ $kindLabels = [
 ?>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Your account</h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">Your account</h1>
+    </header>
     <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary);">
         Every sale at your store credits this account when your customer's invoice is <strong>paid</strong>, and the

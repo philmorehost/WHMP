@@ -15,7 +15,9 @@ $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
 ?>
 <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Your Store</h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">Your store</h1>
+    </header>
     <?= $view->render('partials.reseller-nav') ?>
 
     <?php if ($error !== null && $error !== ''): ?>

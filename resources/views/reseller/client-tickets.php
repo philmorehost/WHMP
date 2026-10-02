@@ -26,7 +26,9 @@ $statusLabels = [
 $needsReply = static fn (string $status): bool => in_array($status, ['open', 'customer-reply'], true);
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Support for your customers</h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">Support for your customers</h1>
+    </header>
     <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary);">
         These are tickets raised by <strong>your</strong> customers at
@@ -46,22 +48,22 @@ $needsReply = static fn (string $status): bool => in_array($status, ['open', 'cu
 <?php endif; ?>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <div style="display:flex; flex-wrap:wrap; gap:var(--cv-space-5);">
-        <div>
-            <div style="font-size:var(--cv-text-xs); text-transform:uppercase; font-weight:700; color:var(--cv-text-secondary);">Total</div>
-            <div style="font-size:var(--cv-text-2xl); font-weight:800;"><?= (int) $counts['total'] ?></div>
+    <div class="rs-stats">
+        <div class="rs-stat">
+            <div class="rs-stat__label">Total</div>
+            <div class="rs-stat__value"><?= (int) $counts['total'] ?></div>
         </div>
-        <div>
-            <div style="font-size:var(--cv-text-xs); text-transform:uppercase; font-weight:700; color:var(--cv-text-secondary);">Waiting on you</div>
-            <div style="font-size:var(--cv-text-2xl); font-weight:800;"><?= (int) $counts['needsReply'] ?></div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">Waiting on you</div>
+            <div class="rs-stat__value"><?= (int) $counts['needsReply'] ?></div>
         </div>
-        <div>
-            <div style="font-size:var(--cv-text-xs); text-transform:uppercase; font-weight:700; color:var(--cv-text-secondary);">With our support</div>
-            <div style="font-size:var(--cv-text-2xl); font-weight:800;"><?= (int) $counts['escalated'] ?></div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">With our support</div>
+            <div class="rs-stat__value"><?= (int) $counts['escalated'] ?></div>
         </div>
-        <div>
-            <div style="font-size:var(--cv-text-xs); text-transform:uppercase; font-weight:700; color:var(--cv-text-secondary);">Closed</div>
-            <div style="font-size:var(--cv-text-2xl); font-weight:800;"><?= (int) $counts['closed'] ?></div>
+        <div class="rs-stat">
+            <div class="rs-stat__label">Closed</div>
+            <div class="rs-stat__value"><?= (int) $counts['closed'] ?></div>
         </div>
     </div>
 </div>

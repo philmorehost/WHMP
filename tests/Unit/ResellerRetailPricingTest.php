@@ -424,7 +424,9 @@ final class ResellerRetailPricingTest extends DatabaseTestCase
 
         $page = (string) $this->controller->prices($this->getRequest())->body();
 
-        $this->assertStringContainsString('Your Prices', $page);
+        // The heading is used as a render marker; the assertions below are the real checks.
+        // Its casing moved to sentence case with the rest of the portal's page titles.
+        $this->assertStringContainsString('Your prices', $page);
         $this->assertStringContainsString('not live yet', $page);
         $this->assertStringContainsString('Business Hosting', $page);
         $this->assertStringContainsString('20.00%', $page, 'the reseller discount is stated');

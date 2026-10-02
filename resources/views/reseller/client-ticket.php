@@ -35,7 +35,9 @@ $customerName = trim((string) ($ticket['client_first_name'] ?? '') . ' ' . (stri
 $customerName = $customerName !== '' ? $customerName : 'your customer';
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">#<?= (int) $ticket['id'] ?> — <?= e((string) ($ticket['subject'] ?? '')) ?></h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">#<?= (int) $ticket['id'] ?> — <?= e((string) ($ticket['subject'] ?? '')) ?></h1>
+    </header>
     <?= $view->render('partials.reseller-nav') ?>
     <p style="color:var(--cv-text-secondary); font-size:var(--cv-text-sm);">
         From <strong><?= e($customerName) ?></strong>

@@ -18,7 +18,9 @@ $issued = is_array($issued ?? null) ? $issued : [];
 ?>
 
 <div class="cv-card">
-    <h1 class="cv-card__title">Your statements</h1>
+    <header class="rs-head">
+        <h1 class="rs-head__title">Your statements</h1>
+    </header>
     <?= $view->render('partials.reseller-nav') ?>
 
     <p style="color:var(--cv-text-secondary);">
