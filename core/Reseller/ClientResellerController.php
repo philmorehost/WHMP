@@ -249,6 +249,12 @@ final class ClientResellerController
         $store = $this->stores->forClient((int) $client['id']);
         $storeId = $store === null ? null : (int) $store['id'];
 
+        // What to suggest for the store's web address, before they type anything:
+        // their company name if we have one, otherwise their own name. Short — see
+        // ResellerStoreService::suggestSlug().
+        $companyName = trim((string) ($client['company_name'] ?? ''));
+        $personName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
+
         // What this store has cost its owner, in their own currency, and what is
         // still unpaid. Read-only: nothing here lets a reseller change what they
         // owe, because cost comes from our catalogue and the admin's discount.
@@ -265,6 +271,7 @@ final class ClientResellerController
             // for them to retype a number we already have.
             'phoneHint' => ResellerChat::normaliseWhatsapp((string) ($client['phone'] ?? '')) ?? '',
             'platformHost' => $this->locator->platformHost(),
+            'slugSuggestion' => $this->stores->suggestSlug($companyName !== '' ? $companyName : $personName),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
                 ? null

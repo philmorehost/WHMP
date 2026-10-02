@@ -340,3 +340,55 @@ Host — then no per-domain cPanel change is needed at all, at the cost of runni
 proxy, and TLS stops being a manual step too. That is a deliberate infrastructure
 decision, and the automation above is not a substitute for it: taking a domain off the
 panel does not take it out of a proxy's configuration.
+
+---
+
+## 6. The platform address — `<slug>.client.philmorehost.com`
+
+Every store ALSO has an address on your own domain, e.g.
+`https://reseller.client.philmorehost.com`. It is not an addon domain and **must not be
+added as one** — it is a subdomain of the account's own main domain, which is a
+different mechanism in cPanel. Adding it as an addon domain would create a second vhost
+and a second document root for the same name.
+
+**It does not work merely because DNS resolves.** The wildcard record
+(`*.client.philmorehost.com`) tells the internet where the name lives; it does **not**
+make Apache answer for it. This is the same distinction as the "SORRY!" page in §3 —
+resolves here, not configured here.
+
+Check what the server actually does, bypassing DNS and any cache:
+
+```bash
+curl -I -H "Host: reseller.client.philmorehost.com" http://<server-ip>/
+```
+
+**If that returns the platform**, something on the server is already answering for
+arbitrary subdomains — typically a wildcard `ServerAlias` on the main domain's vhost,
+or wildcard subdomains enabled on the account. Nothing to do.
+
+**If it returns cPanel's default page or a 404**, create ONE wildcard subdomain and
+never think about it again:
+
+- cPanel → **Domains** → **Create A New Domain**
+- Domain: `*.client.philmorehost.com`
+- Document root: **the same folder that serves `client.philmorehost.com`** — tick
+  *Share document root*
+
+A wildcard is the right answer rather than one entry per store. Without it, every new
+reseller needs a manual server change before their store opens at its platform address,
+which is precisely the work this whole feature exists to remove — and the reseller has
+no working address at all until their custom domain is approved, verified and
+provisioned.
+
+### The store address is a link
+
+The label a reseller chooses becomes the hostname, so the form suggests a SHORT one
+drawn from the first usable word of their company or personal name, and they can change
+it. Two consequences worth knowing:
+
+- A long name makes a long address nobody can read out or type. The suggestion is
+  capped at 20 characters for that reason.
+- Reserved infrastructure names (`www`, `api`, `admin`, `mail`, `checkout`, `client`, …)
+  are refused, so the suggestion moves on to the next word rather than offering an
+  address the store cannot have.
+

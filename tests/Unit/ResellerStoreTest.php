@@ -387,6 +387,33 @@ final class ResellerStoreTest extends DatabaseTestCase
         $this->assertSame('pending', (string) $this->stores->find($id)['domain_status']);
     }
 
+    public function test_a_long_store_name_suggests_a_short_address(): void
+    {
+        $service = $this->service();
+
+        // The address becomes a link the reseller reads out loud and prints on cards,
+        // so the suggestion is a SHORT piece of the name rather than the whole thing —
+        // which is what the field would otherwise fill itself with.
+        $this->assertSame('adeola', $service->suggestSlug('Adeola Integrated Ventures Nigeria'));
+        $this->assertSame('acme', $service->suggestSlug('  Acme   Hosting  '));
+        $this->assertSame('philmorehost', $service->suggestSlug('PhilmoreHost'));
+
+        // Reserved infrastructure names are refused by normaliseSlug(), so the
+        // suggestion moves on to the next word instead of giving up — leaving the
+        // field empty for a name that HAS a usable second word is a worse answer.
+        $this->assertSame('panel', $service->suggestSlug('Admin Panel'));
+
+        // Nothing usable at all: leave it EMPTY rather than pre-fill nonsense the
+        // reseller might accept without reading.
+        $this->assertNull($service->suggestSlug(''));
+        $this->assertNull($service->suggestSlug('!!! &&&'));
+
+        // A single very long word is trimmed to something typeable.
+        $trimmed = $service->suggestSlug('VeryLongCompanyNameThatJustKeepsGoing');
+        $this->assertNotNull($trimmed);
+        $this->assertLessThanOrEqual(20, strlen($trimmed));
+    }
+
     public function test_a_domain_another_store_already_claimed_is_refused(): void
     {
         $service = $this->service();

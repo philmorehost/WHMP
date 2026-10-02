@@ -104,12 +104,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                        placeholder="Acme Hosting" required>
             </p>
             <p>
-                <label for="slug">Store address (optional)</label><br>
+                <label for="slug">Your web address</label><br>
                 <input class="cv-input" type="text" id="slug" name="slug" maxlength="63"
-                       placeholder="acme">
-                <br><span style="color:var(--cv-text-secondary);">Letters, numbers and hyphens, 3-63 characters.
-                    Leave blank to use your store name. It becomes
-                    <code>&lt;address&gt;.<?= e($platformHost) ?></code>.</span>
+                       placeholder="acme" value="<?= e((string) ($slugSuggestion ?? '')) ?>">
+                <br><span style="color:var(--cv-text-secondary);">
+                    <strong>This becomes a link you give to customers.</strong> Your store's front page will be
+                    <code>https://<?= e((string) (($slugSuggestion ?? '') !== '' ? $slugSuggestion : 'yourname')) ?>.<?= e($platformHost) ?></code>
+                    — so keep it short and easy to say out loud. Letters, numbers and hyphens only; spaces become
+                    hyphens. You can change it later.
+                </span>
             </p>
             <button class="cv-btn" type="submit">Open my store</button>
         </form>
@@ -167,11 +170,13 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                        value="<?= e((string) ($store['brand_name'] ?? '')) ?>" required>
             </p>
             <p>
-                <label for="slug">Store address</label><br>
+                <label for="slug">Your web address</label><br>
                 <input class="cv-input" type="text" id="slug" name="slug" maxlength="63"
                        value="<?= e((string) $store['slug']) ?>">
-                <br><span style="color:var(--cv-text-secondary);">Changing this changes your store's platform address.
-                    Existing links using the old address stop working.</span>
+                <br><span style="color:var(--cv-text-secondary);">This is the link you give to customers:
+                    <code>https://<?= e((string) $store['slug']) ?>.<?= e($platformHost) ?></code>.
+                    Keep it short and easy to say out loud. Changing it stops every link you have already
+                    handed out from working, so only change it if you have to.</span>
             </p>
             <p>
                 <label for="logo_url">Logo URL</label><br>

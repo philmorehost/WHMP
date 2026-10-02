@@ -190,6 +190,52 @@ final class ResellerStoreService
     }
 
     /**
+     * A SHORT address suggestion from whatever name we have.
+     *
+     * Short on purpose, and it is the point of the method rather than a detail.
+     * The address becomes a link the reseller reads out, prints on a card and types
+     * into a phone, and the field would otherwise auto-fill from their whole store
+     * name. So "Adeola Integrated Ventures Nigeria" should suggest `adeola`, not
+     * `adeola-integrated-ventures-nigeria` — which is a web address nobody will ever
+     * say correctly.
+     *
+     * Returns null when nothing usable is left, which leaves the field EMPTY for the
+     * reseller to fill in rather than pre-filling something meaningless they might
+     * accept without reading.
+     */
+    public function suggestSlug(string $name): ?string
+    {
+        $name = trim($name);
+
+        if ($name === '') {
+            return null;
+        }
+
+        // First word first, then each following one — so "Admin Panel" suggests
+        // `panel` rather than nothing at all. `normaliseSlug()` refuses reserved
+        // infrastructure names (www, api, admin, mail, ...), and returning the first
+        // word's refusal would leave the field empty for a name that has a perfectly
+        // good second word in it.
+        foreach (preg_split('~[\s\-_]+~', $name) ?: [] as $word) {
+            // Anything a hostname cannot carry — dots, ampersands, quotes — goes. A
+            // word that is nothing but punctuation leaves nothing and is skipped.
+            $cleaned = (string) preg_replace('~[^A-Za-z0-9]+~', '', (string) $word);
+
+            if (strlen($cleaned) > 20) {
+                $cleaned = substr($cleaned, 0, 20);
+            }
+
+            $candidate = ResellerStoreRepository::normaliseSlug($cleaned);
+
+            if ($candidate !== null) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Claims a custom domain, unverified. Reuses the hostname rules the reseller
      * API key's declared domain already uses — one definition of "a domain name"
      * across the whole reseller feature.
