@@ -22,7 +22,13 @@ final class MailDomainAlignmentTest extends TestCase
     private function checker(array $zone): MailDomainAlignment
     {
         return new MailDomainAlignment(
-            static fn (string $name): ?array => $zone[$name] ?? [],
+            // array_key_exists, NOT `?? []`. The null coalescing operator treats a
+            // NULL VALUE exactly like a MISSING KEY, so `$zone[$name] ?? []` can never
+            // return null — which is the one answer this fake exists to be able to
+            // give. The double would then quietly agree with the collapse the class
+            // under test is written to prevent, and the test would pass for the wrong
+            // reason while proving nothing.
+            static fn (string $name): ?array => array_key_exists($name, $zone) ? $zone[$name] : [],
             'spf.philmorehost.test',
             'default'
         );
