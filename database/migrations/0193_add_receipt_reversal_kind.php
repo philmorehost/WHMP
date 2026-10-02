@@ -76,10 +76,17 @@ return [
 
             // 2. The discriminator. Persisted rather than virtual so the unique key
             //    can be enforced by the storage engine.
+            //
+            //    STORED, not PERSISTENT: the two are synonyms on MariaDB 10.2+, but
+            //    PERSISTENT is MariaDB-ONLY vocabulary and MySQL rejects it outright.
+            //    That is not a cosmetic difference — on a MySQL host this migration
+            //    failed with a syntax error, and because the migrator aborted on the
+            //    first failure it took every later migration down with it (the same
+            //    defect is in 0191, which is why reseller_payouts was missing).
             if ($columnType($db, 'forward_flag') === '') {
                 $db->statement(
                     "ALTER TABLE reseller_ledger ADD COLUMN forward_flag TINYINT
-                     AS (IF(kind IN ('store_receipt','cost_invoice'), 1, NULL)) PERSISTENT"
+                     AS (IF(kind IN ('store_receipt','cost_invoice'), 1, NULL)) STORED"
                 );
             }
 

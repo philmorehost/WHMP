@@ -72,7 +72,7 @@ return [
                     requested_at DATETIME NOT NULL,
                     decided_at DATETIME NULL,
                     decided_by INT UNSIGNED NULL,
-                    open_flag TINYINT AS (IF(status = 'pending', 1, NULL)) PERSISTENT,
+                    open_flag TINYINT AS (IF(status = 'pending', 1, NULL)) STORED,
                     UNIQUE KEY uq_reseller_payouts_open (reseller_id, open_flag),
                     INDEX idx_reseller_payouts_queue (status, requested_at),
                     INDEX idx_reseller_payouts_account (reseller_id, requested_at)
