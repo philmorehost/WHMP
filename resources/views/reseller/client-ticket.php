@@ -37,7 +37,8 @@ $customerName = $customerName !== '' ? $customerName : 'your customer';
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">#<?= (int) $ticket['id'] ?> — <?= e((string) ($ticket['subject'] ?? '')) ?></h1>
     <p><a href="/client/reseller/tickets">&larr; Back to your tickets</a> &middot;
-        <a href="/client/reseller/store">Your store</a></p>
+        <a href="/client/reseller/store">Your store</a> &middot;
+        <a href="/client/reseller/mail">Your support address</a></p>
     <p style="color:var(--cv-text-secondary); font-size:var(--cv-text-sm);">
         From <strong><?= e($customerName) ?></strong>
         <?php if (!empty($ticket['client_email'])): ?>

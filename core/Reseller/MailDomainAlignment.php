@@ -61,6 +61,45 @@ final class MailDomainAlignment
     }
 
     /**
+     * A checker wired to the system resolver — what production uses.
+     *
+     * The constructor takes the lookup as a callable precisely so tests never touch the
+     * network; this is the one place that supplies the real one. A failed lookup returns
+     * NULL, which is what lets the checker say "we could not tell" instead of inventing a
+     * failure. `dns_get_record` returns false on error and an empty array on "no such
+     * records", and collapsing those two is exactly the mistake the class is written to
+     * avoid, so they are kept apart here.
+     */
+    public static function withDns(string $spfInclude, string $dkimSelector = 'default'): self
+    {
+        return new self(
+            static function (string $name): ?array {
+                $records = @dns_get_record($name, DNS_TXT);
+
+                if ($records === false) {
+                    return null;
+                }
+
+                $values = [];
+
+                foreach ($records as $record) {
+                    // The key is 'txt' on most builds and 'entries' on some; both have been
+                    // seen in the wild for the same query.
+                    if (isset($record['txt']) && is_string($record['txt'])) {
+                        $values[] = $record['txt'];
+                    } elseif (isset($record['entries']) && is_array($record['entries'])) {
+                        $values[] = implode('', array_map('strval', $record['entries']));
+                    }
+                }
+
+                return $values;
+            },
+            $spfInclude,
+            $dkimSelector
+        );
+    }
+
+    /**
      * @return array{status: string, detail: ?string, spf: ?string, dkim: bool}
      */
     public function check(string $fromAddress): array

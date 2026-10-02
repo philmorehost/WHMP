@@ -30,7 +30,8 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
     <p><a href="<?= e($docsUrl) ?>">API documentation &rarr;</a> &middot;
         <a href="/client/reseller/store">Your store &amp; branding &rarr;</a> &middot;
         <a href="/client/reseller/account">Your account &amp; earnings &rarr;</a> &middot;
-        <a href="/client/reseller/tickets">Your support queue &rarr;</a></p>
+        <a href="/client/reseller/tickets">Your support queue &rarr;</a> &middot;
+        <a href="/client/reseller/mail">Your support address &rarr;</a></p>
 </div>
 
 <?php if (is_array($issued)): ?>

@@ -19,6 +19,7 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
     <p><a href="/client/reseller">&larr; Back to the reseller area</a> &middot;
         <a href="/client/reseller/prices">Your prices &rarr;</a> &middot;
         <a href="/client/reseller/tickets">Your support queue</a> &middot;
+        <a href="/client/reseller/mail">Your support address</a> &middot;
         <a href="<?= e($docsUrl) ?>">API documentation</a></p>
 
     <?php if ($error !== null && $error !== ''): ?>

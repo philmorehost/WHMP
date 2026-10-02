@@ -186,6 +186,7 @@ use CodeVault\Backup\BackupRunRepository;
 use CodeVault\Backup\BackupService;
 use CodeVault\Security\SecurityHeaders;
 use CodeVault\Reseller\CurrentReseller;
+use CodeVault\Reseller\MailDomainAlignment;
 use CodeVault\Reseller\ResellerMailIdentity;
 use CodeVault\Reseller\ResellerRetailPricing;
 use CodeVault\Reseller\ResellerStoreLocator;
@@ -597,6 +598,28 @@ class Kernel
                 $c->make(SettingsRepository::class),
                 $c->make(ServiceLifecycleSettings::class),
             );
+        });
+
+        // The SPF/DKIM checker the reseller mail page and the mailbox job use. Bound here
+        // rather than constructed at each call site because it must be DNS-backed in
+        // production and FAKEABLE in tests: a class that builds its own resolver cannot be
+        // substituted, and a test that depends on real DNS fails when a resolver is slow.
+        //
+        // The SPF include is DERIVED from the platform's own sending address, because that
+        // is by definition the domain a reseller has to authorise; the settings override it
+        // when the mail domain is not the platform domain.
+        $this->container->singleton(MailDomainAlignment::class, function (Container $c) {
+            $settings = $c->make(SettingsRepository::class);
+            $include = trim((string) $settings->get('reseller.mail_spf_include', ''));
+
+            if ($include === '') {
+                $sender = trim((string) $settings->get('smtp.from_email', ''));
+                $include = str_contains($sender, '@') ? (string) substr(strrchr($sender, '@'), 1) : '';
+            }
+
+            $selector = trim((string) $settings->get('reseller.mail_dkim_selector', ''));
+
+            return MailDomainAlignment::withDns($include, $selector !== '' ? $selector : 'default');
         });
 
         $this->container->singleton(CancellationCronJob::class, function (Container $c) {

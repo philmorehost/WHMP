@@ -130,6 +130,118 @@ final class ResellerStoreRepository
         );
     }
 
+    /**
+     * The address a store's customers are written to FROM.
+     *
+     * The alignment result is CLEARED here, and that is the important half: the check
+     * belongs to a DOMAIN, so an address somebody just typed has not been checked at all.
+     * Leaving a previous 'aligned' in place would show a pass for a domain nobody looked
+     * at — and it is the pass that decides whether the portal warns. Absent is honest;
+     * stale is not.
+     *
+     * Empty string and NULL both store NULL, so a cleared form field and a never-set one
+     * behave identically, as saveChat() does for the same reason.
+     */
+    public function setSupportEmail(int $id, ?string $email): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET support_email = ?, support_email_status = NULL, '
+                . 'support_email_checked_at = NULL, support_email_detail = NULL, updated_at = ? WHERE id = ?',
+            [
+                $this->nullIfBlank($email),
+                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                $id,
+            ]
+        );
+    }
+
+    /**
+     * Record what a DNS check found, and WHEN.
+     *
+     * The timestamp is written even on a pass, because a pass is not permanent truth:
+     * DNS records get edited and domains get re-pointed, and a result with no date on it
+     * reads as current forever. `$detail` is what to publish when it failed.
+     *
+     * @param string      $status 'aligned' | 'misaligned' | 'unavailable'
+     */
+    public function recordMailCheck(int $id, string $status, ?string $detail): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->update(
+            'UPDATE resellers SET support_email_status = ?, support_email_checked_at = ?, '
+                . 'support_email_detail = ?, updated_at = ? WHERE id = ?',
+            [$status, $now, $this->nullIfBlank($detail), $now, $id]
+        );
+    }
+
+    /**
+     * Stores that are on the panel and could be given a mailbox.
+     *
+     * Every clause is load-bearing:
+     *
+     *   domain_provisioned_host = custom_domain   the panel actually serves this domain, so
+     *                                             a mailbox can exist on it at all. A store
+     *                                             mid-change has a NEW name claimed while
+     *                                             the panel still hosts the old one.
+     *   support_email IS NULL                     the reseller has not chosen an address.
+     *                                             Adopting one for them would override a
+     *                                             decision they already made.
+     *   mailbox_host <> custom_domain             we have not already made one for THIS
+     *                                             domain — without this the job would ask
+     *                                             the panel about the same store every day
+     *                                             and get "already exists" back forever.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function mailboxCandidates(int $limit = 200): array
+    {
+        return $this->db->select(
+            "SELECT * FROM resellers
+             WHERE custom_domain IS NOT NULL
+               AND domain_provisioned_host IS NOT NULL
+               AND domain_provisioned_host = custom_domain
+               AND support_email IS NULL
+               AND (mailbox_host IS NULL OR mailbox_host <> custom_domain)
+             ORDER BY id ASC
+             LIMIT " . max(1, $limit)
+        );
+    }
+
+    /**
+     * The mailbox now exists on the panel for this host.
+     *
+     * Clearing the previous error is the point: a store that failed yesterday and succeeded
+     * today must not keep showing yesterday's reason to its owner.
+     */
+    public function markMailboxProvisioned(int $id, string $host): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->update(
+            'UPDATE resellers SET mailbox_host = ?, mailbox_provisioned_at = ?, '
+                . 'mailbox_provision_error = NULL, updated_at = ? WHERE id = ?',
+            [$host, $now, $now, $id]
+        );
+    }
+
+    /**
+     * The panel refused, or could not be reached.
+     *
+     * mailbox_host is deliberately NOT written, so the job retries and a panel that is fixed
+     * this afternoon works tonight. The message is stored rather than only logged because it
+     * is the reseller's explanation, not just ours.
+     */
+    public function recordMailboxError(int $id, string $message): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        $this->db->update(
+            'UPDATE resellers SET mailbox_provision_error = ?, updated_at = ? WHERE id = ?',
+            [$this->nullIfBlank($message), $now, $id]
+        );
+    }
+
     public function renameSlug(int $id, string $slug): void
     {
         $this->db->update(

@@ -50,6 +50,7 @@ use CodeVault\Domains\DomainPruningJob;
 use CodeVault\Billing\StaleInvoiceCancellationJob;
 use CodeVault\Reseller\ResellerCostBillingJob;
 use CodeVault\Reseller\DomainVerificationJob;
+use CodeVault\Reseller\ResellerMailboxJob;
 
 $kernel = new Kernel(dirname(__DIR__));
 
@@ -85,6 +86,13 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     // waiting for the reseller to press "Verify" again. Verifies only; it never
     // un-verifies, so a transient DNS failure cannot take a store offline.
     $scheduler->register($kernel->container->make(DomainVerificationJob::class));
+// Registered on its own schedule rather than folded into verification, because a store can
+// become eligible for a mailbox in ways verification does not cover: the domain was approved
+// before provisioning was switched on, an admin added it by hand, or a panel call failed and
+// needs retrying. The job asks "who is eligible?" instead, which handles all of them and is
+// safe to run repeatedly — a record of which domain a mailbox was made for is what stops it
+// doing the same store twice.
+$scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     $scheduler->register($kernel->container->make(BackupCronJob::class));
     $scheduler->register($kernel->container->make(CancellationCronJob::class));
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));

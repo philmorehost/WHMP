@@ -10,6 +10,7 @@ use CodeVault\Reseller\AdminResellerTicketController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerController;
+use CodeVault\Reseller\ClientResellerMailController;
 use CodeVault\Reseller\ClientResellerTicketController;
 
 /** @var CodeVault\Router $router */
@@ -47,6 +48,17 @@ $router->post('/client/reseller/account/payout-method/remove', [ClientResellerAc
 // Neither route carries a store id — the store comes from the session guard.
 $router->get('/client/reseller/statements', [ClientResellerAccountController::class, 'statements']);
 $router->get('/client/reseller/statements/{statementId}', [ClientResellerAccountController::class, 'showStatement']);
+
+// The store's own support address: what its customers are written to FROM, and whether
+// the domain actually authorises us to send as it. No store id in any path — the store is
+// resolved from the session guard.
+$router->get('/client/reseller/mail', [ClientResellerMailController::class, 'index']);
+$router->post('/client/reseller/mail', [ClientResellerMailController::class, 'save']);
+// Longer paths before the bare POST above, for the same first-match reason as the other
+// literal groups: '/client/reseller/mail/create' is more specific than '/client/reseller/mail'.
+$router->post('/client/reseller/mail/create', [ClientResellerMailController::class, 'create']);
+$router->post('/client/reseller/mail/check', [ClientResellerMailController::class, 'check']);
+$router->post('/client/reseller/mail/clear', [ClientResellerMailController::class, 'clear']);
 
 // The store's own support desk: its customers' tickets, and a way to hand one up to
 // us. No store id is carried in any of these paths — the store is resolved from the
