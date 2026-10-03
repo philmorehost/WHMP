@@ -389,14 +389,14 @@
         if (val === 'interserver-vps' || val === 'interserver_vps') {
             usernameField.style.display = 'none';
             tokenLabel.textContent = 'API Key';
-            if (portField) portField.style.display = 'block';
+            if (portField) portField.style.display = 'none'; // fixed HTTPS API, no port
         } else if (val === 'interserver-dedicated' || val === 'interserver_dedicated') {
             usernameField.style.display = 'block';
             if (usernameLabel) usernameLabel.textContent = 'API Username';
             if (usernameInput) usernameInput.placeholder = 'e.g., api_username';
             tokenLabel.textContent = 'API Token / Password';
             if (tokenInput) tokenInput.placeholder = '';
-            if (portField) portField.style.display = 'block';
+            if (portField) portField.style.display = 'none'; // fixed HTTPS API, no port
         } else if (val === 'resellerclub-email' || val === 'resellerclub_email') {
             usernameField.style.display = 'block';
             if (usernameLabel) usernameLabel.textContent = 'Reseller ID';
@@ -414,7 +414,7 @@
             if (usernameInput) usernameInput.placeholder = 'e.g., api_user';
             tokenLabel.textContent = 'API Token';
             if (tokenInput) tokenInput.placeholder = '';
-            if (portField) portField.style.display = 'block';
+            if (portField) portField.style.display = 'none'; // fixed HTTPS API, no port
         } else {
             usernameField.style.display = 'block';
             if (usernameLabel) usernameLabel.textContent = 'API Username';
