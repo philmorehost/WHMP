@@ -694,7 +694,7 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $result = $this->module->testConnection(['server' => $this->server]);
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('firewall (Cloudflare) blocked', $result['message']);
+        $this->assertStringContainsString('InterServer is behind Cloudflare', $result['message']);
     }
 
     public function test_a_transport_error_carries_the_curl_reason(): void

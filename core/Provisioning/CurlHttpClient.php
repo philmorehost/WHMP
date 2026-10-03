@@ -8,7 +8,13 @@ final class CurlHttpClient implements HttpClient
 {
     public function __construct(
         private readonly int $timeoutSeconds = 15,
-        private readonly bool $verifySsl = true
+        private readonly bool $verifySsl = true,
+        // e.g. "http://user:pass@203.0.113.5:3128" or "socks5h://203.0.113.5:1080".
+        // Lets provider calls leave from another IP when the web server's own IP is
+        // blocked by the provider's Cloudflare firewall.
+        private readonly ?string $proxy = null,
+        // Some Cloudflare rules block a host's IPv6 range but not its IPv4 address.
+        private readonly bool $forceIpv4 = false
     ) {
     }
 
@@ -36,6 +42,14 @@ final class CurlHttpClient implements HttpClient
             CURLOPT_SSL_VERIFYPEER => $this->verifySsl,
             CURLOPT_SSL_VERIFYHOST => $this->verifySsl ? 2 : 0,
         ]);
+
+        if ($this->proxy !== null && trim($this->proxy) !== '') {
+            curl_setopt($ch, CURLOPT_PROXY, trim($this->proxy));
+        }
+
+        if ($this->forceIpv4) {
+            curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+        }
 
         // PHP cURL sends no User-Agent by default. Provider APIs behind Cloudflare
         // (InterServer, Nocix) can block requests without one.

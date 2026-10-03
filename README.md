@@ -50,6 +50,8 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 | `REDIS_*` | Optional — sessions/queue/cache silently fall back to file/sync/in-memory if Redis is unreachable or `ext-redis` isn't loaded. |
 | `SESSION_DRIVER`, `QUEUE_DRIVER`, `CACHE_DRIVER` | `redis` or anything else (falls back). |
 | `QUEUE_CRON_DRAIN` | `1` = cron also drains the `default` (order-acceptance) queue as a fallback when no dedicated worker runs. Keep unset/`0` if a `queue-worker.php` process is running. |
+| `PROVIDER_HTTP_PROXY` | Optional. Sends InterServer and Nocix API calls through a proxy, for when their Cloudflare firewall blocks this server's IP. Examples: `http://user:pass@203.0.113.5:3128`, `socks5h://203.0.113.5:1080`. Other traffic is not affected. |
+| `PROVIDER_FORCE_IPV4` | Optional. `1` makes InterServer and Nocix calls use IPv4 only (some Cloudflare rules distrust a host's IPv6 range). |
 | `DEEPSEEK_API_KEY` | Powers the AI features (ticket reply suggestions, fraud triage, Ask AI, AI-assisted KB search). All of them fail open — a missing key or API error never blocks the underlying flow, it just skips the AI step. |
 
 ## Directory map
@@ -176,6 +178,13 @@ username. Linking is what makes the match permanent.
 The VNC console first allows the client's own public IPv4 (InterServer accepts VNC from
 one allowed address) and then shows the host and port. If WHMP is behind a proxy, make
 sure `Request::ip()` sees the real client address.
+
+**If Test Connection says Cloudflare blocked the request:** InterServer's API is behind
+Cloudflare, which sometimes blocks web-hosting IP addresses. The message includes the IP
+Cloudflare saw and a Ray ID. Either ask InterServer support to allow API access from that
+IP (quote the Ray ID), or set `PROVIDER_HTTP_PROXY` in `.env` so these calls leave from a
+server with a clean IP, such as one of your own VPSs. Try `PROVIDER_FORCE_IPV4=1` first if
+your server has IPv6.
 
 **Lifecycle:** once a service is tied to a VPS, suspending it in WHMP (manually or for an
 overdue invoice) stops the VPS. Unsuspending starts it again. **Terminating it cancels

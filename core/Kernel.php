@@ -734,20 +734,33 @@ class Kernel
             return new CyberPanelProvisioningModule($c->make(HttpClient::class));
         });
 
-        $this->container->singleton(InterServerVpsProvisioningModule::class, function (Container $c) {
-            return new InterServerVpsProvisioningModule($c->make(HttpClient::class));
+        // InterServer and Nocix sit behind Cloudflare. When it blocks this server's IP,
+        // PROVIDER_HTTP_PROXY sends just these calls out through another server, and
+        // PROVIDER_FORCE_IPV4=1 avoids an IPv6 range Cloudflare distrusts.
+        $providerHttp = function (Container $c): HttpClient {
+            $config = $c->make(Config::class);
+            $proxy = trim((string) $config->env('PROVIDER_HTTP_PROXY', ''));
+            $ipv4 = in_array(strtolower(trim((string) $config->env('PROVIDER_FORCE_IPV4', ''))), ['1', 'true', 'yes', 'on'], true);
+
+            return $proxy === '' && !$ipv4
+                ? $c->make(HttpClient::class)
+                : new CurlHttpClient(timeoutSeconds: 120, proxy: $proxy !== '' ? $proxy : null, forceIpv4: $ipv4);
+        };
+
+        $this->container->singleton(InterServerVpsProvisioningModule::class, function (Container $c) use ($providerHttp) {
+            return new InterServerVpsProvisioningModule($providerHttp($c));
         });
 
-        $this->container->singleton(InterServerDedicatedProvisioningModule::class, function (Container $c) {
-            return new InterServerDedicatedProvisioningModule($c->make(HttpClient::class));
+        $this->container->singleton(InterServerDedicatedProvisioningModule::class, function (Container $c) use ($providerHttp) {
+            return new InterServerDedicatedProvisioningModule($providerHttp($c));
         });
 
         $this->container->singleton(ResellerClubEmailProvisioningModule::class, function (Container $c) {
             return new ResellerClubEmailProvisioningModule($c->make(HttpClient::class), $c->make(RegistrarRepository::class));
         });
 
-        $this->container->singleton(NocixDedicatedServerModule::class, function (Container $c) {
-            return new NocixDedicatedServerModule($c->make(HttpClient::class));
+        $this->container->singleton(NocixDedicatedServerModule::class, function (Container $c) use ($providerHttp) {
+            return new NocixDedicatedServerModule($providerHttp($c));
         });
 
         $this->container->singleton(LocalRegistrarModule::class, fn () => new LocalRegistrarModule(
