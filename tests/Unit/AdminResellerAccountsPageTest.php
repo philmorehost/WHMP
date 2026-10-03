@@ -275,46 +275,77 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
 
         $this->controller->saveSettings($this->request([
             'payout_holding_days' => '-5',
-            'payout_minimum' => '-100',
+            'payout_minimum_amount' => '-100',
         ]));
 
         // A negative holding period would make the withdrawable figure exceed the
         // balance, and a negative minimum would make an overdrawn account claimable.
         $this->assertSame('0', $this->settings->get('reseller.payout_holding_days'));
-        $this->assertSame('0.00', $this->settings->get('reseller.payout_minimum'));
+        $this->assertSame('0.00', $this->settings->get('reseller.payout_minimum_amount'));
     }
 
-    public function test_the_page_exposes_a_currency_specific_minimum_for_each_configured_currency(): void
+    public function test_the_legacy_field_name_still_sets_the_minimum(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $this->controller->saveSettings($this->request(['payout_holding_days' => '30', 'payout_minimum' => '12.5']));
+
+        $this->assertSame('12.50', $this->settings->get('reseller.payout_minimum_amount'));
+    }
+
+    public function test_the_page_shows_the_ten_dollar_minimum_and_a_rate_for_each_other_currency(): void
     {
         $this->signInAsSuperAdmin();
         (new CurrencyRepository($this->db))->create('NGN', '₦', 1490.0);
 
         $body = (string) $this->controller->index($this->request())->body();
 
-        $this->assertStringContainsString('payout_minimums[USD]', $body);
-        $this->assertStringContainsString('payout_minimums[NGN]', $body);
-        $this->assertStringContainsString('Current base equivalent', $body);
+        $this->assertStringContainsString('name="payout_minimum_amount"', $body);
+        $this->assertStringContainsString('value="10.00"', $body);
+        $this->assertStringContainsString('payout_minimum_rates[NGN]', $body);
+        // The anchor currency's rate is 1 by definition, so it has no input.
+        $this->assertStringNotContainsString('payout_minimum_rates[USD]', $body);
+        $this->assertStringContainsString('14,900.00 NGN', $body);
     }
 
-    public function test_saving_currency_minimums_clamps_negative_values_and_ignores_unknown_codes(): void
+    public function test_saving_conversion_rates_keeps_positive_rates_and_ignores_the_rest(): void
     {
         $this->signInAsSuperAdmin();
         (new CurrencyRepository($this->db))->create('NGN', '₦', 1490.0);
+        (new CurrencyRepository($this->db))->create('EUR', '€', 0.92);
+        (new CurrencyRepository($this->db))->create('GBP', '£', 0.79);
 
         $this->controller->saveSettings($this->request([
             'payout_holding_days' => '30',
-            'payout_minimums' => [
-                'USD' => '25.75',
-                'NGN' => '-10',
-                'ZZZ' => '999999',
+            'payout_minimum_amount' => '10',
+            'payout_minimum_currency' => 'USD',
+            'payout_minimum_rates' => [
+                'NGN' => '1600',
+                'EUR' => '',      // blank = follow the live rate
+                'GBP' => '-3',    // nonsense = follow the live rate
+                'USD' => '5',     // the anchor is always 1
+                'ZZZ' => '99',    // not a configured currency
             ],
         ]));
 
-        $minimums = json_decode((string) $this->settings->get('reseller.payout_minimums', '{}'), true);
-        $this->assertIsArray($minimums);
-        $this->assertSame('25.75', $minimums['USD']);
-        $this->assertSame('0.00', $minimums['NGN']);
-        $this->assertArrayNotHasKey('ZZZ', $minimums);
+        $rates = json_decode((string) $this->settings->get('reseller.payout_minimum_rates', '{}'), true);
+        $this->assertIsArray($rates);
+        $this->assertSame(['NGN'], array_keys($rates));
+        $this->assertEqualsWithDelta(1600.0, (float) $rates['NGN'], 0.0001);
+        $this->assertSame('10.00', $this->settings->get('reseller.payout_minimum_amount'));
+        $this->assertSame('USD', $this->settings->get('reseller.payout_minimum_currency'));
+    }
+
+    public function test_an_unconfigured_anchor_currency_is_refused(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $this->controller->saveSettings($this->request([
+            'payout_holding_days' => '30',
+            'payout_minimum_currency' => 'ZZZ',
+        ]));
+
+        $this->assertSame('USD', $this->settings->get('reseller.payout_minimum_currency'));
     }
 
     public function test_changing_the_holding_period_applies_to_receipts_posted_afterwards(): void
@@ -331,7 +362,7 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
             0.001
         );
 
-        $this->controller->saveSettings($this->request(['payout_holding_days' => '0', 'payout_minimum' => '0']));
+        $this->controller->saveSettings($this->request(['payout_holding_days' => '0', 'payout_minimum_amount' => '0']));
 
         // The existing receipt is NOT released. Each entry stores the date it
         // becomes withdrawable, so a change here governs receipts posted from now

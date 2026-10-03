@@ -296,7 +296,8 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
     public function test_the_account_page_does_not_offer_a_payout_below_the_minimum(): void
     {
         $this->signInAsClient();
-        $this->earn(20.0, 60);
+        // Below the default $10 minimum (migration 0205).
+        $this->earn(5.0, 60);
 
         $body = (string) $this->client->index($this->request())->body();
 

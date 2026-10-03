@@ -270,6 +270,10 @@ final class ClientResellerController
             // chat button would use — so it works out of the box rather than waiting
             // for them to retype a number we already have.
             'phoneHint' => ResellerChat::normaliseWhatsapp((string) ($client['phone'] ?? '')) ?? '',
+            // Whether the reseller has ever saved chat settings. Until they have, the
+            // storefront ALREADY shows a WhatsApp button on the phone hint above, and
+            // the page says so; afterwards, a blank field means "no chat".
+            'chatConfigured' => $store !== null && ResellerChat::isConfigured($store),
             'platformHost' => $this->locator->platformHost(),
             'slugSuggestion' => $this->stores->suggestSlug($companyName !== '' ? $companyName : $personName),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),

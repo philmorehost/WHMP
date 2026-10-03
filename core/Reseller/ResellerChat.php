@@ -142,19 +142,62 @@ final class ResellerChat
      * What this store should show. Tawk.To wins when it is configured, because a
      * reseller who has set it up has deliberately chosen it.
      *
+     * $ownerPhone is the store owner's account phone. It is used ONLY while the
+     * reseller has never saved their chat settings (`chat_configured_at` is NULL):
+     * that is what makes the WhatsApp button appear automatically on a new store,
+     * instead of waiting for a "Save" the reseller did not know they had to press.
+     * Once they have saved, their choice is final — including "no chat at all".
+     *
      * @param array<string, mixed> $store a `resellers` row
      */
-    public static function provider(array $store): string
+    public static function provider(array $store, ?string $ownerPhone = null): string
     {
         if (trim((string) ($store['tawk_property_id'] ?? '')) !== '') {
             return self::PROVIDER_TAWKTO;
         }
 
-        if (trim((string) ($store['support_whatsapp'] ?? '')) !== '') {
-            return self::PROVIDER_WHATSAPP;
+        return self::whatsappDigitsFor($store, $ownerPhone) !== null
+            ? self::PROVIDER_WHATSAPP
+            : self::PROVIDER_NONE;
+    }
+
+    /**
+     * Has the reseller ever saved their chat settings? Until they have, the
+     * store's chat follows the automatic default (the owner's phone).
+     *
+     * @param array<string, mixed> $store
+     */
+    public static function isConfigured(array $store): bool
+    {
+        return trim((string) ($store['chat_configured_at'] ?? '')) !== '';
+    }
+
+    /**
+     * The digits the store's WhatsApp button dials, or NULL for no button.
+     *
+     * 1. The number the reseller saved, always.
+     * 2. Otherwise — and only if they have NEVER saved chat settings — their own
+     *    account phone, when it is a usable WhatsApp number.
+     *
+     * Re-normalised on read, not trusted from the row: the value ends up in a
+     * link on a public page, and a number written by an older code path (or
+     * typed into the client profile in any shape) must still come out as digits.
+     *
+     * @param array<string, mixed> $store a `resellers` row
+     */
+    public static function whatsappDigitsFor(array $store, ?string $ownerPhone = null): ?string
+    {
+        $saved = self::normaliseWhatsapp((string) ($store['support_whatsapp'] ?? ''));
+
+        if ($saved !== null) {
+            return $saved;
         }
 
-        return self::PROVIDER_NONE;
+        if (self::isConfigured($store) || $ownerPhone === null) {
+            return null;
+        }
+
+        return self::normaliseWhatsapp($ownerPhone);
     }
 
     /**

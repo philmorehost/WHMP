@@ -164,7 +164,7 @@ final class ResellerPayoutTest extends DatabaseTestCase
 
     public function test_a_request_below_the_minimum_is_refused_but_the_funds_are_kept(): void
     {
-        $this->settings->set('reseller.payout_minimum', '50.00');
+        $this->settings->set('reseller.payout_minimum_amount', '50.00');
         $this->earn(20.0, 60);
 
         $result = $this->service->request($this->storeId);
@@ -181,7 +181,7 @@ final class ResellerPayoutTest extends DatabaseTestCase
 
     public function test_exactly_the_minimum_is_enough(): void
     {
-        $this->settings->set('reseller.payout_minimum', '50.00');
+        $this->settings->set('reseller.payout_minimum_amount', '50.00');
         $this->earn(50.0, 60);
 
         // The boundary, from the side that must be allowed. A refusal tested only

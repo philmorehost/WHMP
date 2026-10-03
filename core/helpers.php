@@ -206,8 +206,9 @@ if (!function_exists('brand_name_forget')) {
 
 if (!function_exists('active_promo_banner')) {
     /**
-     * The one promo banner (if any) an admin has targeted at the current
-     * request path, or null. Resolved through the container rather than
+     * The one promo banner (if any) targeted at the current request path ON THE
+     * SITE BEING SERVED, or null — the platform's banners on the platform, a
+     * store's own banners on that store. Resolved through the container rather than
      * injected because layouts.client is shared by every public controller —
      * adding a constructor dependency to each just to thread this through
      * would be a much larger change for a single popup.
@@ -220,7 +221,14 @@ if (!function_exists('active_promo_banner')) {
             $container = \CodeVault\Support\App::container();
             $repo = $container->make(\CodeVault\Marketing\PromoBannerRepository::class);
             $pageKey = \CodeVault\Marketing\PromoBannerPages::keyForPath((string) ($_SERVER['REQUEST_URI'] ?? '/'));
-            $banner = $repo->activeForPage($pageKey);
+
+            // WHICH SITE is being served decides whose banners are eligible: the
+            // platform's own banners on the platform, a store's own banners on
+            // that store — never the platform's popup on a reseller's website.
+            // Resolving the tenant can only fail before the container is built,
+            // and the catch below then shows nothing, which is the safe side.
+            $resellerId = $container->make(\CodeVault\Reseller\CurrentReseller::class)->id();
+            $banner = $repo->activeForPage($pageKey, $resellerId);
 
             if ($banner !== null) {
                 $repo->incrementImpressions((int) $banner['id']);

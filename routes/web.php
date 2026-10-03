@@ -102,13 +102,31 @@ $router->get('/deals', function (Request $request, array $params, Container $con
     $settings = $container->make(\CodeVault\Settings\SettingsRepository::class);
     $whatsappNumber = trim((string) $settings->get('company.whatsapp', ''));
 
+    // Deals are a SITE's deals. On a reseller's host this lists only that store's
+    // own codes and links to the store's own WhatsApp — never the platform's
+    // promotions or the platform's number, which belong to a different business.
+    $tenant = $container->make(\CodeVault\Reseller\CurrentReseller::class);
+    $store = $tenant->get();
+
+    if ($store !== null) {
+        $ownerPhone = null;
+
+        if (!\CodeVault\Reseller\ResellerChat::isConfigured($store) && (int) ($store['client_id'] ?? 0) > 0) {
+            $owner = $container->make(\CodeVault\Clients\ClientRepository::class)->find((int) $store['client_id']);
+            $ownerPhone = $owner === null ? null : (string) ($owner['phone'] ?? '');
+        }
+
+        $whatsappNumber = (string) (\CodeVault\Reseller\ResellerChat::whatsappDigitsFor($store, $ownerPhone) ?? '');
+    }
+
     $promotions = $db->select("
-        SELECT * FROM promotions 
-        WHERE status = 'active' 
-          AND (starts_at IS NULL OR starts_at <= CURRENT_DATE()) 
+        SELECT * FROM promotions
+        WHERE status = 'active'
+          AND " . ($store !== null ? 'reseller_id = ?' : 'reseller_id IS NULL') . "
+          AND (starts_at IS NULL OR starts_at <= CURRENT_DATE())
           AND (expires_at IS NULL OR expires_at >= CURRENT_DATE())
         ORDER BY id DESC
-    ");
+    ", $store !== null ? [(int) $store['id']] : []);
 
     $content = $view->render('pages.deals', [
         'promotions' => $promotions,

@@ -211,10 +211,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <label for="support_whatsapp">WhatsApp number</label><br>
                 <input class="cv-input" type="text" id="support_whatsapp" name="support_whatsapp" maxlength="32"
                        placeholder="+234 801 234 5678"
-                       value="<?= e($chat['support_whatsapp'] !== '' ? $chat['support_whatsapp'] : $phoneHint) ?>">
-                <br><span style="color:var(--cv-text-secondary);">Include the country code. This becomes your default
-                    chat button — it works straight away, and there is nothing to sign up for. Leave both fields blank
-                    to show no chat at all.</span>
+                       value="<?= e($chat['support_whatsapp'] !== '' ? $chat['support_whatsapp'] : (($chatConfigured ?? false) ? '' : $phoneHint)) ?>">
+                <br><span style="color:var(--cv-text-secondary);">Include the country code. This is the WhatsApp chat
+                    button that floats at the bottom-right of every page of your storefront — visitors can minimise it,
+                    and it works straight away with nothing to sign up for.
+                    <?php if (!($chatConfigured ?? false) && $phoneHint !== ''): ?>
+                        <strong>Until you save here, your storefront already uses your account phone
+                        (+<?= e($phoneHint) ?>)</strong> so your customers can reach you from day one.
+                    <?php endif; ?>
+                    To show no chat at all, clear both fields and save.</span>
             </p>
             <p>
                 <label for="tawk_property_id">Tawk.To property id <em>(optional)</em></label><br>

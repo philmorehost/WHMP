@@ -20,11 +20,16 @@ final class PromotionService
     }
 
     /**
+     * $resellerId is the site the code is being used ON: null for the platform's
+     * own site, the store id on a storefront. A code is only ever found on the
+     * site that owns it, so a platform coupon cannot discount a reseller's
+     * prices and one store's coupon cannot be used at another store.
+     *
      * @return array{valid: bool, message: string, discount: float, promotion: ?array<string, mixed>}
      */
-    public function validate(string $code, float $subtotal): array
+    public function validate(string $code, float $subtotal, ?int $resellerId = null): array
     {
-        $promotion = $this->promotions->findByCode($code);
+        $promotion = $this->promotions->findByCode($code, $resellerId);
 
         if ($promotion === null) {
             return ['valid' => false, 'message' => 'Promo code not found.', 'discount' => 0.0, 'promotion' => null];

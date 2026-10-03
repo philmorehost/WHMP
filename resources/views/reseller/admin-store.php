@@ -191,6 +191,8 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         <p style="color:var(--cv-text-secondary);">
             What this store's customers see. The platform's own chatbox is never shown on a store's domain — a store
             either has its own chat here or none at all. The reseller can change this themselves from their portal.
+            Until chat settings have been saved once (here or by the reseller), the store automatically shows a
+            WhatsApp button on the owner's account phone number.
         </p>
         <form method="post" action="/admin/resellers/<?= (int) $clientId ?>/store/chat"><?= csrf_field() ?>
             <p>

@@ -8,12 +8,16 @@
  * @var int $claimable
  * @var int $holdingDays
  * @var array<int, array<string, mixed>> $minimums
+ * @var float $minimumAmount the threshold, in $minimumCurrency
+ * @var string $minimumCurrency the currency the threshold is set in
  * @var string $baseCode
  * @var string|null $notice
  * @var string|null $error
  */
 
 $money = static fn (float $amount, string $code): string => number_format($amount, 2) . ($code === '' ? '' : ' ' . $code);
+// Rates are shown to six places without trailing zeros: 1490, 0.92, 0.000671.
+$rateText = static fn (float $rate): string => rtrim(rtrim(number_format($rate, 6, '.', ''), '0'), '.');
 ?>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
@@ -61,7 +65,8 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
         <strong>Withdrawable now</strong> is smaller by exactly the receipts still inside the
         <?= (int) $holdingDays ?>-day holding period, and it is the only figure a payout may draw on. Showing
         one number and calling it “available” would overstate every account by a month of sales. The payout
-        threshold is set separately for each reseller currency, so “above the minimum” is a separate count.
+        threshold is set once (<?= e($money((float) $minimumAmount, $minimumCurrency)) ?>) and converted into each reseller's
+        currency, so “above the minimum” is a separate count.
     </p>
 </div>
 
@@ -87,39 +92,111 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
                 <td><input type="number" name="payout_holding_days" min="0" step="1" value="<?= (int) $holdingDays ?>"></td>
             </tr>
             <tr>
-                <td><strong>Minimum payout by currency</strong><br>
-                    <span style="color:var(--cv-text-secondary);">Amounts are nominal in the reseller's own
-                        currency. A payout balance is compared using the current FX rate; the existing base-currency
-                        minimum remains the fallback for any currency not listed here.</span></td>
+                <td><strong>Minimum payout</strong><br>
+                    <span style="color:var(--cv-text-secondary);">The smallest withdrawable balance a reseller can ask to
+                        be paid. Set it once, in one currency; every other currency's minimum is derived from it using
+                        the conversion rate below.</span></td>
                 <td>
+                    <div style="display:flex;gap:var(--cv-space-2);align-items:center;flex-wrap:wrap;">
+                        <input class="cv-input" type="number" name="payout_minimum_amount" min="0" step="0.01" required
+                               style="max-width:10rem;" data-payout-minimum-amount
+                               value="<?= e(number_format((float) $minimumAmount, 2, '.', '')) ?>">
+                        <select class="cv-input" name="payout_minimum_currency" style="max-width:8rem;" data-payout-minimum-anchor>
+                            <?php foreach ($minimums as $minimumRow): ?>
+                                <?php $optionCode = (string) ($minimumRow['currency_code'] ?? ''); ?>
+                                <option value="<?= e($optionCode) ?>" <?= $optionCode === $minimumCurrency ? 'selected' : '' ?>><?= e($optionCode) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <strong>Conversion rate for other currencies</strong><br>
+                    <span style="color:var(--cv-text-secondary);">How many units of each currency one
+                        <?= e($minimumCurrency) ?> is worth when working out its minimum. Leave a rate blank to follow the
+                        live exchange rate from <a href="/admin/currencies">Currencies</a>; enter a figure to fix the rate
+                        used for payouts in that currency. The balance is still compared in base units at today's rate.</span>
+                    <div style="overflow-x:auto;margin-top:var(--cv-space-2);">
                     <table class="cv-table">
-                        <thead><tr><th>Currency</th><th>Minimum</th><th>Current base equivalent</th></tr></thead>
+                        <thead><tr>
+                            <th>Currency</th>
+                            <th>Live rate (1 <?= e($minimumCurrency) ?> =)</th>
+                            <th>Conversion rate used for payouts</th>
+                            <th>Minimum payout</th>
+                            <th>Base equivalent</th>
+                        </tr></thead>
                         <tbody>
                         <?php foreach ($minimums as $minimumRow): ?>
-                            <?php $minimumCode = (string) ($minimumRow['currency_code'] ?? ''); ?>
-                            <tr>
+                            <?php
+                            $minimumCode = (string) ($minimumRow['currency_code'] ?? '');
+                            $isAnchor = ($minimumRow['anchor'] ?? false) === true;
+                            $isCustom = ($minimumRow['custom'] ?? false) === true;
+                            $liveRate = (float) ($minimumRow['live_rate'] ?? 1.0);
+                            ?>
+                            <tr data-payout-rate-row data-live-rate="<?= e($rateText($liveRate)) ?>" data-anchor="<?= $isAnchor ? '1' : '0' ?>">
                                 <td><strong><?= e($minimumCode) ?></strong>
-                                    <?php if (($minimumRow['custom'] ?? false) !== true): ?>
-                                        <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">legacy fallback</span>
+                                    <?php if ($isAnchor): ?>
+                                        <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">minimum is set in this currency</span>
                                     <?php endif; ?>
                                 </td>
-                                <td><input type="number" name="payout_minimums[<?= e($minimumCode) ?>]"
-                                           min="0" step="0.01" required
-                                           value="<?= e(number_format((float) $minimumRow['minimum'], 2, '.', '')) ?>"></td>
+                                <td><?= e($rateText($liveRate)) ?></td>
+                                <td>
+                                    <?php if ($isAnchor): ?>
+                                        1
+                                    <?php else: ?>
+                                        <input class="cv-input" type="number" name="payout_minimum_rates[<?= e($minimumCode) ?>]"
+                                               min="0" step="any" style="max-width:10rem;" data-payout-rate-input
+                                               placeholder="<?= e($rateText($liveRate)) ?> (live)"
+                                               value="<?= $isCustom ? e($rateText((float) $minimumRow['rate'])) : '' ?>">
+                                        <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                                            <?= $isCustom ? 'fixed rate' : 'following the live rate' ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><strong data-payout-rate-minimum data-code="<?= e($minimumCode) ?>"><?= e($money((float) $minimumRow['minimum'], $minimumCode)) ?></strong></td>
                                 <td><?= e($money((float) $minimumRow['minimum_base'], $baseCode)) ?></td>
                             </tr>
                         <?php endforeach; ?>
                         <?php if ($minimums === []): ?>
-                            <tr><td colspan="3" style="color:var(--cv-text-secondary);">No currencies are configured.</td></tr>
+                            <tr><td colspan="5" style="color:var(--cv-text-secondary);">No currencies are configured.</td></tr>
                         <?php endif; ?>
                         </tbody>
                     </table>
+                    </div>
                 </td>
             </tr>
             </tbody>
         </table>
         <button class="cv-btn" type="submit">Save payout settings</button>
     </form>
+    <script nonce="<?= csp_nonce() ?>">
+    (function () {
+        // Live preview of each currency's minimum while the admin types. The
+        // server recomputes everything on save; this only saves a round trip.
+        var amountInput = document.querySelector('[data-payout-minimum-amount]');
+        var rows = document.querySelectorAll('[data-payout-rate-row]');
+        if (!amountInput || !rows.length) { return; }
+        function refresh() {
+            var amount = parseFloat(amountInput.value);
+            if (!isFinite(amount) || amount < 0) { amount = 0; }
+            rows.forEach(function (row) {
+                var out = row.querySelector('[data-payout-rate-minimum]');
+                if (!out) { return; }
+                var rate = 1;
+                if (row.getAttribute('data-anchor') !== '1') {
+                    var input = row.querySelector('[data-payout-rate-input]');
+                    var typed = input ? parseFloat(input.value) : NaN;
+                    rate = isFinite(typed) && typed > 0 ? typed : parseFloat(row.getAttribute('data-live-rate')) || 1;
+                }
+                var code = out.getAttribute('data-code') || '';
+                var value = (Math.round(amount * rate * 100) / 100).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                out.textContent = value + (code ? ' ' + code : '');
+            });
+        }
+        amountInput.addEventListener('input', refresh);
+        document.querySelectorAll('[data-payout-rate-input]').forEach(function (el) { el.addEventListener('input', refresh); });
+    })();
+    </script>
 </div>
 
 <div class="cv-card">

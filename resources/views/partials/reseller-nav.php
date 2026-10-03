@@ -32,6 +32,7 @@ $items = [
     '/client/reseller' => 'Overview',
     '/client/reseller/store' => 'Store & branding',
     '/client/reseller/prices' => 'Your prices',
+    '/client/reseller/promotions' => 'Promotions',
     '/client/reseller/tickets' => 'Support tickets',
     '/client/reseller/mail' => 'Support address',
     '/client/reseller/account' => 'Earnings & payouts',

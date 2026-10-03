@@ -229,7 +229,14 @@ final class CartService
         $promoError = null;
 
         if ($promoCode !== null && $lines !== []) {
-            $validation = $this->promotions->validate($promoCode, $subtotal);
+            // Scoped to the site being shopped on: a storefront honours only that
+            // store's own codes, the platform only its own.
+            $storeId = $store === null ? null : (int) ($store['id'] ?? 0);
+            $validation = $this->promotions->validate(
+                $promoCode,
+                $subtotal,
+                $storeId !== null && $storeId > 0 ? $storeId : null
+            );
 
             if ($validation['valid']) {
                 $discount = $validation['discount'];

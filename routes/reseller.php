@@ -11,6 +11,7 @@ use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\ClientResellerMailController;
+use CodeVault\Reseller\ClientResellerPromotionsController;
 use CodeVault\Reseller\ClientResellerTicketController;
 
 /** @var CodeVault\Router $router */
@@ -71,6 +72,20 @@ $router->post('/client/reseller/tickets/{ticketId}/reply', [ClientResellerTicket
 $router->post('/client/reseller/tickets/{ticketId}/escalate', [ClientResellerTicketController::class, 'escalate']);
 // Taking a request back before we answer it — the store resolved it itself after all.
 $router->post('/client/reseller/tickets/{ticketId}/withdraw', [ClientResellerTicketController::class, 'withdraw']);
+
+// The store's OWN promo codes and discount banner. Strictly isolated: no store id in
+// any path (the store comes from the session guard) and every query is scoped to it,
+// so one store can never see or change another's — or the platform's — offers, and
+// the platform's banner never appears on a store's website (migration 0204).
+$router->get('/client/reseller/promotions', [ClientResellerPromotionsController::class, 'index']);
+$router->post('/client/reseller/promotions/codes', [ClientResellerPromotionsController::class, 'saveCode']);
+$router->post('/client/reseller/promotions/codes/{id}/toggle', [ClientResellerPromotionsController::class, 'toggleCode']);
+$router->post('/client/reseller/promotions/codes/{id}/delete', [ClientResellerPromotionsController::class, 'deleteCode']);
+$router->post('/client/reseller/promotions/banners', [ClientResellerPromotionsController::class, 'createBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/update', [ClientResellerPromotionsController::class, 'updateBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/pause', [ClientResellerPromotionsController::class, 'pauseBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/resume', [ClientResellerPromotionsController::class, 'resumeBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/delete', [ClientResellerPromotionsController::class, 'deleteBanner']);
 
 // The white-label store. Claiming a domain and proving control of it are
 // separate steps on purpose: nothing is served on a claimant's domain until

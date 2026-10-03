@@ -118,13 +118,21 @@ final class ResellerStoreRepository
      */
     public function saveChat(int $id, array $chat): void
     {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        // chat_configured_at records that the reseller has now CHOSEN. From here on
+        // the saved values are final — blank means "no chat", and the automatic
+        // fallback to the owner's account phone (ResellerChat::whatsappDigitsFor)
+        // stops applying.
         $this->db->update(
-            'UPDATE resellers SET support_whatsapp = ?, tawk_property_id = ?, tawk_widget_id = ?, updated_at = ? WHERE id = ?',
+            'UPDATE resellers SET support_whatsapp = ?, tawk_property_id = ?, tawk_widget_id = ?,
+                chat_configured_at = ?, updated_at = ? WHERE id = ?',
             [
                 $this->nullIfBlank($chat['support_whatsapp'] ?? null),
                 $this->nullIfBlank($chat['tawk_property_id'] ?? null),
                 $this->nullIfBlank($chat['tawk_widget_id'] ?? null),
-                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                $now,
+                $now,
                 $id,
             ]
         );

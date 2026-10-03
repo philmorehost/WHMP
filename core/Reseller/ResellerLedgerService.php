@@ -518,59 +518,148 @@ final class ResellerLedgerService
         return max(0, (int) $this->settings->get('reseller.payout_holding_days', '30'));
     }
 
-    /** The legacy fallback minimum, in base units, retained for currencies not configured individually. */
+    /** The default threshold: $10, anchored in USD. */
+    public const DEFAULT_PAYOUT_MINIMUM = 10.0;
+    public const DEFAULT_PAYOUT_MINIMUM_CURRENCY = 'USD';
+
+    /**
+     * The payout threshold as the admin set it: an amount in an ANCHOR currency
+     * (USD by default — "$10"). Every other currency's minimum is this amount
+     * multiplied by that currency's conversion rate, so there is one figure to
+     * change and the currencies cannot drift away from each other.
+     */
     public function payoutMinimum(): float
     {
-        return max(0.0, (float) $this->settings->get('reseller.payout_minimum', '50.00'));
+        $raw = $this->settings->get('reseller.payout_minimum_amount', null);
+
+        if ($raw === null || !is_numeric($raw) || !is_finite((float) $raw)) {
+            return self::DEFAULT_PAYOUT_MINIMUM;
+        }
+
+        return round(max(0.0, (float) $raw), 2);
+    }
+
+    /**
+     * The currency the threshold is written in. Falls back to the base currency
+     * when the configured anchor is not (or no longer) a configured currency, so
+     * a deleted currency can never make the minimum unresolvable.
+     */
+    public function payoutMinimumCurrency(): string
+    {
+        $configured = strtoupper(trim((string) $this->settings->get(
+            'reseller.payout_minimum_currency',
+            self::DEFAULT_PAYOUT_MINIMUM_CURRENCY
+        )));
+
+        foreach ($this->currency->all() as $currency) {
+            if (strtoupper(trim((string) ($currency['code'] ?? ''))) === $configured && $configured !== '') {
+                return $configured;
+            }
+        }
+
+        return strtoupper(trim($this->currency->codeFor(null)));
+    }
+
+    /**
+     * Admin-set conversion rates for the minimum: code => units of that currency
+     * per ONE unit of the anchor currency. A currency with no entry follows the
+     * live exchange rate.
+     *
+     * @return array<string, float>
+     */
+    public function payoutMinimumRates(): array
+    {
+        $decoded = json_decode((string) $this->settings->get('reseller.payout_minimum_rates', '{}'), true);
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $rates = [];
+
+        foreach ($decoded as $code => $rate) {
+            $code = strtoupper(trim((string) $code));
+
+            if ($code === '' || !is_numeric($rate) || !is_finite((float) $rate) || (float) $rate <= 0.0) {
+                continue;
+            }
+
+            $rates[$code] = (float) $rate;
+        }
+
+        return $rates;
+    }
+
+    /**
+     * The live rate between the anchor and $currency, from the exchange rates on
+     * /admin/currencies: how many units of $currency one anchor unit buys.
+     *
+     * @param array<string, mixed> $currency
+     */
+    public function liveMinimumRate(array $currency): float
+    {
+        $anchor = $this->payoutMinimumCurrency();
+        $code = strtoupper(trim((string) ($currency['code'] ?? '')));
+
+        if ($code === '' || $code === $anchor) {
+            return 1.0;
+        }
+
+        $anchorRate = $this->currency->rateForCode($anchor);
+        $anchorRate = $anchorRate > 0.0 ? $anchorRate : 1.0;
+        $targetRate = $this->currency->rateFor($currency);
+        $targetRate = $targetRate > 0.0 ? $targetRate : 1.0;
+
+        return $targetRate / $anchorRate;
     }
 
     /**
      * The minimum expressed in both the account's base unit and the reseller's
-     * currency. Explicit per-currency settings are nominal amounts in that
-     * currency; an unconfigured currency keeps the legacy behavior by converting
-     * the old base-unit minimum at the current rate.
+     * currency.
+     *
+     *   minimum      = anchor amount x conversion rate (admin-set, else live)
+     *   minimum_base = minimum / the currency's live exchange rate
+     *
+     * minimum_base is what a balance is compared against, because the account is
+     * kept in base units.
      *
      * @param array<string, mixed> $currency
-     * @return array{minimum: float, minimum_base: float, currency_code: string, custom: bool}
+     * @return array{minimum: float, minimum_base: float, currency_code: string, rate: float, live_rate: float, custom: bool}
      */
     public function payoutMinimumForCurrency(array $currency): array
     {
         $code = strtoupper(trim((string) ($currency['code'] ?? '')));
-        $rate = $this->currency->rateFor($currency);
-        $rate = $rate > 0.0 ? $rate : 1.0;
-        $map = $this->payoutMinimumMap();
+        $anchor = $this->payoutMinimumCurrency();
+        $amount = $this->payoutMinimum();
+        $liveRate = $this->liveMinimumRate($currency);
+        $overrides = $this->payoutMinimumRates();
 
-        if ($code !== '' && array_key_exists($code, $map)) {
-            $minimum = $map[$code];
+        $custom = $code !== '' && $code !== $anchor && array_key_exists($code, $overrides);
+        $rate = $code === $anchor ? 1.0 : ($custom ? $overrides[$code] : $liveRate);
 
-            return [
-                'minimum' => $minimum,
-                'minimum_base' => round($minimum / $rate, 6),
-                'currency_code' => $code,
-                'custom' => true,
-            ];
-        }
+        $minimum = round($amount * $rate, 2);
 
-        $baseMinimum = $this->payoutMinimum();
+        $exchange = $this->currency->rateFor($currency);
+        $exchange = $exchange > 0.0 ? $exchange : 1.0;
 
         return [
-            'minimum' => $this->currency->convert($baseMinimum, $rate),
-            'minimum_base' => $baseMinimum,
+            'minimum' => $minimum,
+            'minimum_base' => round($minimum / $exchange, 6),
             'currency_code' => $code,
-            'custom' => false,
+            'rate' => $rate,
+            'live_rate' => $liveRate,
+            'custom' => $custom,
         ];
     }
 
     /**
-     * Effective settings for the admin form. Values are shown in each currency;
-     * for currencies without an explicit setting, the legacy base minimum is
-     * converted at today's rate so saving the form does not silently change its
-     * current behavior.
+     * Effective settings for the admin form, one row per configured currency.
      *
-     * @return array<int, array{currency_code: string, currency_name: string, minimum: float, minimum_base: float, custom: bool}>
+     * @return array<int, array{currency_code: string, currency_name: string, minimum: float, minimum_base: float, rate: float, live_rate: float, custom: bool, anchor: bool}>
      */
     public function payoutMinimums(): array
     {
+        $anchor = $this->payoutMinimumCurrency();
         $minimums = [];
 
         foreach ($this->currency->all() as $currency) {
@@ -580,34 +669,14 @@ final class ResellerLedgerService
                 'currency_name' => (string) ($currency['name'] ?? $currency['code'] ?? ''),
                 'minimum' => $effective['minimum'],
                 'minimum_base' => $effective['minimum_base'],
+                'rate' => $effective['rate'],
+                'live_rate' => $effective['live_rate'],
                 'custom' => $effective['custom'],
+                'anchor' => $effective['currency_code'] === $anchor,
             ];
         }
 
         return $minimums;
-    }
-
-    /** @return array<string, float> */
-    private function payoutMinimumMap(): array
-    {
-        $decoded = json_decode((string) $this->settings->get('reseller.payout_minimums', '{}'), true);
-
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        $map = [];
-        foreach ($decoded as $code => $amount) {
-            $code = strtoupper(trim((string) $code));
-
-            if ($code === '' || !is_numeric($amount) || !is_finite((float) $amount)) {
-                continue;
-            }
-
-            $map[$code] = round(max(0.0, (float) $amount), 2);
-        }
-
-        return $map;
     }
 
     /**

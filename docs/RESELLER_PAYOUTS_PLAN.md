@@ -429,6 +429,13 @@ its only output is a number we can check by hand against the orders.
    inconsistency that generates support tickets. A per-currency minimum is the
    more correct answer for NGN against USD, and is not being built until there are
    multi-currency resellers to justify it.
+   **Superseded 2026-10-03 (migration 0205):** the minimum is now **$10**, set once
+   in an anchor currency (USD by default) on `/admin/resellers/accounts`. Every
+   other currency's minimum is that amount × a conversion rate — the live exchange
+   rate by default, or a fixed per-currency rate the admin enters on the same page
+   (`reseller.payout_minimum_amount`, `reseller.payout_minimum_currency`,
+   `reseller.payout_minimum_rates`). The old `reseller.payout_minimum` /
+   `reseller.payout_minimums` keys are retired.
 7. **FX risk** — *the reseller carries it.* The account is therefore kept in the
    base unit and converted at payout, rather than fixed at receipt. This is the
    one decision that changed the design: §2 for what a reseller will notice, §6

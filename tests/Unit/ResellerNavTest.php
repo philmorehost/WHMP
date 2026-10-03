@@ -88,6 +88,7 @@ final class ResellerNavTest extends TestCase
             '/client/reseller',
             '/client/reseller/store',
             '/client/reseller/prices',
+            '/client/reseller/promotions',
             '/client/reseller/tickets',
             '/client/reseller/mail',
             '/client/reseller/account',

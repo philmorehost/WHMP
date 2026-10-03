@@ -11,10 +11,14 @@ use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
 
+/**
+ * The PLATFORM's promo banners. Every read and write here is scoped to
+ * `reseller_id IS NULL` (the repositories' default scope), so this page can
+ * neither list nor edit a reseller's banner — resellers manage their own under
+ * /client/reseller/promotions, and the two are strictly isolated.
+ */
 final class PromoBannerController
 {
-    private const CTA_DEFAULT = 'Apply Now';
-
     public function __construct(
         private readonly AuthGuard $guard,
         private readonly View $view,
@@ -59,7 +63,7 @@ final class PromoBannerController
         }
 
         $fields['status'] = 'active';
-        $this->banners->create($fields);
+        $this->banners->create($fields, null);
 
         return Response::redirect('/admin/promo-banners?saved=1');
     }
@@ -72,7 +76,7 @@ final class PromoBannerController
 
         $id = (int) $params['id'];
 
-        if ($this->banners->find($id) === null) {
+        if ($this->banners->findScoped($id, null) === null) {
             return Response::html('404 Not Found', 404);
         }
 
@@ -89,7 +93,7 @@ final class PromoBannerController
             ]);
         }
 
-        $this->banners->update($id, $fields);
+        $this->banners->update($id, $fields, null);
 
         return Response::redirect('/admin/promo-banners?saved=1');
     }
@@ -100,7 +104,7 @@ final class PromoBannerController
             return $denied;
         }
 
-        $this->banners->setStatus((int) $params['id'], 'paused');
+        $this->banners->setStatus((int) $params['id'], 'paused', null);
 
         return Response::redirect('/admin/promo-banners');
     }
@@ -111,7 +115,7 @@ final class PromoBannerController
             return $denied;
         }
 
-        $this->banners->setStatus((int) $params['id'], 'active');
+        $this->banners->setStatus((int) $params['id'], 'active', null);
 
         return Response::redirect('/admin/promo-banners');
     }
@@ -122,7 +126,7 @@ final class PromoBannerController
             return $denied;
         }
 
-        $this->banners->delete((int) $params['id']);
+        $this->banners->delete((int) $params['id'], null);
 
         return Response::redirect('/admin/promo-banners');
     }
@@ -130,58 +134,19 @@ final class PromoBannerController
     /**
      * Shared read+validate for store()/update() — a banner without a real,
      * currently-existing coupon code would advertise a code checkout rejects,
-     * so the code is cross-checked against `promotions` here rather than
-     * trusted as free text.
+     * so the code is cross-checked against the PLATFORM's `promotions` here
+     * rather than trusted as free text (see PromoBannerInput).
      *
      * @return array{0: array<string, mixed>, 1: string|null} [fields, error]
      */
     private function readFields(Request $request): array
     {
-        $name = trim((string) $request->input('name', ''));
-        $template = trim((string) $request->input('template', PromoBannerTemplates::DEFAULT_KEY));
-        $eyebrowText = trim((string) $request->input('eyebrow_text', ''));
-        $headline = trim((string) $request->input('headline', ''));
-        $subtext = trim((string) $request->input('subtext', ''));
-        $couponCode = strtoupper(trim((string) $request->input('coupon_code', '')));
-        $ctaText = trim((string) $request->input('cta_text', '')) ?: self::CTA_DEFAULT;
-        $startsAt = trim((string) $request->input('starts_at', ''));
-        $expiresAt = trim((string) $request->input('expires_at', ''));
-
-        /** @var array<int, string> $pagesInput */
-        $pagesInput = (array) $request->input('target_pages', []);
-        $pages = array_values(array_intersect(
-            array_merge([PromoBannerPages::ALL], array_keys(PromoBannerPages::PAGES)),
-            $pagesInput
-        ));
-
-        if ($name === '' || $headline === '' || $couponCode === '') {
-            return [[], 'Name, headline and coupon code are required.'];
-        }
-
-        if (!PromoBannerTemplates::isValid($template)) {
-            return [[], 'Choose a valid design template.'];
-        }
-
-        if ($this->promotions->findByCode($couponCode) === null) {
-            return [[], "No promotion code \"{$couponCode}\" exists — create it under Billing → Promotions first."];
-        }
-
-        if ($pages === []) {
-            $pages = [PromoBannerPages::ALL];
-        }
-
-        return [[
-            'name' => $name,
-            'template' => $template,
-            'eyebrow_text' => $eyebrowText !== '' ? $eyebrowText : null,
-            'headline' => $headline,
-            'subtext' => $subtext !== '' ? $subtext : null,
-            'coupon_code' => $couponCode,
-            'cta_text' => $ctaText,
-            'target_pages' => json_encode($pages, JSON_UNESCAPED_SLASHES),
-            'starts_at' => $startsAt !== '' ? $startsAt : null,
-            'expires_at' => $expiresAt !== '' ? $expiresAt : null,
-        ], null];
+        return PromoBannerInput::read(
+            $request,
+            $this->promotions,
+            null,
+            'create it under Billing → Promotions first.'
+        );
     }
 
     private function requirePermission(): ?Response
