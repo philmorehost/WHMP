@@ -61,10 +61,48 @@ final class CurlHttpClient implements HttpClient
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
         }
 
+        // Response headers are only collected for an admin's connection test.
+        $recording = HttpExchangeLog::recording();
+        $responseHeaders = [];
+
+        if ($recording) {
+            curl_setopt($ch, CURLOPT_HEADERFUNCTION, static function ($handle, string $line) use (&$responseHeaders): int {
+                $responseHeaders[] = $line;
+
+                return strlen($line);
+            });
+        }
+
         $raw = curl_exec($ch);
         $errored = $raw === false || curl_errno($ch) !== 0;
         $errorMsg = $errored ? trim(curl_error($ch)) . ' [cURL ' . curl_errno($ch) . ']' : '';
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if ($recording) {
+            $sent = $headers;
+
+            if (!$hasUserAgent) {
+                $sent['User-Agent'] = 'WHMP-CodeVault/1.0 (PHP cURL)';
+            }
+
+            HttpExchangeLog::record(
+                $method,
+                $url,
+                $sent,
+                $body,
+                $errored ? 0 : $status,
+                $raw === false ? '' : (string) $raw,
+                $errorMsg,
+                $responseHeaders,
+                [
+                    'primary_ip' => (string) curl_getinfo($ch, CURLINFO_PRIMARY_IP),
+                    'local_ip' => (string) curl_getinfo($ch, CURLINFO_LOCAL_IP),
+                    'total_time' => (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
+                    'via_proxy' => $this->proxy !== null && trim($this->proxy) !== '',
+                ]
+            );
+        }
+
         curl_close($ch);
 
         return [

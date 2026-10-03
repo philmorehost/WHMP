@@ -547,6 +547,22 @@
             }
             resultEl.textContent = data.message || (data.success ? 'Connected.' : 'Connection failed.');
             resultEl.className = 'server-test-result cv-badge ' + (data.success ? 'cv-badge--success' : 'cv-badge--danger');
+            resultEl.style.whiteSpace = 'normal';
+            resultEl.style.textAlign = 'left';
+
+            var debugEl = document.querySelector('[data-server-test-debug="' + id + '"]');
+            if (debugEl) {
+                renderServerTestExchanges(debugEl, data);
+            } else if (!btn.parentElement.querySelector('.server-test-details-link')) {
+                // The servers list has no room for the full answer: link to the edit
+                // page, which runs the test again and shows it.
+                var link = document.createElement('a');
+                link.className = 'server-test-details-link';
+                link.href = '/admin/servers/' + id + '/edit#test-connection';
+                link.textContent = 'See full API response →';
+                link.style.cssText = 'font-size:.75rem;margin-left:6px;text-decoration:underline;';
+                btn.parentElement.appendChild(link);
+            }
         })
         .catch(function () {
             if (resultEl) {
@@ -559,6 +575,162 @@
             btn.innerText = originalLabel;
         });
     });
+
+    // On the server edit page, #test-connection (from the list's "See full API
+    // response" link) runs the test straight away.
+    if (window.location.hash === '#test-connection') {
+        var autoTest = document.querySelector('#test-connection [data-test-server]');
+        if (autoTest) {
+            autoTest.click();
+        }
+    }
+
+    // Builds the "API response details" panel from the test's recorded exchanges.
+    // Everything is set with textContent: provider bodies are untrusted HTML.
+    function renderServerTestExchanges(container, data) {
+        var exchanges = Array.isArray(data.exchanges) ? data.exchanges : [];
+        var report = buildServerTestReport(data, exchanges);
+
+        container.textContent = '';
+
+        var panel = document.createElement('div');
+        panel.style.cssText = 'border:1px solid var(--cv-border-default);border-radius:10px;padding:14px;background:rgba(15,23,42,0.35);';
+
+        var head = document.createElement('div');
+        head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;';
+        var title = document.createElement('strong');
+        title.textContent = '🔎 API response details' + (data.testedAt ? ' (' + data.testedAt + ')' : '');
+        head.appendChild(title);
+
+        var actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'cv-btn cv-btn--secondary';
+        copyBtn.style.cssText = 'padding:4px 10px;font-size:.75rem;';
+        copyBtn.textContent = '📋 Copy report';
+        copyBtn.addEventListener('click', function () {
+            var done = function () { copyBtn.textContent = '✅ Copied'; setTimeout(function () { copyBtn.textContent = '📋 Copy report'; }, 2000); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(report).then(done, function () { selectReport(); });
+            } else {
+                selectReport();
+            }
+        });
+        actions.appendChild(copyBtn);
+
+        var downloadBtn = document.createElement('button');
+        downloadBtn.type = 'button';
+        downloadBtn.className = 'cv-btn cv-btn--secondary';
+        downloadBtn.style.cssText = 'padding:4px 10px;font-size:.75rem;';
+        downloadBtn.textContent = '⬇️ Download .txt';
+        downloadBtn.addEventListener('click', function () {
+            var blob = new Blob([report], { type: 'text/plain' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'api-test-' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        });
+        actions.appendChild(downloadBtn);
+        head.appendChild(actions);
+        panel.appendChild(head);
+
+        var note = document.createElement('p');
+        note.style.cssText = 'font-size:.75rem;color:var(--cv-text-secondary);margin:0 0 10px 0;';
+        note.textContent = 'Exactly what the provider sent back. API keys and passwords are hidden.';
+        panel.appendChild(note);
+
+        if (exchanges.length === 0) {
+            var none = document.createElement('p');
+            none.style.cssText = 'font-size:.8rem;margin:0;';
+            none.textContent = 'No request was sent: the check stopped before contacting the provider (see the message above).';
+            panel.appendChild(none);
+        }
+
+        exchanges.forEach(function (x, i) {
+            var box = document.createElement('div');
+            box.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px dashed var(--cv-border-default);font-size:.8rem;';
+
+            addLine(box, (i + 1) + '. ' + x.method + ' ' + x.url, true);
+
+            var outcome = x.status === 0 ? 'No HTTP response' : 'HTTP ' + x.status;
+            outcome += ' in ' + x.seconds + ' s';
+            if (x.connectedTo) { outcome += ' · connected to ' + x.connectedTo; }
+            if (x.localIp) { outcome += ' · from local IP ' + x.localIp; }
+            if (x.viaProxy) { outcome += ' · via proxy'; }
+            addLine(box, outcome, false, x.status >= 200 && x.status < 300 ? '#34d399' : '#f87171');
+
+            if (x.error) {
+                addLine(box, 'cURL error: ' + x.error, false, '#f87171');
+            }
+
+            addPre(box, 'Request headers sent', Object.keys(x.requestHeaders || {}).map(function (k) { return k + ': ' + x.requestHeaders[k]; }).join('\n') || '(none)');
+            addPre(box, 'Response headers', (x.responseHeaders || []).join('\n') || '(none)');
+            addPre(box, 'Response body (' + x.bodyBytes + ' bytes)', x.body || '(empty)');
+
+            panel.appendChild(box);
+        });
+
+        var raw = document.createElement('textarea');
+        raw.readOnly = true;
+        raw.value = report;
+        raw.className = 'cv-textarea';
+        raw.style.cssText = 'display:none;width:100%;height:220px;margin-top:10px;font-family:monospace;font-size:.72rem;';
+        panel.appendChild(raw);
+
+        function selectReport() {
+            raw.style.display = 'block';
+            raw.focus();
+            raw.select();
+            copyBtn.textContent = 'Press Ctrl+C to copy';
+        }
+
+        container.appendChild(panel);
+    }
+
+    function addLine(parent, text, bold, color) {
+        var el = document.createElement('div');
+        el.textContent = text;
+        el.style.cssText = 'word-break:break-all;margin-bottom:4px;' + (bold ? 'font-weight:700;' : '') + (color ? 'color:' + color + ';' : '');
+        parent.appendChild(el);
+    }
+
+    function addPre(parent, label, text) {
+        var details = document.createElement('details');
+        details.open = label.indexOf('Response') === 0;
+        details.style.cssText = 'margin-top:6px;';
+        var summary = document.createElement('summary');
+        summary.textContent = label;
+        summary.style.cssText = 'cursor:pointer;font-weight:600;';
+        details.appendChild(summary);
+        var pre = document.createElement('pre');
+        pre.textContent = text;
+        pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;background:rgba(0,0,0,0.35);padding:8px;border-radius:6px;font-size:.72rem;margin:4px 0 0 0;';
+        details.appendChild(pre);
+        parent.appendChild(details);
+    }
+
+    function buildServerTestReport(data, exchanges) {
+        var lines = ['WHMP server connection test' + (data.testedAt ? ' - ' + data.testedAt : ''), 'Result: ' + (data.success ? 'OK' : 'FAILED') + ' - ' + (data.message || ''), ''];
+        exchanges.forEach(function (x, i) {
+            lines.push('=== Request ' + (i + 1) + ' ===');
+            lines.push(x.method + ' ' + x.url);
+            Object.keys(x.requestHeaders || {}).forEach(function (k) { lines.push(k + ': ' + x.requestHeaders[k]); });
+            lines.push('');
+            lines.push('--- Response: ' + (x.status === 0 ? 'no HTTP response' : 'HTTP ' + x.status) + ' in ' + x.seconds + ' s'
+                + (x.connectedTo ? ', connected to ' + x.connectedTo : '') + (x.localIp ? ', local IP ' + x.localIp : '') + (x.viaProxy ? ', via proxy' : ''));
+            if (x.error) { lines.push('cURL error: ' + x.error); }
+            (x.responseHeaders || []).forEach(function (h) { lines.push(h); });
+            lines.push('');
+            lines.push(x.body || '(empty body)');
+            lines.push('');
+        });
+        if (exchanges.length === 0) { lines.push('No request was sent.'); }
+        return lines.join('\n');
+    }
 
     // Generic show/hide toggle — a trigger with data-toggle-target (a CSS
     // selector) flips the target's visibility. data-toggle-class switches

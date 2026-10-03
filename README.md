@@ -179,6 +179,12 @@ The VNC console first allows the client's own public IPv4 (InterServer accepts V
 one allowed address) and then shows the host and port. If WHMP is behind a proxy, make
 sure `Request::ip()` sees the real client address.
 
+**Seeing the provider's real answer:** on a server's edit page, Test Connection shows an
+**API response details** panel. It contains the exact request, the HTTP status, the
+response headers and body, the IP connected to, and any cURL error. API keys, passwords
+and cookies are hidden. **Copy report** and **Download .txt** let you send it to the
+provider's support. The servers list links to this panel.
+
 **If Test Connection says Cloudflare blocked the request:** InterServer's API is behind
 Cloudflare, which sometimes blocks web-hosting IP addresses. The message includes the IP
 Cloudflare saw and a Ray ID. Either ask InterServer support to allow API access from that

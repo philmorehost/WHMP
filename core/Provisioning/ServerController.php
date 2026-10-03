@@ -223,16 +223,30 @@ final class ServerController
             ]);
         }
 
+        // Record the raw exchange so the admin can see exactly what the provider
+        // answered (status, headers, body, IPs), with the server's secrets hidden.
+        $secrets = [$server['api_token'] ?? null, $server['account_secret'] ?? null];
+
+        if ($this->secrets !== null && !empty($server['account_secret'])) {
+            $secrets[] = $this->secrets->decrypt((string) $server['account_secret']);
+        }
+
+        HttpExchangeLog::start();
+
         try {
             $result = $module->testConnection(['server' => $server]);
         } catch (\Throwable $e) {
-            return Response::json(['success' => false, 'message' => 'Connection test failed: ' . $e->getMessage()]);
+            $result = ['success' => false, 'message' => 'Connection test failed: ' . $e->getMessage()];
+        } finally {
+            $exchanges = HttpExchangeLog::stop($secrets);
         }
 
         return Response::json([
             'success' => (bool) ($result['success'] ?? false),
             'message' => (string) ($result['message'] ?? ($result['success'] ?? false ? 'Connected.' : 'Connection failed.')),
-        ]);
+            'exchanges' => $exchanges,
+            'testedAt' => gmdate('Y-m-d H:i:s') . ' UTC',
+        ])->withHeader('Cache-Control', 'no-store');
     }
 
     /**
