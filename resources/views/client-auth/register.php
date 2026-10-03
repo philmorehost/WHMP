@@ -1,11 +1,30 @@
 <?php
 /** @var string|null $error */
 /** @var string $refCode */
+/**
+ * @var string|null $accountExists 'same_site' (you already have an account HERE — sign in) or
+ *                                 'other_provider' (it belongs to another provider on this platform).
+ *                                 Never says which provider: that is another business's customer list.
+ */
+$accountExists ??= null;
 ?>
 <div class="cv-card" style="max-width:30rem;margin:var(--cv-space-8) auto;box-sizing:border-box;">
     <h1 class="cv-card__title">Create Account</h1>
 
-    <?php if ($error): ?>
+    <?php if ($accountExists === 'same_site'): ?>
+        <div class="cv-alert cv-alert--neutral" role="alert" style="margin-bottom:var(--cv-space-3);">
+            <strong>You already have an account with this email address.</strong><br>
+            Please <a href="/client/login">sign in</a> instead, or
+            <a href="/client/forgot-password">reset your password</a> if you have forgotten it.
+        </div>
+    <?php elseif ($accountExists === 'other_provider'): ?>
+        <div class="cv-alert cv-alert--warning" role="alert" style="margin-bottom:var(--cv-space-3);">
+            <strong>This email address is already registered with another provider on this platform.</strong><br>
+            Please sign in on the website where you created that account. If you would like to move it here,
+            sign in there and open a support ticket asking for an <strong>account move</strong> — your services,
+            domains, invoices and ticket history move with it. Or use a different email address to register here.
+        </div>
+    <?php elseif ($error): ?>
         <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
     <?php endif; ?>
 

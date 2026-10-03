@@ -684,6 +684,9 @@ class Kernel
                 $c->make(\CodeVault\Settings\SettingsRepository::class),
                 $c->make(\CodeVault\Config::class),
                 $c->make(\CodeVault\Notifications\ClientNotificationRepository::class),
+                // Decides, per message, whether it is written as the platform or as
+                // the reseller store whose customer it is for (white-label mail).
+                $c->make(\CodeVault\Reseller\StoreMailBranding::class),
             );
         });
 
@@ -1582,7 +1585,15 @@ class Kernel
                 }
             }
 
-            $dispatcher->sendTemplate('ticket_opened', $ticket['email'], [
+            // The ticket's own store decides who the customer hears from — not the site
+            // the ticket happened to be opened on (mail piping runs from cron, with no
+            // site at all) and not a guess from the address (a guest has no account).
+            $ticketStore = !empty($ticket['reseller_id'])
+                ? $this->container->make(ResellerStoreRepository::class)->find((int) $ticket['reseller_id'])
+                : null;
+            $customerMail = $ticketStore !== null ? $dispatcher->onBehalfOfStore($ticketStore) : $dispatcher;
+
+            $customerMail->sendTemplate('ticket_opened', $ticket['email'], [
                 'ticket_id' => (string) $ticketId,
                 'ticket_subject' => $ticket['subject'],
                 'department_name' => $ticket['department_name'],
@@ -1594,7 +1605,7 @@ class Kernel
             $admins = $this->container->make(AdminRepository::class)->all();
             foreach ($admins as $admin) {
                 if (!empty($admin['email'])) {
-                    $dispatcher->sendTemplate('admin_ticket_opened', $admin['email'], [
+                    $dispatcher->onBehalfOfPlatform()->sendTemplate('admin_ticket_opened', $admin['email'], [
                         'ticket_id' => (string) $ticketId,
                         'ticket_subject' => $ticket['subject'],
                         'department_name' => $ticket['department_name'],
@@ -1657,11 +1668,13 @@ class Kernel
                 $store = $this->container->make(ResellerStoreRepository::class)->find((int) $ticket['reseller_id']);
             }
 
-            $identity = ResellerMailIdentity::forStore($store, $platformName);
-
             // Customer-facing mail is signed with the STORE's name; staff mail below is
-            // signed with ours, because the admins reading it are ours.
-            $companyName = $identity['name'];
+            // signed with ours, because the admins reading it are ours. The dispatcher is
+            // told explicitly whose ticket this is: the reply may have been written in OUR
+            // admin panel, but the customer must still hear from the store — From name and
+            // address, links and shell included (StoreMailBranding).
+            $companyName = $store !== null ? ResellerMailIdentity::displayName($store) : $platformName;
+            $customerMail = $store !== null ? $dispatcher->onBehalfOfStore($store) : $dispatcher;
 
             $clientName = $ticket['email'];
             if (!empty($ticket['client_id'])) {
@@ -1677,13 +1690,13 @@ class Kernel
                 // recorded, the ticket moved to 'answered', and the customer was never
                 // told it existed. It is treated exactly as our own answer is, because
                 // functionally that is what it is.
-                $dispatcher->sendTemplate('ticket_reply', $ticket['email'], [
+                $customerMail->sendTemplate('ticket_reply', $ticket['email'], [
                     'ticket_id' => (string) $ticketId,
                     'ticket_subject' => $ticket['subject'],
                     'client_name' => $clientName,
                     'reply_message' => nl2br(e($reply['message'])),
                     'company_name' => $companyName,
-                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null, $identity);
+                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null);
             } elseif ($authorType === 'client') {
                 // A customer has written in. On a store's ticket that is the STORE's work,
                 // not ours, and mailing every admin about every reseller customer would
@@ -1699,7 +1712,7 @@ class Kernel
                 $admins = $this->container->make(AdminRepository::class)->all();
                 foreach ($admins as $admin) {
                     if (!empty($admin['email'])) {
-                        $dispatcher->sendTemplate('admin_ticket_reply', $admin['email'], [
+                        $dispatcher->onBehalfOfPlatform()->sendTemplate('admin_ticket_reply', $admin['email'], [
                             'ticket_id' => (string) $ticketId,
                             'ticket_subject' => $ticket['subject'],
                             'client_name' => $clientName,

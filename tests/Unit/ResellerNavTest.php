@@ -90,6 +90,7 @@ final class ResellerNavTest extends TestCase
             '/client/reseller/prices',
             '/client/reseller/promotions',
             '/client/reseller/tickets',
+            '/client/reseller/migrations',
             '/client/reseller/mail',
             '/client/reseller/account',
             '/client/reseller/statements',
@@ -120,6 +121,7 @@ final class ResellerNavTest extends TestCase
             '/client/reseller/store',
             '/client/reseller/account',
             '/client/reseller/statements',
+            '/client/reseller/migrations',
         ] as $path) {
             [$html] = $this->navAt($path);
 
@@ -204,10 +206,10 @@ final class ResellerNavTest extends TestCase
             $checked++;
         }
 
-        // Seven client-* views exist and one of them (the statement document) is deliberately
-        // chrome-free, so six is the real number. Asserted rather than assumed: a glob that
+        // Nine client-* views exist and one of them (the statement document) is deliberately
+        // chrome-free, so eight is the real number. Asserted rather than assumed: a glob that
         // silently matches nothing would make this test pass while checking no page at all —
         // which is exactly the vacuous-pass shape this suite exists to avoid.
-        $this->assertSame(6, $checked, 'expected six navigable reseller pages; the glob is not seeing them all');
+        $this->assertSame(8, $checked, 'expected eight navigable reseller pages; the glob is not seeing them all');
     }
 }

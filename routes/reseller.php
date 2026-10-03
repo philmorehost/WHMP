@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use CodeVault\Reseller\AdminClientMigrationController;
 use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
 use CodeVault\Reseller\AdminResellerDomainController;
@@ -11,6 +12,7 @@ use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\ClientResellerMailController;
+use CodeVault\Reseller\ClientResellerMigrationController;
 use CodeVault\Reseller\ClientResellerPromotionsController;
 use CodeVault\Reseller\ClientResellerTicketController;
 
@@ -72,6 +74,12 @@ $router->post('/client/reseller/tickets/{ticketId}/reply', [ClientResellerTicket
 $router->post('/client/reseller/tickets/{ticketId}/escalate', [ClientResellerTicketController::class, 'escalate']);
 // Taking a request back before we answer it — the store resolved it itself after all.
 $router->post('/client/reseller/tickets/{ticketId}/withdraw', [ClientResellerTicketController::class, 'withdraw']);
+
+// Asking us to move a customer INTO this store, or one of its customers OUT to another
+// provider. A request only — a super admin decides (ClientMigrationService). No store
+// id in either path: the store is the signed-in reseller's own.
+$router->get('/client/reseller/migrations', [ClientResellerMigrationController::class, 'index']);
+$router->post('/client/reseller/migrations', [ClientResellerMigrationController::class, 'submit']);
 
 // The store's OWN promo codes and discount banner. Strictly isolated: no store id in
 // any path (the store comes from the session guard) and every query is scoped to it,
@@ -151,6 +159,15 @@ $router->post('/admin/resellers/domains/{storeId}/provision', [AdminResellerDoma
 // Tickets the stores have handed up to us. A literal path, registered before the
 // parameterised store routes below so 'escalations' is never read as a client id.
 $router->get('/admin/resellers/escalations', [AdminResellerTicketController::class, 'index']);
+
+// Moving clients between providers (store -> store, store <-> platform). Literal paths,
+// registered before the parameterised store routes below for the same reason as the
+// groups above. The review page changes nothing; only `execute` moves a client, and
+// only a super admin may press it (AdminClientMigrationController).
+$router->get('/admin/resellers/migrations', [AdminClientMigrationController::class, 'index']);
+$router->get('/admin/resellers/migrations/review', [AdminClientMigrationController::class, 'review']);
+$router->post('/admin/resellers/migrations/execute', [AdminClientMigrationController::class, 'execute']);
+$router->post('/admin/resellers/migrations/{id}/reject', [AdminClientMigrationController::class, 'reject']);
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).

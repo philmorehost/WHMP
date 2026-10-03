@@ -5,11 +5,11 @@
  * The page answers two questions in order, because the second is meaningless without the
  * first: "what address do my customers see?" and "will that address actually be accepted?"
  *
- * The second is the one people do not know to ask. A store with no address is ALREADY
- * white-labelled — its name is on the message and the platform's authenticated address
- * carries it. Setting an address whose domain has not authorised our server replaces
- * authenticated mail with mail that gets filtered, so the page says that plainly rather
- * than presenting the address as a strict upgrade.
+ * The second is the one people do not know to ask. A store with no address is still
+ * white-labelled — its name is on the message and a no-reply address on the store's OWN
+ * host carries it (never the platform's: see ResellerMailIdentity::senderFor). Whichever
+ * address is used, it is only reliably delivered once the domain authorises our server,
+ * so the page says that plainly.
  *
  * @var array<string, mixed> $store
  * @var string|null $address
@@ -37,9 +37,10 @@ $status = (string) ($store['support_email_status'] ?? '');
     <p style="color:var(--cv-text-secondary);">
         This is the address your customers see when your store replies to a support ticket.
         <?php if ($address === null): ?>
-            Right now it is <strong><?= e($platformSender !== '' ? $platformSender : 'our address') ?></strong>,
+            Right now it is <strong><?= e($platformSender !== '' ? $platformSender : 'a no-reply address on your store\'s domain') ?></strong>,
             with <strong><?= e($brand) ?></strong> as the name on every message — so your customers
-            already see your store, not us.
+            see your store, never us. Customers cannot reply to a no-reply address, so set a real
+            support address below, and authorise our server for your domain so your mail is not filtered.
         <?php else: ?>
             Right now it is <strong><?= e($address) ?></strong>.
         <?php endif; ?>
@@ -143,7 +144,7 @@ $status = (string) ($store['support_email_status'] ?? '');
                 <button type="submit" class="cv-btn cv-btn--secondary">Check again</button>
             </form>
             <form method="post" action="/client/reseller/mail/clear" style="margin:0;"><?= csrf_field() ?>
-                <button type="submit" class="cv-btn cv-btn--secondary">Use our address instead</button>
+                <button type="submit" class="cv-btn cv-btn--secondary">Stop using this address</button>
             </form>
         </div>
     <?php endif; ?>

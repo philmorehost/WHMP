@@ -92,4 +92,9 @@ $selectedDomainId ??= null;
         </div>
         <button class="cv-btn" type="submit">Submit Ticket</button>
     </form>
+
+    <p style="margin:var(--cv-space-5) 0 0;padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);font-size:var(--cv-text-sm);color:var(--cv-text-secondary);">
+        Moving your account to another provider on this platform?
+        <a href="/client/account-move">Request an account move</a> — your services, domains, invoices and ticket history go with it.
+    </p>
 </div>

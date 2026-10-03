@@ -39,8 +39,57 @@ final class ClientAuthController
         private readonly Config $config,
         private readonly SecurityQuestionModuleService $securityQuestions,
         private readonly \CodeVault\Settings\SettingsRepository $settings,
-        private readonly ClientRegistrationOtpRepository $registrationOtps
+        private readonly ClientRegistrationOtpRepository $registrationOtps,
+        // Trailing and optional so the tests that build this controller by hand keep
+        // working; the container always supplies both. Without them the controller
+        // behaves exactly as it did before stores were isolated.
+        private readonly ?\CodeVault\Reseller\ClientSiteAccess $siteAccess = null,
+        private readonly ?\CodeVault\Reseller\CurrentReseller $currentStore = null
     ) {
+    }
+
+    /**
+     * True when this account may NOT be used on the site being served — it belongs to
+     * another provider on the platform (ClientSiteAccess has the rule and its two
+     * exceptions). Checked only AFTER the password is proven, so it cannot be used to
+     * discover which addresses are registered where.
+     *
+     * @param array<string, mixed> $client
+     */
+    private function belongsElsewhere(array $client): bool
+    {
+        if ($this->siteAccess === null) {
+            return false;
+        }
+
+        try {
+            return !$this->siteAccess->canSignInHere($client);
+        } catch (Throwable) {
+            // A lookup failure must not lock everyone out; the owner check is the
+            // common case and is answered without a query.
+            return false;
+        }
+    }
+
+    /**
+     * Whether an existing account is "yours, here" or "another provider's".
+     *
+     * @param array<string, mixed> $client
+     */
+    private function existingAccountKind(array $client): string
+    {
+        return $this->belongsElsewhere($client) ? 'other_provider' : 'same_site';
+    }
+
+    /** @param array<string, mixed> $extra */
+    private function registerPage(array $extra, ?array $googleUser, string $refCode): Response
+    {
+        return $this->page('client-auth.register', $extra + [
+            'error' => null,
+            'refCode' => $refCode,
+            'googleUser' => $googleUser,
+            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+        ]);
     }
 
     public function loginForm(Request $request): Response
@@ -98,6 +147,13 @@ final class ClientAuthController
         $password = (string) $request->input('password', '');
 
         $result = $this->auth->attempt($email, $password, $request->ip());
+
+        // The right password on the WRONG SITE: an account of another provider on this
+        // platform. Refused before any session state is written (including the pending
+        // 2FA marker), with the same wording whichever provider it belongs to.
+        if (($result->isSuccess() || $result->requiresTwoFactor()) && $result->client !== null && $this->belongsElsewhere($result->client)) {
+            return $this->page('client-auth.login', ['error' => \CodeVault\Reseller\ClientSiteAccess::otherProviderMessage()]);
+        }
 
         if ($result->requiresTwoFactor()) {
             $this->session->set(self::PENDING_2FA_SESSION_KEY, $result->client['id']);
@@ -241,8 +297,19 @@ final class ClientAuthController
             return $this->page('client-auth.register', ['error' => 'Password must be at least 8 characters.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
         }
 
-        if ($this->clients->findByEmail($email) !== null) {
-            return $this->page('client-auth.register', ['error' => 'An account with that email already exists.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+        // Say WHICH kind of "already exists" this is. "You already have an account here"
+        // and "that address belongs to another provider on this platform" need different
+        // next steps (sign in, versus sign in THERE and ask for an account move), and a
+        // reseller's customer trying to sign up with the platform or another reseller
+        // deserves to be told which. Never which provider: that is another business's
+        // customer list.
+        $existing = $this->clients->findByEmail($email);
+
+        if ($existing !== null) {
+            return $this->registerPage([
+                'error' => 'An account with that email already exists.',
+                'accountExists' => $this->existingAccountKind($existing),
+            ], $googleUser, $refCode);
         }
 
         $pending = compact('email', 'password', 'firstName', 'lastName', 'refCode', 'country', 'vatNumber', 'phone', 'address1', 'city', 'postcode', 'securityPin');
@@ -359,8 +426,17 @@ final class ClientAuthController
         );
 
         if (!$result['success']) {
-            return $this->page('client-auth.register', ['error' => $result['error'], 'refCode' => $pending['refCode'], 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            // The address was taken between the form and the code (a second tab, or a
+            // race): same two-way answer as register() gives.
+            $raced = $this->clients->findByEmail((string) $pending['email']);
+
+            return $this->registerPage([
+                'error' => $result['error'],
+                'accountExists' => $raced !== null ? $this->existingAccountKind($raced) : null,
+            ], $googleUser, (string) $pending['refCode']);
         }
+
+        $result['client'] = $this->claimForCurrentStore($result['client']);
 
         $this->session->remove('google_user');
         $this->session->remove(self::PENDING_REGISTRATION_SESSION_KEY);
@@ -373,6 +449,36 @@ final class ClientAuthController
         }
 
         return Response::redirect('/client/dashboard');
+    }
+
+    /**
+     * An account created on a store's site is that store's customer FROM THE START.
+     *
+     * Previously the claim waited for the first order, so somebody who registered on a
+     * store and had not bought yet was, as far as the data knew, ours — written to as
+     * us, and able to sign in on our site. Stamping it here is the same atomic,
+     * claim-only-if-unclaimed update the checkout uses (setResellerIfUnclaimed), so it
+     * can never take an account away from an owner it already has.
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>
+     */
+    private function claimForCurrentStore(array $client): array
+    {
+        $storeId = $this->currentStore?->id();
+
+        if ($storeId === null || empty($client['id'])) {
+            return $client;
+        }
+
+        try {
+            $this->clients->setResellerIfUnclaimed((int) $client['id'], $storeId);
+
+            return $this->clients->find((int) $client['id']) ?? $client;
+        } catch (Throwable) {
+            // The checkout claims on first order anyway; a failure here only delays it.
+            return $client;
+        }
     }
 
     private function sendRegistrationOtp(string $email, string $firstName, string $ip): void
@@ -614,6 +720,13 @@ final class ClientAuthController
                         $existing = $this->clients->findByEmail($email);
                         
                         if ($existing) {
+                            // Same isolation as the password path: proving you own the
+                            // address at Google does not make another provider's account
+                            // usable on this site.
+                            if ($this->belongsElsewhere($existing)) {
+                                return $this->page('client-auth.login', ['error' => \CodeVault\Reseller\ClientSiteAccess::otherProviderMessage()]);
+                            }
+
                             return $this->completeTwoFactorLogin($existing);
                         }
 

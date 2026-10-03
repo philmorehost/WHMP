@@ -54,6 +54,34 @@ final class ResellerStoreLocator
     }
 
     /**
+     * The public address of a store, for links written OUTSIDE a request to it —
+     * an email sent by a cron job has no Host header to copy.
+     *
+     * The verified custom domain when there is one, because that is the address the
+     * reseller advertises; otherwise the platform subdomain, which always works. An
+     * unverified custom domain is never used: we do not serve it yet, so a link to it
+     * would be a dead link with the reseller's name on it.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function baseUrlFor(array $store): string
+    {
+        return $this->platformScheme() . '://' . $this->hostFor($store);
+    }
+
+    /** @param array<string, mixed> $store */
+    public function hostFor(array $store): string
+    {
+        $custom = self::normaliseHost((string) ($store['custom_domain'] ?? ''));
+
+        if ($custom !== '' && !empty($store['domain_verified_at'])) {
+            return $custom;
+        }
+
+        return strtolower((string) ($store['slug'] ?? '')) . '.' . $this->platformHost();
+    }
+
+    /**
      * @return array{store: array<string, mixed>, host: string}|null
      */
     public function resolve(string $host): ?array
