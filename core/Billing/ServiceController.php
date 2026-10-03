@@ -166,8 +166,8 @@ final class ServiceController
             $servers = array_values($servers);
         }
 
-        // A VPS on a provider account (InterServer) is controllable by the client once
-        // WHMP knows which machine it is. Show how it is tied today, and the account's
+        // A VPS or dedicated server on a provider account (InterServer, Nocix) is
+        // controllable by the client once WHMP knows which machine it is. Show how it is tied today, and the account's
         // machines to link it to. One API call, made only for such services.
         $remoteLink = null;
         $remoteServices = null;
@@ -186,7 +186,9 @@ final class ServiceController
             'remoteNotice' => isset($_GET['remote_linked']) ? (string) $_GET['remote_linked'] : null,
             'remoteHasAccountPassword' => $remoteServices !== null && !empty($this->servers->find((int) $serverId)['account_secret'] ?? null),
             'remoteServerId' => $serverId,
-            'isVpsProduct' => ($product['type'] ?? '') === 'vps',
+            'remoteProvider' => $remoteServices !== null ? self::providerOf((string) ($this->servers->find((int) $serverId)['module_slug'] ?? '')) : null,
+            'isVpsProduct' => in_array($product['type'] ?? '', ['vps', 'dedicated'], true),
+            'isDedicatedProduct' => ($product['type'] ?? '') === 'dedicated',
             'products' => $this->products->all(includeHidden: false),
             'cycles' => BillingCycle::labels(),
             'modes' => ProrationMode::labels(),
@@ -344,7 +346,7 @@ final class ServiceController
         $listing = $serverId > 0 ? $this->provisioning->remoteServicesFor($serverId) : null;
 
         if ($listing === null) {
-            return $back('Assign this service to an InterServer VPS server first, save, then link it.');
+            return $back('Assign this service to an InterServer VPS or Nocix server first, save, then link it.');
         }
 
         if (!$listing['success']) {
@@ -361,7 +363,7 @@ final class ServiceController
         }
 
         if ($match === null) {
-            return $back('That VPS is not on the provider account any more. Reload the page and pick again.');
+            return $back('That server is not on the provider account any more. Reload the page and pick again.');
         }
 
         $fields = ['remote_id' => $ref];
@@ -381,11 +383,17 @@ final class ServiceController
             'service.remote_linked',
             'service',
             $id,
-            "Linked service #{$id} to provider VPS {$match['label']} ({$ref})",
+            "Linked service #{$id} to provider machine {$match['label']} ({$ref})",
             $request->ip()
         );
 
-        return $back('Linked to ' . $match['label'] . '. The client can now control this VPS from their account.');
+        return $back('Linked to ' . $match['label'] . '. The client can now control this server from their account.');
+    }
+
+    /** The provider a linking module talks to, for the admin card's wording. */
+    private static function providerOf(string $slug): string
+    {
+        return str_contains(strtolower($slug), 'nocix') ? 'nocix' : 'interserver';
     }
 
     public function updateDetails(Request $request, array $params): Response

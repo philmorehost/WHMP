@@ -528,6 +528,11 @@ final class ClientServiceController
             return $this->back((int) $service['id'], null, 'Unrecognised power action.');
         }
 
+        // Nocix (the dedicated-server API) can restart a server but not start or stop it.
+        if ($action !== 'restart' && $this->kindOf($service) === self::KIND_DEDICATED) {
+            return $this->back((int) $service['id'], null, 'Dedicated servers can only be restarted from here.');
+        }
+
         return $this->performOrTicket(
             $request,
             $service,
@@ -662,6 +667,10 @@ final class ClientServiceController
             return $this->back($id, null, 'Type REINSTALL to confirm: reinstalling erases everything on the server.');
         }
 
+        if ($this->kindOf($service) === self::KIND_DEDICATED) {
+            return $this->reloadDedicated($request, $service, $client, $template);
+        }
+
         if ($passwordProblem = self::rootPasswordProblem($rootPassword)) {
             return $this->back($id, null, $passwordProblem);
         }
@@ -693,6 +702,95 @@ final class ClientServiceController
                 . 'This destroys all data on the server. Confirm with the client, then reinstall manually and send them the new root password.',
             fn (array $result) => 'OS reinstall started (' . $template . '). It takes a few minutes. Log in as root with the new password you just chose.'
         );
+    }
+
+    /**
+     * OS reload on a dedicated server (Nocix). Nocix takes no root password: it sets
+     * the login itself and keeps it in its portal, which the client reveals with
+     * "Show login details" once the reload has completed. A reload already in
+     * progress is not started twice.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $client
+     */
+    private function reloadDedicated(Request $request, array $service, array $client, string $template): Response
+    {
+        $id = (int) $service['id'];
+        $templates = $this->provisioning->osTemplates($id);
+
+        if ($templates['success'] && !in_array($template, array_column($templates['templates'] ?? [], 'file'), true)) {
+            return $this->back($id, null, 'That operating system is not available for this server. Reload the page and choose again.');
+        }
+
+        $status = $this->provisioning->reloadStatus($id);
+
+        if ($status['success'] && strcasecmp((string) ($status['status'] ?? ''), 'Pending') === 0) {
+            return $this->back($id, null, 'An OS reload is already in progress on this server. Wait for it to finish.');
+        }
+
+        return $this->performOrTicket(
+            $request,
+            $service,
+            $client,
+            'server.reload_requested',
+            "OS reload request for service #{$id} ({$service['product_name']})",
+            fn () => $this->provisioning->reinstall($id, $template),
+            fn (array $result) => "The client asked to reload the OS of dedicated server #{$id} ({$service['product_name']}) with {$template}, "
+                . "but it could not be run through the Nocix API ({$result['message']}).\n\n"
+                . 'Primary IP: ' . ((string) ($service['dedicated_ip'] ?? '') ?: 'not set') . "\n"
+                . 'This erases the server. Confirm with the client, reload it in the Nocix portal, then send them the new login.',
+            fn (array $result) => "OS reload started ({$template}). It can take a while to finish. "
+                . 'When the status below says Completed, use Show login details to get the new login.'
+        );
+    }
+
+    /**
+     * Reveal the server login Nocix stores, after an OS reload has completed (the
+     * reload sets a new one, and Nocix emails it to the account holder, not to the
+     * client). Shown once on this response, sent with no-store, and never logged.
+     */
+    public function serverCredentials(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $id = (int) $service['id'];
+
+        if ($this->kindOf($service) !== self::KIND_DEDICATED || ($service['status'] ?? '') !== 'active') {
+            return $this->back($id, null, 'Login details are only available for an active dedicated server.');
+        }
+
+        $status = $this->provisioning->reloadStatus($id);
+
+        if (!$status['success'] || strcasecmp((string) ($status['status'] ?? ''), 'Completed') !== 0) {
+            return $this->back($id, null, 'The new login can be shown once an OS reload has completed.');
+        }
+
+        $credentials = $this->provisioning->serverCredentials($id);
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'server.credentials_viewed',
+            'service',
+            $id,
+            sprintf('Client viewed the server login for service #%d: %s', $id, $credentials['success'] ? 'shown' : 'unavailable (' . $credentials['message'] . ')'),
+            $request->ip()
+        );
+
+        if (!$credentials['success']) {
+            return $this->back($id, null, 'The login could not be read right now (' . $credentials['message'] . '). Please open a support ticket.');
+        }
+
+        return $this->renderService($service, $client, null, null, [
+            'username' => (string) ($credentials['username'] ?? ''),
+            'password' => (string) ($credentials['password'] ?? ''),
+        ])
+            ->withHeader('Cache-Control', 'no-store, max-age=0')
+            ->withHeader('Pragma', 'no-cache');
     }
 
     /** Why a chosen root password is not acceptable, or null when it is. */
@@ -1056,7 +1154,7 @@ final class ClientServiceController
      * @param array<string, mixed> $service
      * @param array<string, mixed> $client
      */
-    private function renderService(array $service, array $client, ?string $message, ?string $error): Response
+    private function renderService(array $service, array $client, ?string $message, ?string $error, ?array $serverLogin = null): Response
     {
         $id = (int) $service['id'];
         $kind = $this->kindOf($service);
@@ -1089,6 +1187,23 @@ final class ClientServiceController
             $osTemplates = $templates['success'] ? ($templates['templates'] ?? []) : [];
         }
 
+        // Dedicated (Nocix): restart and OS reload. "Live" means WHMP knows which
+        // Nocix service this is (linked, numeric username, or matched by IP).
+        $dedicatedControl = null;
+
+        if ($isActive && $kind === self::KIND_DEDICATED) {
+            $link = $this->provisioning->remoteLink($id);
+            $live = is_array($link) && ($link['ref'] ?? null) !== null;
+            $templates = $live ? $this->provisioning->osTemplates($id) : ['success' => false];
+            $osTemplates = $templates['success'] ? ($templates['templates'] ?? []) : [];
+            $reload = $live ? $this->provisioning->reloadStatus($id) : ['success' => false];
+
+            $dedicatedControl = [
+                'live' => $live,
+                'reloadStatus' => $reload['success'] ? ($reload['status'] ?? null) : null,
+            ];
+        }
+
         return $this->page('billing.client-service-show', [
             'service' => $service,
             'kind' => $kind,
@@ -1098,6 +1213,8 @@ final class ClientServiceController
             'backups' => $backups,
             'osTemplates' => $osTemplates,
             'vpsControl' => $vpsControl,
+            'dedicatedControl' => $dedicatedControl,
+            'serverLogin' => $serverLogin,
             'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
             'domainChangerAvailable' => $this->isOnCpanelServer($service) && $this->addons->isActive(self::DOMAIN_CHANGER_SLUG),
             'currency' => $currency,

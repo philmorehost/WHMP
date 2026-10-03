@@ -249,6 +249,28 @@ final class ProvisioningService
         return $server !== null && $this->resolveModule((string) $server['module_slug']) instanceof LinksRemoteServices;
     }
 
+    /**
+     * State of the latest OS reload, for modules whose reload is queued and polled
+     * (Nocix). `status` is null when there has never been one.
+     *
+     * @return array{success: bool, message: string, status?: ?string}
+     */
+    public function reloadStatus(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'reloadStatus', [], 'This server module does not report OS reload progress.');
+    }
+
+    /**
+     * The server login the provider keeps (Nocix sets it on OS reload). Sensitive:
+     * show it to the owner, never log or store it.
+     *
+     * @return array{success: bool, message: string, username?: string, password?: string}
+     */
+    public function serverCredentials(int $serviceId): array
+    {
+        return $this->optional($serviceId, 'serverCredentials', [], 'This server module cannot read the server login.');
+    }
+
     /** @return array{success: bool, message: string, templates?: array<int, array<string, mixed>>} */
     public function osTemplates(int $serviceId): array
     {

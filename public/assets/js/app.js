@@ -2566,7 +2566,7 @@
             hintEl.innerHTML = 'Hint: Use <strong>https://my.interserver.net/</strong>';
             hintEl.style.display = 'block';
         } else if (module === 'nocix-dedicated' || module === 'nocix_dedicated' || module === 'nocix') {
-            hintEl.innerHTML = 'Hint: Use <strong>https://manage.nocix.net/</strong>';
+            hintEl.innerHTML = 'Hint: Use <strong>my.nocix.net</strong> (wholesale accounts: <strong>my.wholesaleinternet.net</strong>)';
             hintEl.style.display = 'block';
         } else if (module === 'resellerclub-email' || module === 'resellerclub_email') {
             hintEl.innerHTML = 'Hint: Use <strong>https://httpapi.com/api</strong>';

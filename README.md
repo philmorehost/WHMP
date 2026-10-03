@@ -181,6 +181,37 @@ sure `Request::ip()` sees the real client address.
 overdue invoice) stops the VPS. Unsuspending starts it again. **Terminating it cancels
 the VPS on the InterServer account** (`DELETE /vps/{id}`).
 
+## Nocix dedicated servers: restart and OS reload
+
+Clients can restart a Nocix dedicated server and reload its OS from their service page,
+through the Nocix client API (`https://my.nocix.net/api/{call}/`, HTTP Basic
+`api_username:api_token`; docs at https://my.nocix.net/apidoc/, BETA). Wholesale
+accounts use `my.wholesaleinternet.net`, picked when the server record's hostname names it.
+The old `manage.nocix.net` host does not exist, so earlier versions could never reach Nocix.
+
+| Client action | Nocix call |
+| --- | --- |
+| Restart | `reboot-server?service_id=` |
+| OS list for the reload form | `os-list?service_id=` |
+| Reload OS (typed REINSTALL confirmation) | `os-reload?service_id=&os=<name from os-list>` |
+| Reload progress (Pending / Completed) | `reloadstatus?service=` |
+| Show login details, only after a completed reload | `get-server-credentials?service_id=` |
+
+Nocix takes no root password on reload. It sets the login itself and emails it to the
+account holder, so once the reload has completed the client can reveal the login Nocix
+stores. It is shown once, sent with `Cache-Control: no-store`, and never logged.
+
+**Setup for a server bought by hand:** add a server with module **Nocix Dedicated Server**
+and your Nocix API username and token. Set it as the service's **Assigned Server**, then
+use the **Nocix server link** card on the service page to pick the Nocix service. Without
+a link, WHMP uses a numeric WHMP username as the Nocix service id (the older convention),
+then the Nocix service whose IP block contains the service's IP.
+`php bin/check-nocix-config.php` tests each Nocix server record.
+
+**Lifecycle:** once a service is tied to a Nocix server, suspending it (including for an
+overdue invoice) **disconnects the server from the network**, and unsuspending reconnects
+it. Nocix's API cannot cancel a server, so terminate it in the Nocix portal.
+
 ## Known environment-dependent gaps
 
 Some features degrade gracefully but aren't fully live-verifiable without infrastructure this dev environment doesn't have:

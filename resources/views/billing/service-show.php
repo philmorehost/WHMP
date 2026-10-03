@@ -421,10 +421,14 @@ foreach ((array) ($remoteServices['services'] ?? []) as $remoteRow) {
     }
 }
 $viaText = ['hostname' => 'its hostname', 'ip' => 'its IP address', 'username' => 'its username'];
+$isNocix = ($remoteProvider ?? null) === 'nocix';
+$providerName = $isNocix ? 'Nocix' : 'InterServer';
+$machineWord = $isNocix ? 'dedicated server' : 'VPS';
+$clientActions = $isNocix ? 'restart and OS reload buttons act' : "power, console, reverse DNS, snapshot, reinstall and restore buttons act";
 ?>
 <?php if ($remoteLinkable): ?>
 <div class="admin-service-card" id="remote-link">
-    <h2 class="admin-service-card__title">🔗 InterServer VPS link (client self-service)</h2>
+    <h2 class="admin-service-card__title">🔗 <?= e($providerName) ?> <?= $isNocix ? 'server' : 'VPS' ?> link (client self-service)</h2>
     <div class="admin-service-card__body">
         <?php if ($remoteNotice !== null && $remoteNotice !== ''): ?>
             <div class="admin-service-error" style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35);color:#60a5fa;margin-bottom:var(--cv-space-3);"><?= e($remoteNotice) ?></div>
@@ -432,53 +436,59 @@ $viaText = ['hostname' => 'its hostname', 'ip' => 'its IP address', 'username' =
 
         <?php if (is_array($remoteLink) && ($remoteLink['linked'] ?? null) !== null): ?>
             <p>✅ <strong>Linked</strong> to <?= $remoteLabel !== null ? e($remoteLabel) : '<code>' . e((string) $remoteLink['linked']) . '</code>' ?>.
-                The client's power, console, reverse DNS, snapshot, reinstall and restore buttons act on this VPS.</p>
+                The client's <?= e($clientActions) ?> on this <?= e($machineWord) ?>.</p>
         <?php elseif ($currentRef !== null): ?>
             <p>🟡 <strong>Matched automatically</strong> by <?= e($viaText[$remoteLink['via']] ?? 'its details') ?>
                 to <?= $remoteLabel !== null ? e($remoteLabel) : '<code>' . e((string) $currentRef) . '</code>' ?>.
-                It works, but changing the hostname or IP above would break it. Link it to make it permanent.</p>
+                It works, but changing the <?= $isNocix ? 'IP or username' : 'hostname or IP' ?> above would break it. Link it to make it permanent.</p>
         <?php else: ?>
-            <p>⚠️ <strong>Not linked.</strong> No VPS on the InterServer account matches this service's hostname or IP,
-                so the client's VPS buttons open support tickets. Choose the VPS below.</p>
+            <p>⚠️ <strong>Not linked.</strong> No <?= e($machineWord) ?> on the <?= e($providerName) ?> account matches this service's <?= $isNocix ? 'IP addresses' : 'hostname or IP' ?>,
+                so the client's server buttons open support tickets. Choose the <?= e($machineWord) ?> below.</p>
         <?php endif; ?>
 
         <?php if (is_array($remoteServices) && !$remoteServices['success']): ?>
-            <div class="admin-service-error">⚠️ Could not read the InterServer account: <?= e((string) $remoteServices['message']) ?></div>
+            <div class="admin-service-error">⚠️ Could not read the <?= e($providerName) ?> account: <?= e((string) $remoteServices['message']) ?></div>
         <?php elseif (is_array($remoteServices)): ?>
             <form method="post" action="/admin/services/<?= $id ?>/remote-link" style="display:flex;gap:var(--cv-space-2);flex-wrap:wrap;align-items:flex-end;">
                 <?= csrf_field() ?>
                 <div class="admin-service-field" style="flex:1 1 22rem;margin:0;">
-                    <label>VPS on the InterServer account</label>
+                    <label><?= e(ucfirst($machineWord)) ?> on the <?= e($providerName) ?> account</label>
                     <select name="remote_id" required>
-                        <option value="">Choose a VPS…</option>
+                        <option value="">Choose a <?= e($machineWord) ?>…</option>
                         <?php foreach ($remoteServices['services'] as $remoteRow): ?>
                             <option value="<?= e((string) $remoteRow['ref']) ?>" <?= $currentRef !== null && (string) $remoteRow['ref'] === (string) $currentRef ? 'selected' : '' ?>><?= e((string) $remoteRow['label']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <button class="admin-service-btn admin-service-btn--primary" type="submit">🔗 Link this VPS</button>
+                <button class="admin-service-btn admin-service-btn--primary" type="submit">🔗 Link this <?= $isNocix ? 'server' : 'VPS' ?></button>
             </form>
             <?php if (is_array($remoteLink) && ($remoteLink['linked'] ?? null) !== null): ?>
-                <form method="post" action="/admin/services/<?= $id ?>/remote-link" style="margin-top:var(--cv-space-2);" data-confirm="Unlink this service from its InterServer VPS?">
+                <form method="post" action="/admin/services/<?= $id ?>/remote-link" style="margin-top:var(--cv-space-2);" data-confirm="Unlink this service from its <?= e($providerName) ?> <?= e($machineWord) ?>?">
                     <?= csrf_field() ?>
                     <input type="hidden" name="remote_id" value="">
                     <button class="admin-service-btn admin-service-btn--secondary" type="submit">Unlink</button>
                 </form>
             <?php endif; ?>
             <?php if ($remoteServices['services'] === []): ?>
-                <small style="color:var(--cv-text-secondary);">The InterServer account behind this server has no VPS. Check that the API key belongs to the account the VPS was bought on.</small>
+                <small style="color:var(--cv-text-secondary);">The <?= e($providerName) ?> account behind this server lists none. Check that the API credentials belong to the account the <?= e($machineWord) ?> was bought on.</small>
             <?php endif; ?>
         <?php endif; ?>
 
         <small style="color:var(--cv-text-secondary);display:block;margin-top:var(--cv-space-3);">
-            <?php if (!empty($remoteHasAccountPassword)): ?>
+            <?php if ($isNocix): ?>
+                ℹ️ Through the Nocix API the client can restart the server and reload its OS. After a reload they can reveal
+                the new login Nocix stores in its portal. Suspending this service disconnects the server from the network and
+                unsuspending reconnects it. Terminating does not cancel it at Nocix (the API cannot); cancel it in the Nocix portal.
+            <?php elseif (!empty($remoteHasAccountPassword)): ?>
                 ✅ The InterServer account password is saved on the server, so clients can also reinstall the OS and restore backups themselves.
             <?php else: ?>
                 ℹ️ OS reinstall and backup restore also need the InterServer account password. Until it is saved on the
                 <a href="/admin/servers/<?= (int) ($remoteServerId ?? 0) ?>/edit" style="color:var(--cv-color-brand-500);text-decoration:underline;">server record</a>,
                 those two requests come to you as support tickets. Everything else works now.
             <?php endif; ?>
-            Note: suspending this service in WHMP stops the VPS at InterServer, unsuspending starts it, and terminating it cancels the VPS on your InterServer account.
+            <?php if (!$isNocix): ?>
+                Note: suspending this service in WHMP stops the VPS at InterServer, unsuspending starts it, and terminating it cancels the VPS on your InterServer account.
+            <?php endif; ?>
         </small>
     </div>
 </div>
@@ -486,10 +496,10 @@ $viaText = ['hostname' => 'its hostname', 'ip' => 'its IP address', 'username' =
 <div class="admin-service-card" id="remote-link">
     <h2 class="admin-service-card__title">🔗 Client self-service is off</h2>
     <div class="admin-service-card__body">
-        <p>This VPS is not on an InterServer VPS server, so the client's VPS buttons open support tickets.
-            To turn on self-service: set <strong>Assigned Server</strong> below to your InterServer VPS server
-            (<a href="/admin/servers" style="color:var(--cv-color-brand-500);text-decoration:underline;">add one</a> with your API key if there is none),
-            save, then link the VPS in the card that appears here.</p>
+        <p>This server is not assigned to <?= !empty($isDedicatedProduct) ? 'a Nocix' : 'an InterServer VPS' ?> server record, so the client's server buttons open support tickets.
+            To turn on self-service: set <strong>Assigned Server</strong> below to your <?= !empty($isDedicatedProduct) ? 'Nocix Dedicated' : 'InterServer VPS' ?> server
+            (<a href="/admin/servers" style="color:var(--cv-color-brand-500);text-decoration:underline;">add one</a> with your API credentials if there is none),
+            save, then link the <?= !empty($isDedicatedProduct) ? 'server' : 'VPS' ?> in the card that appears here.</p>
     </div>
 </div>
 <?php endif; ?>

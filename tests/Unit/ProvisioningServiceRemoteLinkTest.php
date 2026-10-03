@@ -11,6 +11,7 @@ use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
 use CodeVault\Provisioning\InterServerVpsProvisioningModule;
 use CodeVault\Provisioning\LinksRemoteServices;
+use CodeVault\Provisioning\NocixDedicatedServerModule;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Security\SecretBox;
@@ -40,7 +41,7 @@ final class ProvisioningServiceRemoteLinkTest extends TestCase
     }
 
     /** @param array<string, mixed> $service @param array<string, mixed> $server */
-    private function service(array $service, array $server, ?ProvisioningModule $module = null): ProvisioningService
+    private function service(array $service, array $server, ?ProvisioningModule $module = null, string $slug = 'interserver-vps'): ProvisioningService
     {
         $db = new ScriptedDatabase();
         $db->on('/FROM services s/', [$service + [
@@ -48,11 +49,11 @@ final class ProvisioningServiceRemoteLinkTest extends TestCase
             'domain' => null, 'hostname' => null, 'password' => null, 'product_name' => 'VPS 2',
             'dedicated_ip' => null, 'assigned_ips' => null, 'status' => 'active',
         ]]);
-        $db->on('/FROM servers WHERE id/', [$server + ['id' => 3, 'name' => 'IS', 'module_slug' => 'interserver-vps', 'api_token' => 'KEY', 'account_secret' => null]]);
+        $db->on('/FROM servers WHERE id/', [$server + ['id' => 3, 'name' => 'IS', 'module_slug' => $slug, 'api_username' => 'u', 'api_token' => 'KEY', 'account_secret' => null]]);
 
         $hooks = new HookDispatcher();
         $modules = new ModuleManager($hooks);
-        $modules->register(ProvisioningModule::class, 'interserver-vps', $module ?? new InterServerVpsProvisioningModule($this->http));
+        $modules->register(ProvisioningModule::class, $slug, $module ?? ($slug === 'nocix-dedicated' ? new NocixDedicatedServerModule($this->http) : new InterServerVpsProvisioningModule($this->http)));
 
         return new ProvisioningService(
             new ServiceRepository($db),
@@ -191,5 +192,37 @@ final class ProvisioningServiceRemoteLinkTest extends TestCase
         $listing = $svc->remoteServicesFor(3);
         $this->assertTrue($listing['success']);
         $this->assertSame(self::UUID, $listing['services'][0]['ref']);
+    }
+
+    public function test_a_hand_set_up_nocix_server_without_a_username_reloads_by_its_link(): void
+    {
+        $this->http->respondWith(200, json_encode(['success' => 'Reload queued']));
+        $svc = $this->service(['remote_id' => '218686'], [], null, 'nocix-dedicated');
+
+        $result = $svc->reinstall(7, 'Debian 12');
+
+        $this->assertTrue($result['success'], $result['message']);
+        $this->assertSame('https://my.nocix.net/api/os-reload/?service_id=218686&os=Debian%2012', $this->http->lastRequest()['url']);
+    }
+
+    public function test_nocix_reload_status_and_login_route_to_the_module(): void
+    {
+        $svc = $this->service(['remote_id' => '218686'], [], null, 'nocix-dedicated');
+
+        $this->http->respondWith(200, json_encode(['service' => 218686, 'status' => 'Completed']));
+        $this->assertSame('Completed', $svc->reloadStatus(7)['status']);
+
+        $this->http->respondWith(200, json_encode(['service_id' => 218686, 'username' => 'root', 'password' => 'pw']));
+        $this->assertSame('pw', $svc->serverCredentials(7)['password']);
+    }
+
+    public function test_reload_status_on_a_module_without_it_says_so(): void
+    {
+        $svc = $this->service(['remote_id' => self::UUID], []);
+
+        $result = $svc->reloadStatus(7);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('does not report OS reload progress', $result['message']);
     }
 }
