@@ -39,10 +39,12 @@ final class ClientSiteAccessTest extends TestCase
         $this->assertSame(ClientSiteAccess::OTHER_PROVIDER, ClientSiteAccess::decide(self::CLIENT, null, 7, 500, true));
     }
 
-    public function test_an_account_that_never_bought_anything_may_be_used_on_any_store(): void
+    public function test_a_platform_account_is_the_platforms_even_before_it_buys_anything(): void
     {
-        // Nothing of theirs belongs to anyone yet; the store they order from claims them.
-        $this->assertSame(ClientSiteAccess::SAME_SITE, ClientSiteAccess::decide(self::CLIENT, null, 7, 500, false));
+        // Strict reseller isolation: an account lives on the site it was registered on.
+        // A platform sign-up is never usable on a store, history or not.
+        $this->assertSame(ClientSiteAccess::OTHER_PROVIDER, ClientSiteAccess::decide(self::CLIENT, null, 7, 500, false));
+        $this->assertSame(ClientSiteAccess::SAME_SITE, ClientSiteAccess::decide(self::CLIENT, null, null, null, false));
     }
 
     public function test_a_store_owner_may_use_their_own_store_but_not_someone_elses(): void
@@ -70,7 +72,7 @@ final class ClientSiteAccessTest extends TestCase
         $current->set(['id' => 7, 'client_id' => 500, 'slug' => 'acme']);
         $this->assertTrue($access->canSignInHere($storeCustomer));
         $this->assertFalse($access->canSignInHere($platformCustomer), 'an invoice makes them the platform\'s');
-        $this->assertTrue($access->canSignInHere($prospect));
+        $this->assertFalse($access->canSignInHere($prospect), 'a platform sign-up stays on the platform');
         $this->assertTrue($access->isUnclaimed($prospect));
         $this->assertFalse($access->isUnclaimed($platformCustomer));
     }

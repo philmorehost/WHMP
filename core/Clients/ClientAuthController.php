@@ -88,7 +88,7 @@ final class ClientAuthController
             'error' => null,
             'refCode' => $refCode,
             'googleUser' => $googleUser,
-            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+            'googleClientId' => $this->googleClientId(),
         ]);
     }
 
@@ -244,7 +244,7 @@ final class ClientAuthController
         return $this->page('client-auth.register', [
             'error' => null,
             'refCode' => (string) $request->query('ref', ''),
-            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+            'googleClientId' => $this->googleClientId(),
             'googleUser' => $googleUser,
         ]);
     }
@@ -276,7 +276,7 @@ final class ClientAuthController
         $securityPin = trim((string) $request->input('security_pin', ''));
 
         if ($email === '' || $firstName === '' || $lastName === '') {
-            return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         // The address submitted here is the recipient of the OTP email, and
@@ -286,15 +286,15 @@ final class ClientAuthController
         // transport, which the SMTP layer now also refuses to send (see
         // SmtpMailer::assertSafeAddress) — defence in depth at both ends.
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            return $this->page('client-auth.register', ['error' => 'Enter a valid email address.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'Enter a valid email address.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         if (strlen($securityPin) < 4) {
-            return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         if (strlen($password) < 8) {
-            return $this->page('client-auth.register', ['error' => 'Password must be at least 8 characters.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'Password must be at least 8 characters.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         // Say WHICH kind of "already exists" this is. "You already have an account here"
@@ -313,6 +313,9 @@ final class ClientAuthController
         }
 
         $pending = compact('email', 'password', 'firstName', 'lastName', 'refCode', 'country', 'vatNumber', 'phone', 'address1', 'city', 'postcode', 'securityPin');
+        // Which website this sign-up started on. Kept with the pending registration so
+        // the OTP step can refuse to finish it anywhere else.
+        $pending['storeId'] = $this->currentStore?->id();
 
         // Google already proved this person controls the email address they
         // signed up with — an OTP round-trip to the same inbox verifies
@@ -333,7 +336,7 @@ final class ClientAuthController
                 'error' => 'Too many verification codes have been requested. Please wait a little while and try again.',
                 'refCode' => $refCode,
                 'googleUser' => $googleUser,
-                'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+                'googleClientId' => $this->googleClientId(),
             ]);
         }
 
@@ -363,6 +366,15 @@ final class ClientAuthController
         $pending = $this->session->get(self::PENDING_REGISTRATION_SESSION_KEY);
 
         if ($pending === null) {
+            return Response::redirect('/client/register');
+        }
+
+        // A sign-up started on one website is finished on that website only. Sessions
+        // are per host so this should never differ, but the store an account belongs to
+        // is too important to rest on that alone.
+        if (array_key_exists('storeId', $pending) && $pending['storeId'] !== $this->currentStore?->id()) {
+            $this->session->remove(self::PENDING_REGISTRATION_SESSION_KEY);
+
             return Response::redirect('/client/register');
         }
 
@@ -422,7 +434,10 @@ final class ClientAuthController
             $pending['address1'],
             $pending['city'],
             $pending['postcode'],
-            $pending['securityPin']
+            $pending['securityPin'],
+            // Stamped in the INSERT itself: an account created on a store's website is
+            // that store's customer from its very first moment.
+            $this->registrationStoreId($pending)
         );
 
         if (!$result['success']) {
@@ -452,6 +467,19 @@ final class ClientAuthController
     }
 
     /**
+     * The store an account being registered belongs to: the store whose website is
+     * serving this request. Null on the platform's own site.
+     *
+     * @param array<string, mixed> $pending
+     */
+    private function registrationStoreId(array $pending): ?int
+    {
+        $storeId = $this->currentStore?->id();
+
+        return $storeId !== null && $storeId > 0 ? $storeId : null;
+    }
+
+    /**
      * An account created on a store's site is that store's customer FROM THE START.
      *
      * Previously the claim waited for the first order, so somebody who registered on a
@@ -475,8 +503,11 @@ final class ClientAuthController
             $this->clients->setResellerIfUnclaimed((int) $client['id'], $storeId);
 
             return $this->clients->find((int) $client['id']) ?? $client;
-        } catch (Throwable) {
-            // The checkout claims on first order anyway; a failure here only delays it.
+        } catch (Throwable $e) {
+            // Not silent: an account that ends up on the wrong side of the isolation
+            // line must leave a trace. (The INSERT already carries the store, so this
+            // is a second line of defence only.)
+            error_log('[CodeVault] could not assign new client #' . (int) $client['id'] . ' to store #' . $storeId . ': ' . $e->getMessage());
             return $client;
         }
     }
@@ -651,7 +682,7 @@ final class ClientAuthController
 
     public function googleRedirect(Request $request): Response
     {
-        $clientId = $this->settings->get('auth.google_client_id', '');
+        $clientId = $this->googleClientId();
         if (empty($clientId)) {
             return Response::redirect('/client/login');
         }
@@ -674,7 +705,7 @@ final class ClientAuthController
 
     public function googleCallback(Request $request): Response
     {
-        $clientId = $this->settings->get('auth.google_client_id', '');
+        $clientId = $this->googleClientId();
         $clientSecret = $this->settings->get('auth.google_client_secret', '');
 
         if (empty($clientId) || empty($clientSecret)) {
@@ -744,6 +775,25 @@ final class ClientAuthController
         }
 
         return Response::redirect('/client/login?error=google_failed');
+    }
+
+    /**
+     * The Google sign-in client id — but never on a reseller store's website.
+     *
+     * Google sends the browser back to ONE redirect address registered in the
+     * platform's Google console, which is the platform's own host. A store customer
+     * who used it would leave the store, land on the platform's domain (exposing it,
+     * which strict isolation forbids) and, worse, finish signing up THERE — creating
+     * the account as the platform's customer instead of the store's. So on a store
+     * the button is not offered and the endpoints behave as if Google were off.
+     */
+    private function googleClientId(): string
+    {
+        if ($this->currentStore?->id() !== null) {
+            return '';
+        }
+
+        return (string) $this->settings->get('auth.google_client_id', '');
     }
 
     private function page(string $template, array $data, int $status = 200): Response

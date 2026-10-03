@@ -91,11 +91,16 @@ A reseller manages its own store's customers from **Customers** in the reseller 
 - **Suspensions:** a store can lift only a suspension it made (`services.suspended_by_reseller_id`). Suspensions made by the platform (overdue invoice, abuse, by an admin) need support. A payment does not lift a store's hold while the customer still belongs to that store.
 - Every read and write is scoped to the store inside the SQL (`ResellerClientDirectory`); a suspended store sees its customers but cannot change them. Everything is written to the activity log as `reseller.*`.
 
-The super admin sees store customers everywhere:
+### Strict reseller isolation
 
-- **Clients list:** a *Website* column and filter (Direct, Any reseller store, or one store).
-- **Client page:** a store badge with a link to the store. **Login on store website** signs the admin in on the customer's store site with a one-time, two-minute ticket, and *Return to Admin Panel* comes back. Direct customers keep the original *Login as Client*.
-- **Reseller → Store page:** a searchable *Customers of this store* list with Manage and Login buttons.
+Each reseller is a separate tenant, identified everywhere by its **Reseller ID** (`resellers.id`); every account has a **User ID** (`clients.id`). Both are shown on the admin's reseller list, every admin reseller page, the reseller area and the customer lists.
+
+- **Registration:** an account created on a reseller's website (subdomain or verified custom domain) belongs to that reseller from the `INSERT` that creates it (`clients.reseller_id`). Accounts created on the main site have no reseller. A pending registration is discarded if it is finished on a different site. Google sign-in is turned off on reseller sites, because its redirect URL is the main site's.
+- **Sign-in:** a reseller's customers can sign in only on that reseller's site. Main-site accounts cannot sign in on a reseller's site; the only exception is the reseller themselves on their own store. A store's owner is never claimed as one of their own store's customers.
+- **Admin panel:** the general Clients, Services, Domains, Invoices, Orders and Tickets lists, the client counts, pickers, exports and mass mail all cover **main-site customers only**. Any `/admin/clients/{id}` URL for a reseller's customer redirects to that reseller's page (`StoreCustomerAdminRedirect`).
+- **Managing a reseller's customers as super admin:** open **Resellers → (store) → Customers** (`/admin/resellers/{owner user ID}/customers`). You get the same customer list and customer pages as the reseller, with the same actions, recorded in the activity log as yours. Unlike the reseller, you can still act while the store is suspended, and you can lift any suspension. Or use **Log in to reseller account** to work in the reseller's own control panel.
+- **Orders** placed by a reseller's customers are still fulfilled by the platform. They are listed and accepted from the reseller's Customers page. The main Orders page shows a notice with the number of pending orders for each reseller.
+- **Moving a customer** between the main site and a reseller, or between resellers, is done with **Move provider** (`/admin/resellers/migrations`, super admin). Accounts registered on a reseller's site before this fix were recorded as main-site customers. Move them to the right reseller this way; until they are moved, they cannot sign in on the reseller's site.
 
 Login tickets (`client_impersonation_tokens`) are stored only as SHA-256 hashes, can be used once, and only work on the site they name while the customer still belongs to it.
 

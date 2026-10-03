@@ -34,7 +34,10 @@ final class OrderController
         private readonly ServiceRepository $services,
         private readonly HookDispatcher $hooks,
         private readonly ActivityLogger $activity,
-        private readonly OrderCancellationService $orderCancellation
+        private readonly OrderCancellationService $orderCancellation,
+        // Strict reseller isolation: reseller customers' orders are not on this list;
+        // the page points to each reseller's page where they are reviewed instead.
+        private readonly ?\CodeVault\Reseller\ResellerClientDirectory $storeDirectory = null
     ) {
     }
 
@@ -63,6 +66,7 @@ final class OrderController
 
         return $this->render('billing.orders-index', [
             'results' => $results,
+            'storePending' => $this->storePendingOrders(),
             'statusFilter' => $status,
             'filters' => $filters,
             'sort' => $sort,
@@ -308,5 +312,24 @@ final class OrderController
             'title' => 'CodeVault Admin — Orders',
             'content' => $content,
         ]));
+    }
+
+    /**
+     * Pending orders from reseller customers, per reseller. Never fatal: the Orders
+     * list itself must render even if this lookup fails.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function storePendingOrders(): array
+    {
+        if ($this->storeDirectory === null) {
+            return [];
+        }
+
+        try {
+            return $this->storeDirectory->pendingOrdersByStore();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 }

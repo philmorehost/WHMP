@@ -62,11 +62,7 @@ final class ClientController
         // Appended last, as always here: this controller has ~26 dependencies and
         // is built by the container, but the rule is that a new one goes on the
         // end so no existing call site can silently rebind the rest.
-        private readonly \CodeVault\Reseller\ResellerDomainSync $domainSync,
-        // Store customers: signing in on the store's website, and the store's name on the
-        // client pages. Nullable so nothing constructing this by hand has to change.
-        private readonly ?\CodeVault\Clients\ClientImpersonation $impersonation = null,
-        private readonly ?\CodeVault\Reseller\ResellerStoreRepository $stores = null
+        private readonly \CodeVault\Reseller\ResellerDomainSync $domainSync
     ) {
     }
 
@@ -81,12 +77,12 @@ final class ClientController
 
         $filters = \CodeVault\Table\TableFilters::fromQuery(
             is_array($request->query()) ? $request->query() : [],
-            ['id' => true, 'name' => true, 'email' => true, 'company' => true, 'group' => true, 'status' => true, 'store' => true]
+            ['id' => true, 'name' => true, 'email' => true, 'company' => true, 'group' => true, 'status' => true]
         );
 
         $sort = \CodeVault\Table\TableFilters::sortFromQuery(
             is_array($request->query()) ? $request->query() : [],
-            ['name' => 'c.last_name', 'email' => 'c.email', 'company' => 'c.company_name', 'group' => 'g.name', 'status' => 'c.status', 'joined' => 'c.created_at', 'store' => 'r.brand_name']
+            ['name' => 'c.last_name', 'email' => 'c.email', 'company' => 'c.company_name', 'group' => 'g.name', 'status' => 'c.status', 'joined' => 'c.created_at']
         );
 
         $results = $this->clients->paginate($search, $page, 20, $filters, $sort);
@@ -96,7 +92,6 @@ final class ClientController
             ['filterable' => true, 'key' => 'name', 'label' => 'Name / Email', 'type' => 'text', 'placeholder' => 'Name or email'],
             ['filterable' => true, 'key' => 'company', 'label' => 'Company', 'type' => 'text', 'placeholder' => 'Company name'],
             ['filterable' => true, 'key' => 'group', 'label' => 'Group', 'type' => 'text', 'placeholder' => 'Group name'],
-            ['filterable' => true, 'key' => 'store', 'label' => 'Website', 'type' => 'select', 'options' => $this->storeFilterOptions()],
             ['filterable' => true, 'key' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => [
                 'active' => 'Active',
                 'closed' => 'Closed',
@@ -273,10 +268,6 @@ final class ClientController
 
         return $this->render('clients.show', [
             'client' => $client,
-            // The reseller store this customer belongs to (null: the platform's own).
-            'store' => (int) ($client['reseller_id'] ?? 0) > 0 && $this->stores !== null
-                ? $this->stores->find((int) $client['reseller_id'])
-                : null,
             'currency' => $currency,
             // services.amount is written once at checkout (denominateFor() —
             // already in the client's own currency, no per-row rate to read
@@ -867,41 +858,6 @@ final class ClientController
         }
 
         $admin = $this->guard->currentAdmin();
-
-        // A reseller store's customer lives on the store's website: they sign in there,
-        // see the store's brand and prices there, and their session cookie is for that
-        // host only. Switching the session HERE would put the admin in the platform's own
-        // client area as that customer — a place the customer never sees, with the
-        // platform's prices and branding. So the admin is sent to the store's site with a
-        // one-time ticket instead (ClientImpersonation), and their own admin session on
-        // this host is left exactly as it was, ready for "Return to Admin Panel".
-        if ((int) ($client['reseller_id'] ?? 0) > 0 && $this->impersonation !== null) {
-            $result = $this->impersonation->issue(
-                $client,
-                'admin',
-                (int) ($admin['id'] ?? 0),
-                trim((string) ($admin['display_name'] ?? $admin['username'] ?? 'Admin')) . ' (admin)',
-                rtrim((string) $this->config->env('APP_URL', ''), '/') . '/admin/clients/' . $clientId,
-                $request->ip()
-            );
-
-            if (!$result['success'] || $result['url'] === null) {
-                return Response::redirect('/admin/clients/' . $clientId . '?error=' . rawurlencode((string) $result['error']));
-            }
-
-            $this->activity->log(
-                'admin',
-                $admin !== null ? (int) $admin['id'] : null,
-                'client.login_as_store_customer',
-                'client',
-                $clientId,
-                'Signed in as this customer on store #' . (int) $client['reseller_id'] . "'s website",
-                $request->ip()
-            );
-
-            return Response::redirect((string) $result['url']);
-        }
-
         if ($admin !== null) {
             $this->session->set('original_admin_id', $admin['id']);
         }
@@ -909,28 +865,6 @@ final class ClientController
         $this->session->set('client_id', $clientId);
 
         return Response::redirect('/client/dashboard');
-    }
-
-    /**
-     * Options for the clients list's "Website" filter: the platform's own customers,
-     * every store's customers, then each store by name.
-     *
-     * @return array<string, string>
-     */
-    private function storeFilterOptions(): array
-    {
-        $options = ['direct' => 'Direct (this website)', 'stores' => 'Any reseller store'];
-
-        if ($this->stores === null) {
-            return $options;
-        }
-
-        foreach ($this->stores->all() as $store) {
-            $name = trim((string) ($store['brand_name'] ?? ''));
-            $options[(string) (int) $store['id']] = ($name !== '' ? $name : (string) $store['slug']) . ' (store #' . (int) $store['id'] . ')';
-        }
-
-        return $options;
     }
 
     /**

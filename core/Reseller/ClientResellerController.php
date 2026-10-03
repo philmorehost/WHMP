@@ -84,7 +84,22 @@ final class ClientResellerController
             'domains' => $this->presentDomains($this->pricing->domainCatalogue(), $currency),
             'currency' => $currency,
             'docsUrl' => '/client/reseller/docs',
+            // Shown at the top: every reseller is known by its Reseller ID, every account by its User ID.
+            'userId' => $clientId,
+            'resellerId' => $this->storeIdFor($clientId),
         ]);
+    }
+
+    /** The client's store id (their Reseller ID), or null before they open a store. */
+    private function storeIdFor(int $clientId): ?int
+    {
+        try {
+            $store = $this->stores->forClient($clientId);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $store === null ? null : (int) $store['id'];
     }
 
     /**

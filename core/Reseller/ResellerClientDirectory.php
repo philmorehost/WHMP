@@ -171,4 +171,72 @@ final class ResellerClientDirectory
             [$clientId, $storeId, $storeId]
         );
     }
+
+    /** @return array<int, array<string, mixed>> the customer's orders, newest first */
+    public function orders(int $storeId, int $clientId, int $limit = 10): array
+    {
+        return $this->db->select(
+            'SELECT o.id, o.status, o.total, o.currency_id, o.currency_rate, o.created_at
+               FROM orders o JOIN clients c ON c.id = o.client_id
+              WHERE o.client_id = ? AND c.reseller_id = ?
+              ORDER BY o.id DESC
+              LIMIT ' . max(1, min(50, $limit)),
+            [$clientId, $storeId]
+        );
+    }
+
+    /**
+     * Every order placed by this store's customers — pending ones first, because the
+     * platform still fulfils them (servers and registrars are ours) and they no longer
+     * appear on the admin's general Orders list (strict reseller isolation).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function storeOrders(int $storeId, int $limit = 25): array
+    {
+        return $this->db->select(
+            "SELECT o.id, o.client_id, o.status, o.total, o.currency_id, o.currency_rate, o.created_at,
+                    c.first_name, c.last_name, c.email
+               FROM orders o JOIN clients c ON c.id = o.client_id
+              WHERE c.reseller_id = ?
+              ORDER BY (o.status = 'pending') DESC, o.id DESC
+              LIMIT " . max(1, min(100, $limit)),
+            [$storeId]
+        );
+    }
+
+    /**
+     * Pending orders from store customers, per store — what the admin's Orders page
+     * points to now that those orders are not listed there.
+     *
+     * @return array<int, array{store_id: int, owner_client_id: int, brand_name: ?string, slug: string, pending: int}>
+     */
+    public function pendingOrdersByStore(): array
+    {
+        return array_map(static fn (array $row): array => [
+            'store_id' => (int) $row['store_id'],
+            'owner_client_id' => (int) $row['owner_client_id'],
+            'brand_name' => $row['brand_name'] !== null ? (string) $row['brand_name'] : null,
+            'slug' => (string) $row['slug'],
+            'pending' => (int) $row['pending'],
+        ], $this->db->select(
+            "SELECT r.id AS store_id, r.client_id AS owner_client_id, r.brand_name, r.slug, COUNT(*) AS pending
+               FROM orders o
+               JOIN clients c ON c.id = o.client_id
+               JOIN resellers r ON r.id = c.reseller_id
+              WHERE o.status = 'pending'
+              GROUP BY r.id, r.client_id, r.brand_name, r.slug
+              ORDER BY pending DESC"
+        ));
+    }
+
+    public function pendingOrderCount(int $storeId): int
+    {
+        $row = $this->db->selectOne(
+            "SELECT COUNT(*) AS n FROM orders o JOIN clients c ON c.id = o.client_id WHERE c.reseller_id = ? AND o.status = 'pending'",
+            [$storeId]
+        );
+
+        return (int) ($row['n'] ?? 0);
+    }
 }

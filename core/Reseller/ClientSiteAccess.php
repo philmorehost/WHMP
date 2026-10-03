@@ -21,18 +21,19 @@ use CodeVault\Database;
  *   reseller_id = N     store N's site, and only there
  *   reseller_id = NULL  the platform's site
  *
- * TWO DELIBERATE EXCEPTIONS
+ * ONE DELIBERATE EXCEPTION
  *
- * 1. A store's OWNER on their own store. The owner is a platform client (they buy from
- *    us), but they must be able to sign in on the store they run to see what their
- *    customers see.
+ * A store's OWNER on their own store. The owner is a platform client (they buy from
+ * us), but they must be able to sign in on the store they run to see what their
+ * customers see. Their account stays the platform's (setResellerIfUnclaimed never
+ * claims a store's owner for their own store).
  *
- * 2. An UNCLAIMED account: reseller_id NULL and no history at all — no order, service,
- *    domain or invoice. That is somebody who registered and never bought. Nothing about
- *    them belongs to anyone yet, so refusing them would be pure friction; they may sign
- *    in anywhere, and the first store they order from claims them
- *    (ClientRepository::setResellerIfUnclaimed, the rule that already existed). The
- *    moment they have history on the platform, they are the platform's.
+ * There used to be a second one — a platform account that had never bought anything
+ * could sign in on any store, and the first store it ordered from claimed it. Strict
+ * reseller isolation removed it: an account lives on the site it was registered on,
+ * from the moment it is created (the store is written in the same INSERT), and a
+ * platform account is never quietly turned into a store's customer by signing in on
+ * a store. Moving an account is the audited ClientMigrationService, nothing else.
  *
  * "ANOTHER PROVIDER" IS ALL ANYONE IS TOLD
  *
@@ -76,10 +77,9 @@ final class ClientSiteAccess
             return self::SAME_SITE;
         }
 
-        // Exception 2: a platform account that has never bought anything.
-        if ($ownerStoreId === null && !$hasHistory) {
-            return self::SAME_SITE;
-        }
+        // $hasHistory no longer changes the answer (strict isolation: see the class
+        // comment). It stays in the signature so existing callers need no change.
+        unset($hasHistory);
 
         return self::OTHER_PROVIDER;
     }
@@ -106,7 +106,8 @@ final class ClientSiteAccess
             $owner,
             $siteId,
             $site === null || empty($site['client_id']) ? null : (int) $site['client_id'],
-            $owner === null ? $this->hasHistory($clientId) : true
+            // Not consulted any more (strict isolation), so no history queries either.
+            true
         );
     }
 

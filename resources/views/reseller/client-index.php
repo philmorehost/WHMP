@@ -9,6 +9,8 @@
 /** @var array<int, array<string, mixed>> $domains */
 /** @var array<string, mixed> $currency */
 /** @var string $docsUrl */
+/** @var int|null $userId */
+/** @var int|null $resellerId */
 
 $servicePct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['service']);
 $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain']);
@@ -23,6 +25,13 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
     </header>
 
     <p><a href="/client/dashboard">&larr; Back to dashboard</a></p>
+
+    <?php if (isset($userId) || isset($resellerId)): ?>
+        <p class="rs-admin-head__ids" style="margin:0 0 var(--cv-space-3);">
+            <?php if (($resellerId ?? null) !== null): ?><span class="rs-id-badge" title="Your store's unique ID">Reseller ID <?= (int) $resellerId ?></span><?php endif; ?>
+            <?php if (($userId ?? null) !== null): ?><span class="rs-id-badge rs-id-badge--user" title="Your account's user ID">User ID <?= (int) $userId ?></span><?php endif; ?>
+        </p>
+    <?php endif; ?>
 
     <?php if ($error !== null && $error !== ''): ?>
         <div class="cv-alert cv-alert--error"><?= e((string) $error) ?></div>

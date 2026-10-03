@@ -42,7 +42,6 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                             <?= $view->partial('partials.table-header-sort', ['key' => 'name', 'label' => 'Name / Email', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <?= $view->partial('partials.table-header-sort', ['key' => 'company', 'label' => 'Company', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <?= $view->partial('partials.table-header-sort', ['key' => 'group', 'label' => 'Group', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
-                            <?= $view->partial('partials.table-header-sort', ['key' => 'store', 'label' => 'Website', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <?= $view->partial('partials.table-header-sort', ['key' => 'status', 'label' => 'Status', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
                             <th>Services</th>
                             <?= $view->partial('partials.table-header-sort', ['key' => 'joined', 'label' => 'Joined', 'action' => '/admin/clients', 'filters' => $filters ?? [], 'preserve' => ['q' => $search ?? ''], 'sort' => $sort ?? null]) ?>
@@ -72,14 +71,6 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                             </td>
                             <td><?= e((string) ($client['company_name'] ?? '-')) ?></td>
                             <td><?= e((string) ($client['group_name'] ?? 'None')) ?></td>
-                            <td>
-                                <?php if (!empty($client['reseller_id'])): ?>
-                                    <?php $storeLabel = trim((string) ($client['store_brand_name'] ?? '')) !== '' ? (string) $client['store_brand_name'] : (string) ($client['store_slug'] ?? ('Store #' . (int) $client['reseller_id'])); ?>
-                                    <a href="/admin/clients?<?= e(http_build_query(['filters' => ['store' => (string) (int) $client['reseller_id']]])) ?>" title="Show only this store's customers" style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:.75rem;font-weight:600;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.35);color:#a78bfa;text-decoration:none;">🏬 <?= e($storeLabel) ?></a>
-                                <?php else: ?>
-                                    <span style="font-size:.8rem;color:var(--cv-text-secondary);">Direct</span>
-                                <?php endif; ?>
-                            </td>
                             <td>
                                 <?php if ($client['status'] === 'active'): ?>
                                     <span class="admin-badge admin-badge--active">Active</span>

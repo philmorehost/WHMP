@@ -72,6 +72,17 @@ final class ResellerClientManager
     // Decisions — pure, so every branch is testable without a database.
     // ------------------------------------------------------------------
 
+    /**
+     * Why this actor may not act on the store's customers right now, or null.
+     *
+     * @param array<string, mixed> $store
+     * @param array<string, mixed> $actor
+     */
+    private static function blocked(array $store, array $actor): ?string
+    {
+        return self::isAdminActor($actor) ? null : self::storeError($store);
+    }
+
     /** Why the store may not act right now, or null when it may. @param array<string, mixed> $store */
     public static function storeError(array $store): ?string
     {
@@ -97,6 +108,42 @@ final class ResellerClientManager
         return (string) ($service['status'] ?? '') === 'suspended'
             && (int) ($service['suspended_by_reseller_id'] ?? 0) === $storeId
             && $storeId > 0;
+    }
+
+    /**
+     * The actor array for a platform admin acting from the reseller's page in the admin
+     * panel. Admins are not bound by the store's own limits: they act while the store is
+     * suspended, lift any suspension, and their suspensions are the platform's.
+     *
+     * @param array<string, mixed> $admin a row from AdminRepository
+     * @return array<string, mixed>
+     */
+    public static function adminActor(array $admin): array
+    {
+        $label = trim((string) ($admin['display_name'] ?? $admin['username'] ?? ''));
+
+        return ['id' => (int) ($admin['id'] ?? 0), 'actor_type' => 'admin', 'label' => $label !== '' ? $label : 'Admin'];
+    }
+
+    /** @param array<string, mixed> $actor */
+    public static function isAdminActor(array $actor): bool
+    {
+        return ($actor['actor_type'] ?? null) === 'admin';
+    }
+
+    /**
+     * canLift() for whoever is acting: an admin may lift any suspension.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $actor
+     */
+    public static function canLiftAs(array $service, int $storeId, array $actor): bool
+    {
+        if (self::isAdminActor($actor)) {
+            return (string) ($service['status'] ?? '') === 'suspended';
+        }
+
+        return self::canLift($service, $storeId);
     }
 
     /** @param array<string, mixed> $service */
@@ -191,7 +238,7 @@ final class ResellerClientManager
      */
     public function updateProfile(array $store, array $actor, int $clientId, array $input, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -233,7 +280,7 @@ final class ResellerClientManager
      */
     public function sendPasswordReset(array $store, array $actor, int $clientId, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -282,7 +329,7 @@ final class ResellerClientManager
      */
     public function loginLink(array $store, array $actor, int $clientId, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return ['success' => false, 'url' => null, 'error' => $error];
         }
 
@@ -292,8 +339,20 @@ final class ResellerClientManager
             return ['success' => false, 'url' => null, 'error' => 'That customer was not found.'];
         }
 
-        $label = (string) ($store['brand_name'] ?? '') !== '' ? (string) $store['brand_name'] . ' (reseller)' : 'your reseller account';
         $base = rtrim((string) $this->config->env('APP_URL', ''), '/');
+
+        if (self::isAdminActor($actor)) {
+            return $this->impersonation->issue(
+                $client,
+                'admin',
+                (int) $actor['id'],
+                (string) ($actor['label'] ?? 'Admin') . ' (admin)',
+                "{$base}/admin/resellers/" . (int) $store['client_id'] . "/customers/{$clientId}",
+                $ip
+            );
+        }
+
+        $label = (string) ($store['brand_name'] ?? '') !== '' ? (string) $store['brand_name'] . ' (reseller)' : 'your reseller account';
 
         return $this->impersonation->issue(
             $client,
@@ -312,7 +371,7 @@ final class ResellerClientManager
      */
     public function suspendService(array $store, array $actor, int $serviceId, string $reason, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -347,7 +406,10 @@ final class ResellerClientManager
             }
         }
 
-        $this->services->markSuspendedByReseller($serviceId, (int) $store['id']);
+        // A store's suspension is the store's to lift; an admin's is the platform's.
+        if (!self::isAdminActor($actor)) {
+            $this->services->markSuspendedByReseller($serviceId, (int) $store['id']);
+        }
         $this->log($actor, $store, 'reseller.service_suspended', (int) $service['client_id'], "suspended service #{$serviceId} ({$this->serviceLabel($service)}): {$reason}", $ip);
 
         return self::ok($local
@@ -362,7 +424,7 @@ final class ResellerClientManager
      */
     public function unsuspendService(array $store, array $actor, int $serviceId, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -376,7 +438,7 @@ final class ResellerClientManager
             return self::fail('That service is not suspended.');
         }
 
-        if (!self::canLift($service, (int) $store['id'])) {
+        if (!self::canLiftAs($service, (int) $store['id'], $actor)) {
             return self::fail('This suspension was made by ' . brand_name() . ' (for example for an unpaid invoice), so only our team can lift it. Please open a support ticket.');
         }
 
@@ -404,7 +466,7 @@ final class ResellerClientManager
      */
     public function terminateService(array $store, array $actor, int $serviceId, bool $confirmed, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -446,7 +508,7 @@ final class ResellerClientManager
      */
     public function setDomainAutoRenew(array $store, array $actor, int $domainId, bool $on, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -475,7 +537,7 @@ final class ResellerClientManager
      */
     public function toggleDomainLock(array $store, array $actor, int $domainId, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -509,7 +571,7 @@ final class ResellerClientManager
      */
     public function saveDomainNameservers(array $store, array $actor, int $domainId, array $nameservers, ?string $ip = null): array
     {
-        if (($error = self::storeError($store)) !== null) {
+        if (($error = self::blocked($store, $actor)) !== null) {
             return self::fail($error);
         }
 
@@ -557,13 +619,18 @@ final class ResellerClientManager
      */
     private function log(array $actor, array $store, string $action, int $clientId, string $what, ?string $ip): void
     {
+        $isAdmin = self::isAdminActor($actor);
+        $who = $isAdmin
+            ? 'Admin ' . (string) ($actor['label'] ?? '') . ' for reseller ID ' . (int) $store['id'] . ':'
+            : 'Reseller ' . (string) ($store['brand_name'] ?? '') . ' (reseller ID ' . (int) $store['id'] . ')';
+
         $this->activity->log(
-            'client',
+            $isAdmin ? 'admin' : 'client',
             (int) $actor['id'],
-            $action,
+            $isAdmin ? (string) preg_replace('/^reseller\./', 'admin.reseller_customer.', $action) : $action,
             'client',
             $clientId,
-            mb_substr('Reseller ' . (string) ($store['brand_name'] ?? '') . ' (store #' . (int) $store['id'] . ') ' . $what, 0, 500),
+            mb_substr($who . ' ' . $what, 0, 500),
             $ip
         );
     }

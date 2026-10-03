@@ -9,6 +9,14 @@ use DateTimeImmutable;
 
 final class ClientRepository
 {
+    /**
+     * The platform's own customers. Every admin-facing list, count, picker, export and
+     * mass-mail audience in this repository is limited to these: a reseller store's
+     * customers belong to that store (strict reseller isolation) and are reached only
+     * through the reseller's page or the reseller's own account.
+     */
+    public const PLATFORM_ONLY = 'c.reseller_id IS NULL';
+
     public function __construct(
         private readonly Database $db
     ) {
@@ -35,22 +43,12 @@ final class ClientRepository
             $bindings = array_merge($bindings, [$needle, $needle, $needle, $needle]);
         }
 
-        // Which website the customer belongs to. Not a TableFilters column type: "direct"
-        // is a NULL test, which none of like/eq/number can express.
-        //   direct → the platform's own customers (clients.reseller_id IS NULL)
-        //   stores → every reseller store's customers
-        //   {id}   → one store's customers
-        $store = (string) ($filters['store'] ?? '');
+        // STRICT ISOLATION: the admin's client list is the platform's own customers.
+        // A reseller store's customers (clients.reseller_id set) belong to that store
+        // and are managed from the reseller's page (/admin/resellers/{id}/customers)
+        // or from inside the reseller's own account — never mixed in here.
+        $conditions[] = self::PLATFORM_ONLY;
         unset($filters['store']);
-
-        if ($store === 'direct') {
-            $conditions[] = 'c.reseller_id IS NULL';
-        } elseif ($store === 'stores') {
-            $conditions[] = 'c.reseller_id IS NOT NULL';
-        } elseif ($store !== '' && ctype_digit($store)) {
-            $conditions[] = 'c.reseller_id = ?';
-            $bindings[] = (int) $store;
-        }
 
         [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
             'id'      => ['c.id', 'number'],
@@ -75,7 +73,6 @@ final class ClientRepository
             'group'   => 'g.name',
             'status'  => 'c.status',
             'joined'  => 'c.created_at',
-            'store'   => 'r.brand_name',
         ];
         $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
         if ($orderBy === '') {
@@ -83,19 +80,17 @@ final class ClientRepository
         }
 
         $total = (int) ($this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM clients c LEFT JOIN client_groups g ON g.id = c.client_group_id LEFT JOIN resellers r ON r.id = c.reseller_id {$where}",
+            "SELECT COUNT(*) AS c FROM clients c LEFT JOIN client_groups g ON g.id = c.client_group_id {$where}",
             $bindings
         )['c'] ?? 0);
 
         $data = $this->db->select(
             <<<SQL
             SELECT c.*, g.name AS group_name,
-                r.brand_name AS store_brand_name, r.slug AS store_slug, r.status AS store_status,
                 (SELECT COUNT(*) FROM services s WHERE s.client_id = c.id) AS services_total,
                 (SELECT COUNT(*) FROM services s WHERE s.client_id = c.id AND s.status = 'active') AS services_active
             FROM clients c
             LEFT JOIN client_groups g ON g.id = c.client_group_id
-            LEFT JOIN resellers r ON r.id = c.reseller_id
             {$where}
             {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}
@@ -109,7 +104,7 @@ final class ClientRepository
     /** Dashboard tiles (R17) — bare COUNTs rather than paginate(...)['total'], which also runs the full row query for a page it never uses. */
     public function countAll(): int
     {
-        $row = $this->db->selectOne('SELECT COUNT(*) AS c FROM clients');
+        $row = $this->db->selectOne('SELECT COUNT(*) AS c FROM clients c WHERE ' . self::PLATFORM_ONLY);
 
         return (int) ($row['c'] ?? 0);
     }
@@ -117,7 +112,7 @@ final class ClientRepository
     public function countNewThisMonth(): int
     {
         $row = $this->db->selectOne(
-            'SELECT COUNT(*) AS c FROM clients WHERE created_at >= ?',
+            'SELECT COUNT(*) AS c FROM clients c WHERE c.created_at >= ? AND ' . self::PLATFORM_ONLY,
             [(new DateTimeImmutable('first day of this month'))->format('Y-m-d 00:00:00')]
         );
 
@@ -151,11 +146,11 @@ final class ClientRepository
     {
         $limit = max(1, min(100, $limit));
 
-        $where = '';
+        $where = 'WHERE ' . self::PLATFORM_ONLY;
         $bindings = [];
 
         if ($search !== '') {
-            $where = 'WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ?';
+            $where .= ' AND (c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.company_name LIKE ?)';
             $needle = "%{$search}%";
             $bindings = [$needle, $needle, $needle, $needle];
         }
@@ -163,15 +158,15 @@ final class ClientRepository
         $bindings[] = $limit;
 
         return $this->db->select(
-            "SELECT id, email, first_name, last_name, company_name FROM clients {$where} ORDER BY last_name ASC, first_name ASC LIMIT ?",
+            "SELECT c.id, c.email, c.first_name, c.last_name, c.company_name FROM clients c {$where} ORDER BY c.last_name ASC, c.first_name ASC LIMIT ?",
             $bindings
         );
     }
 
-    /** @return array<int, array<string, mixed>> every client in the system */
+    /** @return array<int, array<string, mixed>> every PLATFORM client (admin pickers; see PLATFORM_ONLY) */
     public function all(): array
     {
-        return $this->db->select("SELECT id, email, first_name, last_name, company_name FROM clients ORDER BY last_name ASC, first_name ASC");
+        return $this->db->select('SELECT c.id, c.email, c.first_name, c.last_name, c.company_name FROM clients c WHERE ' . self::PLATFORM_ONLY . ' ORDER BY c.last_name ASC, c.first_name ASC');
     }
 
     /**
@@ -182,17 +177,17 @@ final class ClientRepository
      */
     public function allForExport(string $search = ''): array
     {
-        $where = '';
+        $where = 'WHERE ' . self::PLATFORM_ONLY;
         $bindings = [];
 
         if ($search !== '') {
-            $where = 'WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ?';
+            $where .= ' AND (c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.company_name LIKE ?)';
             $needle = "%{$search}%";
             $bindings = [$needle, $needle, $needle, $needle];
         }
 
         return $this->db->select(
-            "SELECT id, email, first_name, last_name, company_name, phone, country, status, created_at FROM clients {$where} ORDER BY id DESC",
+            "SELECT c.id, c.email, c.first_name, c.last_name, c.company_name, c.phone, c.country, c.status, c.created_at FROM clients c {$where} ORDER BY c.id DESC",
             $bindings
         );
     }
@@ -201,10 +196,10 @@ final class ClientRepository
     public function activeForGroup(?int $groupId): array
     {
         if ($groupId === null) {
-            return $this->db->select("SELECT * FROM clients WHERE status = 'active'");
+            return $this->db->select("SELECT c.* FROM clients c WHERE c.status = 'active' AND " . self::PLATFORM_ONLY);
         }
 
-        return $this->db->select("SELECT * FROM clients WHERE status = 'active' AND client_group_id = ?", [$groupId]);
+        return $this->db->select("SELECT c.* FROM clients c WHERE c.status = 'active' AND c.client_group_id = ? AND " . self::PLATFORM_ONLY, [$groupId]);
     }
 
     /**
@@ -226,6 +221,7 @@ final class ClientRepository
             SELECT c.*
             FROM clients c
             WHERE c.status = 'active'
+              AND c.reseller_id IS NULL
               AND NOT EXISTS (SELECT 1 FROM services s WHERE s.client_id = c.id AND s.status = 'active')
               AND NOT EXISTS (SELECT 1 FROM domains d WHERE d.client_id = c.id AND d.status = 'active')
             ORDER BY c.last_name ASC, c.first_name ASC
@@ -249,10 +245,14 @@ final class ClientRepository
 
         return (int) $this->db->insert(
             <<<'SQL'
-            INSERT INTO clients (client_group_id, email, password_hash, security_pin_hash, first_name, last_name, company_name, address1, address2, city, state, postcode, country, vat_number, phone, currency_id, status, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clients (reseller_id, client_group_id, email, password_hash, security_pin_hash, first_name, last_name, company_name, address1, address2, city, state, postcode, country, vat_number, phone, currency_id, status, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             SQL,
             [
+                // The store this account belongs to, written in the same INSERT that
+                // creates it, so an account registered on a store can never exist —
+                // not even for a moment — as one of the platform's own customers.
+                isset($fields['reseller_id']) && (int) $fields['reseller_id'] > 0 ? (int) $fields['reseller_id'] : null,
                 $fields['client_group_id'] ?? null,
                 $fields['email'],
                 password_hash($fields['password'] ?? bin2hex(random_bytes(8)), PASSWORD_ARGON2ID),
@@ -348,8 +348,12 @@ final class ClientRepository
     public function setResellerIfUnclaimed(int $clientId, int $resellerId): bool
     {
         return $this->db->update(
-            'UPDATE clients SET reseller_id = ?, updated_at = ? WHERE id = ? AND reseller_id IS NULL',
-            [$resellerId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $clientId]
+            // Never the store's own OWNER: a reseller buying on the store they run stays
+            // the platform's client (they are the reseller, not its customer).
+            'UPDATE clients SET reseller_id = ?, updated_at = ?
+             WHERE id = ? AND reseller_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM resellers r WHERE r.id = ? AND r.client_id = clients.id)',
+            [$resellerId, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $clientId, $resellerId]
         ) > 0;
     }
 

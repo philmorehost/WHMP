@@ -65,10 +65,13 @@ final class ResellerStoreRepository
     public function all(): array
     {
         return $this->db->select(
-            'SELECT r.*, c.first_name, c.last_name, c.email
+            "SELECT r.*, c.first_name, c.last_name, c.email,
+                    (SELECT COUNT(*) FROM clients sc WHERE sc.reseller_id = r.id) AS customer_count,
+                    (SELECT COUNT(*) FROM orders so JOIN clients oc ON oc.id = so.client_id
+                      WHERE oc.reseller_id = r.id AND so.status = 'pending') AS pending_orders
              FROM resellers r
              JOIN clients c ON c.id = r.client_id
-             ORDER BY r.id DESC'
+             ORDER BY r.id DESC"
         );
     }
 

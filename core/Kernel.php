@@ -1970,6 +1970,21 @@ class Kernel
         // anything if the client themselves is the one who set it.
         $path = $request->path();
 
+        // STRICT RESELLER ISOLATION: a reseller's customer is never opened from the
+        // admin's client pages — /admin/clients/{id}[/...] for one goes to the
+        // reseller's page instead (StoreCustomerAdminRedirect).
+        if (\CodeVault\Reseller\StoreCustomerAdminRedirect::clientIdIn($path) !== null) {
+            try {
+                $storeCustomerTarget = $this->container->make(\CodeVault\Reseller\StoreCustomerAdminRedirect::class)->targetFor($path);
+            } catch (\Throwable) {
+                $storeCustomerTarget = null;
+            }
+
+            if ($storeCustomerTarget !== null) {
+                return SecurityHeaders::apply(Response::redirect($storeCustomerTarget));
+            }
+        }
+
         // Signed in on a customer's behalf through a one-time link (a reseller for its
         // customer, or an admin): same reasoning as original_admin_id below for the
         // PIN, and a reseller additionally may not touch what would take the account

@@ -544,10 +544,7 @@ final class AdminResellerController
             'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
             'chat' => ResellerChat::formValues($store),
             'customerSummary' => $store === null || $this->customers === null ? null : $this->customers->summary((int) $store['id']),
-            'customers' => $store === null || $this->customers === null
-                ? null
-                : $this->customers->clients((int) $store['id'], trim((string) $request->query('cq', '')), 'all', max(1, (int) $request->query('cpage', 1)), 15),
-            'customerSearch' => trim((string) $request->query('cq', '')),
+            'pendingOrders' => $store === null || $this->customers === null ? 0 : $this->customers->pendingOrderCount((int) $store['id']),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),

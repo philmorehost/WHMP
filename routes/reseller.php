@@ -11,6 +11,7 @@ use CodeVault\Reseller\AdminResellerTicketController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
 use CodeVault\Reseller\ClientResellerClientsController;
+use CodeVault\Reseller\AdminResellerCustomersController;
 use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\ClientResellerMailController;
 use CodeVault\Reseller\ClientResellerMigrationController;
@@ -189,6 +190,22 @@ $router->post('/admin/resellers/migrations/{id}/reject', [AdminClientMigrationCo
 
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).
+// A reseller's customers, managed from the RESELLER'S page (strict reseller isolation:
+// they are not on the admin's Clients list, and /admin/clients/{id} for one of them
+// redirects here). Plus signing in to the reseller's own account.
+$router->post('/admin/resellers/{clientId}/login', [AdminResellerCustomersController::class, 'loginAsReseller']);
+$router->get('/admin/resellers/{clientId}/customers', [AdminResellerCustomersController::class, 'index']);
+$router->get('/admin/resellers/{clientId}/customers/{id}', [AdminResellerCustomersController::class, 'show']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/profile', [AdminResellerCustomersController::class, 'saveProfile']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/password-reset', [AdminResellerCustomersController::class, 'sendPasswordReset']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/login', [AdminResellerCustomersController::class, 'login']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/services/{serviceId}/suspend', [AdminResellerCustomersController::class, 'suspendService']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/services/{serviceId}/unsuspend', [AdminResellerCustomersController::class, 'unsuspendService']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/services/{serviceId}/terminate', [AdminResellerCustomersController::class, 'terminateService']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/domains/{domainId}/auto-renew', [AdminResellerCustomersController::class, 'domainAutoRenew']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/domains/{domainId}/lock', [AdminResellerCustomersController::class, 'domainLock']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/domains/{domainId}/nameservers', [AdminResellerCustomersController::class, 'domainNameservers']);
+
 $router->get('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'store']);
 $router->post('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'openStore']);
 $router->post('/admin/resellers/{clientId}/store/brand', [AdminResellerController::class, 'saveStoreBrand']);

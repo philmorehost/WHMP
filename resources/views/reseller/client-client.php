@@ -15,6 +15,12 @@
  * @var string|null $storeError
  * @var string|null $notice
  * @var string|null $error
+ * @var array<string, mixed>|null $actor   who is acting (the reseller, or ResellerClientManager::adminActor())
+ * @var string|null $mode    'reseller' (default) or 'admin' (the reseller's page in the admin panel)
+ * @var string|null $baseUrl the customer list this page belongs to
+ * @var array<int, array<string, mixed>>|null $orders
+ * @var array<string, mixed>|null $owner   admin mode: the reseller's own user account
+ * @var string|null $storeNote admin mode: a note about the store's state
  */
 
 use CodeVault\Reseller\ResellerClientManager;
@@ -24,7 +30,11 @@ $storeId = (int) $store['id'];
 $name = trim($client['first_name'] . ' ' . $client['last_name']);
 $canAct = $storeError === null;
 $closed = (string) $client['status'] === 'closed';
-$base = "/client/reseller/clients/{$id}";
+$isAdmin = ($mode ?? 'reseller') === 'admin';
+$actor = is_array($actor ?? null) ? $actor : [];
+$listUrl = (string) ($baseUrl ?? '/client/reseller/clients');
+$base = $listUrl . '/' . $id;
+$orders = $orders ?? [];
 
 $serviceStatus = [
     'active' => ['Active', 'cv-badge--success'],
@@ -67,14 +77,17 @@ $badge = static fn (array $map, string $key): string => '<span class="cv-badge '
     . e($map[$key][0] ?? ucfirst(str_replace('_', ' ', $key))) . '</span>';
 $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
 ?>
+<?php if ($isAdmin): ?>
+    <?= $view->render('partials.reseller-admin-head', ['store' => $store, 'owner' => $owner ?? null, 'current' => 'customers']) ?>
+<?php endif; ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <header class="rs-head">
-        <h1 class="rs-head__title"><?= e($name) ?></h1>
+        <h1 class="rs-head__title"><?= e($name) ?> <span class="rs-id-badge rs-id-badge--user" title="This customer's unique user ID">User ID <?= $id ?></span></h1>
     </header>
-    <?= $view->render('partials.reseller-nav') ?>
+    <?php if (!$isAdmin): ?><?= $view->render('partials.reseller-nav') ?><?php endif; ?>
     <div class="rs-cust-hero">
         <div>
-            <p class="rs-cust-back"><a href="/client/reseller/clients">&larr; All customers</a></p>
+            <p class="rs-cust-back"><a href="<?= e($listUrl) ?>">&larr; All <?= $isAdmin ? 'of this reseller\'s ' : '' ?>customers</a></p>
             <p class="rs-cust-sub">
                 <?= e((string) $client['email']) ?>
                 <?php if (trim((string) ($client['company_name'] ?? '')) !== ''): ?> · <?= e((string) $client['company_name']) ?><?php endif; ?>
@@ -95,7 +108,14 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
             </div>
         <?php endif; ?>
     </div>
-    <?php if ($canAct && !$closed): ?>
+    <?php if ($canAct && !$closed && $isAdmin): ?>
+        <p class="rs-cust-note">
+            This customer belongs to <strong>Reseller ID <?= $storeId ?></strong>. <strong>Log in as customer</strong> opens the
+            reseller's website in a new tab, signed in to this account. Changes you make here are recorded as yours in the activity log.
+            To move this customer to the main site or another reseller, use
+            <a href="/admin/resellers/migrations/review?client=<?= $id ?>">Move provider</a> (super admin).
+        </p>
+    <?php elseif ($canAct && !$closed): ?>
         <p class="rs-cust-note">
             <strong>Log in as customer</strong> opens your store's website in a new tab, signed in to this account, so you
             can order, pay, open tickets or manage services exactly as they would. Their password, security settings and
@@ -106,6 +126,9 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
 
 <?php if ($storeError !== null): ?>
     <div class="cv-alert cv-alert--error" style="margin-bottom:var(--cv-space-4);"><?= e($storeError) ?></div>
+<?php endif; ?>
+<?php if (!empty($storeNote)): ?>
+    <div class="cv-alert cv-alert--warning" style="margin-bottom:var(--cv-space-4);"><?= e((string) $storeNote) ?></div>
 <?php endif; ?>
 <?php if ($error !== null && $error !== ''): ?>
     <div class="cv-alert cv-alert--error" role="alert" style="margin-bottom:var(--cv-space-4);"><?= e((string) $error) ?></div>
@@ -131,18 +154,19 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
                     $sid = (int) $service['id'];
                     $status = (string) $service['status'];
                     $where = (string) ($service['domain'] ?? '') !== '' ? (string) $service['domain'] : (string) ($service['hostname'] ?? '');
-                    $canLift = ResellerClientManager::canLift($service, $storeId);
+                    $canLift = ResellerClientManager::canLiftAs($service, $storeId, $actor);
+                    $byStore = ResellerClientManager::canLift($service, $storeId);
                     ?>
                     <tr>
                         <td data-label="Service">
-                            <strong><?= e((string) $service['product_name']) ?></strong>
+                            <?php if ($isAdmin): ?><a href="/admin/services/<?= $sid ?>"><strong><?= e((string) $service['product_name']) ?></strong></a> <span class="rs-cust-sub">#<?= $sid ?></span><?php else: ?><strong><?= e((string) $service['product_name']) ?></strong><?php endif; ?>
                             <?php if ($where !== ''): ?><div class="rs-cust-sub"><?= e($where) ?></div><?php endif; ?>
                             <?php if (!empty($service['username'])): ?><div class="rs-cust-sub">Username: <?= e((string) $service['username']) ?></div><?php endif; ?>
                         </td>
                         <td data-label="Status">
                             <?= $badge($serviceStatus, $status) ?>
                             <?php if ($status === 'suspended'): ?>
-                                <div class="rs-cust-sub"><?= $canLift ? 'Suspended by you' : 'Suspended by ' . e(brand_name()) ?><?php if (trim((string) ($service['suspension_reason'] ?? '')) !== ''): ?>: <?= e((string) $service['suspension_reason']) ?><?php endif; ?></div>
+                                <div class="rs-cust-sub"><?= $isAdmin ? ($byStore ? 'Suspended by the reseller' : 'Suspended by ' . e(brand_name())) : ($canLift ? 'Suspended by you' : 'Suspended by ' . e(brand_name())) ?><?php if (trim((string) ($service['suspension_reason'] ?? '')) !== ''): ?>: <?= e((string) $service['suspension_reason']) ?><?php endif; ?></div>
                             <?php endif; ?>
                         </td>
                         <td data-label="Price"><?= e($serviceMoney((float) $service['amount'])) ?> <span class="rs-cust-sub"><?= e($cycles[(string) $service['billing_cycle']] ?? (string) $service['billing_cycle']) ?></span></td>
@@ -212,7 +236,7 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
                     ?>
                     <tr>
                         <td data-label="Domain">
-                            <strong><?= e((string) $domain['domain_name']) ?></strong>
+                            <?php if ($isAdmin): ?><a href="/admin/domains/<?= $did ?>"><strong><?= e((string) $domain['domain_name']) ?></strong></a><?php else: ?><strong><?= e((string) $domain['domain_name']) ?></strong><?php endif; ?>
                             <?php if ($ns !== []): ?><div class="rs-cust-sub"><?= e(implode(', ', $ns)) ?></div><?php endif; ?>
                         </td>
                         <td data-label="Status">
@@ -303,7 +327,7 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
                     <tbody>
                     <?php foreach ($invoices as $invoice): ?>
                         <tr>
-                            <td data-label="Invoice">#<?= (int) $invoice['id'] ?></td>
+                            <td data-label="Invoice"><?php if ($isAdmin): ?><a href="/admin/invoices/<?= (int) $invoice['id'] ?>">#<?= (int) $invoice['id'] ?></a><?php else: ?>#<?= (int) $invoice['id'] ?><?php endif; ?></td>
                             <td data-label="Due"><?= e((string) $invoice['due_date']) ?></td>
                             <td data-label="Total"><?= e($invoiceMoney($invoice)) ?></td>
                             <td data-label="Status"><?= $badge($invoiceStatus, (string) $invoice['status']) ?></td>
@@ -312,10 +336,12 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
                     </tbody>
                 </table>
             <?php endif; ?>
+            <?php if (!$isAdmin): ?>
             <p class="rs-cust-sub" style="margin-top:var(--cv-space-2);">
                 Payments are collected through <?= e(brand_name()) ?>, so invoices can't be changed here. To pay one for the
                 customer, log in as them.
             </p>
+            <?php endif; ?>
         </section>
 
         <!-- Tickets -->
@@ -327,7 +353,13 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
                 <ul class="rs-cust-list">
                     <?php foreach ($tickets as $ticket): ?>
                         <li>
-                            <a href="/client/reseller/tickets/<?= (int) $ticket['id'] ?>">#<?= (int) $ticket['id'] ?> <?= e((string) $ticket['subject']) ?></a>
+                            <?php if (!$isAdmin): ?>
+                                <a href="/client/reseller/tickets/<?= (int) $ticket['id'] ?>">#<?= (int) $ticket['id'] ?> <?= e((string) $ticket['subject']) ?></a>
+                            <?php elseif (!empty($ticket['escalated_at'])): ?>
+                                <a href="/admin/tickets/<?= (int) $ticket['id'] ?>">#<?= (int) $ticket['id'] ?> <?= e((string) $ticket['subject']) ?></a> <span class="cv-badge cv-badge--warning">Escalated</span>
+                            <?php else: ?>
+                                #<?= (int) $ticket['id'] ?> <?= e((string) $ticket['subject']) ?> <span class="rs-cust-sub">(on the reseller's desk)</span>
+                            <?php endif; ?>
                             <span class="rs-cust-sub"><?= e($ticketStatus[(string) $ticket['status']] ?? (string) $ticket['status']) ?> · <?= e(substr((string) $ticket['updated_at'], 0, 16)) ?></span>
                         </li>
                     <?php endforeach; ?>
@@ -336,3 +368,23 @@ $v = static fn (string $field): string => e((string) ($client[$field] ?? ''));
         </section>
     </div>
 </div>
+
+<?php if ($isAdmin): ?>
+    <!-- Orders (the platform fulfils them, so pending ones are accepted from the order page) -->
+    <section class="cv-card" style="margin-top:var(--cv-space-4);" aria-labelledby="rs-orders">
+        <h2 class="cv-card__title" id="rs-orders">Orders <span class="rs-cust-count"><?= count($orders) ?></span></h2>
+        <?php if ($orders === []): ?>
+            <p class="rs-cust-sub">No orders yet.</p>
+        <?php else: ?>
+            <ul class="rs-cust-list">
+                <?php foreach ($orders as $order): ?>
+                    <li>
+                        <a href="/admin/orders/<?= (int) $order['id'] ?>">Order #<?= (int) $order['id'] ?></a>
+                        <span class="cv-badge cv-badge--<?= (string) $order['status'] === 'pending' ? 'warning' : ((string) $order['status'] === 'active' ? 'success' : 'neutral') ?>"><?= e(ucfirst((string) $order['status'])) ?></span>
+                        <span class="rs-cust-sub"><?= e(substr((string) $order['created_at'], 0, 10)) ?></span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+    </section>
+<?php endif; ?>

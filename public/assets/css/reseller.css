@@ -611,3 +611,37 @@
         right: auto;
     }
 }
+
+/* ── Reseller ID / User ID badges and the admin's reseller header ─────────────
+   Strict reseller isolation: every reseller is shown by its unique Reseller ID,
+   every account by its User ID, wherever either appears. */
+.rs-id-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+    vertical-align: middle;
+    background: rgba(99, 102, 241, 0.14);
+    color: #818cf8;
+}
+.rs-id-badge--user {
+    background: rgba(148, 163, 184, 0.16);
+    color: var(--cv-text-secondary, #94a3b8);
+}
+.rs-admin-head__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cv-space-3, 0.75rem);
+    align-items: flex-start;
+    justify-content: space-between;
+}
+.rs-admin-head__ids {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    margin: 0.4rem 0 0;
+}

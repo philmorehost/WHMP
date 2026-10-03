@@ -9,6 +9,7 @@
 $servicePct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['service']);
 $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain']);
 ?>
+<link rel="stylesheet" href="/assets/css/reseller.css">
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Resellers</h1>
     <p><a href="<?= e($docsUrl) ?>">Reseller API documentation &rarr;</a>
@@ -108,7 +109,7 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
     <table class="cv-table">
         <thead>
         <tr>
-            <th>Store</th><th>Client</th><th>Platform address</th><th>Custom domain</th>
+            <th>Reseller ID</th><th>Store</th><th>Reseller (user)</th><th>Customers</th><th>Platform address</th><th>Custom domain</th>
             <th>Status</th><th>Opened</th><th></th>
         </tr>
         </thead>
@@ -119,6 +120,7 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
             $storeActive = ($store['status'] ?? 'active') === 'active';
             ?>
             <tr>
+                <td><span class="rs-id-badge" title="This reseller's unique ID">#<?= (int) $store['id'] ?></span></td>
                 <td>
                     <a href="/admin/resellers/<?= (int) $store['client_id'] ?>/store">
                         <?= e((string) ($store['brand_name'] ?? $store['slug'])) ?>
@@ -130,6 +132,13 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
                         <?= e(trim((string) ($store['first_name'] ?? '') . ' ' . (string) ($store['last_name'] ?? ''))) ?>
                     </a>
                     <br><span style="color:var(--cv-text-secondary);"><?= e((string) ($store['email'] ?? '')) ?></span>
+                    <br><span class="rs-id-badge rs-id-badge--user">User ID <?= (int) $store['client_id'] ?></span>
+                </td>
+                <td>
+                    <a href="/admin/resellers/<?= (int) $store['client_id'] ?>/customers"><?= (int) ($store['customer_count'] ?? 0) ?></a>
+                    <?php if ((int) ($store['pending_orders'] ?? 0) > 0): ?>
+                        <br><a class="cv-badge cv-badge--warning" href="/admin/resellers/<?= (int) $store['client_id'] ?>/customers#orders"><?= (int) $store['pending_orders'] ?> pending orders</a>
+                    <?php endif; ?>
                 </td>
                 <td><code><?= e((string) $store['slug']) ?>.<?= e($platformHost) ?></code></td>
                 <td>
@@ -153,11 +162,12 @@ $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['dom
                 <td><?= e((string) ($store['created_at'] ?? '')) ?></td>
                 <td>
                     <a class="cv-btn" href="/admin/resellers/<?= (int) $store['client_id'] ?>/store">Manage</a>
+                    <a class="cv-btn cv-btn--secondary" href="/admin/resellers/<?= (int) $store['client_id'] ?>/customers">Customers</a>
                 </td>
             </tr>
         <?php endforeach; ?>
         <?php if ($stores === []): ?>
-            <tr><td colspan="7" style="color:var(--cv-text-secondary);">No reseller stores have been opened yet.</td></tr>
+            <tr><td colspan="9" style="color:var(--cv-text-secondary);">No reseller stores have been opened yet.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

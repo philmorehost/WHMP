@@ -13,8 +13,7 @@
  * @var int $overrideCount
  * @var array<int, array<string, mixed>> $goLive
  * @var array<string, int>|null $customerSummary
- * @var array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int}|null $customers
- * @var string|null $customerSearch
+ * @var int|null $pendingOrders orders from this reseller's customers awaiting acceptance
  */
 
 $clientName = $client === null
@@ -24,10 +23,13 @@ $clientName = $client === null
 $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
 ?>
+<?php if ($store !== null): ?>
+    <?= $view->render('partials.reseller-admin-head', ['store' => $store, 'owner' => $client, 'current' => 'store']) ?>
+<?php endif; ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Reseller store — <?= e($clientName) ?></h1>
     <p><a href="/admin/resellers">&larr; Back to resellers</a> &middot;
-        <a href="/admin/clients/<?= (int) $clientId ?>">Client account</a></p>
+        <a href="/admin/clients/<?= (int) $clientId ?>">The reseller's own user account (User ID <?= (int) $clientId ?>)</a></p>
 
     <?php if ($error !== null && $error !== ''): ?>
         <div class="cv-alert cv-alert--error"><?= e((string) $error) ?></div>
@@ -131,72 +133,28 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         </form>
     </div>
 
-    <?php if (isset($customers) && is_array($customers)): ?>
-    <?php
-    $customerSearch = (string) ($customerSearch ?? '');
-    $customerPages = max(1, (int) ceil($customers['total'] / max(1, $customers['perPage'])));
-    $customerLink = static fn (int $page): string => '/admin/resellers/' . (int) $clientId . '/store?'
-        . http_build_query(array_filter(['cq' => $customerSearch, 'cpage' => $page > 1 ? $page : null])) . '#store-customers';
-    ?>
+    <?php if (is_array($customerSummary ?? null)): ?>
     <div class="cv-card" id="store-customers" style="margin-bottom:var(--cv-space-4);">
-        <h2 class="cv-card__title">Customers of this store</h2>
-        <?php if (is_array($customerSummary ?? null)): ?>
-            <p style="color:var(--cv-text-secondary);">
-                <?= (int) $customerSummary['customers'] ?> customers ·
-                <?= (int) $customerSummary['services_active'] ?> active services ·
-                <?= (int) $customerSummary['services_suspended'] ?> suspended ·
-                <?= (int) $customerSummary['domains'] ?> domains ·
-                <?= (int) $customerSummary['invoices_unpaid'] ?> unpaid invoices
-            </p>
-        <?php endif; ?>
+        <h2 class="cv-card__title">Customers of this reseller</h2>
         <p style="color:var(--cv-text-secondary);">
-            These are full client accounts, so open one to manage it exactly like any other client. "Login" signs you in
-            on <strong>this store's website</strong> in a new tab; your admin session stays as it is.
+            <?= (int) $customerSummary['customers'] ?> customers ·
+            <?= (int) $customerSummary['services_active'] ?> active services ·
+            <?= (int) $customerSummary['services_suspended'] ?> suspended ·
+            <?= (int) $customerSummary['domains'] ?> domains ·
+            <?= (int) $customerSummary['invoices_unpaid'] ?> unpaid invoices
+            <?php if ((int) ($pendingOrders ?? 0) > 0): ?> · <strong><?= (int) $pendingOrders ?> pending orders</strong><?php endif; ?>
         </p>
-        <form method="get" action="/admin/resellers/<?= (int) $clientId ?>/store#store-customers" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--cv-space-3);">
-            <input class="cv-input" type="search" name="cq" value="<?= e($customerSearch) ?>" placeholder="Search name, email or company" style="flex:1 1 14rem;" aria-label="Search this store's customers">
-            <button class="cv-btn" type="submit">Search</button>
-            <a class="cv-btn cv-btn--secondary" href="/admin/clients?<?= e(http_build_query(['filters' => ['store' => (string) (int) $store['id']]])) ?>">Open in client list</a>
-        </form>
-        <?php if ($customers['data'] === []): ?>
-            <p><em><?= $customerSearch !== '' ? 'No customers match that search.' : 'No customers yet.' ?></em></p>
-        <?php else: ?>
-            <div style="overflow-x:auto;">
-            <table class="cv-table">
-                <thead><tr><th>Customer</th><th>Services</th><th>Domains</th><th>Unpaid</th><th>Joined</th><th></th></tr></thead>
-                <tbody>
-                <?php foreach ($customers['data'] as $row): ?>
-                    <tr>
-                        <td>
-                            <a href="/admin/clients/<?= (int) $row['id'] ?>"><strong><?= e(trim($row['first_name'] . ' ' . $row['last_name'])) ?></strong></a>
-                            <div style="font-size:.8rem;color:var(--cv-text-secondary);"><?= e((string) $row['email']) ?></div>
-                        </td>
-                        <td><?= (int) $row['services_active'] ?> active<?= (int) $row['services_suspended'] > 0 ? ', ' . (int) $row['services_suspended'] . ' suspended' : '' ?> / <?= (int) $row['services_total'] ?></td>
-                        <td><?= (int) $row['domains_total'] ?></td>
-                        <td><?= (int) $row['invoices_unpaid'] ?></td>
-                        <td style="font-size:.8rem;"><?= e(substr((string) $row['created_at'], 0, 10)) ?></td>
-                        <td style="white-space:nowrap;text-align:right;">
-                            <a class="cv-btn cv-btn--secondary" href="/admin/clients/<?= (int) $row['id'] ?>">Manage</a>
-                            <?php if ((string) $row['status'] !== 'closed'): ?>
-                                <form method="post" action="/admin/clients/<?= (int) $row['id'] ?>/login-as" target="_blank" style="display:inline;">
-                                    <?= csrf_field() ?>
-                                    <button class="cv-btn" type="submit">Login</button>
-                                </form>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-            </div>
-            <?php if ($customerPages > 1): ?>
-                <p style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:var(--cv-space-3);">
-                    <?php if ($customers['page'] > 1): ?><a href="<?= e($customerLink($customers['page'] - 1)) ?>">&larr; Previous</a><?php endif; ?>
-                    <span>Page <?= (int) $customers['page'] ?> of <?= $customerPages ?></span>
-                    <?php if ($customers['page'] < $customerPages): ?><a href="<?= e($customerLink($customers['page'] + 1)) ?>">Next &rarr;</a><?php endif; ?>
-                </p>
+        <p style="color:var(--cv-text-secondary);">
+            Users who registered on this reseller's website belong to <strong>Reseller ID <?= (int) $store['id'] ?></strong> only.
+            They are not on the main Clients list; view and manage them from this reseller's Customers page, or log in to the
+            reseller account and use its own control panel.
+        </p>
+        <p style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="cv-btn" href="/admin/resellers/<?= (int) $clientId ?>/customers">Manage customers</a>
+            <?php if ((int) ($pendingOrders ?? 0) > 0): ?>
+                <a class="cv-btn cv-btn--secondary" href="/admin/resellers/<?= (int) $clientId ?>/customers#orders">Review pending orders</a>
             <?php endif; ?>
-        <?php endif; ?>
+        </p>
     </div>
     <?php endif; ?>
 
