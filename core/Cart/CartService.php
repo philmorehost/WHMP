@@ -86,12 +86,15 @@ final class CartService
         $subtotal = 0.0;
         $setupFees = 0.0;
         $costTotal = 0.0;
+        // A sub-reseller's store: what its UPLINE owes us for the same lines (the
+        // upline earns cost − this). Null on a first-tier store and on the platform.
+        $upline = $store === null || $this->retail === null ? null : $this->retail->uplineOf($store);
+        $uplineCostTotal = 0.0;
 
         // With a store, every catalogue figure below is a COST basis and the
         // customer's price is derived from it. Without one, list IS the price
         // and the cost fields stay null — so the platform's own checkout keeps
         // exactly the numbers it had before stores existed.
-        $markup = $store === null || $this->retail === null ? 0.0 : $this->retail->markupFor($store);
 
         foreach ($items as $index => $item) {
             $product = $this->products->find($item['product_id']);
@@ -111,9 +114,15 @@ final class CartService
             if ($store !== null && $this->retail !== null) {
                 $quote = $this->retail->quoteProduct($unitPrice, $store, (int) $product['id'], (string) $item['billing_cycle']);
                 $costUnit = $quote['cost'];
-                $costSetup = $this->costOf($setupFee, 'service');
+                $costSetup = $this->costOf($setupFee, 'service', $store);
+
+                if ($upline !== null) {
+                    $uplineCostTotal += (float) ($quote['upline_cost'] ?? 0.0) * (int) $item['quantity']
+                        + (float) $this->retail->uplineCostFor($setupFee, 'service', $store);
+                }
+
                 $unitPrice = $quote['retail'];
-                $setupFee = $this->retail->priceFor($setupFee, $markup, null);
+                $setupFee = $this->retail->retailPriceFor($setupFee, $store);
             }
 
             $selectedOptions = [];
@@ -133,8 +142,13 @@ final class CartService
                 // store's markup. A reseller who wants a hand-set price for an
                 // option prices it into the product instead.
                 if ($store !== null && $this->retail !== null) {
-                    $costOptionsTotal += $this->costOf($optionPrice, 'service');
-                    $optionPrice = $this->retail->priceFor($optionPrice, $markup, null);
+                    $costOptionsTotal += $this->costOf($optionPrice, 'service', $store);
+
+                    if ($upline !== null) {
+                        $uplineCostTotal += (float) $this->retail->uplineCostFor($optionPrice, 'service', $store);
+                    }
+
+                    $optionPrice = $this->retail->retailPriceFor($optionPrice, $store);
                 }
 
                 $optionsTotal += $optionPrice;
@@ -162,7 +176,11 @@ final class CartService
                     // catalogue price, so it is the customer's price as given
                     // and only the cost side is derived.
                     if ($store !== null && $this->retail !== null) {
-                        $costDomainPrice = $this->costOf($domainPrice, 'domain');
+                        $costDomainPrice = $this->costOf($domainPrice, 'domain', $store);
+
+                        if ($upline !== null) {
+                            $uplineCostTotal += (float) $this->retail->uplineCostFor($domainPrice, 'domain', $store);
+                        }
                     }
                 } elseif (in_array($domainOptions['option'], ['register', 'transfer'], true)) {
                     $tld = self::tldFromDomainName((string) $domainOptions['name']);
@@ -175,6 +193,10 @@ final class CartService
                             $quote = $this->retail->quoteDomain($list, $store, $tld, (string) $domainOptions['option']);
                             $domainPrice = $quote['retail'];
                             $costDomainPrice = $quote['cost'];
+
+                            if ($upline !== null) {
+                                $uplineCostTotal += (float) ($quote['upline_cost'] ?? 0.0);
+                            }
                         }
                     }
                 }
@@ -261,15 +283,28 @@ final class CartService
             'total' => max(0.0, $subtotal + $setupFees + $domainTotal - $discount),
             'costTotal' => round($costTotal, 2),
             'store_id' => $store === null ? null : (int) ($store['id'] ?? 0),
+            // Sub-reseller stores only: the upline store, and what IT owes us for
+            // these lines. Promotions do not touch either, for the reason above.
+            'upline_store_id' => $upline === null ? null : (int) $upline['id'],
+            'uplineCostTotal' => $upline === null ? null : round($uplineCostTotal, 2),
         ];
     }
 
-    /** What the reseller owes us for one catalogue figure, at the admin's discount. */
-    private function costOf(float $listPrice, string $kind): float
+    /**
+     * What the store owes for one catalogue figure: our discounted price, or on a
+     * sub-reseller's store its upline's price.
+     *
+     * @param array<string, mixed>|null $store
+     */
+    private function costOf(float $listPrice, string $kind, ?array $store = null): float
     {
-        return $this->retail === null
-            ? round($listPrice, 2)
-            : $this->retail->costPriceFor($listPrice, $kind);
+        if ($this->retail === null) {
+            return round($listPrice, 2);
+        }
+
+        return $store === null
+            ? $this->retail->costPriceFor($listPrice, $kind)
+            : $this->retail->storeCostFor($listPrice, $kind, $store);
     }
 
     /**

@@ -29,7 +29,8 @@ $statusBadge = [
 
 $muted = 'font-size:var(--cv-text-xs); color:var(--cv-text-secondary);';
 ?>
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<?= $view->render('partials.reseller-admin-nav') ?>
+<div class="cv-card rs-page-head" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Client migrations</h1>
     <p><a href="/admin/resellers">&larr; Back to resellers</a> &middot;
         <a href="/admin/resellers/escalations">Store escalations</a></p>

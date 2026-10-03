@@ -95,8 +95,17 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
     $creditRepo = $container->make(\CodeVault\Billing\ClientCreditRepository::class);
     $creditBalance = $creditRepo->balance($clientId);
 
+    // The Reseller area button is hidden from customers of a sub-reseller: the chain
+    // stops at two tiers (ResellerEligibility), and the Kernel refuses the area too.
+    try {
+        $canResell = $container->make(\CodeVault\Reseller\ResellerEligibility::class)->canResell($client);
+    } catch (\Throwable) {
+        $canResell = true;
+    }
+
     $content = $view->render('client-auth.dashboard', [
         'client' => $client,
+        'canResell' => $canResell,
         'servicesCount' => $servicesCount,
         'domainsCount' => $domainsCount,
         'invoicesCount' => $invoicesCount,

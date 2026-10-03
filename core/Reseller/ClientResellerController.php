@@ -50,7 +50,12 @@ final class ClientResellerController
         // Appended last on purpose: this controller is constructed BY HAND in two
         // test files, and a new dependency in the middle would silently rebind
         // every argument after it.
-        private readonly ResellerDomainSync $domainSync
+        private readonly ResellerDomainSync $domainSync,
+        // Overview figures and sub-reseller pricing. Optional and last for the same
+        // reason as above; without them the overview simply shows less.
+        private readonly ?ResellerStoreRepository $storeRows = null,
+        private readonly ?ResellerClientDirectory $directory = null,
+        private readonly ?ResellerLedgerService $ledger = null
     ) {
     }
 
@@ -73,6 +78,12 @@ final class ClientResellerController
         // page says so rather than leaving them stuck with an unusable key.
         $issued = $this->session->pullFlash('reseller_issued', null);
 
+        // A SUB-RESELLER (a customer of another reseller's store) buys at that
+        // store's retail prices, not at our discount — so that is the price list
+        // shown here, and the one their own store is priced over.
+        $upline = $this->uplineForClient($client);
+        $store = $this->storeFor($clientId);
+
         return $this->page('reseller.client-index', [
             'state' => $this->stateFor($credential),
             'credential' => $credential,
@@ -80,26 +91,85 @@ final class ClientResellerController
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'discounts' => $this->settings->all(),
-            'services' => $this->presentServices($this->pricing->serviceCatalogue(), $currency),
-            'domains' => $this->presentDomains($this->pricing->domainCatalogue(), $currency),
+            'services' => $this->presentServices($upline !== null ? $this->retail->wholesaleServices($upline) : $this->pricing->serviceCatalogue(), $currency),
+            'domains' => $this->presentDomains($upline !== null ? $this->retail->wholesaleDomains($upline) : $this->pricing->domainCatalogue(), $currency),
             'currency' => $currency,
             'docsUrl' => '/client/reseller/docs',
             // Shown at the top: every reseller is known by its Reseller ID, every account by its User ID.
             'userId' => $clientId,
-            'resellerId' => $this->storeIdFor($clientId),
+            'resellerId' => $store === null ? null : (int) $store['id'],
+            'client' => $client,
+            'store' => $store,
+            'upline' => $upline,
+            'overview' => $this->overviewFor($store),
         ]);
     }
 
-    /** The client's store id (their Reseller ID), or null before they open a store. */
-    private function storeIdFor(int $clientId): ?int
+    /** @return array<string, mixed>|null the client's own store */
+    private function storeFor(int $clientId): ?array
     {
         try {
-            $store = $this->stores->forClient($clientId);
+            return $this->stores->forClient($clientId);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The store the client registered under, when they are a customer of another
+     * reseller (which makes them a sub-reseller).
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>|null
+     */
+    private function uplineForClient(array $client): ?array
+    {
+        $uplineId = (int) ($client['reseller_id'] ?? 0);
+
+        if ($uplineId <= 0 || $this->storeRows === null) {
+            return null;
+        }
+
+        try {
+            $upline = $this->storeRows->find($uplineId);
         } catch (\Throwable) {
             return null;
         }
 
-        return $store === null ? null : (int) $store['id'];
+        return $upline !== null && (int) $upline['client_id'] !== (int) $client['id'] ? $upline : null;
+    }
+
+    /**
+     * The figures on the overview's stat cards. Each source is optional and each
+     * failure is contained: the overview must render even if one figure cannot.
+     *
+     * @param array<string, mixed>|null $store
+     * @return array<string, mixed>
+     */
+    private function overviewFor(?array $store): array
+    {
+        $overview = ['summary' => null, 'account' => null, 'pending_orders' => null];
+
+        if ($store === null) {
+            return $overview;
+        }
+
+        $storeId = (int) $store['id'];
+
+        try {
+            if ($this->directory !== null) {
+                $overview['summary'] = $this->directory->summary($storeId);
+                $overview['pending_orders'] = $this->directory->pendingOrderCount($storeId);
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $overview['account'] = $this->ledger?->accountFor($storeId);
+        } catch (\Throwable) {
+        }
+
+        return $overview;
     }
 
     /**
@@ -638,6 +708,8 @@ final class ClientResellerController
             'notice' => $this->session->pullFlash('reseller_notice'),
             'discounts' => $this->settings->all(),
             'currency' => $currency,
+            // A sub-reseller prices over its upline's retail, not our list.
+            'upline' => $this->retail->uplineOf($store),
         ]);
     }
 

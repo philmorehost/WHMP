@@ -20,7 +20,8 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
 $rateText = static fn (float $rate): string => rtrim(rtrim(number_format($rate, 6, '.', ''), '0'), '.');
 ?>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<?= $view->render('partials.reseller-admin-nav') ?>
+<div class="cv-card rs-page-head" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Reseller accounts</h1>
     <p><a href="/admin/resellers">&larr; Back to resellers</a> &middot;
         <a href="/admin/resellers/billing">Store cost billing</a> &middot;

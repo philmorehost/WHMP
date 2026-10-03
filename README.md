@@ -104,6 +104,36 @@ Each reseller is a separate tenant, identified everywhere by its **Reseller ID**
 
 Login tickets (`client_impersonation_tokens`) are stored only as SHA-256 hashes, can be used once, and only work on the site they name while the customer still belongs to it.
 
+### Sub-resellers (two tiers, never three)
+
+A reseller's customer may open a reseller account of their own and become a **sub-reseller**. The chain stops there (`ResellerEligibility`, `MAX_TIER = 2`):
+
+| Who | Can resell? | Buys at |
+|---|---|---|
+| Main-site customer | Yes (partner reseller, tier 1) | Our list price less the admin's reseller discount |
+| Customer of a partner reseller | Yes (sub-reseller, tier 2) | **The partner's own retail prices**, including any prices the partner set by hand |
+| Customer of a sub-reseller | **No.** The Reseller Area link is hidden on their dashboard, and every `/client/reseller…` URL returns 403 (Kernel guard). | n/a |
+
+- **The first reseller keeps its profit.** A sub-reseller's cost for an item is what the upline's customers would pay for it. The sub-reseller's markup and hand-set prices go on top of that, and it cannot set a price below that cost. Setup fees, configurable options and domains all work the same way (`ResellerRetailPricing`).
+- **Money.** Each order records `orders.upline_reseller_id` and `upline_cost_total` (migration 0211). When the invoice is paid:
+  - the sub-reseller is billed `cost_total` (the upline's prices);
+  - the upline is credited `upline_margin = cost_total − upline_cost_total` on its account, held for the usual holding period.
+
+  A refund posts a proportional `upline_margin_reversal`.
+- **Where it shows.**
+  - The sub-reseller's overview, prices page and `/api/reseller/pricing` show the upline's prices instead of our discount.
+  - The admin's reseller list has a **Tier** column, and the store page explains whom a sub-reseller buys from.
+  - A store whose upline is itself a sub-reseller (possible only for stores opened before the cap) is flagged **Legacy 3rd tier**.
+
+### Reseller panel design
+
+The reseller control panel (`/client/reseller…`) and the admin's reseller pages (`/admin/resellers…`) share a modern skin in `public/assets/css/reseller.css`.
+
+- **Scoping:** the skin applies only under `.rs-panel` / `.rs-admin`, which the layouts add to `<main>` on those paths. The rest of the app is unchanged.
+- **What it covers:** a hero header, stat cards with icons, pill navigation with inline SVG icons, quick-action tiles, and restyled `cv-*` buttons, cards, tables, inputs, alerts and badges. Dark mode is supported.
+- **Colours:** everything uses theme tokens, so a tenant's brand colour carries through.
+- **Navigation:** the admin's programme-wide reseller pages share one nav (`partials/reseller-admin-nav.php`).
+
 ## Known environment-dependent gaps
 
 Some features degrade gracefully but aren't fully live-verifiable without infrastructure this dev environment doesn't have:

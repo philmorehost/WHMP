@@ -645,3 +645,806 @@
     align-items: center;
     margin: 0.4rem 0 0;
 }
+
+/* ============================================================================
+ * Modern control-panel skin
+ *
+ * Scoped to two classes the layouts put on <main>: .rs-panel (the client's
+ * /client/reseller area) and .rs-admin (the admin's /admin/resellers pages). Nothing
+ * outside those pages changes, and every view keeps composing the shared cv-*
+ * components — this restyles them in place rather than forking the markup.
+ *
+ * Same colour rule as the top of this file: only --cv-color-brand-500/600 are
+ * overridden per tenant, so every tint is mixed against 500, never read from 100/200.
+ * ========================================================================== */
+
+.rs-panel,
+.rs-admin {
+    --rs-brand: var(--cv-color-brand-500);
+    --rs-brand-strong: var(--cv-color-brand-600);
+    --rs-accent: var(--rs-brand);
+    --rs-tint: color-mix(in srgb, var(--rs-brand) 9%, var(--cv-bg-surface));
+    --rs-ring: color-mix(in srgb, var(--rs-brand) 30%, transparent);
+    --rs-line: color-mix(in srgb, var(--cv-border-default) 80%, transparent);
+    --rs-radius: 14px;
+    --rs-radius-lg: 20px;
+    --rs-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 30px -18px rgba(16, 24, 40, 0.28);
+    --rs-shadow-hover: 0 2px 4px rgba(16, 24, 40, 0.05), 0 18px 40px -20px rgba(16, 24, 40, 0.38);
+    --rs-hero-ink: #fff;
+    background:
+        radial-gradient(900px 340px at 0% -6%, color-mix(in srgb, var(--rs-brand) 9%, transparent), transparent 70%),
+        radial-gradient(700px 300px at 100% 0%, color-mix(in srgb, var(--cv-color-violet-500) 7%, transparent), transparent 70%);
+}
+
+/* One reading width for the whole panel: the views were written with a mix of 56rem,
+ * 64rem and full-width cards, which made the edge of the page jump between screens.
+ * !important only to beat those inline widths, and only inside the panel. */
+.rs-panel > *,
+.rs-panel .rs-page {
+    max-width: 76rem;
+    margin-inline: auto;
+}
+.rs-panel .cv-card,
+.rs-panel .rs-nav {
+    max-width: 76rem !important;
+}
+.rs-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cv-space-4);
+}
+.rs-page > * { margin: 0; }
+
+/* Plain links: the browser's default blue is unreadable on the dark theme and ignores
+ * the tenant's colour. Mixed with the text colour so it reads in light and dark alike. */
+.rs-panel .cv-card a:not([class]),
+.rs-admin .cv-card a:not([class]),
+.rs-panel .cv-alert a:not([class]),
+.rs-admin .cv-alert a:not([class]) {
+    color: color-mix(in srgb, var(--rs-brand) 72%, var(--cv-text-primary));
+    font-weight: 600;
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--rs-brand) 30%, transparent);
+    transition: border-color var(--cv-transition-fast), color var(--cv-transition-fast);
+}
+.rs-panel .cv-card a:not([class]):hover,
+.rs-admin .cv-card a:not([class]):hover,
+.rs-panel .cv-alert a:not([class]):hover,
+.rs-admin .cv-alert a:not([class]):hover {
+    color: var(--rs-brand);
+    border-bottom-color: currentColor;
+}
+
+/* -------------------------------------------------------------- cards --- */
+
+.rs-panel .cv-card,
+.rs-admin .cv-card {
+    border: 1px solid var(--rs-line);
+    border-radius: var(--rs-radius-lg);
+    box-shadow: var(--rs-shadow);
+    padding: clamp(1.1rem, 2.4vw, 1.75rem);
+    background: var(--cv-bg-surface);
+}
+
+.rs-panel .cv-card__title,
+.rs-admin .cv-card__title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: clamp(1.05rem, 1.6vw, 1.2rem);
+    letter-spacing: -0.015em;
+    margin-bottom: var(--cv-space-4);
+}
+.rs-panel h2.cv-card__title::before,
+.rs-admin h2.cv-card__title::before {
+    content: "";
+    width: 4px;
+    height: 1.1em;
+    border-radius: 99px;
+    background: linear-gradient(180deg, var(--rs-brand), var(--cv-color-violet-500));
+    flex: none;
+}
+
+.rs-panel .cv-card h3,
+.rs-admin .cv-card h3 {
+    margin-top: var(--cv-space-5);
+    font-size: var(--cv-text-base);
+    letter-spacing: -0.01em;
+}
+
+/* A page's header card (title + nav) reads as a soft hero band rather than one more box. */
+.rs-panel .cv-card:has(> .rs-head),
+.rs-admin .rs-page-head,
+.rs-admin .rs-hero-card {
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(520px 200px at 100% 0%, color-mix(in srgb, var(--rs-brand) 16%, transparent), transparent 70%),
+        linear-gradient(180deg, color-mix(in srgb, var(--rs-brand) 5%, var(--cv-bg-surface)), var(--cv-bg-surface));
+    border-color: color-mix(in srgb, var(--rs-brand) 18%, var(--cv-border-default));
+}
+.rs-admin .rs-page-head .cv-card__title {
+    font-size: clamp(1.35rem, 2.6vw, 1.75rem);
+    font-weight: 800;
+}
+
+.rs-card--success {
+    border: 1px solid color-mix(in srgb, var(--cv-color-success-500) 45%, transparent) !important;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--cv-color-success-500) 12%, transparent), var(--rs-shadow) !important;
+}
+
+/* ----------------------------------------------------------- welcome hero --- */
+
+.rs-welcome {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--cv-space-5);
+    padding: clamp(1.4rem, 3.5vw, 2.4rem);
+    border-radius: calc(var(--rs-radius-lg) + 4px);
+    color: var(--rs-hero-ink);
+    overflow: hidden;
+    isolation: isolate;
+    background:
+        radial-gradient(600px 260px at 88% 10%, color-mix(in srgb, var(--rs-brand) 70%, transparent), transparent 65%),
+        radial-gradient(500px 240px at 0% 100%, color-mix(in srgb, var(--cv-color-violet-600) 45%, transparent), transparent 70%),
+        linear-gradient(135deg, color-mix(in srgb, var(--rs-brand-strong) 55%, #0b1020), color-mix(in srgb, var(--rs-brand) 30%, #111827));
+    box-shadow: 0 24px 48px -28px color-mix(in srgb, var(--rs-brand) 70%, #000);
+    margin-bottom: var(--cv-space-4);
+}
+.rs-page > .rs-welcome { margin-bottom: 0; }
+.rs-welcome::after {
+    /* a faint grid, for depth without an image */
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: linear-gradient(90deg, transparent, #000 60%);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 60%);
+}
+.rs-welcome .rs-head { margin-bottom: var(--cv-space-4); }
+.rs-welcome .rs-head__title {
+    color: var(--rs-hero-ink);
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    letter-spacing: -0.025em;
+}
+.rs-welcome .rs-head__lede { color: rgba(255, 255, 255, 0.82); }
+.rs-welcome .rs-head__lede strong { color: #fff; }
+.rs-welcome a:not(.cv-btn) { color: #fff; }
+
+.rs-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 var(--cv-space-3);
+    padding: 0.25rem 0.7rem;
+    border-radius: 99px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.rs-eyebrow::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--cv-color-teal-400);
+    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.25);
+}
+
+.rs-welcome__ids { margin: 0 0 var(--cv-space-4) !important; }
+.rs-welcome .rs-id-badge {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.rs-welcome__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cv-space-2);
+}
+.rs-welcome .cv-btn.cv-btn {
+    background: #fff;
+    color: color-mix(in srgb, var(--rs-brand-strong) 85%, #111);
+    box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.55);
+}
+.rs-welcome .cv-btn.cv-btn:hover { background: #fff; color: color-mix(in srgb, var(--rs-brand-strong) 85%, #111); filter: brightness(0.97); }
+.rs-welcome .cv-btn.cv-btn--secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: none;
+    backdrop-filter: blur(6px);
+}
+.rs-welcome .cv-btn.cv-btn--secondary:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
+
+.rs-welcome__art {
+    position: relative;
+    width: clamp(7rem, 16vw, 11rem);
+    aspect-ratio: 1;
+}
+.rs-welcome__orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(0.5px);
+}
+.rs-welcome__orb--a {
+    inset: 0;
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.04) 60%);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.rs-welcome__orb--b {
+    width: 38%;
+    height: 38%;
+    right: -6%;
+    bottom: 4%;
+    background: linear-gradient(135deg, var(--cv-color-teal-400), var(--cv-color-violet-500));
+    opacity: 0.85;
+}
+.rs-welcome__glyph {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #fff;
+}
+.rs-welcome__glyph svg { width: 42%; height: 42%; stroke-width: 1.4; }
+
+.rs-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.65rem;
+    border-radius: 99px;
+    font-size: var(--cv-text-xs);
+    font-weight: 700;
+    color: color-mix(in srgb, var(--rs-brand-strong) 80%, var(--cv-text-primary));
+    background: color-mix(in srgb, var(--rs-brand) 12%, var(--cv-bg-surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-brand) 25%, transparent);
+    white-space: nowrap;
+}
+.rs-chip--tier {
+    color: color-mix(in srgb, var(--cv-color-violet-600) 85%, var(--cv-text-primary));
+    background: color-mix(in srgb, var(--cv-color-violet-500) 12%, var(--cv-bg-surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cv-color-violet-500) 28%, transparent);
+}
+.rs-welcome .rs-chip {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+/* ---------------------------------------------------------------- nav --- */
+
+.rs-panel .rs-nav,
+.rs-admin .rs-nav {
+    max-width: none;
+    margin-block: 0 var(--cv-space-4);
+    padding: 0.35rem;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--cv-bg-surface-sunken) 80%, transparent);
+    border: 1px solid var(--rs-line);
+    box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.rs-page > .rs-nav { margin: 0; }
+.rs-panel .cv-card .rs-nav,
+.rs-admin .cv-card .rs-nav { margin-bottom: var(--cv-space-2); }
+
+.rs-panel .rs-nav__list,
+.rs-admin .rs-nav__list { gap: 0.2rem; }
+
+.rs-panel .rs-nav__link,
+.rs-admin .rs-nav__link {
+    border-radius: 11px;
+    padding: 0.5rem 0.85rem;
+    font-weight: 600;
+    color: var(--cv-text-secondary);
+}
+.rs-nav__icon { flex: none; opacity: 0.8; }
+.rs-panel .rs-nav__link:hover,
+.rs-admin .rs-nav__link:hover {
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    box-shadow: var(--cv-shadow-xs);
+}
+.rs-panel .rs-nav__link--active,
+.rs-admin .rs-nav__link--active,
+.rs-panel .rs-nav__link--active:hover,
+.rs-admin .rs-nav__link--active:hover {
+    background: linear-gradient(135deg, var(--rs-brand), var(--rs-brand-strong));
+    color: #fff;
+    box-shadow: 0 8px 18px -10px color-mix(in srgb, var(--rs-brand) 80%, #000), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.rs-nav__link--active .rs-nav__icon { opacity: 1; }
+
+/* Phones: one scrollable row instead of four wrapped lines of pills. */
+@media (max-width: 720px) {
+    .rs-panel .rs-nav__list,
+    .rs-admin .rs-nav__list {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x proximity;
+    }
+    .rs-panel .rs-nav__list::-webkit-scrollbar,
+    .rs-admin .rs-nav__list::-webkit-scrollbar { display: none; }
+    .rs-panel .rs-nav__link,
+    .rs-admin .rs-nav__link { scroll-snap-align: start; }
+}
+
+/* ------------------------------------------------------------ buttons --- */
+
+.rs-panel .cv-btn,
+.rs-admin .cv-btn {
+    justify-content: center;
+    min-height: 2.6rem;
+    padding: 0.6rem 1.15rem;
+    border-radius: 12px;
+    font-weight: 650;
+    letter-spacing: -0.005em;
+    text-decoration: none;
+    background: linear-gradient(135deg, var(--rs-brand), var(--rs-brand-strong));
+    color: #fff;
+    border: 1px solid color-mix(in srgb, var(--rs-brand-strong) 60%, transparent);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 8px 18px -10px color-mix(in srgb, var(--rs-brand) 85%, #000);
+    transition: transform var(--cv-transition-fast), box-shadow var(--cv-transition-fast), filter var(--cv-transition-fast), background-color var(--cv-transition-fast);
+}
+.rs-panel .cv-btn svg,
+.rs-admin .cv-btn svg { width: 1.05rem; height: 1.05rem; flex: none; }
+.rs-panel .cv-btn:hover,
+.rs-admin .cv-btn:hover {
+    filter: brightness(1.06) saturate(1.05);
+    transform: translateY(-1px);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, 0 14px 26px -12px color-mix(in srgb, var(--rs-brand) 90%, #000);
+}
+.rs-panel .cv-btn:active,
+.rs-admin .cv-btn:active { transform: translateY(0); filter: brightness(0.97); }
+.rs-panel .cv-btn:focus-visible,
+.rs-admin .cv-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--cv-bg-surface), 0 0 0 5px var(--rs-ring);
+}
+.rs-panel .cv-btn:disabled,
+.rs-admin .cv-btn:disabled { filter: grayscale(0.4); opacity: 0.55; transform: none; }
+
+.rs-panel .cv-btn--secondary,
+.rs-admin .cv-btn--secondary {
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    border: 1px solid var(--cv-border-default);
+    box-shadow: var(--cv-shadow-xs);
+}
+.rs-panel .cv-btn--secondary:hover,
+.rs-admin .cv-btn--secondary:hover {
+    filter: none;
+    background: var(--rs-tint);
+    color: color-mix(in srgb, var(--rs-brand-strong) 85%, var(--cv-text-primary));
+    border-color: color-mix(in srgb, var(--rs-brand) 40%, var(--cv-border-default));
+    box-shadow: var(--cv-shadow-sm);
+}
+
+.rs-panel .cv-btn--danger,
+.rs-admin .cv-btn--danger {
+    background: linear-gradient(135deg, var(--cv-color-danger-500), var(--cv-color-danger-600, #b91c1c));
+    border-color: color-mix(in srgb, var(--cv-color-danger-500) 70%, transparent);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset, 0 8px 18px -10px rgba(220, 38, 38, 0.7);
+}
+
+.rs-panel .rs-btn-sm,
+.rs-admin .rs-btn-sm,
+.rs-panel .cv-table .cv-btn,
+.rs-admin .cv-table .cv-btn {
+    min-height: 2rem;
+    padding: 0.32rem 0.75rem;
+    border-radius: 9px;
+    font-size: var(--cv-text-xs);
+}
+
+.rs-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+/* ------------------------------------------------------------- forms --- */
+
+.rs-panel .cv-input,
+.rs-panel .cv-select,
+.rs-panel .cv-textarea,
+.rs-admin .cv-input,
+.rs-admin .cv-select,
+.rs-admin .cv-textarea {
+    min-height: 2.6rem;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid var(--cv-border-default);
+    border-radius: 11px;
+    background: var(--cv-bg-surface);
+    box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.04);
+    transition: border-color var(--cv-transition-fast), box-shadow var(--cv-transition-fast);
+    max-width: 100%;
+}
+.rs-panel .cv-textarea,
+.rs-admin .cv-textarea { min-height: 6rem; }
+/* Bare inputs in a form paragraph were browser-default width (about 20 characters),
+ * too short for a domain or a URL. */
+.rs-panel .cv-card p > .cv-input,
+.rs-panel .cv-card p > .cv-select,
+.rs-admin .cv-card p > .cv-input,
+.rs-admin .cv-card p > .cv-select { width: min(100%, 30rem); margin-top: 0.35rem; }
+.rs-panel .cv-card p > .cv-textarea,
+.rs-admin .cv-card p > .cv-textarea { width: 100%; margin-top: 0.35rem; }
+.rs-panel .cv-input:hover,
+.rs-panel .cv-select:hover,
+.rs-panel .cv-textarea:hover,
+.rs-admin .cv-input:hover,
+.rs-admin .cv-select:hover,
+.rs-admin .cv-textarea:hover { border-color: color-mix(in srgb, var(--rs-brand) 30%, var(--cv-border-default)); }
+.rs-panel .cv-input:focus,
+.rs-panel .cv-select:focus,
+.rs-panel .cv-textarea:focus,
+.rs-admin .cv-input:focus,
+.rs-admin .cv-select:focus,
+.rs-admin .cv-textarea:focus {
+    outline: none;
+    border-color: var(--rs-brand);
+    box-shadow: 0 0 0 4px var(--rs-ring);
+}
+.rs-panel .cv-card label,
+.rs-admin .cv-card label {
+    font-size: var(--cv-text-sm);
+    font-weight: 600;
+    color: var(--cv-text-primary);
+}
+
+.rs-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    gap: var(--cv-space-3) var(--cv-space-4);
+    align-items: end;
+}
+.rs-form-grid .cv-field { margin: 0; }
+.rs-form-grid .cv-input { width: 100%; }
+.rs-form-grid__actions { display: flex; gap: var(--cv-space-2); }
+.rs-form-grid__wide { grid-column: 1 / -1; }
+
+/* ------------------------------------------------------------ tables --- */
+
+/* components.css makes .cv-table a scrolling block (meant for phones only, but an
+ * unbalanced rule there lets it leak to every width), which stops tables filling their
+ * card. Inside the panel a table is a table again on anything wider than a phone; on a
+ * phone .rs-table-scroll / the block fallback still scrolls it sideways. */
+@media (min-width: 769px) {
+    .rs-panel .cv-table,
+    .rs-admin .cv-table {
+        display: table;
+        width: 100%;
+        white-space: normal;
+    }
+}
+
+.rs-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--rs-radius);
+}
+
+.rs-panel .cv-table,
+.rs-admin .cv-table {
+    border: 1px solid var(--rs-line);
+    border-radius: var(--rs-radius);
+    overflow: hidden;
+    background: var(--cv-bg-surface);
+}
+.rs-panel .cv-table th,
+.rs-admin .cv-table th {
+    padding: 0.7rem 1rem;
+    height: auto;
+    background: color-mix(in srgb, var(--cv-bg-surface-sunken) 85%, var(--rs-tint));
+    color: var(--cv-text-secondary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--rs-line);
+    white-space: nowrap;
+}
+.rs-panel .cv-table td,
+.rs-admin .cv-table td {
+    padding: 0.8rem 1rem;
+    height: auto;
+    vertical-align: middle;
+    border-bottom: 1px solid color-mix(in srgb, var(--cv-border-subtle) 90%, transparent);
+}
+/* Key/value tables (a <th> heading each body row) read better left-aligned and unshouted. */
+.rs-panel .cv-table tbody th,
+.rs-admin .cv-table tbody th {
+    background: transparent;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: var(--cv-text-sm);
+    font-weight: 600;
+    color: var(--cv-text-secondary);
+    width: 14rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--cv-border-subtle) 90%, transparent);
+}
+.rs-panel .cv-table tbody tr:hover,
+.rs-admin .cv-table tbody tr:hover { background: color-mix(in srgb, var(--rs-brand) 4%, transparent); }
+.rs-panel .cv-table tbody tr:last-child > *,
+.rs-admin .cv-table tbody tr:last-child > * { border-bottom: none; }
+.rs-panel .cv-table code,
+.rs-admin .cv-table code {
+    padding: 0.1rem 0.4rem;
+    border-radius: 6px;
+    background: var(--cv-bg-surface-sunken);
+    font-size: 0.85em;
+}
+
+/* ------------------------------------------------------ alerts & badges --- */
+
+.rs-panel .cv-alert,
+.rs-admin .cv-alert {
+    position: relative;
+    border-radius: var(--rs-radius);
+    border: 1px solid var(--rs-line);
+    border-left-width: 1px;
+    padding: 0.85rem 1rem 0.85rem 1.25rem;
+    overflow: hidden;
+    margin-bottom: var(--cv-space-3);
+}
+.rs-panel .cv-alert::before,
+.rs-admin .cv-alert::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--cv-text-tertiary);
+}
+.rs-panel .cv-alert--success::before,
+.rs-admin .cv-alert--success::before { background: var(--cv-color-success-500); }
+.rs-panel .cv-alert--error::before,
+.rs-admin .cv-alert--error::before { background: var(--cv-color-danger-500); }
+.rs-panel .cv-alert--warning::before,
+.rs-admin .cv-alert--warning::before { background: var(--cv-color-warning-500); }
+.rs-panel .cv-alert--neutral,
+.rs-admin .cv-alert--neutral { background: var(--rs-tint); }
+.rs-panel .cv-alert--neutral::before,
+.rs-admin .cv-alert--neutral::before { background: linear-gradient(180deg, var(--rs-brand), var(--cv-color-violet-500)); }
+.rs-page > .cv-alert { margin: 0; }
+
+.rs-panel .cv-badge,
+.rs-admin .cv-badge {
+    padding: 0.18rem 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+    white-space: nowrap;
+    text-decoration: none;
+}
+.rs-panel .cv-badge--success,
+.rs-admin .cv-badge--success { color: var(--cv-color-success-600, #15803d); background: color-mix(in srgb, var(--cv-color-success-500) 13%, var(--cv-bg-surface)); }
+.rs-panel .cv-badge--warning,
+.rs-admin .cv-badge--warning { color: color-mix(in srgb, var(--cv-color-warning-500) 80%, #000); background: color-mix(in srgb, var(--cv-color-warning-500) 15%, var(--cv-bg-surface)); }
+.rs-panel .cv-badge--danger,
+.rs-admin .cv-badge--danger { color: var(--cv-color-danger-500); background: color-mix(in srgb, var(--cv-color-danger-500) 12%, var(--cv-bg-surface)); }
+
+.rs-callout { margin: 0; }
+
+.rs-panel .rs-id-badge,
+.rs-admin .rs-id-badge { border-radius: 99px; }
+
+/* -------------------------------------------------------- stat cards --- */
+
+.rs-panel .rs-stats,
+.rs-admin .rs-stats {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12.5rem), 1fr));
+    gap: var(--cv-space-3);
+}
+
+.rs-panel .rs-stat,
+.rs-admin .rs-stat {
+    position: relative;
+    display: block;
+    padding: 1.1rem 1.2rem 1.15rem;
+    border: 1px solid var(--rs-line);
+    border-radius: var(--rs-radius-lg);
+    background: var(--cv-bg-surface);
+    box-shadow: var(--rs-shadow);
+    color: inherit;
+    text-decoration: none;
+    overflow: hidden;
+    transition: transform var(--cv-transition-base), box-shadow var(--cv-transition-base), border-color var(--cv-transition-base);
+}
+.rs-panel .rs-stat::after,
+.rs-admin .rs-stat::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--rs-accent), transparent);
+    opacity: 0.85;
+}
+/* A soft glow in the accent colour, top right — a pseudo-element rather than a
+ * background layer so it never tiles, whatever size the card grows to. */
+.rs-panel .rs-stat::before,
+.rs-admin .rs-stat::before {
+    content: "";
+    position: absolute;
+    top: -70px;
+    right: -60px;
+    width: 170px;
+    height: 170px;
+    border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--rs-accent) 16%, transparent), transparent 70%);
+    pointer-events: none;
+}
+.rs-panel .rs-stat > *,
+.rs-admin .rs-stat > * { position: relative; }
+.rs-stat--teal { --rs-accent: var(--cv-color-teal-500); }
+.rs-stat--violet { --rs-accent: var(--cv-color-violet-500); }
+.rs-stat--amber { --rs-accent: var(--cv-color-amber-500); }
+.rs-stat--alert { --rs-accent: var(--cv-color-danger-500); }
+
+.rs-stat__icon {
+    display: inline-grid;
+    place-items: center;
+    width: 2.6rem;
+    height: 2.6rem;
+    margin-bottom: 0.85rem;
+    border-radius: 12px;
+    color: var(--rs-accent);
+    background: color-mix(in srgb, var(--rs-accent) 13%, var(--cv-bg-surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-accent) 22%, transparent);
+}
+.rs-panel .rs-stat__label,
+.rs-admin .rs-stat__label {
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    color: var(--cv-text-secondary);
+}
+.rs-panel .rs-stat__value,
+.rs-admin .rs-stat__value {
+    margin-top: 0.15rem;
+    font-size: clamp(1.5rem, 2.6vw, 1.95rem);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+}
+.rs-stat__value--sm { font-size: var(--cv-text-lg) !important; letter-spacing: -0.01em !important; }
+.rs-stat__of {
+    margin-left: 0.3rem;
+    font-size: 0.55em;
+    font-weight: 700;
+    color: var(--cv-text-tertiary);
+}
+.rs-panel .rs-stat__note,
+.rs-admin .rs-stat__note {
+    margin-top: 0.3rem;
+    font-size: var(--cv-text-xs);
+    color: var(--cv-text-secondary);
+}
+.rs-stat--link { cursor: pointer; }
+.rs-panel .rs-stat--link:hover,
+.rs-admin .rs-stat--link:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--rs-shadow-hover);
+    border-color: color-mix(in srgb, var(--rs-accent) 35%, var(--cv-border-default));
+}
+.rs-stat--link:focus-visible { outline: 2px solid var(--rs-accent); outline-offset: 2px; }
+
+/* ------------------------------------------------------- quick tiles --- */
+
+.rs-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.5rem), 1fr));
+    gap: var(--cv-space-3);
+}
+.rs-tile {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 1rem 1.1rem;
+    border-radius: var(--rs-radius-lg);
+    border: 1px solid var(--rs-line);
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    text-decoration: none;
+    box-shadow: var(--rs-shadow);
+    transition: transform var(--cv-transition-base), box-shadow var(--cv-transition-base), border-color var(--cv-transition-base);
+}
+.rs-tile:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--rs-brand) 35%, var(--cv-border-default));
+    box-shadow: var(--rs-shadow-hover);
+}
+.rs-tile:focus-visible { outline: 2px solid var(--rs-brand); outline-offset: 2px; }
+.rs-tile__icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 13px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--rs-brand), var(--cv-color-violet-500));
+    box-shadow: 0 8px 18px -10px color-mix(in srgb, var(--rs-brand) 80%, #000);
+}
+.rs-tile__text { display: flex; flex-direction: column; min-width: 0; }
+.rs-tile__text strong { font-size: var(--cv-text-sm); }
+.rs-tile__text span { font-size: var(--cv-text-xs); color: var(--cv-text-secondary); }
+.rs-tile__go {
+    margin-left: auto;
+    color: var(--cv-text-tertiary);
+    transition: transform var(--cv-transition-fast), color var(--cv-transition-fast);
+}
+.rs-tile__go svg { width: 18px; height: 18px; }
+.rs-tile:hover .rs-tile__go { color: var(--rs-brand); transform: translateX(3px); }
+
+/* -------------------------------------------------- admin reseller head --- */
+
+.rs-admin-head__who {
+    display: flex;
+    align-items: center;
+    gap: var(--cv-space-3);
+    min-width: 0;
+}
+.rs-avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 16px;
+    font-family: var(--cv-font-heading);
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #fff;
+    background: linear-gradient(135deg, var(--rs-brand, var(--cv-color-brand-500)), var(--cv-color-violet-500));
+    box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--cv-color-brand-500) 80%, #000);
+}
+
+/* ---------------------------------------------------------- responsive --- */
+
+@media (max-width: 560px) {
+    /* Two figures a row on a phone rather than one long column of cards. */
+    .rs-panel .rs-stats,
+    .rs-admin .rs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--cv-space-2); }
+    .rs-panel .rs-stat,
+    .rs-admin .rs-stat { padding: 0.9rem; }
+    .rs-stat__icon { width: 2.2rem; height: 2.2rem; margin-bottom: 0.6rem; }
+    .rs-panel .rs-stat__value,
+    .rs-admin .rs-stat__value { font-size: 1.35rem; }
+}
+
+@media (max-width: 720px) {
+    .rs-welcome { grid-template-columns: 1fr; }
+    .rs-welcome__art { display: none; }
+    .rs-panel .cv-table tbody th,
+    .rs-admin .cv-table tbody th { width: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rs-panel *,
+    .rs-admin * { transition: none !important; }
+    .rs-stat--link:hover,
+    .rs-tile:hover,
+    .rs-panel .cv-btn:hover,
+    .rs-admin .cv-btn:hover { transform: none !important; }
+}
+
+@media print {
+    .rs-panel,
+    .rs-admin { background: none; }
+    .rs-welcome,
+    .rs-nav,
+    .rs-tiles { display: none !important; }
+}

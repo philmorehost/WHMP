@@ -17,7 +17,8 @@ $destinationValue = $target === 'store' && $toStoreId !== null ? (string) $toSto
 $counts = $preview['counts'] ?? [];
 $muted = 'color:var(--cv-text-secondary);';
 ?>
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<?= $view->render('partials.reseller-admin-nav') ?>
+<div class="cv-card rs-page-head" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Review client move</h1>
     <p><a href="/admin/resellers/migrations">&larr; All client migrations</a></p>
 

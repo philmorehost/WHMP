@@ -1985,6 +1985,30 @@ class Kernel
             }
         }
 
+        // TWO TIERS OF RESELLERS, NEVER THREE: a customer of a sub-reseller's store may
+        // not resell, so the whole Reseller area refuses them (ResellerEligibility).
+        if (\CodeVault\Reseller\ResellerEligibility::isResellerAreaPath($path) && (int) $session->get('client_id', 0) > 0) {
+            try {
+                $resellerAreaClient = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class)->currentClient();
+                $resellerAreaAllowed = $resellerAreaClient === null
+                    || $this->container->make(\CodeVault\Reseller\ResellerEligibility::class)->canResell($resellerAreaClient);
+            } catch (\Throwable) {
+                $resellerAreaAllowed = true;
+            }
+
+            if (!$resellerAreaAllowed) {
+                return SecurityHeaders::apply(Response::html(
+                    '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not available</title>'
+                    . '<div style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;">'
+                    . '<h1 style="font-size:1.25rem;">The reseller programme is not available on this account</h1>'
+                    . '<p>Your account is with a provider who is itself a reseller, and their customers cannot open reseller accounts. '
+                    . 'You can still order and manage your own services.</p>'
+                    . '<p><a href="/client/dashboard">Back to your dashboard</a></p></div>',
+                    403
+                ));
+            }
+        }
+
         // Signed in on a customer's behalf through a one-time link (a reseller for its
         // customer, or an admin): same reasoning as original_admin_id below for the
         // PIN, and a reseller additionally may not touch what would take the account

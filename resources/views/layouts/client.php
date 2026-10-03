@@ -27,6 +27,9 @@ $storefrontHome ??= false;
 $storefrontStore ??= current_storefront();
 $isStorefront = is_array($storefrontStore);
 $storefrontPath = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+// The reseller control panel gets its own modern skin, scoped to one class on <main>
+// so nothing outside /client/reseller changes.
+$resellerPanel = \CodeVault\Reseller\ResellerEligibility::isResellerAreaPath($storefrontPath);
 // The client area keeps its own page headings; the public pages and the sign-in
 // pages get the storefront's title banner.
 $storefrontBanner = $isStorefront && !$storefrontHome && (
@@ -79,6 +82,9 @@ $storefrontBanner = $isStorefront && !$storefrontHome && (
     <?php foreach ($jsonLd as $schema): ?>
         <script type="application/ld+json"><?= json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
     <?php endforeach; ?>
+    <?php if ($resellerPanel): ?>
+        <link rel="stylesheet" href="<?= asset('assets/css/reseller.css') ?>">
+    <?php endif; ?>
     <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
 <body data-skin="client"<?= $isStorefront ? ' class="sf' . ($storefrontHome ? ' sf--home' : '') . '"' : '' ?>>
@@ -123,7 +129,7 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
     <?php if ($storefrontBanner): ?>
         <?= $view->partial('partials.storefront-page-banner', ['title' => $title ?? null, 'breadcrumbs' => $breadcrumbs ?? null]) ?>
     <?php endif; ?>
-    <main class="cv-shell__main sf-main<?= $storefrontHome ? ' sf-main--home' : '' ?>">
+    <main class="cv-shell__main sf-main<?= $storefrontHome ? ' sf-main--home' : '' ?><?= $resellerPanel ? ' rs-panel' : '' ?>">
         <?= $content ?>
     </main>
     <?= $view->partial('partials.storefront-footer', ['store' => $storefrontStore, 't' => $t, 'theme' => $theme]) ?>
@@ -136,7 +142,7 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
     'languages' => $languages,
     'theme' => $theme,
 ]) ?>
-<main class="cv-shell__main">
+<main class="cv-shell__main<?= $resellerPanel ? ' rs-panel' : '' ?>">
     <?= $content ?>
 </main>
 <?= $view->partial('partials.footer', ['t' => $t, 'theme' => $theme]) ?>

@@ -48,7 +48,11 @@ final class AdminResellerController
         private readonly ResellerDomainSync $domainSync,
         // The store's customers, listed on the store page so an admin can open any of
         // them. Nullable so a hand-built instance needs no change.
-        private readonly ?ResellerClientDirectory $customers = null
+        private readonly ?ResellerClientDirectory $customers = null,
+        // The work queues counted on the overview's stat cards. Nullable for the same reason.
+        private readonly ?ResellerStoreRepository $storeRows = null,
+        private readonly ?ResellerPayoutRepository $payouts = null,
+        private readonly ?ClientMigrationRepository $migrations = null
     ) {
     }
 
@@ -59,17 +63,75 @@ final class AdminResellerController
         }
 
         $resellers = $this->credentials->all();
+        $stores = $this->stores->all();
 
         return $this->render('reseller.admin-index', [
             'discounts' => $this->settings->all(),
             'resellers' => $resellers,
-            'stores' => $this->stores->all(),
+            'stores' => $stores,
+            'stats' => self::overviewStats($stores, $this->queueCounts()),
             'platformHost' => $this->locator->platformHost(),
             'activeCount' => count(array_filter($resellers, static fn (array $r): bool => (int) ($r['active'] ?? 0) === 1)),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'docsUrl' => '/admin/resellers/docs',
         ]);
+    }
+
+    /**
+     * The figures on the overview's stat cards, from the store list already loaded for
+     * the table plus the queue counts. Static so it can be checked without a database.
+     *
+     * @param array<int, array<string, mixed>> $stores rows from ResellerStoreRepository::all()
+     * @param array{domains: ?int, payouts: ?int, migrations: ?int} $queues
+     * @return array<string, int|null>
+     */
+    public static function overviewStats(array $stores, array $queues): array
+    {
+        $stats = [
+            'stores' => count($stores),
+            'active' => 0,
+            'sub_resellers' => 0,
+            'third_tier' => 0,
+            'customers' => 0,
+            'pending_orders' => 0,
+            'custom_domains' => 0,
+            'domain_requests' => $queues['domains'] ?? null,
+            'payout_requests' => $queues['payouts'] ?? null,
+            'migrations' => $queues['migrations'] ?? null,
+        ];
+
+        foreach ($stores as $store) {
+            $stats['active'] += ($store['status'] ?? 'active') === 'active' ? 1 : 0;
+            $stats['customers'] += (int) ($store['customer_count'] ?? 0);
+            $stats['pending_orders'] += (int) ($store['pending_orders'] ?? 0);
+            $stats['custom_domains'] += ($store['domain_verified_at'] ?? null) !== null ? 1 : 0;
+
+            if ((int) ($store['upline_id'] ?? 0) > 0) {
+                $stats['sub_resellers']++;
+                $stats['third_tier'] += (int) ($store['upline_upline_id'] ?? 0) > 0 ? 1 : 0;
+            }
+        }
+
+        return $stats;
+    }
+
+    /** @return array{domains: ?int, payouts: ?int, migrations: ?int} each null when it cannot be counted */
+    private function queueCounts(): array
+    {
+        $count = static function (callable $read): ?int {
+            try {
+                return count($read());
+            } catch (\Throwable) {
+                return null;
+            }
+        };
+
+        return [
+            'domains' => $this->storeRows === null ? null : $count(fn (): array => $this->storeRows->pendingDomainRequests()),
+            'payouts' => $this->payouts === null ? null : $count(fn (): array => $this->payouts->pending()),
+            'migrations' => $this->migrations === null ? null : $count(fn (): array => $this->migrations->pending()),
+        ];
     }
 
     public function saveDiscounts(Request $request): Response
@@ -529,6 +591,24 @@ final class AdminResellerController
     /** @param array<string, mixed>|null $store */
     private function renderStorePage(int $clientId, ?array $store, Request $request): Response
     {
+        $upline = null;
+        $legacyThirdTier = false;
+
+        if ($store !== null) {
+            try {
+                $upline = $this->retail->uplineOf($store);
+
+                if ($upline !== null) {
+                    $uplineOwner = $this->clients->find((int) $upline['client_id']);
+                    // The upline is itself a sub-reseller, so this store is a third tier —
+                    // possible only for stores opened before the two-tier cap.
+                    $legacyThirdTier = ResellerEligibility::tierFromOwnerStore($uplineOwner['reseller_id'] ?? null) === null;
+                }
+            } catch (\Throwable) {
+                $upline = null;
+            }
+        }
+
         return $this->render('reseller.admin-store', [
             'clientId' => $clientId,
             'store' => $store,
@@ -544,6 +624,9 @@ final class AdminResellerController
             'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
             'chat' => ResellerChat::formValues($store),
             'customerSummary' => $store === null || $this->customers === null ? null : $this->customers->summary((int) $store['id']),
+            // A sub-reseller (its owner registered on another store) buys at that store's prices.
+            'upline' => $upline,
+            'legacyThirdTier' => $legacyThirdTier,
             'pendingOrders' => $store === null || $this->customers === null ? 0 : $this->customers->pendingOrderCount((int) $store['id']),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),

@@ -40,6 +40,33 @@ final class ResellerStoreRepository
         return $this->db->selectOne('SELECT * FROM resellers WHERE id = ? LIMIT 1', [$id]);
     }
 
+    /**
+     * The store's UPLINE: the store its owner registered under, when the owner is
+     * a customer of another reseller (a sub-reseller). Null for a store opened by
+     * one of the platform's own customers.
+     *
+     * A sub-reseller buys at the upline's retail prices (ResellerRetailPricing), so
+     * this is read on every priced page of a sub-reseller's store.
+     *
+     * @param array<string, mixed> $store
+     * @return array<string, mixed>|null
+     */
+    public function uplineFor(array $store): ?array
+    {
+        $storeId = (int) ($store['id'] ?? 0);
+        $ownerId = (int) ($store['client_id'] ?? 0);
+
+        if ($storeId <= 0 || $ownerId <= 0) {
+            return null;
+        }
+
+        return $this->db->selectOne(
+            'SELECT u.* FROM clients c JOIN resellers u ON u.id = c.reseller_id
+              WHERE c.id = ? AND u.id <> ? LIMIT 1',
+            [$ownerId, $storeId]
+        );
+    }
+
     /** The platform-subdomain match. Used with a slug already validated by isValidSlug(). */
     public function forSlug(string $slug): ?array
     {
@@ -68,9 +95,13 @@ final class ResellerStoreRepository
             "SELECT r.*, c.first_name, c.last_name, c.email,
                     (SELECT COUNT(*) FROM clients sc WHERE sc.reseller_id = r.id) AS customer_count,
                     (SELECT COUNT(*) FROM orders so JOIN clients oc ON oc.id = so.client_id
-                      WHERE oc.reseller_id = r.id AND so.status = 'pending') AS pending_orders
+                      WHERE oc.reseller_id = r.id AND so.status = 'pending') AS pending_orders,
+                    up.id AS upline_id, up.slug AS upline_slug, up.brand_name AS upline_brand,
+                    upc.reseller_id AS upline_upline_id
              FROM resellers r
              JOIN clients c ON c.id = r.client_id
+             LEFT JOIN resellers up ON up.id = c.reseller_id AND up.client_id <> r.client_id
+             LEFT JOIN clients upc ON upc.id = up.client_id
              ORDER BY r.id DESC"
         );
     }

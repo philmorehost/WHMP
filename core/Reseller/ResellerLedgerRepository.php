@@ -149,6 +149,21 @@ final class ResellerLedgerRepository
     }
 
     /**
+     * What is still credited to the UPLINE for one sub-reseller order: its
+     * upline_margin less any reversals. The ceiling for a refund's reversal.
+     */
+    public function uplineMarginOutstanding(int $orderId): float
+    {
+        $row = $this->db->selectOne(
+            "SELECT COALESCE(SUM(amount), 0) AS outstanding FROM reseller_ledger
+              WHERE order_id = ? AND kind IN ('upline_margin', 'upline_margin_reversal')",
+            [$orderId]
+        );
+
+        return max(0.0, round((float) ($row['outstanding'] ?? 0.0), 2));
+    }
+
+    /**
      * The whole account, in the base currency. Not filtered by anything — a
      * negative balance is a real state (they priced below our cost) and must be
      * returned rather than clamped.
@@ -329,6 +344,10 @@ final class ResellerLedgerRepository
             'SELECT o.id AS order_id,
                     o.reseller_id,
                     r.client_id AS reseller_client_id,
+                    o.cost_total,
+                    o.upline_reseller_id,
+                    o.upline_cost_total,
+                    u.client_id AS upline_client_id,
                     i.id AS invoice_id,
                     i.status,
                     i.total,
@@ -337,6 +356,7 @@ final class ResellerLedgerRepository
              FROM invoices i
              JOIN orders o ON o.id = i.order_id
              JOIN resellers r ON r.id = o.reseller_id
+             LEFT JOIN resellers u ON u.id = o.upline_reseller_id
              WHERE i.id = ?
                AND o.reseller_id IS NOT NULL
              LIMIT 1',

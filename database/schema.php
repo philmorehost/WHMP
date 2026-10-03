@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0210_reseller_client_management.php',
-    'migration_count' => 209,
+    'last_migration' => '0211_reseller_upline_margin.php',
+    'migration_count' => 210,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -2442,6 +2442,8 @@ return [
                 'cancellation_reason' => 'TEXT NULL',
                 'total' => 'DECIMAL(18,6) NOT NULL DEFAULT 0.00',
                 'cost_total' => 'DECIMAL(10,2) NULL',
+                'upline_reseller_id' => 'INT UNSIGNED NULL',
+                'upline_cost_total' => 'DECIMAL(10,2) NULL',
                 'reseller_cost_invoice_id' => 'INT UNSIGNED NULL',
                 'discount_amount' => 'DECIMAL(18,6) NOT NULL DEFAULT 0.00',
                 'promotion_code' => 'VARCHAR(50) NULL',
@@ -2501,6 +2503,13 @@ return [
                         'reseller_cost_invoice_id',
                     ],
                 ],
+                'fk_orders_upline_reseller' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'upline_reseller_id',
+                    ],
+                ],
             ],
             'foreign' => [
                 'fk_orders_client' => [
@@ -2527,6 +2536,13 @@ return [
                 'fk_orders_reseller_cost_invoice' => [
                     'column' => 'reseller_cost_invoice_id',
                     'references' => 'invoices',
+                    'referenced_column' => 'id',
+                    'on_delete' => 'SET NULL',
+                    'on_update' => NULL,
+                ],
+                'fk_orders_upline_reseller' => [
+                    'column' => 'upline_reseller_id',
+                    'references' => 'resellers',
                     'referenced_column' => 'id',
                     'on_delete' => 'SET NULL',
                     'on_update' => NULL,
@@ -3117,7 +3133,7 @@ return [
                 'id' => 'INT UNSIGNED AUTO_INCREMENT',
                 'reseller_id' => 'INT UNSIGNED NOT NULL',
                 'client_id' => 'INT UNSIGNED NULL',
-                'kind' => 'ENUM(\'store_receipt\',\'cost_invoice\',\'payout\',\'adjustment\',\'receipt_reversal\',\'cost_reversal\') NOT NULL',
+                'kind' => 'ENUM(\'store_receipt\',\'cost_invoice\',\'payout\',\'adjustment\',\'receipt_reversal\',\'cost_reversal\',\'upline_margin\',\'upline_margin_reversal\') NOT NULL',
                 'amount' => 'DECIMAL(18,6) NOT NULL COMMENT \'BASE currency, signed: + owed to the reseller, - owed by them\'',
                 'withdrawable_at' => 'DATETIME NULL COMMENT \'NULL = immediate; receipts carry payment date + holding period\'',
                 'order_id' => 'INT UNSIGNED NULL',

@@ -26,11 +26,32 @@ namespace CodeVault\Reseller;
  * `ResellerPricing` works in, and for the same reason: applying a percentage to
  * an already-converted figure is how a catalogue price becomes a different
  * number than the admin typed (see the money notes in ResellerPricing).
+ *
+ * SUB-RESELLERS (a store whose owner is a customer of another store, its UPLINE)
+ *
+ * A sub-reseller buys at the upline's RETAIL prices, not at our reseller discount,
+ * so the upline keeps its profit on a customer who turned reseller:
+ *
+ *   base   — the upline's retail for the item (what the upline's customers pay)
+ *   cost   — = base: what the sub-reseller owes
+ *   retail — the sub-reseller's markup/override applied over base
+ *   upline_cost — what the UPLINE owes us (list less our discount); the upline
+ *            earns cost − upline_cost on the sale (ResellerLedgerService)
+ *
+ * The chain is followed at most MAX_CHAIN levels, which also stops a cycle (two
+ * stores whose owners are each other's customers) from recursing forever. New
+ * chains cannot go past two tiers (ResellerEligibility).
  */
 final class ResellerRetailPricing
 {
     /** A reseller pricing 10x list is almost certainly a mistake; 0% is the floor. */
     public const MAX_MARKUP = 1000.0;
+
+    /** How many uplines a price may be built through. */
+    private const MAX_CHAIN = 3;
+
+    /** @var array<int, array<string, mixed>|null> upline store per store id, for this request */
+    private array $uplineCache = [];
 
     /** @var array<int, array<string, float>> product overrides, cached per store for this request */
     private array $productCache = [];
@@ -40,8 +61,84 @@ final class ResellerRetailPricing
 
     public function __construct(
         private readonly ResellerPricing $cost,
-        private readonly ResellerRetailPriceRepository $overrides
+        private readonly ResellerRetailPriceRepository $overrides,
+        // Trailing and optional: without it every store prices as a first-tier store,
+        // which is what the hand-built instances in the tests expect.
+        private readonly ?ResellerStoreRepository $stores = null
     ) {
+    }
+
+    /**
+     * The store's upline (the store its owner registered under), or null for a
+     * store opened by one of the platform's own customers.
+     *
+     * @param array<string, mixed> $store
+     * @return array<string, mixed>|null
+     */
+    public function uplineOf(array $store): ?array
+    {
+        $id = (int) ($store['id'] ?? 0);
+
+        if ($this->stores === null || $id <= 0) {
+            return null;
+        }
+
+        if (!array_key_exists($id, $this->uplineCache)) {
+            $this->uplineCache[$id] = $this->stores->uplineFor($store);
+        }
+
+        return $this->uplineCache[$id];
+    }
+
+    /**
+     * The figure the store's markup applies to, for an item with no per-item
+     * override (setup fees, configurable options): list on a first-tier store, the
+     * upline's markup price on a sub-reseller's.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function basePriceFor(float $listPrice, array $store, int $depth = 0): float
+    {
+        $upline = $depth < self::MAX_CHAIN ? $this->uplineOf($store) : null;
+
+        return $upline === null ? $listPrice : $this->retailPriceFor($listPrice, $upline, $depth + 1);
+    }
+
+    /**
+     * What the store's customer pays for an item with no per-item override.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function retailPriceFor(float $listPrice, array $store, int $depth = 0): float
+    {
+        return $this->priceFor($this->basePriceFor($listPrice, $store, $depth), $this->markupFor($store), null);
+    }
+
+    /**
+     * What the store owes for an item with no per-item override: our discounted
+     * price on a first-tier store, the upline's price on a sub-reseller's.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function storeCostFor(float $listPrice, string $kind, array $store, int $depth = 0): float
+    {
+        $upline = $depth < self::MAX_CHAIN ? $this->uplineOf($store) : null;
+
+        return $upline === null
+            ? $this->cost->resellerPrice($listPrice, $kind)
+            : $this->retailPriceFor($listPrice, $upline, $depth + 1);
+    }
+
+    /**
+     * What the store's UPLINE owes for the same item, or null when there is none.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function uplineCostFor(float $listPrice, string $kind, array $store): ?float
+    {
+        $upline = $this->uplineOf($store);
+
+        return $upline === null ? null : $this->storeCostFor($listPrice, $kind, $upline, 1);
     }
 
     /** 0–1000, to two decimals. Negative would sell below list; the ceiling is a typo guard. */
@@ -81,48 +178,140 @@ final class ResellerRetailPricing
      * The full three-way quote for one product cycle: what the catalogue says,
      * what the reseller owes, what the customer pays, and the difference.
      *
+     * On a sub-reseller's store `list` is the BASE the store prices from (the
+     * upline's retail) and `catalogue_list` is our own list price.
+     *
      * @param array<string, mixed> $store
-     * @return array{list: float, cost: float, retail: float, margin: float, discount_percent: float, markup_percent: float, overridden: bool}
+     * @return array{list: float, catalogue_list: float, cost: float, retail: float, margin: float, discount_percent: float, markup_percent: float, overridden: bool, upline_id: ?int, upline_cost: ?float}
      */
-    public function quoteProduct(float $listPrice, array $store, int $productId, string $cycle): array
+    public function quoteProduct(float $listPrice, array $store, int $productId, string $cycle, int $depth = 0): array
     {
         $override = $this->productOverrides($store)[$productId . ':' . $cycle] ?? null;
         $markup = $this->markupFor($store);
+        $upline = $depth < self::MAX_CHAIN ? $this->uplineOf($store) : null;
+
+        if ($upline !== null) {
+            $up = $this->quoteProduct($listPrice, $upline, $productId, $cycle, $depth + 1);
+
+            return $this->uplineQuote($listPrice, $up, $markup, $override, (int) $upline['id']);
+        }
+
         $cost = $this->cost->resellerPrice($listPrice, 'service');
         $retail = $this->priceFor($listPrice, $markup, $override);
 
         return [
             'list' => round($listPrice, 2),
+            'catalogue_list' => round($listPrice, 2),
             'cost' => $cost,
             'retail' => $retail,
             'margin' => round($retail - $cost, 2),
             'discount_percent' => $this->cost->discountFor('service'),
             'markup_percent' => $markup,
             'overridden' => $override !== null,
+            'upline_id' => null,
+            'upline_cost' => null,
+        ];
+    }
+
+    /**
+     * A sub-reseller's quote, built over its upline's.
+     *
+     * @param array<string, mixed> $up the upline's quote for the same item
+     * @return array<string, mixed>
+     */
+    private function uplineQuote(float $listPrice, array $up, float $markup, ?float $override, int $uplineId): array
+    {
+        $base = (float) $up['retail'];
+        $retail = $this->priceFor($base, $markup, $override);
+
+        return [
+            'list' => round($base, 2),
+            'catalogue_list' => round($listPrice, 2),
+            'cost' => round($base, 2),
+            'retail' => $retail,
+            'margin' => round($retail - $base, 2),
+            'discount_percent' => 0.0,
+            'markup_percent' => $markup,
+            'overridden' => $override !== null,
+            'upline_id' => $uplineId,
+            'upline_cost' => (float) $up['cost'],
         ];
     }
 
     /**
      * @param array<string, mixed> $store
      * @param 'register'|'transfer'|'renew' $which
-     * @return array{list: float, cost: float, retail: float, margin: float, discount_percent: float, markup_percent: float, overridden: bool}
+     * @return array{list: float, catalogue_list: float, cost: float, retail: float, margin: float, discount_percent: float, markup_percent: float, overridden: bool, upline_id: ?int, upline_cost: ?float}
      */
-    public function quoteDomain(float $listPrice, array $store, string $tld, string $which): array
+    public function quoteDomain(float $listPrice, array $store, string $tld, string $which, int $depth = 0): array
     {
         $override = $this->domainOverrides($store)[$tld][$which] ?? null;
         $markup = $this->markupFor($store);
+        $upline = $depth < self::MAX_CHAIN ? $this->uplineOf($store) : null;
+
+        if ($upline !== null) {
+            $up = $this->quoteDomain($listPrice, $upline, $tld, $which, $depth + 1);
+
+            return $this->uplineQuote($listPrice, $up, $markup, $override, (int) $upline['id']);
+        }
+
         $cost = $this->cost->resellerPrice($listPrice, 'domain');
         $retail = $this->priceFor($listPrice, $markup, $override);
 
         return [
             'list' => round($listPrice, 2),
+            'catalogue_list' => round($listPrice, 2),
             'cost' => $cost,
             'retail' => $retail,
             'margin' => round($retail - $cost, 2),
             'discount_percent' => $this->cost->discountFor('domain'),
             'markup_percent' => $markup,
             'overridden' => $override !== null,
+            'upline_id' => null,
+            'upline_cost' => null,
         ];
+    }
+
+    /**
+     * The price list a SUB-RESELLER buys from — their upline's retail prices — in
+     * the shape ResellerPricing::serviceCatalogue() returns, so the reseller area
+     * shows it exactly where a first-tier reseller sees our discounted prices.
+     *
+     * @param array<string, mixed> $upline
+     * @return array<int, array<string, mixed>>
+     */
+    public function wholesaleServices(array $upline): array
+    {
+        $catalogue = $this->cost->serviceCatalogue();
+        $flat = static fn (float $price): array => ['list' => $price, 'discount_percent' => 0.0, 'reseller' => $price];
+
+        foreach ($catalogue as $i => $product) {
+            foreach ($product['cycles'] as $j => $cycle) {
+                $price = $this->quoteProduct((float) $cycle['price']['list'], $upline, (int) $product['product_id'], (string) $cycle['cycle'])['retail'];
+                $catalogue[$i]['cycles'][$j]['price'] = $flat($price);
+                $catalogue[$i]['cycles'][$j]['setup_fee'] = $flat($this->retailPriceFor((float) $cycle['setup_fee']['list'], $upline));
+            }
+        }
+
+        return $catalogue;
+    }
+
+    /**
+     * @param array<string, mixed> $upline
+     * @return array<int, array<string, mixed>> shaped like ResellerPricing::domainCatalogue()
+     */
+    public function wholesaleDomains(array $upline): array
+    {
+        $catalogue = $this->cost->domainCatalogue();
+
+        foreach ($catalogue as $i => $row) {
+            foreach (['register', 'transfer', 'renew'] as $which) {
+                $price = $this->quoteDomain((float) $row[$which]['list'], $upline, (string) $row['tld'], $which)['retail'];
+                $catalogue[$i][$which] = ['list' => $price, 'discount_percent' => 0.0, 'reseller' => $price];
+            }
+        }
+
+        return $catalogue;
     }
 
     /**

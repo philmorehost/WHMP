@@ -192,7 +192,7 @@ final class ResellerLedgerService
 
         $now ??= $this->now();
 
-        return $this->ledger->append([
+        $receiptId = $this->ledger->append([
             'reseller_id' => (int) $facts['reseller_id'],
             'client_id' => $facts['reseller_client_id'] === null ? null : (int) $facts['reseller_client_id'],
             'kind' => 'store_receipt',
@@ -205,6 +205,76 @@ final class ResellerLedgerService
             'admin_id' => null,
             'created_at' => $now,
         ]);
+
+        // Posted only AFTER the receipt, whose (kind, invoice_id) key is unique: a
+        // re-fired hook fails on the receipt and never reaches this line, so the
+        // upline cannot be credited twice for one sale.
+        $this->accrueUplineMargin($facts, $invoiceId, $now);
+
+        return $receiptId;
+    }
+
+    /**
+     * The UPLINE's share of a sub-reseller's sale (orders.upline_reseller_id): the
+     * sub-reseller paid the upline's retail (cost_total) and the upline owes us
+     * upline_cost_total, so the upline earns the difference. Same holding period as
+     * a receipt, because it is funded by the same customer payment.
+     *
+     * @param array<string, mixed> $facts storeOrderForInvoice()
+     */
+    public function accrueUplineMargin(array $facts, int $invoiceId, ?string $now = null): ?int
+    {
+        $amount = self::uplineMarginOf($facts);
+
+        if ($amount === null || ($facts['upline_reseller_id'] ?? null) === null) {
+            return null;
+        }
+
+        $orderId = (int) $facts['order_id'];
+
+        if ($this->ledger->hasEntryForOrder($orderId, 'upline_margin')) {
+            return null;
+        }
+
+        $base = $this->baseAmount($amount, $facts['currency_id'] ?? null, $facts['currency_rate'] ?? 1.0);
+
+        if ($base < 0.01) {
+            return null;
+        }
+
+        $now ??= $this->now();
+
+        return $this->ledger->append([
+            'reseller_id' => (int) $facts['upline_reseller_id'],
+            'client_id' => ($facts['upline_client_id'] ?? null) === null ? null : (int) $facts['upline_client_id'],
+            'kind' => 'upline_margin',
+            'amount' => round($base, 2),
+            'withdrawable_at' => $this->withdrawableFrom($now),
+            'order_id' => $orderId,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => 'Sub-reseller sale — order #' . $orderId . ' at reseller ID ' . (int) $facts['reseller_id'],
+            'admin_id' => null,
+            'created_at' => $now,
+        ]);
+    }
+
+    /**
+     * cost_total − upline_cost_total in the order's currency, or null when the order
+     * has no upline share (a first-tier store, or a sub-reseller priced at or under
+     * the upline's own cost).
+     *
+     * @param array<string, mixed> $facts
+     */
+    public static function uplineMarginOf(array $facts): ?float
+    {
+        if (($facts['upline_reseller_id'] ?? null) === null || ($facts['upline_cost_total'] ?? null) === null || ($facts['cost_total'] ?? null) === null) {
+            return null;
+        }
+
+        $margin = round((float) $facts['cost_total'] - (float) $facts['upline_cost_total'], 2);
+
+        return $margin >= 0.01 ? $margin : null;
     }
 
     /**
@@ -271,7 +341,9 @@ final class ResellerLedgerService
             return null;
         }
 
-        return $this->ledger->append([
+        $now ??= $this->now();
+
+        $reversalId = $this->ledger->append([
             'reseller_id' => (int) $facts['reseller_id'],
             'client_id' => $facts['reseller_client_id'] === null ? null : (int) $facts['reseller_client_id'],
             'kind' => 'receipt_reversal',
@@ -285,7 +357,56 @@ final class ResellerLedgerService
             'payout_id' => null,
             'description' => 'Refund on store order #' . $orderId . ' — retail returned to the customer',
             'admin_id' => null,
-            'created_at' => $now ?? $this->now(),
+            'created_at' => $now,
+        ]);
+
+        $this->reverseUplineMargin($facts, $invoiceId, $refundedAmount, $now);
+
+        return $reversalId;
+    }
+
+    /**
+     * Take back the upline's share of a refunded sub-reseller sale, in the same
+     * proportion as the refund, never more than is still credited. Immediate, like
+     * every reversal: it is money nobody holds any more.
+     *
+     * @param array<string, mixed> $facts
+     */
+    private function reverseUplineMargin(array $facts, int $invoiceId, float $refundedAmount, string $now): ?int
+    {
+        $margin = self::uplineMarginOf($facts);
+        $total = (float) ($facts['total'] ?? 0.0);
+
+        if ($margin === null || $total <= 0.0 || ($facts['upline_reseller_id'] ?? null) === null) {
+            return null;
+        }
+
+        $orderId = (int) $facts['order_id'];
+        $outstanding = $this->ledger->uplineMarginOutstanding($orderId);
+
+        if ($outstanding <= 0.0) {
+            return null;
+        }
+
+        $share = $margin * min(1.0, max(0.0, $refundedAmount / $total));
+        $amount = min(round($this->baseAmount($share, $facts['currency_id'] ?? null, $facts['currency_rate'] ?? 1.0), 2), $outstanding);
+
+        if ($amount < 0.01) {
+            return null;
+        }
+
+        return $this->ledger->append([
+            'reseller_id' => (int) $facts['upline_reseller_id'],
+            'client_id' => ($facts['upline_client_id'] ?? null) === null ? null : (int) $facts['upline_client_id'],
+            'kind' => 'upline_margin_reversal',
+            'amount' => -$amount,
+            'withdrawable_at' => null,
+            'order_id' => $orderId,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => 'Refund on sub-reseller order #' . $orderId . ' — your share returned',
+            'admin_id' => null,
+            'created_at' => $now,
         ]);
     }
 

@@ -283,6 +283,42 @@ final class ApiResourceController
         $settings = $container->make(\CodeVault\Reseller\ResellerSettings::class);
         $currency = $container->make(\CodeVault\Billing\CurrencyRepository::class)->pricing();
 
+        // A sub-reseller (a customer of another reseller's store) buys at that
+        // store's retail prices, so that is the price list their key returns —
+        // never our discounted catalogue, which would undercut the upline.
+        $upline = null;
+
+        try {
+            $owner = $container->make(\CodeVault\Database::class)->selectOne(
+                'SELECT c.id, c.reseller_id FROM api_credentials ac JOIN clients c ON c.id = ac.client_id WHERE ac.id = ? LIMIT 1',
+                [$credential->id]
+            );
+            $uplineId = (int) ($owner['reseller_id'] ?? 0);
+
+            if ($uplineId > 0) {
+                $found = $container->make(\CodeVault\Reseller\ResellerStoreRepository::class)->find($uplineId);
+                $upline = $found !== null && (int) $found['client_id'] !== (int) $owner['id'] ? $found : null;
+            }
+        } catch (\Throwable) {
+            $upline = null;
+        }
+
+        if ($upline !== null) {
+            $retail = $container->make(\CodeVault\Reseller\ResellerRetailPricing::class);
+
+            return ApiResponse::success([
+                'discounts' => ['service' => 0.0, 'domain' => 0.0],
+                'priced_by' => 'upline',
+                'currency' => [
+                    'code' => (string) $currency['code'],
+                    'symbol' => (string) $currency['symbol'],
+                    'note' => 'All figures are your provider\'s prices in this currency.',
+                ],
+                'services' => $retail->wholesaleServices($upline),
+                'domains' => $retail->wholesaleDomains($upline),
+            ]);
+        }
+
         return ApiResponse::success([
             'discounts' => $settings->all(),
             'currency' => [
