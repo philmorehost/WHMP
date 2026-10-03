@@ -2563,10 +2563,12 @@
         if (!hintEl) return;
         
         if (module === 'interserver-vps' || module === 'interserver-dedicated' || module === 'interserver_vps' || module === 'interserver_dedicated') {
-            hintEl.innerHTML = 'Hint: Use <strong>https://my.interserver.net/</strong>';
+            // Both InterServer modules call the fixed API address https://my.interserver.net/apiv2
+            // themselves; this field is only a label, so nothing here can point them elsewhere.
+            hintEl.innerHTML = 'Enter <strong>my.interserver.net</strong>. WHMP always connects to the InterServer API at <strong>https://my.interserver.net/apiv2</strong> by itself, so this field is only a label and no port is needed.';
             hintEl.style.display = 'block';
         } else if (module === 'nocix-dedicated' || module === 'nocix_dedicated' || module === 'nocix') {
-            hintEl.innerHTML = 'Hint: Use <strong>my.nocix.net</strong> (wholesale accounts: <strong>my.wholesaleinternet.net</strong>)';
+            hintEl.innerHTML = 'Enter <strong>my.nocix.net</strong> (wholesale accounts: <strong>my.wholesaleinternet.net</strong>). WHMP adds the API path (<strong>/api</strong>) itself, and no port is needed.';
             hintEl.style.display = 'block';
         } else if (module === 'resellerclub-email' || module === 'resellerclub_email') {
             hintEl.innerHTML = 'Hint: Use <strong>https://httpapi.com/api</strong>';
