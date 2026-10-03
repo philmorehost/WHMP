@@ -125,6 +125,21 @@ A reseller's customer may open a reseller account of their own and become a **su
   - The admin's reseller list has a **Tier** column, and the store page explains whom a sub-reseller buys from.
   - A store whose upline is itself a sub-reseller (possible only for stores opened before the cap) is flagged **Legacy 3rd tier**.
 
+### Platform address (free store subdomains)
+
+Each reseller store has a short name (its slug). Its free web address is `{slug}.{platform address domain}`. The super admin picks that domain under **Admin → Resellers → Platform address**.
+
+- **Pick a separate domain, ideally a neutral one** (for example `resellerhub.com`). It should not be a subdomain of the client area. If the client area runs on `client.example.com` and stores were built under it, addresses become `acme.client.example.com`. That is long, shows your brand, and a `*.example.com` wildcard certificate does not cover it.
+- **Not set means not served.** With no domain configured, a store's slug is just its name. No `slug.anything` address answers, and the store is reachable only on its own custom domain once that domain is verified. The reseller's store page and the admin pages say so.
+- **Set means live at once.** `acme.resellerhub.com` serves the store `acme`. The bare domain, its `www`, and deeper names (`x.acme.resellerhub.com`) are never stores. Verified custom domains keep working either way, and become the store's main address.
+- **Server set-up for the domain** (listed in the admin card, which also has a **Check DNS** button):
+  1. A wildcard `A` record `*.domain` pointing at this server, or a `CNAME` to the platform host.
+  2. The domain added to the web server with a wildcard subdomain `*`, both on the platform's document root.
+  3. A wildcard SSL certificate for `*.domain`, from AutoSSL or a DNS-01 certificate.
+- **No store can claim the domain** or any name under it as its custom domain.
+- **Verification is unchanged.** Custom-domain checks still accept a CNAME to the platform host (APP_URL).
+- **For developers:** the setting is stored under the `reseller.platform_domain` key and read by `ResellerPlatformAddress`. `ResellerStoreLocator::storeDomain()`, `publicHostFor()` and `platformAddressFor()` are the API. A locator built by hand without the address service keeps the old behaviour (subdomains of the APP_URL host), so hand-built test fixtures need no change.
+
 ### Reseller panel design
 
 The reseller control panel (`/client/reseller…`) and the admin's reseller pages (`/admin/resellers…`) share a modern skin in `public/assets/css/reseller.css`.

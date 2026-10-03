@@ -150,7 +150,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <tr><th>Slug</th><td><code><?= e((string) $store['slug']) ?></code></td></tr>
             <tr>
                 <th>Platform address</th>
-                <td><a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a></td>
+                <td>
+                    <?php if (($platformUrl ?? null) !== null): ?>
+                        <a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a>
+                    <?php else: ?>
+                        <em>not served</em> — no platform address domain is set
+                        (<a href="/admin/resellers#rs-platform-address">set one</a>), so this store loads only on its
+                        verified domain.
+                    <?php endif; ?>
+                </td>
             </tr>
             <tr>
                 <th>Custom domain</th>

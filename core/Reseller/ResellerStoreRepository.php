@@ -15,7 +15,7 @@ use DateTimeImmutable;
  * verified custom domain. Two lookups are security-relevant and are separated
  * deliberately:
  *
- *   - forSlug()        — platform subdomain, i.e. {slug}.{platform host}
+ *   - forSlug()        — free store address, i.e. {slug}.{platform address domain}
  *   - forVerifiedDomain() — a custom domain, matched ONLY when we have
  *                           verified it points at us. A domain that was merely
  *                           typed in is never served, which is what stops a

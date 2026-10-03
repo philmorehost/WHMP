@@ -7,11 +7,18 @@
 /** @var string|null $notice */
 /** @var string $docsUrl */
 /** @var array<string, int|null>|null $stats from AdminResellerController::overviewStats() */
+/** @var string $platformHost the host this install runs on (APP_URL) */
+/** @var string|null $storeDomain the domain store subdomains are served under; null = none */
+/** @var string|null $storeDomainSetting what the super admin saved (null when not set) */
+/** @var array<string, mixed>|null $dnsCheck the result of the last "Check DNS" */
 
 $servicePct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['service']);
 $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain']);
 $stats = $stats ?? \CodeVault\Reseller\AdminResellerController::overviewStats($stores, ['domains' => null, 'payouts' => null, 'migrations' => null]);
 $icon = static fn (string $paths): string => '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' . $paths . '</svg>';
+$storeDomain = $storeDomain ?? null;
+$storeDomainSetting = $storeDomainSetting ?? null;
+$dnsCheck = $dnsCheck ?? null;
 $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($n === 1 ? $one : $many);
 ?>
 <link rel="stylesheet" href="/assets/css/reseller.css">
@@ -26,6 +33,7 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
         </header>
         <div class="rs-welcome__actions">
             <a class="cv-btn" href="#rs-stores"><?= $icon('<path d="M3 9l1.5-5h15L21 9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 12v8h14v-8"/>') ?> View stores</a>
+            <a class="cv-btn cv-btn--secondary" href="#rs-platform-address">Platform address</a>
             <a class="cv-btn cv-btn--secondary" href="#rs-discounts">Reseller discounts</a>
             <a class="cv-btn cv-btn--secondary" href="<?= e($docsUrl) ?>">API documentation</a>
         </div>
@@ -100,6 +108,72 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
             <div class="rs-stat__value"><?= (int) $stats['migrations'] ?></div>
             <div class="rs-stat__note">pending review</div>
         </a>
+    <?php endif; ?>
+</div>
+
+<div class="cv-card" id="rs-platform-address" style="margin-bottom:var(--cv-space-4);">
+    <h2 class="cv-card__title">Platform address</h2>
+    <p>The domain every reseller store gets a free address under. Use a short, neutral domain so your resellers'
+        customers see a white-label address and not your hosting brand. With <code>resellerhub.com</code> set here,
+        the store named <strong>acme</strong> is served at <code>acme.resellerhub.com</code>.</p>
+
+    <?php if ($storeDomain !== null): ?>
+        <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-4);">
+            <strong>Live.</strong> Store addresses are <code>{store name}.<?= e($storeDomain) ?></code>.
+            Resellers can still connect their own domain and verify it; that becomes their main address.
+        </div>
+    <?php else: ?>
+        <div class="cv-alert cv-alert--warning" style="margin-bottom:var(--cv-space-4);">
+            <strong>Not set.</strong> Stores have no free address: a store's name is just its name, and the store is
+            served only once the reseller connects and verifies a domain of their own. Set a domain below to give
+            every store <code>{store name}.yourdomain.com</code>.
+        </div>
+    <?php endif; ?>
+
+    <form method="post" action="/admin/resellers/platform-domain" class="rs-form-grid">
+        <?= csrf_field() ?>
+        <div class="cv-field">
+            <label class="cv-label" for="platform_domain">Platform address domain</label>
+            <input class="cv-input" type="text" id="platform_domain" name="platform_domain" maxlength="253"
+                   placeholder="resellerhub.com" autocomplete="off" spellcheck="false"
+                   value="<?= e((string) ($storeDomainSetting ?? '')) ?>">
+        </div>
+        <div class="rs-form-grid__actions">
+            <button class="cv-btn" type="submit">Save platform address</button>
+        </div>
+        <p class="rs-form-grid__wide" style="color:var(--cv-text-secondary);margin:0;">
+            A domain only, without <code>https://</code>. Leave it empty and save to switch free addresses off.
+            Avoid a subdomain of your client area (such as <code>client.example.com</code>): store addresses would
+            become sub-subdomains like <code>acme.client.example.com</code>, which are long and not covered by a
+            normal wildcard certificate.
+        </p>
+    </form>
+
+    <?php if (is_array($dnsCheck)): ?>
+        <div class="cv-alert <?= !empty($dnsCheck['ok']) ? 'cv-alert--success' : 'cv-alert--error' ?>" style="margin-top:var(--cv-space-4);">
+            <strong>DNS check:</strong> <?= e((string) ($dnsCheck['message'] ?? '')) ?>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($storeDomainSetting !== null): ?>
+        <h3 style="margin-top:var(--cv-space-5);">Make <?= e($storeDomainSetting) ?> work</h3>
+        <ol class="rs-steps">
+            <li><strong>Wildcard DNS.</strong> At the domain's DNS host, add an <code>A</code> record for
+                <code>*.<?= e($storeDomainSetting) ?></code> pointing at this server's IP. You can also use a
+                <code>CNAME</code> to <code><?= e($platformHost) ?></code>.
+                <form method="post" action="/admin/resellers/platform-domain/check" style="display:inline;">
+                    <?= csrf_field() ?>
+                    <button class="cv-btn cv-btn--secondary rs-btn-sm" type="submit">Check DNS</button>
+                </form>
+            </li>
+            <li><strong>Web server.</strong> Make the server answer for every subdomain with this platform. On cPanel,
+                add <code><?= e($storeDomainSetting) ?></code> as an addon or alias domain, then create the subdomain
+                <code>*</code> (a wildcard subdomain). Both must use the platform's document root.</li>
+            <li><strong>Wildcard SSL.</strong> Install a certificate for <code>*.<?= e($storeDomainSetting) ?></code>.
+                cPanel AutoSSL with Let's Encrypt or Sectigo covers wildcard subdomains when the domain's DNS is on the
+                same server. Otherwise issue one with DNS validation (for example <code>certbot --manual
+                --preferred-challenges dns -d "*.<?= e($storeDomainSetting) ?>"</code>) or buy one.</li>
+        </ol>
     <?php endif; ?>
 </div>
 
@@ -237,7 +311,14 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
                         <br><a class="cv-badge cv-badge--warning" href="/admin/resellers/<?= (int) $store['client_id'] ?>/customers#orders"><?= (int) $store['pending_orders'] ?> pending orders</a>
                     <?php endif; ?>
                 </td>
-                <td><code><?= e((string) $store['slug']) ?>.<?= e($platformHost) ?></code></td>
+                <td>
+                    <?php if ($storeDomain !== null): ?>
+                        <code><?= e((string) $store['slug']) ?>.<?= e($storeDomain) ?></code>
+                    <?php else: ?>
+                        <code><?= e((string) $store['slug']) ?></code>
+                        <br><span class="rs-cust-sub">not served (no platform address)</span>
+                    <?php endif; ?>
+                </td>
                 <td>
                     <?php if (($store['custom_domain'] ?? null) === null): ?>
                         <em>not set</em>

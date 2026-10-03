@@ -133,6 +133,8 @@ $router->post('/client/reseller/prices', [ClientResellerController::class, 'save
 // Admin side: the discounts resellers get, and the keys issued to them.
 $router->get('/admin/resellers', [AdminResellerController::class, 'index']);
 $router->post('/admin/resellers/discounts', [AdminResellerController::class, 'saveDiscounts']);
+$router->post('/admin/resellers/platform-domain', [AdminResellerController::class, 'savePlatformDomain']);
+$router->post('/admin/resellers/platform-domain/check', [AdminResellerController::class, 'checkPlatformDomain']);
 $router->post('/admin/resellers/{clientId}/toggle', [AdminResellerController::class, 'toggle']);
 $router->get('/admin/resellers/docs', [AdminResellerController::class, 'docs']);
 

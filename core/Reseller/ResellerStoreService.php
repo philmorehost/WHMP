@@ -307,6 +307,13 @@ final class ResellerStoreService
             return ['success' => false, 'error' => 'That domain belongs to the platform.', 'domain' => null];
         }
 
+        // Likewise the store domain: every name under it is some store's free address.
+        $storeDomain = $this->locator->storeDomain();
+
+        if ($storeDomain !== null && ($normalised === $storeDomain || str_ends_with($normalised, '.' . $storeDomain))) {
+            return ['success' => false, 'error' => 'That domain is the platform address domain. Your free address under it is already yours; claim a domain of your own here.', 'domain' => null];
+        }
+
         $existing = $this->stores->find($storeId);
         $current = $existing === null
             ? ''
@@ -516,13 +523,19 @@ final class ResellerStoreService
     }
 
     /**
-     * The store's own web address, platform subdomain form — the one that works
-     * before any DNS is set up. Built from APP_URL's scheme, never from the
-     * request, so it is the same string everywhere it is shown.
+     * The store's free web address (`{slug}.{store domain}`), the one that works
+     * before the reseller sets up a domain of their own. Built from APP_URL's scheme,
+     * never from the request, so it is the same string everywhere it is shown.
+     * Null when the super admin has not set a platform address domain: then the store
+     * is served only on its own verified domain.
+     *
+     * @param array<string, mixed> $store
      */
-    public function platformUrl(array $store): string
+    public function platformUrl(array $store): ?string
     {
-        return $this->locator->platformScheme() . '://' . $store['slug'] . '.' . $this->locator->platformHost();
+        $address = $this->locator->platformAddressFor($store);
+
+        return $address === null ? null : $this->locator->platformScheme() . '://' . $address;
     }
 
     /**

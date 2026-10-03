@@ -52,7 +52,9 @@ final class AdminResellerController
         // The work queues counted on the overview's stat cards. Nullable for the same reason.
         private readonly ?ResellerStoreRepository $storeRows = null,
         private readonly ?ResellerPayoutRepository $payouts = null,
-        private readonly ?ClientMigrationRepository $migrations = null
+        private readonly ?ClientMigrationRepository $migrations = null,
+        // The domain stores get their free subdomain under. Nullable like the rest.
+        private readonly ?ResellerPlatformAddress $platformAddress = null
     ) {
     }
 
@@ -71,6 +73,9 @@ final class AdminResellerController
             'stores' => $stores,
             'stats' => self::overviewStats($stores, $this->queueCounts()),
             'platformHost' => $this->locator->platformHost(),
+            'storeDomain' => $this->locator->storeDomain(),
+            'storeDomainSetting' => $this->platformAddress?->domain(),
+            'dnsCheck' => $this->session->pullFlash('reseller_dns_check'),
             'activeCount' => count(array_filter($resellers, static fn (array $r): bool => (int) ($r['active'] ?? 0) === 1)),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
@@ -132,6 +137,132 @@ final class AdminResellerController
             'payouts' => $this->payouts === null ? null : $count(fn (): array => $this->payouts->pending()),
             'migrations' => $this->migrations === null ? null : $count(fn (): array => $this->migrations->pending()),
         ];
+    }
+
+    /**
+     * Set (or clear) the platform address domain, the domain every store's free
+     * subdomain lives under. Clearing it takes every free address offline at once,
+     * which is why the notice says so in as many words.
+     */
+    public function savePlatformDomain(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        if ($this->platformAddress === null) {
+            $this->session->flash('reseller_error', 'The platform address cannot be changed on this install.');
+
+            return Response::redirect('/admin/resellers#rs-platform-address');
+        }
+
+        $result = ResellerPlatformAddress::normalise((string) $request->input('platform_domain', ''));
+
+        if ($result['error'] !== null) {
+            $this->session->flash('reseller_error', $result['error']);
+
+            return Response::redirect('/admin/resellers#rs-platform-address');
+        }
+
+        $domain = $result['domain'];
+
+        // A domain a reseller has proved is theirs cannot become everyone's.
+        if ($domain !== null && $this->storeRows !== null) {
+            try {
+                $owner = $this->storeRows->forVerifiedDomain($domain);
+            } catch (\Throwable) {
+                $owner = null;
+            }
+
+            if ($owner !== null) {
+                $this->session->flash('reseller_error', $domain . ' is the verified domain of reseller store #' . (int) $owner['id'] . '. Choose a domain of your own.');
+
+                return Response::redirect('/admin/resellers#rs-platform-address');
+            }
+        }
+
+        $previous = $this->platformAddress->domain();
+        $this->platformAddress->save($domain);
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.platform_domain.updated',
+            null,
+            null,
+            $domain === null
+                ? 'Cleared the reseller platform address domain' . ($previous !== null ? ' (was ' . $previous . ')' : '')
+                : 'Set the reseller platform address domain to ' . $domain . ($previous !== null && $previous !== $domain ? ' (was ' . $previous . ')' : ''),
+            $request->ip()
+        );
+
+        $this->session->flash('reseller_notice', $domain === null
+            ? 'Platform address cleared. Stores are now served only on their own verified domains; free addresses no longer load.'
+            : 'Platform address saved. Every store\'s free address is now {store name}.' . $domain . '. Point *.' . $domain . ' at this server and install a wildcard SSL certificate for it (see below).');
+
+        return Response::redirect('/admin/resellers#rs-platform-address');
+    }
+
+    /**
+     * Check that the wildcard DNS for the platform address domain points here: a made-up
+     * name under it must resolve to the same IPs as the platform host. On demand only
+     * (a button), never on page load, because a DNS lookup can take seconds.
+     */
+    public function checkPlatformDomain(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $domain = $this->platformAddress?->domain();
+
+        if ($domain === null) {
+            $this->session->flash('reseller_error', 'Set a platform address domain first.');
+
+            return Response::redirect('/admin/resellers#rs-platform-address');
+        }
+
+        $probe = 'cv-check-' . bin2hex(random_bytes(4)) . '.' . $domain;
+        $this->session->flash('reseller_dns_check', self::dnsCheckResult(
+            $domain,
+            $probe,
+            self::lookup($probe),
+            self::lookup($this->locator->platformHost())
+        ));
+
+        return Response::redirect('/admin/resellers#rs-platform-address');
+    }
+
+    /**
+     * The verdict of a wildcard DNS check, from the two lookups. Static so it can be
+     * checked without a network.
+     *
+     * @param array<int, string> $probeIps what the made-up name under the domain resolved to
+     * @param array<int, string> $platformIps what the platform host resolves to
+     * @return array{ok: bool, domain: string, probe: string, found: array<int, string>, expected: array<int, string>, message: string}
+     */
+    public static function dnsCheckResult(string $domain, string $probe, array $probeIps, array $platformIps): array
+    {
+        $probeIps = array_values(array_unique($probeIps));
+        $platformIps = array_values(array_unique($platformIps));
+        $ok = $probeIps !== [] && ($platformIps === [] || array_intersect($probeIps, $platformIps) !== []);
+
+        $message = match (true) {
+            $probeIps === [] => 'No wildcard record: ' . $probe . ' does not resolve. Add an A record for *.' . $domain . ' pointing at this server\'s IP.',
+            $ok && $platformIps === [] => '*.' . $domain . ' resolves (' . implode(', ', $probeIps) . '). The platform host could not be looked up to compare, so confirm this is this server\'s IP.',
+            $ok => '*.' . $domain . ' points at this server (' . implode(', ', $probeIps) . ').',
+            default => '*.' . $domain . ' resolves to ' . implode(', ', $probeIps) . ', but this server is ' . implode(', ', $platformIps) . '. Update the wildcard A record.',
+        };
+
+        return ['ok' => $ok, 'domain' => $domain, 'probe' => $probe, 'found' => $probeIps, 'expected' => $platformIps, 'message' => $message];
+    }
+
+    /** @return array<int, string> IPv4 addresses, or none */
+    private static function lookup(string $host): array
+    {
+        $ips = @gethostbynamel($host);
+
+        return is_array($ips) ? $ips : [];
     }
 
     public function saveDiscounts(Request $request): Response

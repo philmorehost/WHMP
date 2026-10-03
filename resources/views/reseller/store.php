@@ -1,6 +1,7 @@
 <?php
 /** @var array<string, mixed>|null $store */
 /** @var string $platformHost */
+/** @var string|null $storeDomain the domain free store addresses are served under; null = none set */
 /** @var string|null $platformUrl */
 /** @var string|null $recordName */
 /** @var string|null $error */
@@ -13,6 +14,7 @@
 
 $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
+$storeDomain = $storeDomain ?? null;
 ?>
 <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
     <header class="rs-head">
@@ -109,10 +111,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <input class="cv-input" type="text" id="slug" name="slug" maxlength="63"
                        placeholder="acme" value="<?= e((string) ($slugSuggestion ?? '')) ?>">
                 <br><span style="color:var(--cv-text-secondary);">
-                    <strong>This becomes a link you give to customers.</strong> Your store's front page will be
-                    <code>https://<?= e((string) (($slugSuggestion ?? '') !== '' ? $slugSuggestion : 'yourname')) ?>.<?= e($platformHost) ?></code>
-                    — so keep it short and easy to say out loud. Letters, numbers and hyphens only; spaces become
-                    hyphens. You can change it later.
+                    <?php if ($storeDomain !== null): ?>
+                        <strong>This becomes a link you give to customers.</strong> Your store's front page will be
+                        <code>https://<?= e((string) (($slugSuggestion ?? '') !== '' ? $slugSuggestion : 'yourname')) ?>.<?= e($storeDomain) ?></code>
+                        — so keep it short and easy to say out loud.
+                    <?php else: ?>
+                        <strong>Your store's short name.</strong> Your store goes live on your own domain name, which
+                        you connect and verify after opening the store.
+                    <?php endif; ?>
+                    Letters, numbers and hyphens only; spaces become hyphens. You can change it later.
                 </span>
             </p>
             <button class="cv-btn" type="submit">Open my store</button>
@@ -130,8 +137,16 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             </tr>
             <tr>
                 <th>Platform address</th>
-                <td><a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a>
-                    <br><span style="color:var(--cv-text-secondary);">Always available.</span></td>
+                <td>
+                    <?php if ($platformUrl !== null): ?>
+                        <a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a>
+                        <br><span style="color:var(--cv-text-secondary);">Free and always available.</span>
+                    <?php else: ?>
+                        <em>not available</em>
+                        <br><span style="color:var(--cv-text-secondary);">Your store is served on your own domain: connect
+                            and verify it below to start selling.</span>
+                    <?php endif; ?>
+                </td>
             </tr>
             <tr>
                 <th>Your own domain</th>
@@ -174,10 +189,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <label for="slug">Your web address</label><br>
                 <input class="cv-input" type="text" id="slug" name="slug" maxlength="63"
                        value="<?= e((string) $store['slug']) ?>">
+                <?php if ($storeDomain !== null): ?>
                 <br><span style="color:var(--cv-text-secondary);">This is the link you give to customers:
-                    <code>https://<?= e((string) $store['slug']) ?>.<?= e($platformHost) ?></code>.
+                    <code>https://<?= e((string) $store['slug']) ?>.<?= e($storeDomain) ?></code>.
                     Keep it short and easy to say out loud. Changing it stops every link you have already
                     handed out from working, so only change it if you have to.</span>
+                <?php else: ?>
+                <br><span style="color:var(--cv-text-secondary);">Your store's short name. Customers reach your store
+                    on your own domain.</span>
+                <?php endif; ?>
             </p>
             <p>
                 <label for="logo_url">Logo URL</label><br>
@@ -378,9 +398,13 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 store, two more things have to happen on the server: the domain is <strong>added to the server</strong>
                 (so the server answers for that address) <em>and</em> its DNS points here. Ask support to finish those and
                 your store will answer on it.</p>
+            <?php if ($platformUrl !== null): ?>
             <p style="color:var(--cv-text-secondary);">Until then your store keeps working at
-                <?php if ($platformUrl !== null): ?><code><?= e((string) $platformUrl) ?></code><?php else: ?>its platform address<?php endif; ?>
-                — you do not have to wait to start selling.</p>
+                <code><?= e((string) $platformUrl) ?></code> — you do not have to wait to start selling.</p>
+            <?php else: ?>
+            <p style="color:var(--cv-text-secondary);">Your store opens to customers once these steps are done: it is
+                served on your own domain only.</p>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 <?php endif; ?>

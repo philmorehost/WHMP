@@ -360,6 +360,8 @@ final class ClientResellerController
             // the page says so; afterwards, a blank field means "no chat".
             'chatConfigured' => $store !== null && ResellerChat::isConfigured($store),
             'platformHost' => $this->locator->platformHost(),
+            // Where free store addresses live; null when the super admin has set none.
+            'storeDomain' => $this->locator->storeDomain(),
             'slugSuggestion' => $this->stores->suggestSlug($companyName !== '' ? $companyName : $personName),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null

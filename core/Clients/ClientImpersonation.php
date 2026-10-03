@@ -93,6 +93,13 @@ final class ClientImpersonation
                 return ['success' => false, 'url' => null, 'error' => 'The store this customer belongs to no longer exists.'];
             }
 
+            // A store customer can only sign in on the store's own site, so a store
+            // with no working address (no verified domain, and no store domain set
+            // by the super admin) has nowhere to open the session.
+            if ($this->locator->publicHostFor($store) === null) {
+                return ['success' => false, 'url' => null, 'error' => 'This store has no web address yet: it has no verified domain, and no platform address domain is set under Resellers → Platform address.'];
+            }
+
             $base = $this->locator->baseUrlFor($store);
         }
 
