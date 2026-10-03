@@ -460,12 +460,34 @@ final class CartCheckoutTest extends DatabaseTestCase
         $this->assertEqualsWithDelta(5.00, (float) $order['discount_amount'], 0.001);
         $this->assertSame('FLAT5', $order['promotion_code']);
         $this->assertEqualsWithDelta(5.00, (float) $invoice['discount_amount'], 0.001);
-        // 9.99 subtotal + 3.00 setup - 5.00 discount
+        // The amount charged is the net figure and must not move:
+        // 9.99 subtotal + 3.00 setup - 5.00 discount.
         $this->assertEqualsWithDelta(7.99, (float) $invoice['total'], 0.001);
+        // `subtotal` is GROSS, so the invoice's own arithmetic works out.
+        $this->assertEqualsWithDelta(12.99, (float) $invoice['subtotal'], 0.001);
+        $this->assertEqualsWithDelta(
+            (float) $invoice['total'],
+            (float) $invoice['subtotal'] + (float) $invoice['tax_amount'] - (float) $invoice['discount_amount'],
+            0.001,
+            'the invoice must satisfy subtotal + tax - discount = total'
+        );
 
-        $items = $this->db->select('SELECT * FROM invoice_items WHERE invoice_id = ? AND amount < 0', [$result['invoiceId']]);
-        $this->assertCount(1, $items);
-        $this->assertStringContainsString('FLAT5', $items[0]['description']);
+        // The promo is carried by `discount_amount` (its own row in the totals
+        // block) and NOT also written as a negative line item — that showed the
+        // discount twice and made the printed arithmetic unreadable.
+        $negative = $this->db->select('SELECT * FROM invoice_items WHERE invoice_id = ? AND amount < 0', [$result['invoiceId']]);
+        $this->assertCount(0, $negative, 'the discount must not also be written as a line item');
+
+        $itemsSum = (float) $this->db->selectOne(
+            'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_items WHERE invoice_id = ?',
+            [$result['invoiceId']]
+        )['s'];
+        $this->assertEqualsWithDelta(
+            (float) $invoice['subtotal'],
+            $itemsSum,
+            0.001,
+            'the line items must sum to the gross subtotal'
+        );
 
         $updated = $this->promotions->find((int) $promotion['id']);
         $this->assertSame(1, (int) $updated['redemption_count']);
@@ -473,6 +495,40 @@ final class CartCheckoutTest extends DatabaseTestCase
         // The promo code doesn't survive past a completed checkout — a
         // fresh cart shouldn't silently re-apply the last code used.
         $this->assertNull($this->cart->promoCode());
+    }
+
+    /**
+     * The fix changed the invoice's BREAKDOWN, never the figure charged. This
+     * pins the amount against the CART's own net total — the source of truth
+     * the customer was shown before paying — so a future edit to the
+     * subtotal/discount columns cannot quietly move what someone is billed.
+     */
+    public function test_a_discounted_invoice_reconciles_without_moving_the_amount_charged(): void
+    {
+        $this->promotions->save(['code' => 'SAVE10', 'type' => 'percentage', 'value' => 10]);
+        $this->cart->add($this->productId, 'monthly', [], 1);
+        $this->cart->setPromoCode('SAVE10');
+
+        // Captured BEFORE the order is placed — checkout clears the cart.
+        $priced = $this->cartService->priced();
+
+        $result = $this->checkout->placeOrder($this->clientId);
+        $this->assertTrue($result['success']);
+
+        $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$result['invoiceId']]);
+
+        $this->assertEqualsWithDelta(
+            $priced['total'],
+            (float) $invoice['total'],
+            0.001,
+            'the amount charged must be exactly what the cart quoted'
+        );
+        $this->assertEqualsWithDelta(
+            (float) $invoice['total'],
+            (float) $invoice['subtotal'] + (float) $invoice['tax_amount'] - (float) $invoice['discount_amount'],
+            0.001,
+            'the invoice must satisfy subtotal + tax - discount = total'
+        );
     }
 
     public function test_promo_code_below_minimum_order_amount_is_rejected(): void

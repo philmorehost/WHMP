@@ -334,6 +334,17 @@ final class CheckoutService
             $orderLinesWithDomains[$lineIndex] = $domainName;
         }
 
+        // The invoice's `subtotal` column is GROSS by convention: every other
+        // writer (recurring, billable items, reseller cost, domain renewal),
+        // the invoice EDIT path (`total = subtotal + tax - discount`), the
+        // detail page and the PDF builder all read that identity. The cart's
+        // `total` is already NET of the promo — CartService subtracts it — so
+        // storing that here made a discounted invoice print
+        // "Sub Total 461.90 / Promo Discount -59.60 / Total Due 461.90".
+        // Adding the discount back fixes the breakdown; `$invoiceTotal` below
+        // is untouched, so no amount charged moves.
+        $invoiceSubtotal = $priced['total'] + $discount;
+
         $invoiceTotal = $priced['total'] + $tax['amount'];
         // An existing service/domain order never has an invoice to add tax to,
         // so its order total is exactly what the items are worth.
@@ -519,7 +530,7 @@ final class CheckoutService
 
         $invoiceId = (int) $this->db->insert(
             'INSERT INTO invoices (client_id, order_id, status, subtotal, tax_amount, discount_amount, promotion_code, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$clientId, $orderId, 'unpaid', $priced['total'], $tax['amount'], $discount, $promoCode, $invoiceTotal, $currencyLock['currency_id'], $currencyLock['currency_rate'], $dueDate, $now, $now]
+            [$clientId, $orderId, 'unpaid', $invoiceSubtotal, $tax['amount'], $discount, $promoCode, $invoiceTotal, $currencyLock['currency_id'], $currencyLock['currency_rate'], $dueDate, $now, $now]
         );
 
         foreach ($priced['lines'] as $line) {
@@ -542,15 +553,14 @@ final class CheckoutService
             );
         }
 
-        if ($discount > 0) {
-            $this->db->insert(
-                'INSERT INTO invoice_items (invoice_id, description, amount) VALUES (?, ?, ?)',
-                [$invoiceId, "Promo: {$promoCode}", -$discount]
-            );
-
-            if ($promotionId !== null) {
-                $this->promotions->incrementRedemptions($promotionId);
-            }
+        // The discount is recorded ON the invoice (`discount_amount`, rendered
+        // as its own "Promo Discount" row in the totals block) and must NOT
+        // also be written as a negative line item: doing both showed the promo
+        // twice, and combined with a net subtotal made the printed arithmetic
+        // unreadable. The line items now sum to the gross subtotal, and the
+        // discount appears exactly once, between the subtotal and the total.
+        if ($discount > 0 && $promotionId !== null) {
+            $this->promotions->incrementRedemptions($promotionId);
         }
 
         if ($tax['amount'] > 0) {
