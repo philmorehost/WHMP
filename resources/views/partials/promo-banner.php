@@ -10,7 +10,7 @@ if ($banner === null) {
 
 $design = PromoBannerTemplates::get((string) $banner['template']);
 ?>
-<div class="cv-promo-banner" id="cv-promo-banner-<?= (int) $banner['id'] ?>" data-promo-banner data-promo-banner-id="<?= (int) $banner['id'] ?>" hidden>
+<div class="cv-promo-banner cv-no-print" id="cv-promo-banner-<?= (int) $banner['id'] ?>" data-promo-banner data-promo-banner-id="<?= (int) $banner['id'] ?>" hidden>
     <div class="cv-promo-banner__backdrop" data-promo-banner-dismiss></div>
     <div class="cv-promo-banner__modal" role="dialog" aria-modal="true" aria-label="Promotional offer">
         <button type="button" class="cv-promo-banner__close" data-promo-banner-dismiss aria-label="Close">&times;</button>

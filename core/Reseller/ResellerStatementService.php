@@ -28,9 +28,8 @@ use CodeVault\Settings\SettingsRepository;
  * THE IDENTITY IS FROZEN FOR THE SAME REASON THE TOTALS ARE
  *
  * A company that later changes its VAT number must not retroactively alter
- * documents it has already issued. Storing the identity as it was is what makes
- * the stamp on a tax document mean anything — otherwise "issued by" describes
- * whoever we are today, which is not a statement about the past.
+ * documents it has already issued. Storing the identity as it was keeps "issued
+ * by" tied to the facts recorded on the issue date, not whoever we are today.
  *
  * Nothing here moves money, and nothing here changes the ledger. Issuing a
  * statement is a read that happens to be written down.
@@ -38,9 +37,9 @@ use CodeVault\Settings\SettingsRepository;
 final class ResellerStatementService
 {
     /**
-     * The identity fields a tax document carries, in the order they should be
-     * shown and warned about. Labels live here so the checklist on the page and
-     * the document itself cannot disagree about what is missing.
+     * The issuer identity fields carried on a statement, in the order they
+     * should be shown and warned about. Labels live here so the checklist on the
+     * page and the document itself cannot disagree about what is missing.
      */
     public const IDENTITY_FIELDS = [
         'legal_name' => 'Legal company name',
@@ -179,7 +178,7 @@ final class ResellerStatementService
     }
 
     /**
-     * Our tax identity, as it stands right now.
+     * Our issuer identity, as it stands right now.
      *
      * `company.name` is the legal name — it already exists and is what the rest of
      * the platform prints, so re-introducing a second "legal name" setting would
@@ -210,10 +209,9 @@ final class ResellerStatementService
     /**
      * Which identity fields are still blank, as human labels.
      *
-     * Exists so the page can say what is missing BEFORE a document is issued, which
-     * is the only moment it matters: a tax document that prints an empty VAT number
-     * has already gone out by the time anyone notices, and it cannot be corrected
-     * without superseding it.
+     * Exists so the page can say what is missing BEFORE a document is issued. The
+     * snapshot is immutable, so filling in a missing field after issue cannot
+     * silently rewrite a statement that has already gone out.
      *
      * @return array<int, string>
      */

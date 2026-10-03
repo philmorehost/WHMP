@@ -329,8 +329,8 @@ final class ResellerLedgerService
         $line = $this->ledger->billedCostLineForOrder($orderId);
 
         if ($line === null) {
-            // Never billed. Nothing to give back, and on a refund that arrived before
-            // the month closed that is the correct outcome rather than a miss.
+            // Never billed. Nothing to give back. If the refund arrived before the
+            // configured billing period closed, that is the correct outcome, not a miss.
             return null;
         }
 
@@ -450,7 +450,7 @@ final class ResellerLedgerService
 
         $balance = $this->ledger->balance($resellerId);
         $withdrawable = $this->ledger->withdrawableBalance($resellerId, $asOf);
-        $minimum = $this->payoutMinimum();
+        $minimum = $this->payoutMinimumForCurrency($currency);
 
         return [
             'reseller_id' => $resellerId,
@@ -462,16 +462,16 @@ final class ResellerLedgerService
             // Base figures — the account's real unit.
             'balance_base' => $balance,
             'withdrawable_base' => $withdrawable,
-            'minimum_base' => $minimum,
+            'minimum_base' => $minimum['minimum_base'],
 
             // The same numbers in the reseller's currency. These MOVE with the
             // rate; they are a conversion of the balance, not a promise of it.
             'balance' => $this->inResellerCurrency($balance, $currency),
             'withdrawable' => $this->inResellerCurrency($withdrawable, $currency),
-            'minimum' => $this->inResellerCurrency($minimum, $currency),
+            'minimum' => $minimum['minimum'],
 
             'holding_days' => $this->holdingDays(),
-            'can_withdraw' => $withdrawable > 0.0 && $withdrawable >= $minimum,
+            'can_withdraw' => $withdrawable > 0.0 && $withdrawable >= (float) $minimum['minimum_base'],
             'in_arrears' => $balance < 0.0,
             'totals' => $this->ledger->totalsByKind($resellerId),
             'entries' => $this->ledger->entries($resellerId),
@@ -518,10 +518,96 @@ final class ResellerLedgerService
         return max(0, (int) $this->settings->get('reseller.payout_holding_days', '30'));
     }
 
-    /** The agreed minimum, in BASE units (see the plan: one value for all currencies). */
+    /** The legacy fallback minimum, in base units, retained for currencies not configured individually. */
     public function payoutMinimum(): float
     {
         return max(0.0, (float) $this->settings->get('reseller.payout_minimum', '50.00'));
+    }
+
+    /**
+     * The minimum expressed in both the account's base unit and the reseller's
+     * currency. Explicit per-currency settings are nominal amounts in that
+     * currency; an unconfigured currency keeps the legacy behavior by converting
+     * the old base-unit minimum at the current rate.
+     *
+     * @param array<string, mixed> $currency
+     * @return array{minimum: float, minimum_base: float, currency_code: string, custom: bool}
+     */
+    public function payoutMinimumForCurrency(array $currency): array
+    {
+        $code = strtoupper(trim((string) ($currency['code'] ?? '')));
+        $rate = $this->currency->rateFor($currency);
+        $rate = $rate > 0.0 ? $rate : 1.0;
+        $map = $this->payoutMinimumMap();
+
+        if ($code !== '' && array_key_exists($code, $map)) {
+            $minimum = $map[$code];
+
+            return [
+                'minimum' => $minimum,
+                'minimum_base' => round($minimum / $rate, 6),
+                'currency_code' => $code,
+                'custom' => true,
+            ];
+        }
+
+        $baseMinimum = $this->payoutMinimum();
+
+        return [
+            'minimum' => $this->currency->convert($baseMinimum, $rate),
+            'minimum_base' => $baseMinimum,
+            'currency_code' => $code,
+            'custom' => false,
+        ];
+    }
+
+    /**
+     * Effective settings for the admin form. Values are shown in each currency;
+     * for currencies without an explicit setting, the legacy base minimum is
+     * converted at today's rate so saving the form does not silently change its
+     * current behavior.
+     *
+     * @return array<int, array{currency_code: string, currency_name: string, minimum: float, minimum_base: float, custom: bool}>
+     */
+    public function payoutMinimums(): array
+    {
+        $minimums = [];
+
+        foreach ($this->currency->all() as $currency) {
+            $effective = $this->payoutMinimumForCurrency($currency);
+            $minimums[] = [
+                'currency_code' => $effective['currency_code'],
+                'currency_name' => (string) ($currency['name'] ?? $currency['code'] ?? ''),
+                'minimum' => $effective['minimum'],
+                'minimum_base' => $effective['minimum_base'],
+                'custom' => $effective['custom'],
+            ];
+        }
+
+        return $minimums;
+    }
+
+    /** @return array<string, float> */
+    private function payoutMinimumMap(): array
+    {
+        $decoded = json_decode((string) $this->settings->get('reseller.payout_minimums', '{}'), true);
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $map = [];
+        foreach ($decoded as $code => $amount) {
+            $code = strtoupper(trim((string) $code));
+
+            if ($code === '' || !is_numeric($amount) || !is_finite((float) $amount)) {
+                continue;
+            }
+
+            $map[$code] = round(max(0.0, (float) $amount), 2);
+        }
+
+        return $map;
     }
 
     /**

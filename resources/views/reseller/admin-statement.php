@@ -22,6 +22,7 @@
  * @var array<string, mixed> $statement
  * @var array<int, array<string, mixed>> $issued
  * @var array<int, string> $missingIdentity
+ * @var bool $canIssueStatement
  * @var string $baseCode
  * @var string|null $notice
  * @var string|null $error
@@ -216,7 +217,7 @@ $kindLabels = [
 
     <?php if ($missingIdentity !== []): ?>
         <div class="cv-alert cv-alert--error">
-            <strong>Before issuing a tax document:</strong> these identity fields are still blank, so the document
+            <strong>Statement identity details:</strong> these fields are still blank, so an issued document
             will show them as missing — <?= e(implode(', ', $missingIdentity)) ?>.
             Set them under <a href="/admin/settings/general">General Settings → Company Information</a>.
             They are saved onto the document as they stand at the moment you issue it, so filling them in afterwards
@@ -224,17 +225,24 @@ $kindLabels = [
         </div>
     <?php endif; ?>
 
-    <form method="post" action="/admin/resellers/<?= $clientId ?>/statement/issue"
-          style="display:flex;gap:var(--cv-space-2);align-items:flex-end;flex-wrap:wrap;">
-        <?= csrf_field() ?>
-        <input type="hidden" name="from" value="<?= e($fromDate) ?>">
-        <input type="hidden" name="to" value="<?= e($toDate) ?>">
-        <button class="cv-btn" type="submit">Issue for <?= e($fromDate) ?> &ndash; <?= e($toDate) ?></button>
-    </form>
-    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:var(--cv-space-2);">
-        Issuing the same period twice returns the statement that already exists rather than minting a second
-        number, so a double click cannot put a gap in the sequence.
-    </p>
+    <?php if ($canIssueStatement): ?>
+        <form method="post" action="/admin/resellers/<?= $clientId ?>/statement/issue"
+              style="display:flex;gap:var(--cv-space-2);align-items:flex-end;flex-wrap:wrap;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="from" value="<?= e($fromDate) ?>">
+            <input type="hidden" name="to" value="<?= e($toDate) ?>">
+            <button class="cv-btn" type="submit">Issue for <?= e($fromDate) ?> &ndash; <?= e($toDate) ?></button>
+        </form>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);margin-top:var(--cv-space-2);">
+            Issuing the same period twice returns the statement that already exists rather than minting a second
+            number, so a double click cannot put a gap in the sequence.
+        </p>
+    <?php else: ?>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+            You can review this live account view. Freezing a numbered statement additionally requires the
+            <code>resellers.statements.issue</code> permission.
+        </p>
+    <?php endif; ?>
 
     <table class="cv-table" style="margin-top:var(--cv-space-3);">
         <thead>

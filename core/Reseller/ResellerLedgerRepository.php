@@ -89,8 +89,8 @@ final class ResellerLedgerRepository
      * reads.
      *
      * Returns null when the order was never billed, which is the ordinary case for an
-     * order refunded before its month closed: the exclusion means no line was ever
-     * written, so there is nothing to reverse.
+     * order refunded before its configured billing period closed: the exclusion means
+     * no line was ever written, so there is nothing to reverse.
      *
      * @return array<string, mixed>|null
      */

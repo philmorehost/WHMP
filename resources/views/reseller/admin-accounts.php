@@ -7,7 +7,7 @@
  * @var float $totalWithdrawable
  * @var int $claimable
  * @var int $holdingDays
- * @var float $minimum
+ * @var array<int, array<string, mixed>> $minimums
  * @var string $baseCode
  * @var string|null $notice
  * @var string|null $error
@@ -60,8 +60,8 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
         <strong>Balance owed</strong> is everything we owe, including money collected minutes ago.
         <strong>Withdrawable now</strong> is smaller by exactly the receipts still inside the
         <?= (int) $holdingDays ?>-day holding period, and it is the only figure a payout may draw on. Showing
-        one number and calling it “available” would overstate every account by a month of sales. A payout also
-        needs <?= e($money($minimum, $baseCode)) ?>, which is why “above the minimum” is a separate count.
+        one number and calling it “available” would overstate every account by a month of sales. The payout
+        threshold is set separately for each reseller currency, so “above the minimum” is a separate count.
     </p>
 </div>
 
@@ -87,12 +87,34 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
                 <td><input type="number" name="payout_holding_days" min="0" step="1" value="<?= (int) $holdingDays ?>"></td>
             </tr>
             <tr>
-                <td><strong>Minimum payout</strong><br>
-                    <span style="color:var(--cv-text-secondary);">In base currency (<?= e($baseCode !== '' ? $baseCode : 'the base unit') ?>),
-                        one value for every reseller regardless of the currency they see. Below it an account can be
-                        in credit and still not be paid out — the money is theirs, it is just not worth a transfer yet.</span></td>
-                <td><input type="number" name="payout_minimum" min="0" step="0.01"
-                           value="<?= e(number_format($minimum, 2, '.', '')) ?>"></td>
+                <td><strong>Minimum payout by currency</strong><br>
+                    <span style="color:var(--cv-text-secondary);">Amounts are nominal in the reseller's own
+                        currency. A payout balance is compared using the current FX rate; the existing base-currency
+                        minimum remains the fallback for any currency not listed here.</span></td>
+                <td>
+                    <table class="cv-table">
+                        <thead><tr><th>Currency</th><th>Minimum</th><th>Current base equivalent</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($minimums as $minimumRow): ?>
+                            <?php $minimumCode = (string) ($minimumRow['currency_code'] ?? ''); ?>
+                            <tr>
+                                <td><strong><?= e($minimumCode) ?></strong>
+                                    <?php if (($minimumRow['custom'] ?? false) !== true): ?>
+                                        <br><span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">legacy fallback</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><input type="number" name="payout_minimums[<?= e($minimumCode) ?>]"
+                                           min="0" step="0.01" required
+                                           value="<?= e(number_format((float) $minimumRow['minimum'], 2, '.', '')) ?>"></td>
+                                <td><?= e($money((float) $minimumRow['minimum_base'], $baseCode)) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if ($minimums === []): ?>
+                            <tr><td colspan="3" style="color:var(--cv-text-secondary);">No currencies are configured.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+                </td>
             </tr>
             </tbody>
         </table>

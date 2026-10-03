@@ -65,7 +65,7 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
 <body data-skin="client">
 <?= $view->partial('partials.promo-banner') ?>
 <?php if (!empty($_SESSION['original_admin_id'])): ?>
-    <div style="background:var(--cv-color-brand-500);color:#ffffff;padding:var(--cv-space-2) var(--cv-space-6);display:flex;justify-content:space-between;align-items:center;font-size:var(--cv-text-sm);font-weight:600;z-index:9999;position:relative;">
+    <div class="cv-no-print" style="background:var(--cv-color-brand-500);color:#ffffff;padding:var(--cv-space-2) var(--cv-space-6);display:flex;justify-content:space-between;align-items:center;font-size:var(--cv-text-sm);font-weight:600;z-index:9999;position:relative;">
         <span>👤 You are logged in as a client.</span>
         <a href="/client/return-to-admin" style="color:#ffffff;text-decoration:underline;font-weight:700;">Return to Admin Panel &rarr;</a>
     </div>

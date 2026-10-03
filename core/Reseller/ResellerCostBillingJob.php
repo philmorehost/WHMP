@@ -15,9 +15,10 @@ use CodeVault\Settings\SettingsRepository;
 use DateTimeImmutable;
 
 /**
- * Invoices each store for the cost of the orders it took, one invoice per
- * closed calendar month, through the ordinary invoice path — the same daily
- * sweep as BillableItemInvoicingJob, and no new money code.
+ * Invoices each store for the cost of the orders it took, grouping accruals by
+ * closed billing period (calendar month by default, or ISO week). A below-minimum
+ * period can carry into the next invoice. Uses the ordinary invoice path — the
+ * same daily sweep as BillableItemInvoicingJob.
  *
  * The reseller pays us at retail through their storefront (Phase 3), so this is
  * the other half of that: we bill them the cost. The invoice lands on their
@@ -27,7 +28,7 @@ use DateTimeImmutable;
  * **Idempotency is a property of the data, not of this job.** An order's cost
  * is billed when orders.reseller_cost_invoice_id is stamped, and the guard on
  * that stamp lives inside the UPDATE. So running twice bills once; running
- * after a missed month bills the month that was missed; and an order whose
+ * after a missed period bills the period that was missed; and an order whose
  * invoice is later deleted is simply unbilled again rather than lost.
  *
  * Nothing here suspends a store for non-payment. Taking a reseller's storefront
@@ -61,15 +62,30 @@ final class ResellerCostBillingJob implements CronJob
 
     public function handle(): void
     {
-        if ($this->settings->get('reseller.billing_auto', '1') !== '1') {
+        $this->run(false);
+    }
+
+    /** Explicit admin run; it remains available when scheduled billing is off. */
+    public function billNow(): void
+    {
+        $this->run(true);
+    }
+
+    private function run(bool $manual): void
+    {
+        if (!$manual && $this->settings->get('reseller.billing_auto', '1') !== '1') {
             return;
         }
 
         $today = (new DateTimeImmutable())->format('Y-m-d');
         $dueDays = max(0, (int) $this->settings->get('reseller.billing_due_days', '7'));
         $minimum = max(0.0, (float) $this->settings->get('reseller.billing_minimum', '0.00'));
+        $cadence = $this->settings->get('reseller.billing_period', ResellerCostService::CADENCE_MONTHLY);
+        $cadence = $cadence === ResellerCostService::CADENCE_WEEKLY
+            ? ResellerCostService::CADENCE_WEEKLY
+            : ResellerCostService::CADENCE_MONTHLY;
 
-        foreach ($this->costs->duePeriods($today, $minimum) as $period) {
+        foreach ($this->costs->duePeriods($today, $minimum, $cadence) as $period) {
             $invoiceId = $this->raise($period, $dueDays);
 
             // The debit side of the reseller's account: the cost invoice is the

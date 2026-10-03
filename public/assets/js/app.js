@@ -4,6 +4,15 @@
 (function () {
     'use strict';
 
+    // Print a frozen reseller account statement without inline handlers, keeping
+    // the UI compatible with the site's strict script-src policy.
+    document.addEventListener('click', function (event) {
+        var printTrigger = event.target.closest('[data-print-document]');
+        if (!printTrigger) { return; }
+        event.preventDefault();
+        window.print();
+    });
+
     // Copy one element's value into another on click (e.g. the ticket
     // AI-copilot "Insert into Reply" button copies the suggestion textarea
     // into the reply box). Replaces an inline <script> the CSP blocked.

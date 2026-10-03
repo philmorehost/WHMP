@@ -26,8 +26,8 @@ use CodeVault\View;
  * than the credential service), and because adding to a controller that is
  * hand-built in tests is a blast radius with no upside here.
  *
- * The report is a READ. The only writes are the three tunables and an explicit
- * "bill now" — and that button is safe to press twice, because idempotency is a
+ * The report is a READ. Writes are limited to the billing controls and terms,
+ * plus an explicit "bill now" — and that button is safe to press twice, because idempotency is a
  * property of the data (the stamp on each order), not of the run.
  */
 final class AdminResellerBillingController
@@ -80,6 +80,10 @@ final class AdminResellerBillingController
             'auto' => $this->settings->get('reseller.billing_auto', '1') === '1',
             'minimum' => (float) $this->settings->get('reseller.billing_minimum', '0.00'),
             'dueDays' => (int) $this->settings->get('reseller.billing_due_days', '7'),
+            'billingPeriod' => $this->settings->get('reseller.billing_period', ResellerCostService::CADENCE_MONTHLY)
+                === ResellerCostService::CADENCE_WEEKLY
+                    ? ResellerCostService::CADENCE_WEEKLY
+                    : ResellerCostService::CADENCE_MONTHLY,
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
         ]);
@@ -97,14 +101,25 @@ final class AdminResellerBillingController
         $auto = (string) $request->input('billing_auto', '0') === '1';
         $minimum = max(0.0, (float) $request->input('billing_minimum', 0));
         $dueDays = max(0, (int) $request->input('billing_due_days', 7));
+        $requestedPeriod = (string) $request->input(
+            'billing_period',
+            $this->settings->get('reseller.billing_period', ResellerCostService::CADENCE_MONTHLY)
+        );
+        $billingPeriod = $requestedPeriod === ResellerCostService::CADENCE_WEEKLY
+            ? ResellerCostService::CADENCE_WEEKLY
+            : ResellerCostService::CADENCE_MONTHLY;
 
         $this->settings->set('reseller.billing_auto', $auto ? '1' : '0');
         $this->settings->set('reseller.billing_minimum', number_format($minimum, 2, '.', ''));
         $this->settings->set('reseller.billing_due_days', (string) $dueDays);
+        $this->settings->set('reseller.billing_period', $billingPeriod);
 
+        $cadenceLabel = $billingPeriod === ResellerCostService::CADENCE_WEEKLY
+            ? 'weekly (Monday–Sunday)'
+            : 'monthly (calendar month)';
         $this->session->flash(
             'reseller_notice',
-            'Cost billing saved: ' . ($auto ? 'monthly, automatically' : 'manual only')
+            'Cost billing saved: ' . ($auto ? $cadenceLabel . ', automatically' : 'manual only; next period ' . $cadenceLabel)
             . ', ' . number_format($minimum, 2) . ' minimum, ' . $dueDays . '-day terms.'
         );
 
@@ -115,7 +130,8 @@ final class AdminResellerBillingController
             null,
             null,
             'Set store cost billing to ' . ($auto ? 'auto' : 'manual')
-                . ', minimum ' . number_format($minimum, 2) . ', terms ' . $dueDays . ' days',
+                . ', ' . $billingPeriod . ', minimum ' . number_format($minimum, 2)
+                . ', terms ' . $dueDays . ' days',
             $request->ip()
         );
 
@@ -136,13 +152,13 @@ final class AdminResellerBillingController
         }
 
         $before = $this->repository->distinctCostInvoiceCount();
-        $this->billing->handle();
+        $this->billing->billNow();
         $raised = $this->repository->distinctCostInvoiceCount() - $before;
 
         $this->session->flash(
             'reseller_notice',
             $raised === 0
-                ? 'Cost billing ran — nothing new to invoice. Every closed month is already billed.'
+                ? 'Cost billing ran — nothing new to invoice. Every eligible closed period is already billed.'
                 : 'Cost billing ran — ' . $raised . ' invoice(s) raised. Pressing it again will not raise them twice.'
         );
 

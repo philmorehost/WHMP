@@ -31,17 +31,18 @@ final class ResellerCostRepository
      * bill is a report that makes somebody ask why a figure never turns into an
      * invoice — and the usual cause is a filter added to one query and not the other.
      *
-     * A REFUNDED SALE MUST NOT BE BILLED. Cost is billed monthly, so a refund that
-     * lands before the month closes is simply never billed: the receipt has already
-     * been reversed off the account (plan §9 decision 4), and charging the cost of a
-     * sale we refunded would debit the reseller for an order that un-wound.
+     * A REFUNDED SALE MUST NOT BE BILLED. Cost is billed by the configured period,
+     * so a refund that lands before that period closes is simply never billed: the
+     * receipt has already been reversed off the account (plan §9 decision 4), and
+     * charging the cost of a sale we refunded would debit the reseller for an order
+     * that un-wound.
      *
      * The refunded test is `NOT EXISTS` on the order's invoices rather than a flag on
      * the order, because the refund is recorded against the INVOICE and the same
      * refund path serves every invoice type.
      *
-     * A refund arriving AFTER the month has already been invoiced is the other half of
-     * the same decision, and needs a reversing CREDIT rather than an exclusion. It is
+     * A refund arriving AFTER the period has already been invoiced is the other half
+     * of the same decision, and needs a reversing CREDIT rather than an exclusion. It is
      * deliberately not built here: reversing one order's share of an invoice needs the
      * per-order figure the invoice was built from, and invoice_items stores only a
      * description, so there is no link to reverse against yet. Guessing it would
@@ -60,7 +61,7 @@ final class ResellerCostRepository
 
     /**
      * Order cost that has not been billed yet and belongs to a closed period,
-     * oldest first so month buckets come out in order without re-sorting.
+     * oldest first so period buckets come out in order without re-sorting.
      *
      * @return array<int, array<string, mixed>>
      */

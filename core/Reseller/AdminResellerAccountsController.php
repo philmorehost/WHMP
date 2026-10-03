@@ -91,7 +91,7 @@ final class AdminResellerAccountsController
             'totalWithdrawable' => $totalWithdrawable,
             'claimable' => $claimable,
             'holdingDays' => $this->ledger->holdingDays(),
-            'minimum' => $this->ledger->payoutMinimum(),
+            'minimums' => $this->ledger->payoutMinimums(),
             'baseCode' => $this->baseCurrencyCode(),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
@@ -215,19 +215,14 @@ final class AdminResellerAccountsController
      * One store's account for a period: the opening balance, the entries, the
      * closing balance and the withdrawable figure at the period end (§10.2).
      *
-     * Defaults to the CURRENT CALENDAR MONTH, because the cost invoices are raised
-     * monthly and this page is read beside them.
+     * Defaults to the CURRENT CALENDAR MONTH as a convenient starting range. Cost
+     * billing cadence is configurable separately (monthly or ISO-weekly).
      *
-     * THIS IS NOT YET A TAX DOCUMENT, AND THAT IS A REAL DISTINCTION rather than a
-     * caveat. A statement must eventually serve as one (confirmed by the user), but
-     * the decision taken was to build the VIEW first, and the two differ in a way
-     * that matters: a view is recomputed on every read and can therefore be
-     * corrected, while a tax document has to be NUMBERED and IMMUTABLE, so that two
-     * copies of "statement 12" can never disagree. Building the numbered document
-     * before its format is settled would mean reissuing documents, which is the one
-     * thing numbering exists to prevent. So this page carries the CONTENT such a
-     * document needs — period, both parties, opening and closing balances — and
-     * says plainly that it is not the document of record yet.
+     * THIS IS THE LIVE ACCOUNT VIEW, not the issued document: its values are
+     * recomputed on each read. A numbered statement is frozen separately so two
+     * copies of the same number cannot disagree. That document currently uses a
+     * generic account-statement layout; no jurisdiction-specific tax-document
+     * format is claimed or implied.
      */
     public function statement(Request $request, array $params): Response
     {
@@ -259,6 +254,7 @@ final class AdminResellerAccountsController
         return $this->render('reseller.admin-statement', [
             'clientId' => $clientId,
             'statement' => $statement,
+            'canIssueStatement' => $this->canIssueStatement(),
             'issued' => $this->documents->listing((int) $store['id'], 24),
             'missingIdentity' => $this->documents->missingIdentity(),
             'baseCode' => $this->baseCurrencyCode(),
@@ -283,7 +279,7 @@ final class AdminResellerAccountsController
      */
     public function issueStatement(Request $request, array $params): Response
     {
-        if ($denied = $this->requirePermission()) {
+        if ($denied = $this->requireStatementIssuePermission()) {
             return $denied;
         }
 
@@ -390,8 +386,7 @@ final class AdminResellerAccountsController
      *
      * DEFAULTS TO THE CURRENT CALENDAR MONTH. The TO end is normalised to the LAST
      * DAY at 23:59:59, not to midnight: a period ending at '2026-08-31 00:00:00'
-     * would silently omit everything posted on the final day, which is exactly the
-     * day a monthly billing run's entries land on.
+     * would silently omit entries posted during that final day.
      *
      * Anything unparseable — or a period that runs backwards — falls back to the
      * default rather than erroring. A bad query string should give you this month,
@@ -475,15 +470,47 @@ final class AdminResellerAccountsController
         }
 
         $holdingDays = max(0, (int) $request->input('payout_holding_days', 30));
-        $minimum = max(0.0, (float) $request->input('payout_minimum', 50));
-
         $this->settings->set('reseller.payout_holding_days', (string) $holdingDays);
-        $this->settings->set('reseller.payout_minimum', number_format($minimum, 2, '.', ''));
+
+        $postedMinimums = $request->input('payout_minimums');
+        $minimumSummary = '';
+
+        if (is_array($postedMinimums)) {
+            $values = [];
+
+            foreach ($this->currency->all() as $currency) {
+                $code = strtoupper(trim((string) ($currency['code'] ?? '')));
+                if ($code === '') {
+                    continue;
+                }
+
+                // The form's default is the current effective threshold, including
+                // the legacy base-currency fallback. Missing or malformed fields
+                // therefore preserve the existing rule rather than zeroing a
+                // threshold because of a partial POST.
+                $effective = $this->ledger->payoutMinimumForCurrency($currency);
+                $raw = $postedMinimums[$code] ?? $effective['minimum'];
+                $amount = $this->normaliseMinimum($raw, (float) $effective['minimum']);
+                $values[$code] = number_format($amount, 2, '.', '');
+            }
+
+            $this->settings->set(
+                'reseller.payout_minimums',
+                (string) json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            );
+            $minimumSummary = count($values) . ' currency-specific minimum(s)';
+        } elseif ($request->input('payout_minimum') !== null) {
+            // Backward-compatible path for older admin forms/automation. This is
+            // the base-unit fallback used by currencies without a specific row.
+            $minimum = $this->normaliseMinimum($request->input('payout_minimum'), $this->ledger->payoutMinimum());
+            $this->settings->set('reseller.payout_minimum', number_format($minimum, 2, '.', ''));
+            $minimumSummary = 'base-currency fallback ' . number_format($minimum, 2);
+        }
 
         $this->session->flash(
             'reseller_notice',
-            'Payout settings saved: receipts become withdrawable after ' . $holdingDays
-            . ' day(s), and a payout needs at least ' . number_format($minimum, 2) . '.'
+            'Payout settings saved: receipts become withdrawable after ' . $holdingDays . ' day(s)'
+            . ($minimumSummary === '' ? '' : ', with ' . $minimumSummary . '.')
             . ($holdingDays === 0
                 ? ' A zero-day holding period means a receipt is withdrawable the moment it is posted.'
                 : '')
@@ -495,12 +522,27 @@ final class AdminResellerAccountsController
             'reseller.payout.settings',
             null,
             null,
-            'Set reseller payout holding period to ' . $holdingDays . ' day(s) and minimum to '
-                . number_format($minimum, 2),
+            'Set reseller payout holding period to ' . $holdingDays . ' day(s)'
+                . ($minimumSummary === '' ? '' : '; ' . $minimumSummary),
             $request->ip()
         );
 
         return Response::redirect('/admin/resellers/accounts');
+    }
+
+    private function normaliseMinimum(mixed $value, float $fallback): float
+    {
+        if (!is_scalar($value) || !is_numeric($value)) {
+            return max(0.0, $fallback);
+        }
+
+        $amount = (float) $value;
+
+        if (!is_finite($amount)) {
+            return max(0.0, $fallback);
+        }
+
+        return round(max(0.0, $amount), 2);
     }
 
     /**
@@ -516,6 +558,28 @@ final class AdminResellerAccountsController
     private function baseCurrencyCode(): string
     {
         return strtoupper(trim($this->currency->codeFor(null)));
+    }
+
+    private function canIssueStatement(): bool
+    {
+        return $this->guard->can(PermissionRegistry::RESELLERS_MANAGE)
+            && $this->guard->can(PermissionRegistry::RESELLER_STATEMENTS_ISSUE);
+    }
+
+    private function requireStatementIssuePermission(): ?Response
+    {
+        if (!$this->guard->check()) {
+            return Response::redirect('/login');
+        }
+
+        if (!$this->canIssueStatement()) {
+            return Response::html(
+                '403 Forbidden — issuing reseller statements requires resellers.manage and resellers.statements.issue',
+                403
+            );
+        }
+
+        return null;
     }
 
     private function adminId(): ?int

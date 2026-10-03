@@ -31,8 +31,9 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         <h2 class="cv-card__title" style="margin-top:var(--cv-space-4);">What your store has cost you</h2>
         <p style="color:var(--cv-text-secondary);">
             Your customers pay you directly — we never charge them. This is the wholesale cost of the orders your
-            store has taken, at our catalogue prices, and we invoice it to your client account: one invoice per
-            closed calendar month. A month still in progress is never invoiced.
+            store has taken, at our catalogue prices, and we invoice it to your client account after the configured
+            billing period closes. Periods are calendar months or ISO weeks; below-minimum amounts can carry forward,
+            and an open period is never invoiced.
         </p>
         <table class="cv-table">
             <tbody>

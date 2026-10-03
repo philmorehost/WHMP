@@ -75,6 +75,7 @@ try {
         . 'color:#fff;';
     ?>
     <a href="<?= e(ResellerChat::whatsappUrl($digits, $greeting)) ?>"
+       class="cv-no-print"
        style="<?= e($style) ?>"
        target="_blank" rel="noopener noreferrer"
        aria-label="Chat with us on WhatsApp">

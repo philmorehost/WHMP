@@ -541,6 +541,9 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         )->body();
 
         $this->assertStringContainsString((string) $issued['number'], $body);
+        $this->assertStringContainsString('Account statement', $body);
+        $this->assertStringContainsString('data-print-document', $body);
+        $this->assertStringContainsString('not a customer sales invoice', $body);
         $this->assertStringContainsString('2026-08-01', $body);
     }
 
