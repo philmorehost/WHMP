@@ -180,6 +180,54 @@ final class ClientMassPaymentTest extends DatabaseTestCase
         $this->assertSame((float) $mass['total'], round($sum, 2));
     }
 
+    /**
+     * A consolidation sums each source invoice's subtotal / tax / discount / total
+     * into the matching column. So the consolidated invoice satisfies
+     * `total = subtotal + tax - discount` only because every SOURCE does — which is
+     * what makes that identity an invariant rather than a style preference, and is
+     * why a writer storing a net subtotal (CheckoutService, until 8b54387) poisons
+     * every consolidation that later absorbs its invoice.
+     *
+     * Every other test here consolidates invoices with no discount, where the
+     * identity is trivially true and this could not fail.
+     */
+    public function test_a_consolidation_of_discounted_invoices_keeps_the_invoice_identity(): void
+    {
+        $plain = $this->unpaidInvoice(100.00);
+        // 120 owed, 30 off: subtotal 150 (gross), discount 30, total 120.
+        $discounted = $this->unpaidInvoice(120.00, 30.00);
+
+        // Preconditions. massPay's arithmetic is a SUM of these rows, so if a
+        // source is already inconsistent the consolidation test proves nothing
+        // about the consolidation.
+        foreach ([$plain, $discounted] as $id) {
+            $source = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$id]);
+            $this->assertEqualsWithDelta(
+                (float) $source['total'],
+                (float) $source['subtotal'] + (float) $source['tax_amount'] - (float) $source['discount_amount'],
+                0.01,
+                "source invoice {$id} must satisfy the identity, or this test is vacuous"
+            );
+        }
+
+        $this->controller->massPay($this->massPayRequest([$plain, $discounted]));
+
+        $mass = $this->latestInvoice();
+        $this->assertNotNull($mass);
+
+        // Summed field by field: 100 + 150 subtotal, 30 discount, 100 + 120 total.
+        $this->assertSame(250.00, (float) $mass['subtotal']);
+        $this->assertSame(30.00, (float) $mass['discount_amount'], 'the discount must be carried, not dropped');
+        $this->assertSame(220.00, (float) $mass['total']);
+
+        $this->assertEqualsWithDelta(
+            (float) $mass['total'],
+            (float) $mass['subtotal'] + (float) $mass['tax_amount'] - (float) $mass['discount_amount'],
+            0.01,
+            'the consolidation must satisfy subtotal + tax - discount = total'
+        );
+    }
+
     public function test_selecting_a_single_invoice_still_redirects_without_creating_anything(): void
     {
         $only = $this->unpaidInvoice(28339.00);
@@ -384,14 +432,21 @@ final class ClientMassPaymentTest extends DatabaseTestCase
         return new Request([], ['invoice_ids' => array_map('strval', $ids)], ['REQUEST_METHOD' => 'POST'], []);
     }
 
-    /** An unpaid invoice denominated in the client's currency — rate 1.0. */
-    private function unpaidInvoice(float $total): int
+    /**
+     * An unpaid invoice denominated in the client's currency — rate 1.0.
+     *
+     * `$total` is what is OWED (the net). With a discount, `subtotal` is stored
+     * GROSS and the discount is recorded once in `discount_amount`, which is the
+     * shape every invoice writer in the app produces — the reader subtracts it,
+     * nothing folds it into the subtotal.
+     */
+    private function unpaidInvoice(float $total, float $discount = 0.0): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
             'INSERT INTO invoices (client_id, status, subtotal, tax_amount, discount_amount, total, currency_id, currency_rate, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$this->clientId, 'unpaid', $total, 0.0, 0.0, $total, $this->currencyId, 1.0000, substr($now, 0, 10), $now, $now]
+            [$this->clientId, 'unpaid', $total + $discount, 0.0, $discount, $total, $this->currencyId, 1.0000, substr($now, 0, 10), $now, $now]
         );
     }
 

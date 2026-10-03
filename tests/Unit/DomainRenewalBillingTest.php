@@ -163,6 +163,26 @@ final class DomainRenewalBillingTest extends DatabaseTestCase
         $this->assertNotNull($redemptionItem, 'Expected a redemption fee line item.');
         // 25.00 catalog fee converted at 1490 -> 37,250.00
         $this->assertEqualsWithDelta(37250.00, (float) $redemptionItem['amount'], 0.01);
+
+        // The invoice's own arithmetic. A renewal is the shape most easily got
+        // wrong — an extra component (the redemption fee) added into `subtotal`
+        // — and `subtotal` is load-bearing: DunningJob's 5% late fee and
+        // massPay's consolidation both read it. Only the identity is asserted,
+        // never a hand-computed total.
+        $invoice = $this->db->selectOne('SELECT * FROM invoices WHERE id = ?', [$generated[0]]);
+        $this->assertGreaterThan(0.0, (float) $invoice['subtotal'], 'the subtotal must not be empty');
+        $this->assertEqualsWithDelta(
+            (float) $invoice['total'],
+            (float) $invoice['subtotal'] + (float) $invoice['tax_amount'] - (float) $invoice['discount_amount'],
+            0.01,
+            'the renewal invoice must satisfy subtotal + tax - discount = total'
+        );
+        // The redemption fee belongs IN the gross subtotal, not beside it.
+        $this->assertGreaterThanOrEqual(
+            (float) $redemptionItem['amount'],
+            (float) $invoice['subtotal'],
+            'the redemption fee must be included in the subtotal'
+        );
     }
 
     /**
