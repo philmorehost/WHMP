@@ -1,7 +1,27 @@
 # Multi-currency and billing work — status
 
-**Branch:** `BUYAFROBEATS2` · **Shipped through:** `33f6976` (later commits on this branch are
-unrelated reseller/statement work) · **Written:** 2026-10-01
+**Branch:** `BUYAFROBEATS2` · **Shipped through:** `8b54387` · **Written:** 2026-10-01 ·
+**Corrected:** 2026-10-03
+
+> ### ⚠️ CORRECTED 2026-10-03 — the pricing premise below was WRONG for the live install
+>
+> §2.1, §3.1, §3.2 and §3.6 were written on the assumption that this install prices its catalogue in
+> **naira**. A dump of the production database shows it prices in **USD**:
+>
+> - no `product_pricing` row is ≥ 999 (max **$155.48**);
+> - "cPanel VPS SP1" (product 237) is **$15.00**, and its naira clients are charged **₦22,350**
+>   (= 15 × 1490) — a correct conversion of a dollar catalogue;
+> - USD clients pay the catalogue figure **1:1** (order 41: $12.00).
+>
+> So `is_pricing = 0` is the **correct** state here — the pricing currency already equals the base,
+> which is the case `CurrencyService::catalogRate()` was written to leave unchanged. **Do NOT mark NGN
+> as the pricing currency.** §3.1 is now a warning, not an instruction: doing it would make
+> `catalogRate(NGN)` = 1.0 (a ₦22,350 plan charging ₦15) and `catalogRate(USD)` = 1/1490 (about
+> $0.01).
+>
+> The code fix described in §2.1 is still correct and still necessary — it is simply **inert** on an
+> install whose catalogue happens to be priced in the base currency, and that inertness is the
+> designed behaviour, not a missing step.
 
 This covers the workstream that started as a mailing-system security report and grew into the
 admin billing lifecycle, invoice/order reactivation, and the multi-currency model.
@@ -25,6 +45,8 @@ admin billing lifecycle, invoice/order reactivation, and the multi-currency mode
 | `23132a3` | That recalculation was scoped to live amounts only |
 | `3b67225` | Adds the opt-in "convert settled records too" |
 | `33f6976` | **Catalog prices are converted from the currency they were entered in** — the root-cause fix |
+| `9e2c286` | Pins the pricing-currency flag with tests — it had no coverage at all (see §3.1) |
+| `8b54387` | A discounted invoice records the promo once and stores a **gross** `subtotal`, so the document adds up (see §3.7) |
 
 Migrations added: `0178` (registration OTP IP), `0179` (service suspension reason), `0180` (ticket
 auto-assign setting), `0181` (billable-item status), `0182` (currencies.is_pricing).
@@ -42,6 +64,11 @@ This install prices in naira while USD is the seeded default (`0037`). So the ra
 multiplied by the USD rate (`1.0`) and the naira number was stored, quoted and reported wearing a
 dollar sign, with no conversion applied anywhere. The mirror image of the same bug would have
 charged an NGN client `22350 × 1490` = ₦33,301,500 for the same plan.
+
+> **Correction (2026-10-03):** the live install does **not** price in naira — see the notice at the
+top. The bug as originally reported was real, but the catalogue has since been re-typed in USD
+(products 137/195/214/237 now sit at `15.00`), so the naira-priced `22350` this section describes no
+longer exists in that form. Everything below about the fix stands; only the premise is stale.
 
 **Fix (`33f6976`)** — introduced the missing concept, *which currency the prices were typed in*,
 independent of the default currency:
@@ -93,29 +120,51 @@ is representable.
 
 ## 3. Remaining
 
-### 3.1 Set the pricing currency *(blocking — do this first)*
+### 3.1 The pricing currency is deliberately UNSET — do not change it *(was: "do this first")*
 
 `is_pricing` exists in the schema (migration `0182`) and is read by the code, but **nothing sets it**:
-there is no seeding migration and no admin action recorded. Unless it was set by hand on the live
-install, it is `0` on every row — and until it is marked, the pricing fix is inert and the original
-mis-quoting still happens on new orders.
+there is no seeding migration and no admin action recorded. It is `0` on every row (USD, NGN and EUR
+alike) — and on this install **that is correct**. With the catalogue priced in the base currency,
+`catalogRate()` is identical to `rateFor()`, so no figure moves either way.
 
-**Action:** `/admin/currencies` → click **💲 Prices** on NGN.
+The original instruction here was to click **💲 Prices** on NGN. **Do not.** It rested on the mistaken
+premise corrected at the top of this document, and it would be destructive: marking NGN makes
+`catalogRate(NGN) = 1490 / 1490 = 1.0`, so a plan typed as `15.00` would charge **₦15** to a naira
+client, and `catalogRate(USD) = 1/1490` would ask dollar clients for **$0.01**. Every price on the
+platform would collapse by the exchange rate.
 
-### 3.2 Correct the already-placed order *(needs a decision)*
+`CurrencyRepository::pricing()` falls back to the **default** currency when nothing is marked, so an
+unset flag is not an error state — it means "the catalogue is in the base currency".
 
-The existing order's rows hold the naira figure stamped as USD. No currency switch can repair it —
-switching that client to NGN would multiply it to ₦33M, because the stored amount is mislabelled
-rather than merely in the wrong currency.
+**If you ever want a naira catalogue**, the order is: re-price the catalogue in naira **first**, then
+mark NGN. Never the reverse.
 
-Two options, both defensible:
+Coverage added 2026-10-03 (`9e2c286`): `tests/Unit/CurrencyPricingFlagTest.php`, 6 tests pinning the
+unmarked fallback, the one-row invariant, the $15.00 / ₦22,350 conversion, the pair showing the flag
+is what makes a naira client's price correct, and that a visitor's own currency still wins over a
+naira catalogue. Before this, **nothing in the suite ever set the flag** — every `setPricing(` call in
+`tests/` belongs to `ProductPricingRepository`, a different method on a different class that merely
+shares the name.
 
-- **Re-denominate** that client's rows at `÷1490` → `$15.00` (the client stays on USD).
-- **Relabel as naira** — set the client to NGN and set those rows' `currency_id` to NGN with
-  `currency_rate = 1.0`, leaving the amounts alone → `₦22,350`.
+### 3.2 The already-placed order *(DONE 2026-10-03 — and not in the shape described here)*
 
-**Needed:** the client id / order id, and which of the two you want. A targeted correction is right
-here; a blanket migration would also hit genuinely-correct USD rows and cannot tell them apart.
+The order is **order 37 / invoice 3617** (client 237), and it was not a mislabelled amount at all:
+`orders.total`, `invoices.total` and `services.amount` already read **22,350** — correctly, as
+₦22,350 = $15 × 1490.
+
+What was wrong was **four double-converted rows**, each holding `15 × 1490²` = **33,301,500**:
+`invoices.subtotal`, one `invoice_items.amount`, one `order_items.unit_price` and — the serious one —
+a `transactions.amount` row recorded as a `completed`, `manual` **payment of ₦33,301,500 against a
+₦22,350 invoice**. `gateway_transaction_id` was `NULL` and it was created in the same second as
+`paid_at`, so it was an app-computed entry, not a bank record.
+
+All four were corrected to 22,350 on production with value-guarded `UPDATE`s (`ROW_COUNT() = 1` each),
+a full-schema sweep confirmed no other numeric column held the figure, and the invoice now satisfies
+`subtotal = total = items_sum = payment`. A guarded reversal script exists in case that money turns
+out to have been real.
+
+**The two options originally listed here (re-denominate at ÷1490 vs relabel) were never needed** — the
+client was already an NGN client with correct totals, and the damage was in the sub-rows.
 
 ### 3.3 Client-side currency switch during the order *(built)*
 
@@ -195,10 +244,39 @@ the specific rows are known.
 
 ### 3.6 Smaller open items
 
-- New clients default to the default currency (USD). With `is_pricing` = NGN they will now correctly
-  see `$15.00` for a naira-priced plan — decide whether new clients should default to NGN instead.
-- `AdminOrderControllerTest` / `CartCheckoutTest` assert on order/invoice currency locks; they were
-  not re-run after `33f6976` (see §4).
+- New clients default to the **default** currency (USD) — `ClientRepository::create()` inserts
+  `$fields['currency_id'] ?? $defaultCurrencyId`. That is a separate lever from `is_pricing`: it
+  decides what a new signup starts in, and what an anonymous storefront visitor sees. Leave it as is
+  unless you deliberately want new accounts to open in NGN.
+
+- `AdminOrderControllerTest` / `CartCheckoutTest` assert on order/invoice currency locks. These have
+  since been re-run many times against a real database (§4) and pass.
+
+### 3.7 A discounted invoice did not add up *(FIXED 2026-10-03, `8b54387`)*
+
+Found by auditing production data, not by a failing test: **every discounted invoice in the book** —
+all 7 of them, 2026-07-25 to 2026-09-26 — printed `Sub Total 461.90 / Promo Discount −59.60 / Total
+Due 461.90`. The amount charged was right; the breakdown was not.
+
+`subtotal` is **GROSS** by convention: `total = subtotal + tax − discount`. Every other invoice writer
+keeps that identity, the invoice EDIT path computes it that way, and both
+`resources/views/billing/client-invoice-show.php` and `InvoicePdfBuilder` render it as
+Sub Total − Promo Discount = Total Due. `CheckoutService::buildOrder()` was the one writer that did
+not: it stored `$priced['total']`, which `CartService::priceItems()` defines as the total with the
+discount **already deducted** — so the page took the discount off a second time. It also wrote the
+discount a second time as a negative `invoice_items` row (`"Promo: {code}"`), so a promo appeared both
+as a line item and as a totals row.
+
+Now `subtotal` is gross and the negative item is gone, so the line items sum to the subtotal and the
+discount appears exactly once. **`total` is untouched** — no amount charged changed, and a test pins it
+against the cart's own quoted total so a later edit cannot move what someone is billed.
+
+The 7 existing invoices were back-filled on production (subtotal grossed, promo row removed; `total`
+unchanged), which took the whole-book count of invoices failing the identity from **304 → 297**.
+
+**`subtotal`'s meaning is load-bearing** — this is why the direction of the fix matters:
+`DunningJob` computes the 5% late fee from it, and `ClientInvoiceController::massPay()` sums it into a
+consolidated invoice.
 
 ---
 
@@ -208,6 +286,13 @@ the specific rows are known.
 `Could not open mysql.plugin table` → `Failed to initialize plugins` → `Aborting`: the XAMPP `mysql`
 system schema is unreadable (same Aria corruption family noted in repo memory). InnoDB itself starts
 fine. Consequently every `DatabaseTestCase`-derived test **skips** rather than runs.
+
+> **Update 2026-10-03:** a working MariaDB has since been available, and these tests do run — the
+> suites named in §3.1/§3.2/§3.7 were executed against a real database on 2026-10-03 (e.g.
+> `CurrencyPricingFlagTest` 6/6, `CartCheckoutTest|AdminOrderControllerTest|ExistingOrderTest`
+> 27 tests / 117 assertions, `ResellerStoreCheckoutTest|AutoSetupProvisioningTest|
+> OrderAcceptanceIntegrationTest` 15/71). The paragraph below describes the state on 2026-10-01 only,
+> and the claim that the suite "skips rather than runs" no longer holds.
 
 What was verified instead:
 
@@ -258,6 +343,14 @@ caused by violating one of them.
    `1490` there put ₦11,177,235 on a ₦7,501.50 invoice.
 7. **A cancelled invoice/order has two representations** — `status` and the `is_cancelled` flag.
    Always handle both.
+8. **An invoice's `subtotal` is GROSS: `total = subtotal + tax_amount − discount_amount` must hold on
+   every invoice row.** This is not stylistic — the detail page, the PDF and the admin invoice edit
+   path all render or recompute from it, and both `DunningJob`'s 5% late fee and `massPay()`'s
+   consolidation read `subtotal`. A discount belongs on the invoice (`discount_amount`) **once**;
+   never also as a negative line item, and never pre-subtracted from `subtotal` — that is exactly
+   what §3.7 was. Menu of the ways to get it wrong, all of which shipped at least once: storing the
+   net figure in `subtotal` (§3.7), writing the discount twice (§3.7), and leaving `discount_amount`
+   out of a conversion while scaling the other columns (§2.2).
 8. **`updateCurrency()` is the deliberate admin action; `setCurrencyPreference()` is the passive one.**
    `updateCurrency($id, $currencyId, $includeSettled = false)`: default converts only live amounts;
    `true` drops every status filter so the whole account reads in the new currency.
