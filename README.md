@@ -51,6 +51,7 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 | `SESSION_DRIVER`, `QUEUE_DRIVER`, `CACHE_DRIVER` | `redis` or anything else (falls back). |
 | `QUEUE_CRON_DRAIN` | `1` = cron also drains the `default` (order-acceptance) queue as a fallback when no dedicated worker runs. Keep unset/`0` if a `queue-worker.php` process is running. |
 | `PROVIDER_HTTP_PROXY` | Optional. Sends InterServer and Nocix API calls through a proxy, for when their Cloudflare firewall blocks this server's IP. Examples: `http://user:pass@203.0.113.5:3128`, `socks5h://203.0.113.5:1080`. Other traffic is not affected. |
+| `PROVIDER_HTTP_USER_AGENT` | Optional. The User-Agent sent to InterServer and Nocix (default `WHMP-CodeVault/1.0`). Set it if the provider's support asks for a specific value. |
 | `PROVIDER_FORCE_IPV4` | Optional. `1` makes InterServer and Nocix calls use IPv4 only (some Cloudflare rules distrust a host's IPv6 range). |
 | `DEEPSEEK_API_KEY` | Powers the AI features (ticket reply suggestions, fraud triage, Ask AI, AI-assisted KB search). All of them fail open — a missing key or API error never blocks the underlying flow, it just skips the AI step. |
 

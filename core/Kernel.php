@@ -736,15 +736,22 @@ class Kernel
 
         // InterServer and Nocix sit behind Cloudflare. When it blocks this server's IP,
         // PROVIDER_HTTP_PROXY sends just these calls out through another server, and
-        // PROVIDER_FORCE_IPV4=1 avoids an IPv6 range Cloudflare distrusts.
+        // PROVIDER_FORCE_IPV4=1 avoids an IPv6 range Cloudflare distrusts, and
+        // PROVIDER_HTTP_USER_AGENT sends the User-Agent a provider asks for.
         $providerHttp = function (Container $c): HttpClient {
             $config = $c->make(Config::class);
             $proxy = trim((string) $config->env('PROVIDER_HTTP_PROXY', ''));
             $ipv4 = in_array(strtolower(trim((string) $config->env('PROVIDER_FORCE_IPV4', ''))), ['1', 'true', 'yes', 'on'], true);
+            $agent = trim((string) $config->env('PROVIDER_HTTP_USER_AGENT', ''));
 
-            return $proxy === '' && !$ipv4
+            return $proxy === '' && !$ipv4 && $agent === ''
                 ? $c->make(HttpClient::class)
-                : new CurlHttpClient(timeoutSeconds: 120, proxy: $proxy !== '' ? $proxy : null, forceIpv4: $ipv4);
+                : new CurlHttpClient(
+                    timeoutSeconds: 120,
+                    proxy: $proxy !== '' ? $proxy : null,
+                    forceIpv4: $ipv4,
+                    userAgent: $agent !== '' ? $agent : null
+                );
         };
 
         $this->container->singleton(InterServerVpsProvisioningModule::class, function (Container $c) use ($providerHttp) {

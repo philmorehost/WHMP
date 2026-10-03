@@ -6,6 +6,12 @@ namespace CodeVault\Provisioning;
 
 final class CurlHttpClient implements HttpClient
 {
+    /**
+     * Without the word "curl": Cloudflare firewall rules commonly block User-Agents
+     * containing it, and InterServer's API sits behind Cloudflare.
+     */
+    public const DEFAULT_USER_AGENT = 'WHMP-CodeVault/1.0';
+
     public function __construct(
         private readonly int $timeoutSeconds = 15,
         private readonly bool $verifySsl = true,
@@ -14,7 +20,10 @@ final class CurlHttpClient implements HttpClient
         // blocked by the provider's Cloudflare firewall.
         private readonly ?string $proxy = null,
         // Some Cloudflare rules block a host's IPv6 range but not its IPv4 address.
-        private readonly bool $forceIpv4 = false
+        private readonly bool $forceIpv4 = false,
+        // Overrides DEFAULT_USER_AGENT (PROVIDER_HTTP_USER_AGENT), e.g. to the exact
+        // value a provider's support asks API clients to send.
+        private readonly ?string $userAgent = null
     ) {
     }
 
@@ -54,7 +63,7 @@ final class CurlHttpClient implements HttpClient
         // PHP cURL sends no User-Agent by default. Provider APIs behind Cloudflare
         // (InterServer, Nocix) can block requests without one.
         if (!$hasUserAgent) {
-            curl_setopt($ch, CURLOPT_USERAGENT, 'WHMP-CodeVault/1.0 (PHP cURL)');
+            curl_setopt($ch, CURLOPT_USERAGENT, $this->agent());
         }
 
         if ($body !== null) {
@@ -82,7 +91,7 @@ final class CurlHttpClient implements HttpClient
             $sent = $headers;
 
             if (!$hasUserAgent) {
-                $sent['User-Agent'] = 'WHMP-CodeVault/1.0 (PHP cURL)';
+                $sent['User-Agent'] = $this->agent();
             }
 
             HttpExchangeLog::record(
@@ -110,5 +119,13 @@ final class CurlHttpClient implements HttpClient
             'body' => $errored ? '' : (string) $raw,
             'error' => $errorMsg,
         ];
+    }
+
+    private function agent(): string
+    {
+        $agent = trim((string) $this->userAgent);
+
+        // A header value must stay on one line.
+        return $agent !== '' ? (string) preg_replace('/[\r\n]+/', ' ', $agent) : self::DEFAULT_USER_AGENT;
     }
 }
