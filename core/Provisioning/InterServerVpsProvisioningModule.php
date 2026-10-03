@@ -13,25 +13,36 @@ use CodeVault\Modules\ProvisioningModule;
  * read directly from InterServer's own published API reference
  * (my.interserver.net/api-docs, v0.9.0) during development — not guessed.
  *
- * Architectural note: `ProvisioningService` (the orchestration engine)
- * threads exactly one identifier — `services.username` — through every
- * lifecycle call after create(); it has no separate "remote id" column.
- * cPanel's username IS its account identifier, so that fits directly, but
- * InterServer's VPS lifecycle endpoints are keyed by a numeric `vps_id`
- * only InterServer assigns (returned from the order call, not chosen by
- * us). Rather than widen the core orchestration engine's schema for one
- * module — real regression risk to every other already-verified module —
- * this module stores the locally-generated username as the VPS's
- * `hostname` at order time, then resolves `vps_id` by listing the
- * account's VPS services and matching on that hostname whenever a later
- * lifecycle call needs the numeric id. One extra read call per action,
- * paid only by this module, in exchange for zero changes to shared code.
+ * WHICH VPS IS THIS SERVICE?
+ *
+ * InterServer addresses a VPS by its `vps_uuid` in every `/vps/{id}/*` path. The
+ * legacy integer `vps_id` is still accepted, but is deprecated. WHMP finds it in this
+ * order (see resolveRemote()):
+ *
+ *   1. `services.remote_id`: the admin linked the service to a VPS explicitly from
+ *      the service page. This is the reliable way for VPSes bought by hand on
+ *      InterServer and then entered into WHMP, whose hostname rarely matches.
+ *   2. Otherwise GET /vps (the account's VPS list), matched on the service's hostname,
+ *      then its primary or assigned IPs, then its username. API-ordered services
+ *      match by hostname, because create() orders the VPS with the WHMP username as
+ *      its hostname.
+ *
+ * The UUID is used whenever the list provides one; the integer id is only a fallback.
+ *
+ * DESTRUCTIVE CALLS
+ *
+ * OS reinstall and backup restore re-check the InterServer ACCOUNT password on top of
+ * the API key. The password is stored encrypted on the server record
+ * (servers.account_secret). ProvisioningService decrypts it into
+ * `server.account_password` for these two calls only.
  */
-final class InterServerVpsProvisioningModule implements ProvisioningModule
+final class InterServerVpsProvisioningModule implements ProvisioningModule, LinksRemoteServices
 {
     private const BASE_URL = 'https://my.interserver.net/apiv2';
 
-    /** @var array<string, int> hostname => InterServer vps_id, per request */
+    private const NOT_LINKED = 'This VPS is not linked to a VPS on the InterServer account yet: no VPS there matches its hostname or IP. An admin can link it from the service page.';
+
+    /** @var array<string, string> match key => InterServer VPS ref, per request */
     private array $vpsIdCache = [];
 
     public function __construct(
@@ -179,7 +190,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'backups' => []];
+            return ['success' => false, 'message' => self::NOT_LINKED, 'backups' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/backups", null));
@@ -204,6 +215,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
                 'name' => $name,
                 'type' => $type,
                 'sizeBytes' => isset($row['size']) ? (int) $row['size'] : null,
+                'createdAt' => isset($row['date']) && (int) $row['date'] > 0 ? (int) $row['date'] : null,
                 'ref' => "{$type}:{$service}:{$name}",
             ];
         }
@@ -224,7 +236,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'slices' => []];
+            return ['success' => false, 'message' => self::NOT_LINKED, 'slices' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/slices", null));
@@ -261,7 +273,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'info' => []];
+            return ['success' => false, 'message' => self::NOT_LINKED, 'info' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}", null));
@@ -271,17 +283,26 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         }
 
         $data = is_array($decoded['data']) ? $decoded['data'] : [];
+        // getVpsInfo nests the VPS row under `serviceInfo`, next to `serviceMaster`
+        // (the host node) and `billingDetails`. Reading the top level, as this used to,
+        // found nothing, so the status badge never showed. Older flat shapes still work.
+        $row = is_array($data['serviceInfo'] ?? null) ? $data['serviceInfo'] : $data;
+        $power = (string) ($row['vps_server_status'] ?? '');
 
         return [
             'success' => true,
             'message' => '',
             'info' => [
-                'status' => (string) ($data['vps_status'] ?? ''),
-                'hostname' => (string) ($data['vps_hostname'] ?? ''),
-                'ip' => (string) ($data['vps_ip'] ?? ''),
-                'os' => (string) ($data['vps_os'] ?? ''),
-                'slices' => isset($data['vps_slices']) ? (int) $data['vps_slices'] : null,
-                'plan' => (string) ($data['services_name'] ?? ''),
+                // The machine's power state when reported (running/stopped), else the
+                // service state (active/suspended).
+                'status' => $power !== '' ? $power : (string) ($row['vps_status'] ?? ''),
+                'serviceStatus' => (string) ($row['vps_status'] ?? ''),
+                'hostname' => (string) ($row['vps_hostname'] ?? ''),
+                'ip' => (string) ($row['vps_ip'] ?? ''),
+                'ipv6' => (string) ($row['vps_ipv6'] ?? ''),
+                'os' => (string) ($row['vps_os'] ?? ''),
+                'slices' => isset($row['vps_slices']) ? (int) $row['vps_slices'] : null,
+                'plan' => (string) ($data['services_name'] ?? $row['services_name'] ?? ''),
             ],
         ];
     }
@@ -291,7 +312,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+            return ['success' => false, 'message' => self::NOT_LINKED];
         }
 
         $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/change_root_password", [
@@ -306,7 +327,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+            return ['success' => false, 'message' => self::NOT_LINKED];
         }
 
         $slices = (int) ($params['package'] ?? $params['slices'] ?? 0);
@@ -321,51 +342,118 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
     }
 
     /**
-     * InterServer has no cPanel-style "create_user_session" call that hands
-     * back a one-click browser URL — its own docs describe
-     * getVpsSetupVnc's response only as "Object with VNC connection info
-     * (IP, port, credentials when provisioned)" with no fixed field names,
-     * and note it's "a stub for some platforms." Rather than guess a shape
-     * that isn't documented, this reads whatever connection info is
-     * available (GET, side-effect-free) and — when present — hands back a
-     * `vnc://host:port` URI, a real scheme VNC clients can be launched
-     * from. If nothing is provisioned yet, it reports that plainly instead
-     * of fabricating success; postVpsSetupVnc (which needs the caller's own
-     * IP to whitelist) is intentionally not called automatically here.
+     * The out-of-band VNC console.
+     *
+     * InterServer only accepts console connections from one allowed IPv4 address.
+     * postVpsSetupVnc sets that address (`vnc`) and re-provisions the listener, which
+     * takes about two minutes. So this first allows the CLIENT's own IP (the browser
+     * that pressed the button), then reads where to connect. The VNC listener runs on
+     * the host node (`serviceMaster.vps_ip`) at the VPS's `vps_vnc_port`, both from
+     * getVpsInfo. getVpsSetupVnc has no fixed schema, so it is only a fallback.
+     *
+     * A private or IPv6 client address cannot be allowed (the API validates IPv4), so
+     * in that case only the existing details are read.
+     *
+     * @param array<string, mixed> $params
+     * @return array{success: bool, message: string, url?: ?string, host?: ?string, port?: ?int, allowedIp?: ?string}
      */
+    public function console(array $params, string $clientIp = ''): array
+    {
+        $ref = $this->resolveVpsId($params);
+
+        if ($ref === null) {
+            return ['success' => false, 'message' => self::NOT_LINKED];
+        }
+
+        $allowed = null;
+
+        if (filter_var($clientIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+            $setup = $this->decode($this->call($params['server'], 'POST', "/vps/{$ref}/setup_vnc", ['vnc' => $clientIp]));
+
+            if (!$setup['success']) {
+                return ['success' => false, 'message' => $setup['message'] !== '' ? $setup['message'] : 'The provider would not open the console.'];
+            }
+
+            $allowed = $clientIp;
+        }
+
+        [$host, $port] = $this->consoleEndpoint($params['server'], $ref);
+
+        if ($host === null) {
+            if ($allowed !== null) {
+                return [
+                    'success' => true,
+                    'url' => null,
+                    'host' => null,
+                    'port' => $port,
+                    'allowedIp' => $allowed,
+                    'message' => "Console access is being opened for your IP {$allowed}. Allow about 2 minutes, then press Get Console Details again to see the address to connect to.",
+                ];
+            }
+
+            return ['success' => false, 'message' => 'No VNC console details are available for this VPS yet.'];
+        }
+
+        $address = $port !== null ? "{$host}:{$port}" : $host;
+
+        return [
+            'success' => true,
+            'url' => "vnc://{$address}",
+            'host' => $host,
+            'port' => $port,
+            'allowedIp' => $allowed,
+            'message' => "VNC console: connect a VNC client to {$address}"
+                . ($allowed !== null ? " from your IP {$allowed}. Access was just opened for that IP; allow up to 2 minutes." : '.'),
+        ];
+    }
+
+    /** Kept for the ProvisioningModule contract: the console, without allowing an IP. */
     public function singleSignOn(array $params): array
     {
-        $vpsId = $this->resolveVpsId($params);
+        return $this->console($params, (string) ($params['client_ip'] ?? ''));
+    }
 
-        if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+    /**
+     * Where the VNC listener for this VPS is: [host, port].
+     *
+     * @param array<string, mixed> $server
+     * @return array{0: ?string, 1: ?int}
+     */
+    private function consoleEndpoint(array $server, string $ref): array
+    {
+        $host = null;
+        $port = null;
+        $info = $this->decode($this->call($server, 'GET', "/vps/{$ref}", null));
+
+        if ($info['success'] && is_array($info['data'])) {
+            $row = is_array($info['data']['serviceInfo'] ?? null) ? $info['data']['serviceInfo'] : $info['data'];
+            $master = is_array($info['data']['serviceMaster'] ?? null) ? $info['data']['serviceMaster'] : [];
+            $port = self::portOf($row['vps_vnc_port'] ?? null);
+            $host = self::ipOf($master['vps_ip'] ?? null);
         }
 
-        $response = $this->call($params['server'], 'GET', "/vps/{$vpsId}/setup_vnc", null);
-        $decoded = $this->decode($response);
-
-        if (!$decoded['success']) {
-            return ['success' => false, 'message' => $decoded['message']];
+        if ($host === null || $port === null) {
+            $vnc = $this->decode($this->call($server, 'GET', "/vps/{$ref}/setup_vnc", null));
+            $data = $vnc['success'] && is_array($vnc['data']) ? $vnc['data'] : [];
+            $host ??= self::ipOf($data['host'] ?? $data['ip'] ?? $data['vnc_host'] ?? $data['vnc_ip'] ?? null);
+            $port ??= self::portOf($data['port'] ?? $data['vnc_port'] ?? null);
         }
 
-        if (!$decoded['success']) {
-            return ['success' => false, 'message' => $decoded['message']];
-        }
+        return [$host, $port];
+    }
 
-        $data = is_array($decoded['data']) ? $decoded['data'] : [];
-        $ip = $data['ip'] ?? $data['vnc_ip'] ?? $data['vnc'] ?? null;
-        $port = $data['port'] ?? $data['vnc_port'] ?? null;
+    private static function ipOf(mixed $value): ?string
+    {
+        $value = trim((string) $value);
 
-        if ($ip === null) {
-            return [
-                'success' => false,
-                'message' => 'No VNC console is provisioned for this VPS yet — contact support to provision one.',
-            ];
-        }
+        return $value !== '' && filter_var($value, FILTER_VALIDATE_IP) !== false ? $value : null;
+    }
 
-        $url = $port !== null ? "vnc://{$ip}:{$port}" : "vnc://{$ip}";
+    private static function portOf(mixed $value): ?int
+    {
+        $port = (int) $value;
 
-        return ['success' => true, 'url' => $url, 'message' => 'VNC console connection info retrieved.'];
+        return $port > 0 && $port < 65536 ? $port : null;
     }
 
     public function usage(array $params): array
@@ -373,7 +461,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+            return ['success' => false, 'message' => self::NOT_LINKED];
         }
 
         $response = $this->call($params['server'], 'GET', "/vps/{$vpsId}/traffic_usage", null);
@@ -417,7 +505,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'templates' => []];
+            return ['success' => false, 'message' => self::NOT_LINKED, 'templates' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/reinstall_os", null));
@@ -449,23 +537,27 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
      * where `template` is a `template_file` from `osTemplates()`, not a bare
      * `osVersion` slug like "ubuntu24".
      *
-     * `localPassword` is the MyAdmin *account* password, re-checked by
-     * InterServer on every call because this wipes the disk with no
-     * rollback. WHMP stores only `api_username`/`api_token` for a server, so
-     * there is nothing to send — this reports that plainly rather than
-     * firing a destructive call that would be rejected anyway. The
-     * client-facing reinstall flow routes through a support ticket instead.
+     * `localPassword` is the InterServer *account* password, re-checked on
+     * every call because this wipes the disk with no rollback. It comes from
+     * the server record (`server.account_password`, decrypted by
+     * ProvisioningService) unless the caller passes one. When neither exists,
+     * this says so rather than firing a destructive call that would be
+     * rejected, and the client's request becomes a support ticket instead.
      */
     public function reinstall(array $params): array
     {
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+            return ['success' => false, 'message' => self::NOT_LINKED];
         }
 
         $template = trim((string) ($params['template'] ?? ''));
         $localPassword = (string) ($params['localPassword'] ?? '');
+
+        if ($localPassword === '') {
+            $localPassword = (string) ($params['server']['account_password'] ?? '');
+        }
 
         if ($template === '') {
             return ['success' => false, 'message' => 'An OS template is required — choose one from the templates this VPS supports.'];
@@ -474,7 +566,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         if ($localPassword === '') {
             return [
                 'success' => false,
-                'message' => 'The hosting provider requires the control panel account password to reinstall a VPS, which is not stored on this server record. Submit the reinstall as a support request instead.',
+                'message' => 'The hosting provider requires the InterServer account password to reinstall a VPS, and none is saved on this server record (Admin → Servers → edit → Account password).',
             ];
         }
 
@@ -487,6 +579,211 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reinstall_os", $body);
 
         return $this->toResult($response, 'VPS OS reinstallation has been queued.');
+    }
+
+    /**
+     * postVpsRestore: overwrite the disk from one of the VPS's own backups.
+     *
+     * `backup` is the composite `<type>:<service>:<name>` that listBackups() returns
+     * as `ref`. InterServer re-checks the account password (`password`), as for a
+     * reinstall, and rejects a backup that is not in this VPS's own list.
+     *
+     * @param array<string, mixed> $params
+     */
+    public function restore(array $params): array
+    {
+        $ref = $this->resolveVpsId($params);
+
+        if ($ref === null) {
+            return ['success' => false, 'message' => self::NOT_LINKED];
+        }
+
+        $backup = trim((string) ($params['backup'] ?? ''));
+
+        if ($backup === '') {
+            return ['success' => false, 'message' => 'Choose which backup to restore from.'];
+        }
+
+        $password = (string) ($params['localPassword'] ?? '');
+
+        if ($password === '') {
+            $password = (string) ($params['server']['account_password'] ?? '');
+        }
+
+        if ($password === '') {
+            return [
+                'success' => false,
+                'message' => 'The hosting provider requires the InterServer account password to restore a backup, and none is saved on this server record (Admin → Servers → edit → Account password).',
+            ];
+        }
+
+        $response = $this->call($params['server'], 'POST', "/vps/{$ref}/restore", ['backup' => $backup, 'password' => $password]);
+
+        return $this->toResult($response, 'Restore has been queued. Allow up to 10 minutes for it to complete.');
+    }
+
+    /** {@inheritDoc} */
+    public function remoteServices(array $server): array
+    {
+        $rows = $this->vpsRows($server);
+
+        if (!$rows['success']) {
+            return ['success' => false, 'message' => $rows['message'], 'services' => []];
+        }
+
+        $services = [];
+
+        foreach ($rows['rows'] as $row) {
+            $ref = self::refOf($row);
+
+            if ($ref === '') {
+                continue;
+            }
+
+            $hostname = (string) ($row['vps_hostname'] ?? '');
+            $ip = (string) ($row['vps_ip'] ?? '');
+            $status = (string) ($row['vps_status'] ?? '');
+            $name = trim((string) ($row['vps_name'] ?? ''));
+
+            $services[] = [
+                'ref' => $ref,
+                'id' => (string) ($row['vps_id'] ?? ''),
+                'hostname' => $hostname,
+                'ip' => $ip,
+                'status' => $status,
+                'label' => trim(($hostname !== '' ? $hostname : 'VPS ' . ($row['vps_id'] ?? '')) . ($ip !== '' ? " ({$ip})" : '')
+                    . ($name !== '' && $name !== $hostname ? " · {$name}" : '')
+                    . ($status !== '' && $status !== 'active' ? " · {$status}" : '')),
+            ];
+        }
+
+        return ['success' => true, 'message' => '', 'services' => $services];
+    }
+
+    /** {@inheritDoc} */
+    public function resolveRemote(array $params): array
+    {
+        $linked = trim((string) ($params['remote_id'] ?? ''));
+
+        // Only something shaped like an InterServer id (a UUID or an integer) goes into
+        // a URL path. Anything else is treated as "not linked".
+        if ($linked !== '' && preg_match('/^[A-Za-z0-9-]{1,64}$/', $linked) === 1) {
+            return ['ref' => $linked, 'via' => 'linked'];
+        }
+
+        $hostname = strtolower(trim((string) ($params['hostname'] ?? '')));
+        $username = strtolower(trim((string) ($params['username'] ?? '')));
+        $ips = self::serviceIps($params);
+
+        if ($hostname === '' && $username === '' && $ips === []) {
+            return ['ref' => null, 'via' => 'none'];
+        }
+
+        $cacheKey = $hostname . '|' . implode(',', $ips) . '|' . $username;
+
+        // Memoized for the life of the request: rendering a service page reads
+        // status, reverse DNS, backups and templates, and each would otherwise pay
+        // its own /vps list call. The module is a container singleton, so the cache
+        // lives exactly as long as the request.
+        if (array_key_exists($cacheKey, $this->vpsIdCache)) {
+            [$via, $ref] = explode('|', $this->vpsIdCache[$cacheKey], 2);
+
+            return ['ref' => $ref, 'via' => $via];
+        }
+
+        $rows = $this->vpsRows($params['server']);
+
+        if (!$rows['success']) {
+            return ['ref' => null, 'via' => 'none'];
+        }
+
+        // Most specific first: the recorded hostname, then the IPs the admin
+        // recorded, then the username (API-ordered services use it as the hostname).
+        // Without the ordering, a VPS literally named "root" would win over the real
+        // one for every WHMCS-imported service.
+        $passes = [
+            'hostname' => static fn (array $row): bool => $hostname !== '' && strtolower(trim((string) ($row['vps_hostname'] ?? ''))) === $hostname,
+            'ip' => static fn (array $row): bool => $ips !== [] && in_array(trim((string) ($row['vps_ip'] ?? '')), $ips, true),
+            'username' => static fn (array $row): bool => $username !== '' && strtolower(trim((string) ($row['vps_hostname'] ?? ''))) === $username,
+        ];
+
+        foreach ($passes as $via => $matches) {
+            foreach ($rows['rows'] as $row) {
+                if ($matches($row) && self::refOf($row) !== '') {
+                    $ref = self::refOf($row);
+                    // Only a successful lookup is cached: a transient API failure must
+                    // not pin this VPS to "not found" for the rest of the request.
+                    $this->vpsIdCache[$cacheKey] = $via . '|' . $ref;
+
+                    return ['ref' => $ref, 'via' => $via];
+                }
+            }
+        }
+
+        return ['ref' => null, 'via' => 'none'];
+    }
+
+    /**
+     * The account's VPS rows (GET /vps).
+     *
+     * @param array<string, mixed> $server
+     * @return array{success: bool, message: string, rows: array<int, array<string, mixed>>}
+     */
+    private function vpsRows(array $server): array
+    {
+        $decoded = $this->decode($this->call($server, 'GET', '/vps', null));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'] !== '' ? $decoded['message'] : 'Could not list the VPSes on the InterServer account.', 'rows' => []];
+        }
+
+        $rows = [];
+
+        foreach (is_array($decoded['data']) ? $decoded['data'] : [] as $row) {
+            if (is_array($row)) {
+                $rows[] = $row;
+            }
+        }
+
+        return ['success' => true, 'message' => '', 'rows' => $rows];
+    }
+
+    /**
+     * The id to put in `/vps/{id}` paths: the UUID when the list gives one, the
+     * legacy integer otherwise.
+     *
+     * @param array<string, mixed> $row
+     */
+    private static function refOf(array $row): string
+    {
+        $uuid = trim((string) ($row['vps_uuid'] ?? ''));
+
+        return $uuid !== '' ? $uuid : trim((string) ($row['vps_id'] ?? ''));
+    }
+
+    /**
+     * The service's recorded IPs: the primary IP, then the assigned ones (one per line).
+     *
+     * @param array<string, mixed> $params
+     * @return array<int, string>
+     */
+    private static function serviceIps(array $params): array
+    {
+        $lines = array_merge(
+            [(string) ($params['dedicated_ip'] ?? '')],
+            preg_split('/[\s,]+/', (string) ($params['assigned_ips'] ?? '')) ?: []
+        );
+        $ips = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+
+            if ($line !== '' && filter_var($line, FILTER_VALIDATE_IP) !== false) {
+                $ips[] = $line;
+            }
+        }
+
+        return array_values(array_unique($ips));
     }
 
     /**
@@ -503,7 +800,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+            return ['success' => false, 'message' => self::NOT_LINKED];
         }
 
         $ips = $params['ips'] ?? null;
@@ -536,7 +833,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).', 'ips' => []];
+            return ['success' => false, 'message' => self::NOT_LINKED, 'ips' => []];
         }
 
         $decoded = $this->decode($this->call($params['server'], 'GET', "/vps/{$vpsId}/reverse_dns", null));
@@ -560,7 +857,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
         $vpsId = $this->resolveVpsId($params);
 
         if ($vpsId === null) {
-            return ['success' => false, 'message' => 'Could not find this VPS on the hosting provider (hostname lookup failed).'];
+            return ['success' => false, 'message' => self::NOT_LINKED];
         }
 
         $path = str_replace('{id}', (string) $vpsId, $pathTemplate);
@@ -570,81 +867,14 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule
     }
 
     /**
-     * Lists the account's VPS services and finds the one whose hostname
-     * matches this service — see class docblock.
-     *
-     * InterServer keys lifecycle endpoints by the numeric `vps_id` it
-     * assigns, so this translates our local identifier into theirs. At
-     * order time this module stores the locally-generated username as the
-     * VPS hostname (see create()), so for app-created services the two are
-     * the same string. WHMCS-imported VPS services instead carry the real
-     * hostname in `services.hostname` with a generic username like "root" —
-     * try both identifiers so both are found.
+     * The `/vps/{id}` ref for this service, or null when it cannot be found. See
+     * resolveRemote().
      *
      * @param array<string, mixed> $params
      */
-    private function resolveVpsId(array $params): ?int
+    private function resolveVpsId(array $params): ?string
     {
-        $hostname = (string) ($params['hostname'] ?? '');
-        $username = (string) ($params['username'] ?? '');
-
-        // The service's recorded hostname is the authoritative identifier;
-        // the username is only a fallback for app-created services where
-        // create() stored it as the VPS hostname. Kept in stable order for
-        // the cache key.
-        $candidates = array_values(array_unique(array_filter(
-            [$hostname, $username],
-            static fn (string $candidate): bool => $candidate !== ''
-        )));
-
-        if ($candidates === []) {
-            return null;
-        }
-
-        $cacheKey = implode('|', $candidates);
-
-        // Memoized for the life of the request. Every lifecycle call pays a
-        // `/vps` list to translate hostname -> numeric id, so rendering a
-        // service page that reads status, bandwidth and reverse DNS used to
-        // cost three identical list calls on top of the three real ones.
-        // The module is a container singleton, so this cache lives exactly
-        // as long as the request does.
-        if (array_key_exists($cacheKey, $this->vpsIdCache)) {
-            return $this->vpsIdCache[$cacheKey];
-        }
-
-        $decoded = $this->decode($this->call($params['server'], 'GET', '/vps', null));
-        $resolved = null;
-
-        if ($decoded['success'] && is_array($decoded['data'])) {
-            // Two passes, most-specific first. Hostname only, then username.
-            // Without the ordering a VPS literally named "root" would win
-            // over the real one for every WHMCS-imported service.
-            foreach ([$hostname, $username] as $preferred) {
-                if ($preferred === '') {
-                    continue;
-                }
-
-                foreach ($decoded['data'] as $row) {
-                    if (!is_array($row)) {
-                        continue;
-                    }
-
-                    if ((string) ($row['vps_hostname'] ?? '') === $preferred) {
-                        $resolved = (int) $row['vps_id'];
-                        break 2;
-                    }
-                }
-            }
-        }
-
-        // Only a successful lookup is cached — a transient API failure must
-        // not pin this VPS to "not found" for the rest of the request.
-        if ($resolved !== null) {
-            $this->vpsIdCache[$cacheKey] = $resolved;
-        }
-
-        return $resolved;
+        return $this->resolveRemote($params)['ref'];
     }
 
     /**

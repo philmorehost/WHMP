@@ -549,6 +549,10 @@ final class ServiceRepository
         try {
             $this->db->statement('ALTER TABLE services ADD COLUMN suspended_by_reseller_id INT UNSIGNED NULL AFTER suspension_reason');
         } catch (\Throwable) {}
+        // Migration 0212. The provider's id for a hand-linked VPS; linking writes it.
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN remote_id VARCHAR(64) NULL AFTER username');
+        } catch (\Throwable) {}
     }
 
     /**
@@ -574,7 +578,7 @@ final class ServiceRepository
     {
         $this->ensureSchema();
 
-        $writable = ['username', 'domain', 'hostname', 'password', 'dedicated_ip', 'assigned_ips', 'server_id', 'next_due_date'];
+        $writable = ['username', 'remote_id', 'domain', 'hostname', 'password', 'dedicated_ip', 'assigned_ips', 'server_id', 'next_due_date'];
         $assignments = [];
         $bindings = [];
 

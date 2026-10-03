@@ -166,8 +166,27 @@ final class ServiceController
             $servers = array_values($servers);
         }
 
+        // A VPS on a provider account (InterServer) is controllable by the client once
+        // WHMP knows which machine it is. Show how it is tied today, and the account's
+        // machines to link it to. One API call, made only for such services.
+        $remoteLink = null;
+        $remoteServices = null;
+        $serverId = isset($service['server_id']) ? (int) $service['server_id'] : null;
+
+        if ($this->provisioning->serverLinksRemoteServices($serverId)) {
+            $remoteLink = $this->provisioning->remoteLink((int) $service['id']);
+            $remoteServices = $this->provisioning->remoteServicesFor((int) $serverId);
+        }
+
         return $this->render('billing.service-show', [
             'service' => $service,
+            'remoteLinkable' => $remoteServices !== null,
+            'remoteLink' => $remoteLink,
+            'remoteServices' => $remoteServices,
+            'remoteNotice' => isset($_GET['remote_linked']) ? (string) $_GET['remote_linked'] : null,
+            'remoteHasAccountPassword' => $remoteServices !== null && !empty($this->servers->find((int) $serverId)['account_secret'] ?? null),
+            'remoteServerId' => $serverId,
+            'isVpsProduct' => ($product['type'] ?? '') === 'vps',
             'products' => $this->products->all(includeHidden: false),
             'cycles' => BillingCycle::labels(),
             'modes' => ProrationMode::labels(),
@@ -287,6 +306,86 @@ final class ServiceController
             $all,
             static fn (array $srv): bool => (int) ($srv['server_group_id'] ?? 0) === $groupId
         ));
+    }
+
+    /**
+     * Link (or unlink) a service to a machine on its provider account. This is how a
+     * VPS bought and set up by hand becomes controllable by the client: power,
+     * console, rDNS, snapshots, reinstall and restore all address that machine.
+     *
+     * The id must be one the account actually lists, so a typo or a machine on
+     * someone else's account cannot be linked. Empty hostname and primary IP fields
+     * are filled from the machine, so the client sees them too.
+     */
+    public function linkRemote(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+
+        if ($service === null) {
+            return Response::html('404 Not Found', 404);
+        }
+
+        $serverId = isset($service['server_id']) ? (int) $service['server_id'] : 0;
+        $ref = trim((string) $request->input('remote_id', ''));
+        $back = static fn (string $note): Response => Response::redirect("/admin/services/{$id}?remote_linked=" . urlencode($note) . '#remote-link');
+
+        if ($ref === '') {
+            $this->services->updateDetails($id, ['remote_id' => null]);
+            $this->activity->log('admin', (int) $this->guard->currentAdmin()['id'], 'service.remote_unlinked', 'service', $id, "Unlinked service #{$id} from its provider machine", $request->ip());
+
+            return $back('Unlinked. The service is now matched by hostname or IP again.');
+        }
+
+        $listing = $serverId > 0 ? $this->provisioning->remoteServicesFor($serverId) : null;
+
+        if ($listing === null) {
+            return $back('Assign this service to an InterServer VPS server first, save, then link it.');
+        }
+
+        if (!$listing['success']) {
+            return $back('Could not read the provider account: ' . $listing['message']);
+        }
+
+        $match = null;
+
+        foreach ($listing['services'] as $remote) {
+            if ((string) $remote['ref'] === $ref) {
+                $match = $remote;
+                break;
+            }
+        }
+
+        if ($match === null) {
+            return $back('That VPS is not on the provider account any more. Reload the page and pick again.');
+        }
+
+        $fields = ['remote_id' => $ref];
+
+        if (trim((string) ($service['hostname'] ?? '')) === '' && (string) $match['hostname'] !== '') {
+            $fields['hostname'] = (string) $match['hostname'];
+        }
+
+        if (trim((string) ($service['dedicated_ip'] ?? '')) === '' && (string) $match['ip'] !== '') {
+            $fields['dedicated_ip'] = (string) $match['ip'];
+        }
+
+        $this->services->updateDetails($id, $fields);
+        $this->activity->log(
+            'admin',
+            (int) $this->guard->currentAdmin()['id'],
+            'service.remote_linked',
+            'service',
+            $id,
+            "Linked service #{$id} to provider VPS {$match['label']} ({$ref})",
+            $request->ip()
+        );
+
+        return $back('Linked to ' . $match['label'] . '. The client can now control this VPS from their account.');
     }
 
     public function updateDetails(Request $request, array $params): Response

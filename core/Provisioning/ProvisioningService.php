@@ -10,6 +10,7 @@ use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
+use CodeVault\Security\SecretBox;
 
 /**
  * The provisioning orchestration engine (blueprint §4.4): turns a Service
@@ -26,7 +27,11 @@ final class ProvisioningService
         private readonly ProductRepository $products,
         private readonly ServerRepository $servers,
         private readonly ModuleManager $modules,
-        private readonly HookDispatcher $hooks
+        private readonly HookDispatcher $hooks,
+        // Decrypts servers.account_secret (a provider account password) for the
+        // few calls that need it. Optional and trailing so hand-built instances keep
+        // working; without it, no account password is ever passed to a module.
+        private readonly ?SecretBox $secrets = null
     ) {
     }
 
@@ -144,12 +149,104 @@ final class ProvisioningService
         return $module->singleSignOn($params);
     }
 
-    public function reinstall(int $serviceId, string $template, string $localPassword = ''): array
+    /**
+     * $rootPassword is the NEW root password for the reinstalled machine. It always
+     * overrides the service's stored password in the params: an empty one means "the
+     * template's default", never "reuse the old one".
+     */
+    public function reinstall(int $serviceId, string $template, string $localPassword = '', string $rootPassword = ''): array
     {
         return $this->optional($serviceId, 'reinstall', [
             'template' => $template,
             'localPassword' => $localPassword,
+            'password' => $rootPassword,
         ], 'OS reinstallation is not supported by this server module.');
+    }
+
+    /** Restore the machine from one of its own backups (`ref` from listBackups()). */
+    public function restore(int $serviceId, string $backupRef): array
+    {
+        return $this->optional($serviceId, 'restore', ['backup' => $backupRef], 'Restoring a backup is not supported by this server module.');
+    }
+
+    /**
+     * The out-of-band console. $clientIp is the address of the person asking; modules
+     * that restrict console access by IP (InterServer) allow it first.
+     *
+     * @return array{success: bool, message: string, url?: ?string}
+     */
+    public function console(int $serviceId, string $clientIp): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+
+        if (method_exists($module, 'console')) {
+            return $module->console($params, $clientIp);
+        }
+
+        return $module->singleSignOn($params);
+    }
+
+    /**
+     * How a service is tied to its machine on the provider account. For the admin's
+     * service page. Null when the service's server module has no such notion.
+     *
+     * @return array{ref: ?string, via: string, linked: ?string}|null
+     */
+    public function remoteLink(int $serviceId): ?array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null || !$module instanceof LinksRemoteServices) {
+            return null;
+        }
+
+        try {
+            $resolved = $module->resolveRemote($params);
+        } catch (\Throwable) {
+            $resolved = ['ref' => null, 'via' => 'none'];
+        }
+
+        $linked = trim((string) ($params['remote_id'] ?? ''));
+
+        return ['ref' => $resolved['ref'], 'via' => $resolved['via'], 'linked' => $linked !== '' ? $linked : null];
+    }
+
+    /**
+     * Machines on the provider account behind a server, for the "link this service"
+     * picker. Null when the server's module cannot list them.
+     *
+     * @return array{success: bool, message: string, services: array<int, array<string, mixed>>}|null
+     */
+    public function remoteServicesFor(int $serverId): ?array
+    {
+        $server = $this->servers->find($serverId);
+        $module = $server === null ? null : $this->resolveModule((string) $server['module_slug']);
+
+        if (!$module instanceof LinksRemoteServices) {
+            return null;
+        }
+
+        try {
+            return $module->remoteServices($this->withSecrets($server));
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Could not list the provider account: ' . $e->getMessage(), 'services' => []];
+        }
+    }
+
+    /** Whether the server behind this id runs a module that links remote machines. */
+    public function serverLinksRemoteServices(?int $serverId): bool
+    {
+        if ($serverId === null || $serverId <= 0) {
+            return false;
+        }
+
+        $server = $this->servers->find($serverId);
+
+        return $server !== null && $this->resolveModule((string) $server['module_slug']) instanceof LinksRemoteServices;
     }
 
     /** @return array{success: bool, message: string, templates?: array<int, array<string, mixed>>} */
@@ -373,7 +470,7 @@ final class ProvisioningService
             return [null, [], 'Service not found.'];
         }
 
-        if ($service['server_id'] === null || $service['username'] === null) {
+        if ($service['server_id'] === null) {
             return [null, [], 'Service has not been provisioned yet.'];
         }
 
@@ -389,14 +486,49 @@ final class ProvisioningService
             return [null, [], "Unknown provisioning module \"{$server['module_slug']}\"."];
         }
 
+        // A username is how most modules address an account (cPanel), so without one
+        // the service is not provisioned. A module that links remote machines finds
+        // its machine by remote_id, hostname or IP instead, so a VPS set up by hand
+        // needs no WHMP username.
+        if ($service['username'] === null && !$module instanceof LinksRemoteServices) {
+            return [null, [], 'Service has not been provisioned yet.'];
+        }
+
         return [$module, [
             'username' => $service['username'],
-            'server' => $server,
+            'server' => $this->withSecrets($server),
             'domain' => $service['domain'] ?? null,
             'hostname' => $service['hostname'] ?? null,
             'password' => $service['password'] ?? null,
             'product_name' => $service['product_name'] ?? '',
+            'remote_id' => $service['remote_id'] ?? null,
+            'dedicated_ip' => $service['dedicated_ip'] ?? null,
+            'assigned_ips' => $service['assigned_ips'] ?? null,
         ], null];
+    }
+
+    /**
+     * The server row with its provider account password decrypted into
+     * `account_password`, when one is stored and can be decrypted. The ciphertext
+     * itself is never handed to a module.
+     *
+     * @param array<string, mixed> $server
+     * @return array<string, mixed>
+     */
+    private function withSecrets(array $server): array
+    {
+        $stored = $server['account_secret'] ?? null;
+        unset($server['account_secret']);
+
+        if ($this->secrets !== null && is_string($stored) && $stored !== '') {
+            $plain = $this->secrets->decrypt($stored);
+
+            if ($plain !== null && $plain !== '') {
+                $server['account_password'] = $plain;
+            }
+        }
+
+        return $server;
     }
 
     private function resolveModule(string $slug): ?ProvisioningModule

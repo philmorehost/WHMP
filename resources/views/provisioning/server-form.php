@@ -53,6 +53,19 @@ $formId = 'server-form-' . ($server['id'] ?? 'new');
         <label class="cv-label" data-server-token-label>API Token / Password</label>
         <input class="cv-input" type="password" name="api_token" placeholder="<?= !empty($server['api_token']) ? '••••••••  (leave blank to keep)' : '' ?>" data-server-token-input>
     </div>
+    <div class="cv-field" data-server-secret-field style="grid-column: 1 / -1;">
+        <label class="cv-label">InterServer account password <span style="font-weight:normal;color:var(--cv-text-secondary);">(optional)</span></label>
+        <input class="cv-input" type="password" name="account_secret" autocomplete="new-password"
+               placeholder="<?= !empty($server['account_secret']) ? '••••••••  (saved, leave blank to keep)' : 'Your my.interserver.net login password' ?>">
+        <small style="color:var(--cv-text-secondary);display:block;margin-top:var(--cv-space-1);">
+            InterServer asks for the account password, on top of the API key, before it reinstalls an OS or restores a
+            backup. Save it here to let clients do both themselves from their VPS page; leave it empty and those two
+            requests become support tickets. Stored encrypted.
+        </small>
+        <?php if (!empty($server['account_secret'])): ?>
+            <label class="cv-label" style="font-weight:normal;margin-top:var(--cv-space-2);"><input type="checkbox" name="clear_account_secret" value="1"> Remove the saved account password</label>
+        <?php endif; ?>
+    </div>
     <div class="cv-field" data-server-port-field>
         <label class="cv-label">API Port (blank = module default)</label>
         <input class="cv-input" type="number" name="api_port" value="<?= e((string) ($server['api_port'] ?? '')) ?>">

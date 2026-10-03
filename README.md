@@ -149,6 +149,38 @@ The reseller control panel (`/client/reseller…`) and the admin's reseller page
 - **Colours:** everything uses theme tokens, so a tenant's brand colour carries through.
 - **Navigation:** the admin's programme-wide reseller pages share one nav (`partials/reseller-admin-nav.php`).
 
+## InterServer VPS: client self-service
+
+Clients control their InterServer VPS from their service page: start, restart and stop;
+VNC console; reverse DNS; on-demand snapshots; OS reinstall; and restore from a snapshot.
+All of these go through the InterServer API (`https://my.interserver.net/apiv2`,
+`X-API-KEY`). If a call can't be made, the client's request becomes a support ticket.
+
+VPSs that are ordered and set up by hand also work. Each one just needs to be tied to its
+machine:
+
+1. **Admin → Servers:** add a server with module **InterServer VPS** and your InterServer
+   API key. Optionally, save the **InterServer account password** too. InterServer checks
+   it again on every OS reinstall and backup restore. It is stored encrypted with
+   AES-256-GCM, using a key derived from `APP_KEY`. Without it, those two actions become
+   tickets and everything else still works.
+2. **Admin → the client's service:** set **Assigned Server** to that server and save.
+3. In the **InterServer VPS link** card on the same page, pick the VPS from the
+   account's list and click **Link this VPS**. This saves the VPS's InterServer id in
+   `services.remote_id` and fills in an empty hostname or IP. A WHMP username is not
+   needed.
+
+An unlinked service is matched automatically by its hostname, then its IP, then its
+username. Linking is what makes the match permanent.
+
+The VNC console first allows the client's own public IPv4 (InterServer accepts VNC from
+one allowed address) and then shows the host and port. If WHMP is behind a proxy, make
+sure `Request::ip()` sees the real client address.
+
+**Lifecycle:** once a service is tied to a VPS, suspending it in WHMP (manually or for an
+overdue invoice) stops the VPS. Unsuspending starts it again. **Terminating it cancels
+the VPS on the InterServer account** (`DELETE /vps/{id}`).
+
 ## Known environment-dependent gaps
 
 Some features degrade gracefully but aren't fully live-verifiable without infrastructure this dev environment doesn't have:

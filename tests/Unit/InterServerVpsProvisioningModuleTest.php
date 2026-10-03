@@ -225,7 +225,7 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $result = $this->module->usage(['username' => 'cv701-not-found', 'server' => $this->server]);
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('Could not find', $result['message']);
+        $this->assertStringContainsString('not linked', $result['message']);
     }
 
     public function test_single_sign_on_reports_not_provisioned_when_vnc_info_is_empty(): void
@@ -247,7 +247,7 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $result = $this->module->suspend(['username' => 'cv999-not-found', 'server' => $this->server]);
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('Could not find', $result['message']);
+        $this->assertStringContainsString('not linked', $result['message']);
         // Only the resolve call happens — no action call once resolution fails.
         $this->assertCount(1, $this->http->requests);
     }
@@ -305,7 +305,7 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         ]);
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('support request', $result['message']);
+        $this->assertStringContainsString('account password', $result['message']);
         // Only the hostname->id lookup should have happened, never the POST.
         $this->assertSame('GET', $this->http->lastRequest()['method']);
     }
@@ -484,5 +484,175 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
 
         $this->assertTrue($result['success']);
         $this->assertSame('https://my.interserver.net/apiv2/vps/99/start', $this->http->lastRequest()['url']);
+    }
+
+    /* ---- manually set-up VPSes: explicit link, IP matching, UUID paths ---- */
+
+    public function test_a_linked_remote_id_is_used_directly_without_listing(): void
+    {
+        $this->http->respondWith(200, json_encode(['text' => 'Action has been sent to the server.', 'queueId' => 1]));
+
+        $result = $this->module->power([
+            'username' => null,
+            'remote_id' => '0196bd0a-5b4c-7e2a-91d3-f1a4c7b90e55',
+            'server' => $this->server,
+        ], 'restart');
+
+        $this->assertTrue($result['success']);
+        $this->assertCount(1, $this->http->requests, 'no /vps list call when the service is linked');
+        $this->assertSame('https://my.interserver.net/apiv2/vps/0196bd0a-5b4c-7e2a-91d3-f1a4c7b90e55/restart', $this->http->lastRequest()['url']);
+    }
+
+    public function test_a_remote_id_that_is_not_an_id_is_never_put_in_a_path(): void
+    {
+        $this->http->respondWith(200, json_encode([['vps_id' => '5', 'vps_hostname' => 'other']]));
+
+        $result = $this->module->power(['remote_id' => '../account', 'hostname' => 'box.example.com', 'server' => $this->server], 'stop');
+
+        $this->assertFalse($result['success']);
+        foreach ($this->http->requests as $request) {
+            $this->assertStringNotContainsString('..', $request['url']);
+        }
+    }
+
+    public function test_a_hand_built_vps_is_found_by_its_ip_and_addressed_by_uuid(): void
+    {
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => json_encode([
+                ['vps_id' => '100', 'vps_uuid' => 'aaaaaaaa-0000-0000-0000-000000000001', 'vps_hostname' => 'vps100', 'vps_ip' => '64.20.46.220'],
+                ['vps_id' => '101', 'vps_uuid' => 'aaaaaaaa-0000-0000-0000-000000000002', 'vps_hostname' => 'vps101', 'vps_ip' => '64.20.46.221'],
+            ])],
+            ['status' => 200, 'body' => json_encode(['text' => 'queued', 'queueId' => 7])],
+        ]);
+
+        // WHMP knows it as "server1.client.com" with IP .221; InterServer calls it vps101.
+        $result = $this->module->createBackup([
+            'username' => null,
+            'hostname' => 'server1.client.com',
+            'dedicated_ip' => '64.20.46.221',
+            'server' => $this->server,
+        ]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/aaaaaaaa-0000-0000-0000-000000000002/backup', $this->http->lastRequest()['url']);
+    }
+
+    public function test_an_assigned_sub_ip_also_identifies_the_vps(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            ['vps_id' => '100', 'vps_uuid' => 'aaaaaaaa-0000-0000-0000-000000000009', 'vps_hostname' => 'vps100', 'vps_ip' => '64.20.46.230'],
+        ]));
+
+        $resolved = $this->module->resolveRemote([
+            'hostname' => '', 'assigned_ips' => "10.1.1.1\n64.20.46.230", 'server' => $this->server,
+        ]);
+
+        $this->assertSame(['ref' => 'aaaaaaaa-0000-0000-0000-000000000009', 'via' => 'ip'], $resolved);
+    }
+
+    public function test_remote_services_lists_the_account_for_the_admin_picker(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            ['vps_id' => '100', 'vps_uuid' => 'u-1', 'vps_name' => 'Builder', 'vps_hostname' => 'vps100', 'vps_ip' => '64.20.46.220', 'vps_status' => 'active'],
+            ['vps_id' => '101', 'vps_hostname' => 'vps101', 'vps_ip' => '64.20.46.221', 'vps_status' => 'suspended'],
+        ]));
+
+        $result = $this->module->remoteServices($this->server);
+
+        $this->assertTrue($result['success']);
+        $this->assertCount(2, $result['services']);
+        $this->assertSame('u-1', $result['services'][0]['ref']);
+        $this->assertSame('vps100 (64.20.46.220) · Builder', $result['services'][0]['label']);
+        $this->assertSame('101', $result['services'][1]['ref'], 'no uuid: the legacy id is the ref');
+        $this->assertStringContainsString('suspended', $result['services'][1]['label']);
+    }
+
+    public function test_info_reads_the_nested_service_info_shape(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            'serviceInfo' => ['vps_id' => '85872', 'vps_hostname' => 'vps85872', 'vps_ip' => '1.2.3.4', 'vps_status' => 'active', 'vps_server_status' => 'running', 'vps_os' => 'ubuntu24', 'vps_slices' => '2'],
+            'serviceMaster' => ['vps_ip' => '10.11.12.13'],
+            'services_name' => 'KVM',
+        ]));
+
+        $result = $this->module->info(['remote_id' => 'u-1', 'server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('running', $result['info']['status']);
+        $this->assertSame('active', $result['info']['serviceStatus']);
+        $this->assertSame('1.2.3.4', $result['info']['ip']);
+        $this->assertSame(2, $result['info']['slices']);
+    }
+
+    public function test_console_allows_the_client_ip_then_reads_host_and_port(): void
+    {
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => json_encode(['text' => 'Action has been sent', 'queueId' => 3])],
+            ['status' => 200, 'body' => json_encode([
+                'serviceInfo' => ['vps_vnc' => '203.0.113.9', 'vps_vnc_port' => '5902'],
+                'serviceMaster' => ['vps_ip' => '66.45.1.10'],
+            ])],
+        ]);
+
+        $result = $this->module->console(['remote_id' => 'u-1', 'server' => $this->server], '203.0.113.9');
+
+        $setup = $this->http->requests[0];
+        $this->assertSame('POST', $setup['method']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/u-1/setup_vnc', $setup['url']);
+        $this->assertSame(['vnc' => '203.0.113.9'], json_decode((string) $setup['body'], true));
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('vnc://66.45.1.10:5902', $result['url']);
+        $this->assertStringContainsString('66.45.1.10:5902', $result['message']);
+        $this->assertStringContainsString('203.0.113.9', $result['message']);
+    }
+
+    public function test_console_does_not_try_to_allow_a_private_address(): void
+    {
+        $this->http->respondWith(200, json_encode(['serviceInfo' => ['vps_vnc_port' => '5901'], 'serviceMaster' => ['vps_ip' => '66.45.1.10']]));
+
+        $result = $this->module->console(['remote_id' => 'u-1', 'server' => $this->server], '192.168.1.5');
+
+        foreach ($this->http->requests as $request) {
+            $this->assertSame('GET', $request['method']);
+        }
+        $this->assertTrue($result['success']);
+        $this->assertSame('vnc://66.45.1.10:5901', $result['url']);
+    }
+
+    public function test_reinstall_uses_the_saved_account_password(): void
+    {
+        $this->http->respondWith(200, json_encode(['text' => 'Reinstall sent', 'queueId' => 9]));
+        $server = $this->server + ['account_password' => 'MyAdminPass!'];
+
+        $result = $this->module->reinstall(['remote_id' => 'u-1', 'server' => $server, 'template' => 'ubuntu-22.04', 'password' => 'NewRoot#2026']);
+
+        $this->assertTrue($result['success']);
+        $request = $this->http->lastRequest();
+        $this->assertSame('https://my.interserver.net/apiv2/vps/u-1/reinstall_os', $request['url']);
+        $this->assertSame(['template' => 'ubuntu-22.04', 'localPassword' => 'MyAdminPass!', 'password' => 'NewRoot#2026'], json_decode((string) $request['body'], true));
+    }
+
+    public function test_restore_posts_the_backup_ref_with_the_account_password(): void
+    {
+        $this->http->respondWith(200, json_encode(['text' => 'Restore sent', 'queueId' => 10]));
+        $server = $this->server + ['account_password' => 'MyAdminPass!'];
+
+        $result = $this->module->restore(['remote_id' => 'u-1', 'server' => $server, 'backup' => 'zfs:2722890:first']);
+
+        $this->assertTrue($result['success']);
+        $request = $this->http->lastRequest();
+        $this->assertSame('POST', $request['method']);
+        $this->assertSame('https://my.interserver.net/apiv2/vps/u-1/restore', $request['url']);
+        $this->assertSame(['backup' => 'zfs:2722890:first', 'password' => 'MyAdminPass!'], json_decode((string) $request['body'], true));
+    }
+
+    public function test_restore_without_an_account_password_makes_no_destructive_call(): void
+    {
+        $result = $this->module->restore(['remote_id' => 'u-1', 'server' => $this->server, 'backup' => 'zfs:1:first']);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('account password', $result['message']);
+        $this->assertCount(0, $this->http->requests);
     }
 }

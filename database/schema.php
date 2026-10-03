@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0211_reseller_upline_margin.php',
-    'migration_count' => 210,
+    'last_migration' => '0212_vps_remote_link.php',
+    'migration_count' => 211,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -3808,6 +3808,7 @@ return [
                 'module_slug' => 'VARCHAR(50) NOT NULL',
                 'api_username' => 'VARCHAR(191) NULL',
                 'api_token' => 'VARCHAR(255) NULL',
+                'account_secret' => 'TEXT NULL',
                 'api_port' => 'INT UNSIGNED NULL',
                 'use_ssl' => 'TINYINT(1) NOT NULL DEFAULT 1',
                 'active' => 'TINYINT(1) NOT NULL DEFAULT 1',
@@ -3891,6 +3892,7 @@ return [
                 'product_id' => 'INT UNSIGNED NOT NULL',
                 'server_id' => 'INT UNSIGNED NULL',
                 'username' => 'VARCHAR(100) NULL',
+                'remote_id' => 'VARCHAR(64) NULL',
                 'dedicated_ip' => 'VARCHAR(255) NULL',
                 'assigned_ips' => 'TEXT NULL',
                 'product_name' => 'VARCHAR(191) NOT NULL',

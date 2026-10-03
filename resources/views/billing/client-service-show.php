@@ -843,6 +843,13 @@ $cpanelTabs = [
                     <?php endif; ?>
                 </div>
 
+                <?php if (is_array($vpsControl ?? null) && !$vpsControl['live']): ?>
+                    <div class="svc-alert" style="margin-bottom:16px;padding:12px 16px;border-radius:10px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#fbbf24;font-size:0.85rem;">
+                        ⚠️ Live control of this server is not connected yet, so the actions below are sent to our support team as tickets.
+                        We'll get them done; you don't need to do anything else.
+                    </div>
+                <?php endif; ?>
+
                 <!-- VPS Action Cards Grid -->
                 <div class="svc-actions-grid">
 
@@ -879,17 +886,21 @@ $cpanelTabs = [
                         // and did not reflect what this VPS can actually run.
                         ?>
                         <?php if ($osTemplates === []): ?>
-                            <p>Available operating systems could not be read from the server right now.</p>
+                            <p>Available operating systems could not be read from the server right now. To reinstall, please open a support ticket.</p>
                         <?php else: ?>
-                            <p>Requests a fresh OS install. This erases all data, so our team confirms with you first.</p>
-                            <form method="post" action="/client/services/<?= $id ?>/reinstall" data-confirm="Request an OS reinstall? All current data will be erased.">
+                            <p>Installs a fresh operating system. <strong>Everything on the server is erased.</strong> Take a snapshot first if you need your data.</p>
+                            <form method="post" action="/client/services/<?= $id ?>/reinstall" data-confirm="Reinstall the OS? Every file on this server will be erased and cannot be recovered.">
                                 <?= csrf_field() ?>
                                 <select class="cv-select" name="template" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
                                     <?php foreach ($osTemplates as $template): ?>
                                         <option value="<?= e((string) $template['file']) ?>"><?= e((string) ($template['name'] !== '' ? $template['name'] : $template['file'])) ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Request Reinstall</button>
+                                <input class="cv-input" type="password" name="root_password" required minlength="10" maxlength="64" autocomplete="new-password"
+                                       placeholder="New root password (10+ letters and numbers)" style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                                <input class="cv-input" name="confirm" required autocomplete="off" pattern="[Rr][Ee][Ii][Nn][Ss][Tt][Aa][Ll][Ll]"
+                                       placeholder="Type REINSTALL to confirm" style="width:100%;margin-bottom:8px;font-size:0.8rem;">
+                                <button type="submit" class="svc-btn svc-btn--danger" style="width:100%;">Reinstall OS</button>
                             </form>
                         <?php endif; ?>
                     </div>
@@ -920,7 +931,7 @@ $cpanelTabs = [
                     <!-- VNC Console Card -->
                     <div class="svc-action-card">
                         <h4>🖥️ Setup VNC / Console</h4>
-                        <p>Read out-of-band VNC console connection details for this VPS.</p>
+                        <p>Opens console access from your current IP address and shows the VNC address to connect to. It is ready about 2 minutes after you ask.</p>
                         <form method="post" action="/client/services/<?= $id ?>/vnc">
                             <?= csrf_field() ?>
                             <button type="submit" class="svc-btn svc-btn--primary" style="width:100%;">Get Console Details</button>
@@ -930,7 +941,7 @@ $cpanelTabs = [
                     <!-- Backup VPS Card -->
                     <div class="svc-action-card">
                         <h4>💾 Backup VPS</h4>
-                        <p>Queue an on-demand snapshot of your virtual server disk.</p>
+                        <p>Queue an on-demand snapshot of your virtual server disk. It appears under Restore VPS when it is done.</p>
                         <form method="post" action="/client/services/<?= $id ?>/backup">
                             <?= csrf_field() ?>
                             <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Create Snapshot</button>
@@ -944,17 +955,20 @@ $cpanelTabs = [
                         <?php if ($backups === []): ?>
                             <p>No snapshots available to restore from. Create one first.</p>
                         <?php else: ?>
-                            <p>Requests a restore from one of your snapshots. This overwrites the disk, so our team confirms first.</p>
-                            <form method="post" action="/client/services/<?= $id ?>/restore" data-confirm="Request a restore? This overwrites the current disk.">
+                            <p>Puts the server back to a snapshot. <strong>Anything changed since that snapshot is lost.</strong> Takes up to about 10 minutes.</p>
+                            <form method="post" action="/client/services/<?= $id ?>/restore" data-confirm="Restore this snapshot? The current disk will be overwritten.">
                                 <?= csrf_field() ?>
                                 <select class="cv-select" name="backup" required style="width:100%;margin-bottom:8px;font-size:0.8rem;">
                                     <?php foreach ($backups as $backup): ?>
                                         <option value="<?= e((string) $backup['ref']) ?>">
-                                            <?= e((string) $backup['name']) ?><?php if (($backup['sizeBytes'] ?? null) !== null): ?> (<?= e(number_format($backup['sizeBytes'] / 1048576, 1)) ?> MB)<?php endif; ?>
+                                            <?= e((string) $backup['name']) ?><?php if (($backup['createdAt'] ?? '') !== ''): ?> · <?= e((string) $backup['createdAt']) ?><?php endif; ?><?php if (($backup['sizeBytes'] ?? null) !== null): ?> (<?= e(number_format($backup['sizeBytes'] / 1048576, 1)) ?> MB)<?php endif; ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
-                                <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Request Restore</button>
+                                <label style="display:flex;gap:6px;align-items:flex-start;font-size:0.75rem;margin-bottom:8px;">
+                                    <input type="checkbox" name="confirm" value="1" required> I understand the current disk will be overwritten.
+                                </label>
+                                <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">Restore Snapshot</button>
                             </form>
                         <?php endif; ?>
                     </div>

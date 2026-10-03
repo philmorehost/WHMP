@@ -373,12 +373,18 @@
         var tokenLabel = form && form.querySelector('[data-server-token-label]');
         var tokenInput = form && form.querySelector('[data-server-token-input]');
         var portField = form && form.querySelector('[data-server-port-field]');
+        var secretField = form && form.querySelector('[data-server-secret-field]');
 
         if (!usernameField || !tokenLabel) {
             return;
         }
 
         var val = select.value;
+
+        // The provider account password is only asked for where a module uses it.
+        if (secretField) {
+            secretField.style.display = (val === 'interserver-vps' || val === 'interserver_vps') ? 'block' : 'none';
+        }
 
         if (val === 'interserver-vps' || val === 'interserver_vps') {
             usernameField.style.display = 'none';

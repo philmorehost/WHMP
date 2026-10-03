@@ -20,6 +20,7 @@ $router->post('/admin/services/{id}/terminate', [ServiceController::class, 'term
 $router->post('/admin/services/{id}/create-account', [ServiceController::class, 'createAccount']);
 $router->post('/admin/services/{id}/retry-provisioning', [ServiceController::class, 'retryProvisioning']);
 $router->post('/admin/services/{id}/edit', [ServiceController::class, 'updateDetails']);
+$router->post('/admin/services/{id}/remote-link', [ServiceController::class, 'linkRemote']);
 $router->post('/admin/services/{id}/send-details', [ServiceController::class, 'sendDetails']);
 $router->post('/admin/services/{id}/status', [ServiceController::class, 'setStatus']);
 

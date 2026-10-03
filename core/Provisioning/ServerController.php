@@ -8,6 +8,7 @@ use CodeVault\Auth\AuthGuard;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
 use CodeVault\Request;
+use CodeVault\Security\SecretBox;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
@@ -19,7 +20,10 @@ final class ServerController
         private readonly View $view,
         private readonly ServerRepository $servers,
         private readonly ServerGroupRepository $groups,
-        private readonly ModuleManager $modules
+        private readonly ModuleManager $modules,
+        // Encrypts the provider account password. Optional and trailing like the
+        // other late additions; without it, the field is simply not saved.
+        private readonly ?SecretBox $secrets = null
     ) {
     }
 
@@ -113,7 +117,8 @@ final class ServerController
             return $denied;
         }
 
-        $this->servers->create($this->extractFields($request));
+        $id = $this->servers->create($this->extractFields($request));
+        $this->saveAccountSecret($request, $id);
 
         return Response::redirect('/admin/servers');
     }
@@ -155,6 +160,7 @@ final class ServerController
         }
 
         $this->servers->update($id, $fields);
+        $this->saveAccountSecret($request, $id);
 
         return Response::redirect("/admin/servers/{$id}/edit");
     }
@@ -227,6 +233,28 @@ final class ServerController
             'success' => (bool) ($result['success'] ?? false),
             'message' => (string) ($result['message'] ?? ($result['success'] ?? false ? 'Connected.' : 'Connection failed.')),
         ]);
+    }
+
+    /**
+     * The provider ACCOUNT password (InterServer: re-checked on OS reinstall and
+     * backup restore), stored encrypted. Blank means "keep what is saved", the same
+     * as the API token. The separate "clear" box removes it.
+     */
+    private function saveAccountSecret(Request $request, int $id): void
+    {
+        if ($request->input('clear_account_secret')) {
+            $this->servers->setAccountSecret($id, null);
+
+            return;
+        }
+
+        $plain = (string) $request->input('account_secret', '');
+
+        if (trim($plain) === '' || $this->secrets === null || !$this->secrets->available()) {
+            return;
+        }
+
+        $this->servers->setAccountSecret($id, $this->secrets->encrypt($plain));
     }
 
     /** @return array<string, mixed> */
