@@ -59,6 +59,26 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 - `resources/views/` — plain-PHP templates, mirroring the `core/` structure.
 - `resources/lang/{code}.php` — localization string catalogs (storefront + shared chrome only — see docs/ADMIN_GUIDE.md).
 - `database/migrations/` — plain PHP arrays (`return ['up' => [...]]`), run in filename order by `bin/migrate.php`.
+- `database/schema.php` — **generated** snapshot of the complete schema the migrations build. Every live site checks itself against it and adds whatever it is missing (see *Database schema on live sites* below). Never edit it by hand.
+
+## Database schema on live sites
+
+Upload the new code and you're done — no SSH, no button:
+
+1. On the first request after an upload, every pending migration in `database/migrations/` runs (`Migrator::run`). A migration that fails is logged and retried on the next request; it does not block the ones after it.
+2. Then `SchemaReconciler` compares the live database with `database/schema.php` and **adds** anything missing: whole tables (with their foreign keys), columns (in their original position), indexes, and missing ENUM values. This covers what migrations alone cannot — a migration edited after a site had already run it never runs again on that site. It runs once per upload (when `schema.php` changes) and retries hourly if a repair failed.
+3. It only ever adds. It never drops, renames or narrows anything. A few things are only *reported*, because changing them could break existing data: a foreign key missing on an existing table, an ENUM a site customised, a missing primary key. They appear on the **System Diagnostics** addon page (the *Database migrations* card), along with the last automatic check and any failure.
+
+`php bin/migrate.php` does the same from a terminal, and `php bin/migrate.php --check` lists what is missing without changing anything.
+
+**When you add or change a migration, regenerate the snapshot and commit it with the migration:**
+
+```bash
+php bin/build-schema.php          # rewrites database/schema.php
+php bin/build-schema.php --check  # exit 1 if it is out of date (also enforced by SchemaSnapshotTest)
+```
+
+The snapshot is built by replaying every migration against an in-memory model of MySQL (`core/Database/Schema/`), so building it needs no database. Never fix a live schema by editing a migration that has already shipped: add a new migration, guarded with an INFORMATION_SCHEMA check, and rebuild the snapshot.
 - `docs/ADMIN_GUIDE.md` — day-to-day operations guide for whoever runs the admin panel.
 
 ## Known environment-dependent gaps

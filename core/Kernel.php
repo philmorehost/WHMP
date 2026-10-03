@@ -312,6 +312,13 @@ class Kernel
             return new Migrator($c->make(Database::class), $basePath . '/database/migrations');
         });
 
+        // Adds whatever the live database is missing compared with database/schema.php
+        // (generated from the migrations) — see SchemaReconciler for why the Migrator
+        // alone cannot guarantee that.
+        $this->container->singleton(\CodeVault\Database\Schema\SchemaReconciler::class, function (Container $c) use ($basePath) {
+            return new \CodeVault\Database\Schema\SchemaReconciler($c->make(Database::class), $basePath . '/database/schema.php');
+        });
+
         $this->container->singleton(LocalizationService::class, function (Container $c) use ($basePath) {
             return new LocalizationService(
                 $c->make(LanguageRepository::class),
@@ -884,7 +891,7 @@ class Kernel
         ));
 
         $this->container->singleton(SystemDiagnosticsAddon::class, function (Container $c) use ($basePath) {
-            return new SystemDiagnosticsAddon($c->make(Database::class), $c->make(Config::class), $basePath, $c->make(Migrator::class));
+            return new SystemDiagnosticsAddon($c->make(Database::class), $c->make(Config::class), $basePath, $c->make(Migrator::class), $c->make(\CodeVault\Database\Schema\SchemaReconciler::class));
         });
 
         $this->container->singleton(DomainChangerAddon::class, function (Container $c) {
@@ -1834,7 +1841,25 @@ class Kernel
                 // cause of several unrelated "Table ... doesn't exist" fatals at
                 // once. bin/migrate.php calls run() WITHOUT it, so an operator still
                 // gets the error and a non-zero exit.
-                $this->container->make(Migrator::class)->run(true);
+                $migrator = $this->container->make(Migrator::class);
+                $migrator->run(true);
+
+                // Then fill any gap the migrations leave: a table or column a live site
+                // never got (a migration that failed on its MySQL and was later rewritten,
+                // a file edited after the site ran it). Due once per deploy — when
+                // database/schema.php changes — or hourly while a repair keeps failing,
+                // so an ordinary request pays one small file read. Forced when the
+                // Migrator skipped an "already exists" statement, since a multi-clause
+                // ALTER skipped that way may have carried other changes.
+                try {
+                    $this->container->make(\CodeVault\Database\Schema\SchemaReconciler::class)->reconcileIfDue(
+                        $this->basePath('storage/system/schema-reconcile.json'),
+                        $migrator->tolerated() !== []
+                    );
+                } catch (\Throwable $e) {
+                    error_log('[CodeVault] schema reconcile failed: ' . $e->getMessage());
+                }
+
                 $this->container->make(AddonModuleService::class)->bootActiveAddons();
             } catch (\Throwable $e) {
                 // Not fatal on purpose — a boot that throws takes the whole site
