@@ -30,6 +30,7 @@ $currentPath = rtrim((string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''
 
 $items = [
     '/client/reseller' => 'Overview',
+    '/client/reseller/clients' => 'Customers',
     '/client/reseller/store' => 'Store & branding',
     '/client/reseller/prices' => 'Your prices',
     '/client/reseller/promotions' => 'Promotions',

@@ -206,10 +206,11 @@ final class ResellerNavTest extends TestCase
             $checked++;
         }
 
-        // Nine client-* views exist and one of them (the statement document) is deliberately
-        // chrome-free, so eight is the real number. Asserted rather than assumed: a glob that
-        // silently matches nothing would make this test pass while checking no page at all —
-        // which is exactly the vacuous-pass shape this suite exists to avoid.
-        $this->assertSame(8, $checked, 'expected eight navigable reseller pages; the glob is not seeing them all');
+        // Eleven client-* views exist and one of them (the statement document) is deliberately
+        // chrome-free, so ten is the real number (the Customers list and customer page are
+        // the newest two). Asserted rather than assumed: a glob that silently matches nothing
+        // would make this test pass while checking no page at all — which is exactly the
+        // vacuous-pass shape this suite exists to avoid.
+        $this->assertSame(10, $checked, 'expected ten navigable reseller pages; the glob is not seeing them all');
     }
 }

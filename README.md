@@ -60,6 +60,7 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 - `resources/lang/{code}.php` — localization string catalogs (storefront + shared chrome only — see docs/ADMIN_GUIDE.md).
 - `database/migrations/` — plain PHP arrays (`return ['up' => [...]]`), run in filename order by `bin/migrate.php`.
 - `database/schema.php` — **generated** snapshot of the complete schema the migrations build. Every live site checks itself against it and adds whatever it is missing (see *Database schema on live sites* below). Never edit it by hand.
+- `docs/ADMIN_GUIDE.md` — day-to-day operations guide for whoever runs the admin panel.
 
 ## Database schema on live sites
 
@@ -79,7 +80,24 @@ php bin/build-schema.php --check  # exit 1 if it is out of date (also enforced b
 ```
 
 The snapshot is built by replaying every migration against an in-memory model of MySQL (`core/Database/Schema/`), so building it needs no database. Never fix a live schema by editing a migration that has already shipped: add a new migration, guarded with an INFORMATION_SCHEMA check, and rebuild the snapshot.
-- `docs/ADMIN_GUIDE.md` — day-to-day operations guide for whoever runs the admin panel.
+
+## Reseller customers
+
+A reseller manages its own store's customers from **Customers** in the reseller area (`/client/reseller/clients`):
+
+- **List and search** every customer of the store, with active/suspended services, domains and unpaid invoices per customer.
+- **Customer page:** edit contact details (not the login email), send a password-reset email, suspend / unsuspend / terminate services, turn domain auto-renew on or off, lock or unlock domains, and change nameservers. Invoices and tickets are listed; invoices are read-only because payments are collected by the platform.
+- **Log in as customer** opens the store's own website (subdomain or verified custom domain) in a new tab, signed in to that account, with a banner and a *Return to your reseller area* link. While signed in this way a reseller cannot change the customer's password, PIN, 2FA, security question, login email or saved cards, request data export/erasure, or open the customer's own reseller area (`ClientImpersonation::restrictedForReseller`).
+- **Suspensions:** a store can lift only a suspension it made (`services.suspended_by_reseller_id`). Suspensions made by the platform (overdue invoice, abuse, by an admin) need support. A payment does not lift a store's hold while the customer still belongs to that store.
+- Every read and write is scoped to the store inside the SQL (`ResellerClientDirectory`); a suspended store sees its customers but cannot change them. Everything is written to the activity log as `reseller.*`.
+
+The super admin sees store customers everywhere:
+
+- **Clients list:** a *Website* column and filter (Direct, Any reseller store, or one store).
+- **Client page:** a store badge with a link to the store. **Login on store website** signs the admin in on the customer's store site with a one-time, two-minute ticket, and *Return to Admin Panel* comes back. Direct customers keep the original *Login as Client*.
+- **Reseller → Store page:** a searchable *Customers of this store* list with Manage and Login buttons.
+
+Login tickets (`client_impersonation_tokens`) are stored only as SHA-256 hashes, can be used once, and only work on the site they name while the customer still belongs to it.
 
 ## Known environment-dependent gaps
 

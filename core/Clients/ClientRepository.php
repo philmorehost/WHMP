@@ -35,6 +35,23 @@ final class ClientRepository
             $bindings = array_merge($bindings, [$needle, $needle, $needle, $needle]);
         }
 
+        // Which website the customer belongs to. Not a TableFilters column type: "direct"
+        // is a NULL test, which none of like/eq/number can express.
+        //   direct → the platform's own customers (clients.reseller_id IS NULL)
+        //   stores → every reseller store's customers
+        //   {id}   → one store's customers
+        $store = (string) ($filters['store'] ?? '');
+        unset($filters['store']);
+
+        if ($store === 'direct') {
+            $conditions[] = 'c.reseller_id IS NULL';
+        } elseif ($store === 'stores') {
+            $conditions[] = 'c.reseller_id IS NOT NULL';
+        } elseif ($store !== '' && ctype_digit($store)) {
+            $conditions[] = 'c.reseller_id = ?';
+            $bindings[] = (int) $store;
+        }
+
         [$filterWhere, $filterBindings] = \CodeVault\Table\TableFilters::where($filters, [
             'id'      => ['c.id', 'number'],
             'name'    => [['c.first_name', 'c.last_name', 'c.email'], 'like'],
@@ -58,6 +75,7 @@ final class ClientRepository
             'group'   => 'g.name',
             'status'  => 'c.status',
             'joined'  => 'c.created_at',
+            'store'   => 'r.brand_name',
         ];
         $orderBy = \CodeVault\Table\TableFilters::orderBy($sortable, $sort);
         if ($orderBy === '') {
@@ -65,17 +83,19 @@ final class ClientRepository
         }
 
         $total = (int) ($this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM clients c LEFT JOIN client_groups g ON g.id = c.client_group_id {$where}",
+            "SELECT COUNT(*) AS c FROM clients c LEFT JOIN client_groups g ON g.id = c.client_group_id LEFT JOIN resellers r ON r.id = c.reseller_id {$where}",
             $bindings
         )['c'] ?? 0);
 
         $data = $this->db->select(
             <<<SQL
             SELECT c.*, g.name AS group_name,
+                r.brand_name AS store_brand_name, r.slug AS store_slug, r.status AS store_status,
                 (SELECT COUNT(*) FROM services s WHERE s.client_id = c.id) AS services_total,
                 (SELECT COUNT(*) FROM services s WHERE s.client_id = c.id AND s.status = 'active') AS services_active
             FROM clients c
             LEFT JOIN client_groups g ON g.id = c.client_group_id
+            LEFT JOIN resellers r ON r.id = c.reseller_id
             {$where}
             {$orderBy}
             LIMIT {$perPage} OFFSET {$offset}

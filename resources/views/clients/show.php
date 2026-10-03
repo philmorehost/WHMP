@@ -401,9 +401,15 @@ $id = (int) $client['id'];
             <p class="admin-detail-hero__subtitle"><?= e($client['email']) ?></p>
         </div>
         <div class="admin-detail-hero__actions">
+            <?php if (!empty($store)): ?>
+            <form method="post" action="/admin/clients/<?= $id ?>/login-as" target="_blank"><?= csrf_field() ?>
+                <button class="admin-detail-btn admin-detail-btn--primary" type="submit" title="Opens <?= e((string) ($store['brand_name'] ?: $store['slug'])) ?>'s website in a new tab, signed in as this customer">🔑 Login on store website</button>
+            </form>
+            <?php else: ?>
             <form method="post" action="/admin/clients/<?= $id ?>/login-as"><?= csrf_field() ?>
                 <button class="admin-detail-btn admin-detail-btn--primary" type="submit" title="Login as Client">🔑 Login as Client</button>
             </form>
+            <?php endif; ?>
             <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/clients/<?= $id ?>/edit" title="Edit">✏️ Edit</a>
             <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/resellers/migrations/review?client=<?= $id ?>" title="Move this client, with their services, domains, invoices and tickets, to another reseller or the main site">⇄ Move provider</a>
             <?php if ($client['status'] !== 'closed'): ?>
@@ -417,6 +423,20 @@ $id = (int) $client['id'];
         </div>
     </div>
 </div>
+
+<?php if (!empty($store)): ?>
+<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.35);padding:12px 16px;border-radius:10px;margin-bottom:20px;">
+    <div>
+        🏬 Customer of reseller store <strong><?= e((string) ($store['brand_name'] ?: $store['slug'])) ?></strong>
+        <span style="color:var(--cv-text-secondary);">(store #<?= (int) $store['id'] ?><?= ($store['status'] ?? 'active') !== 'active' ? ', ' . e((string) $store['status']) : '' ?>)</span>.
+        <span style="color:var(--cv-text-secondary);">They sign in on the store's website, and the reseller can manage their services and domains.</span>
+    </div>
+    <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/resellers/<?= (int) $store['client_id'] ?>/store">View store</a>
+</div>
+<?php endif; ?>
+<?php if (!empty($error) && $tab !== 'message'): ?>
+<div style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:12px 16px;border-radius:8px;margin-bottom:20px;font-weight:600;">⚠️ <?= e($error) ?></div>
+<?php endif; ?>
 
 <!-- Credit Balance & Management -->
 <div class="admin-detail-stat-card">

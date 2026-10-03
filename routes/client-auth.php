@@ -116,3 +116,9 @@ $router->get('/client/dashboard', function (Request $request, array $params, Con
         'content' => $content,
     ]));
 });
+
+// Signing in to a customer's account on their behalf, on the customer's own website
+// (ClientImpersonation): a reseller for its customer, or an admin for a store's
+// customer. `end` is registered first so it is never read as a token.
+$router->get('/client/impersonate/end', [\CodeVault\Clients\ClientImpersonationController::class, 'end']);
+$router->get('/client/impersonate/{token}', [\CodeVault\Clients\ClientImpersonationController::class, 'start']);

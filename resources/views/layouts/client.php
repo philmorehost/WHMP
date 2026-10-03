@@ -83,7 +83,28 @@ $storefrontBanner = $isStorefront && !$storefrontHome && (
 </head>
 <body data-skin="client"<?= $isStorefront ? ' class="sf' . ($storefrontHome ? ' sf--home' : '') . '"' : '' ?>>
 <?= $view->partial('partials.promo-banner') ?>
-<?php if (!empty($_SESSION['original_admin_id'])): ?>
+<?php
+// Signed in on the customer's behalf through a one-time link (ClientImpersonation) —
+// a reseller for its customer, or an admin on a store's website. Always visible, so
+// nobody forgets whose account they are in.
+$cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
+    $_SESSION[\CodeVault\Clients\ClientImpersonation::SESSION_KEY] ?? null,
+    $_SESSION['client_id'] ?? null
+);
+?>
+<?php if ($cvImpersonation !== null): ?>
+    <div class="cv-no-print" role="status" style="background:#7c3aed;color:#ffffff;padding:var(--cv-space-2) var(--cv-space-6);display:flex;flex-wrap:wrap;gap:var(--cv-space-2);justify-content:space-between;align-items:center;font-size:var(--cv-text-sm);font-weight:600;z-index:9999;position:relative;">
+        <span>👤 You are viewing <strong><?= e((string) ($cvImpersonation['client_name'] ?? 'this customer')) ?></strong>'s account
+            as <?= e((string) ($cvImpersonation['actor_label'] ?? '')) ?>.
+            <?php if (($cvImpersonation['actor_type'] ?? '') === 'reseller'): ?>
+                <span style="font-weight:400;opacity:.9;">Password, security and saved-card settings are left to the customer.</span>
+            <?php endif; ?>
+        </span>
+        <a href="/client/impersonate/end" style="color:#ffffff;text-decoration:underline;font-weight:700;">
+            <?= ($cvImpersonation['actor_type'] ?? '') === 'admin' ? 'Return to Admin Panel' : 'Return to your reseller area' ?> &rarr;
+        </a>
+    </div>
+<?php elseif (!empty($_SESSION['original_admin_id'])): ?>
     <div class="cv-no-print" style="background:var(--cv-color-brand-500);color:#ffffff;padding:var(--cv-space-2) var(--cv-space-6);display:flex;justify-content:space-between;align-items:center;font-size:var(--cv-text-sm);font-weight:600;z-index:9999;position:relative;">
         <span>👤 You are logged in as a client.</span>
         <a href="/client/return-to-admin" style="color:#ffffff;text-decoration:underline;font-weight:700;">Return to Admin Panel &rarr;</a>

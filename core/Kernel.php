@@ -1969,7 +1969,32 @@ class Kernel
         // recovery PIN on the client's behalf; that secret only means
         // anything if the client themselves is the one who set it.
         $path = $request->path();
-        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin') && !$session->has('original_admin_id')) {
+
+        // Signed in on a customer's behalf through a one-time link (a reseller for its
+        // customer, or an admin): same reasoning as original_admin_id below for the
+        // PIN, and a reseller additionally may not touch what would take the account
+        // from the customer (ClientImpersonation::restrictedForReseller()).
+        $impersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
+            $session->get(\CodeVault\Clients\ClientImpersonation::SESSION_KEY),
+            $session->get('client_id')
+        );
+
+        if ($impersonation !== null
+            && ($impersonation['actor_type'] ?? '') === 'reseller'
+            && \CodeVault\Clients\ClientImpersonation::restrictedForReseller($request->method(), $path)
+        ) {
+            return SecurityHeaders::apply(Response::html(
+                '<!doctype html><meta charset="utf-8"><title>Not available</title>'
+                . '<div style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;">'
+                . '<h1 style="font-size:1.25rem;">Not available while signed in for the customer</h1>'
+                . '<p>Passwords, security settings, saved cards, the login email and privacy requests can only be '
+                . 'changed by the customer. You can send them a password-reset email from their page in your reseller area.</p>'
+                . '<p><a href="/client/dashboard">Back to the account</a> &middot; <a href="/client/impersonate/end">Return to your reseller area</a></p></div>',
+                403
+            ));
+        }
+
+        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin') && !str_starts_with($path, '/client/impersonate') && !$session->has('original_admin_id') && $impersonation === null) {
             /** @var \CodeVault\Clients\ClientAuthGuard $clientGuard */
             $clientGuard = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class);
             $currentClient = $clientGuard->currentClient();

@@ -19,7 +19,7 @@ final class ServiceRepository
     {
         return $this->db->selectOne(
             <<<SQL
-            SELECT s.*, c.email AS client_email, c.first_name, c.last_name, c.company_name, c.currency_id AS client_currency_id, cu.code AS currency_code, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
+            SELECT s.*, c.email AS client_email, c.first_name, c.last_name, c.company_name, c.reseller_id AS client_reseller_id, c.currency_id AS client_currency_id, cu.code AS currency_code, cu.symbol AS currency_symbol, cu.exchange_rate AS currency_rate
             FROM services s
             JOIN clients c ON c.id = s.client_id
             LEFT JOIN currencies cu ON cu.id = COALESCE(c.currency_id, (SELECT id FROM currencies WHERE is_default = 1 LIMIT 1))
@@ -367,11 +367,17 @@ final class ServiceRepository
 
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
+        // EVERY status change clears suspended_by_reseller_id — including a fresh
+        // suspension. The mark means "suspended by this store and untouched since",
+        // which is what lets that store (and only it) lift the suspension; a
+        // suspension anyone else makes, or any later change, must take that power
+        // away. The reseller path sets it again straight after, via
+        // markSuspendedByReseller(). Migration 0210.
         if ($status === 'suspended') {
             $reason = $reason !== null ? trim($reason) : '';
 
             $this->db->update(
-                'UPDATE services SET status = ?, suspension_reason = ?, updated_at = ? WHERE id = ?',
+                'UPDATE services SET status = ?, suspension_reason = ?, suspended_by_reseller_id = NULL, updated_at = ? WHERE id = ?',
                 [$status, $reason !== '' ? $reason : null, $now, $id]
             );
 
@@ -381,9 +387,24 @@ final class ServiceRepository
         // Any non-suspended status retires the reason, so a stale "overdue"
         // note can never linger on a reactivated service.
         $this->db->update(
-            'UPDATE services SET status = ?, suspension_reason = NULL, updated_at = ? WHERE id = ?',
+            'UPDATE services SET status = ?, suspension_reason = NULL, suspended_by_reseller_id = NULL, updated_at = ? WHERE id = ?',
             [$status, $now, $id]
         );
+    }
+
+    /**
+     * Record that a store suspended this service, so that store may lift it again.
+     * Guarded on the service still being suspended: if anything changed it between
+     * the suspension and this call, the mark must not be applied.
+     */
+    public function markSuspendedByReseller(int $id, int $resellerId): bool
+    {
+        $this->ensureSchema();
+
+        return $this->db->update(
+            "UPDATE services SET suspended_by_reseller_id = ? WHERE id = ? AND status = 'suspended'",
+            [$resellerId, $id]
+        ) > 0;
     }
 
     public function advanceNextDueDate(int $id, string $newDueDate): void
@@ -519,6 +540,11 @@ final class ServiceRepository
         // admin Services list and on the service page. Same defensive shape.
         try {
             $this->db->statement('ALTER TABLE services ADD COLUMN suspension_reason VARCHAR(255) NULL AFTER status');
+        } catch (\Throwable) {}
+        // Migration 0210. setStatus() writes it on every status change, so a site
+        // that has the code before the migration must not lose suspend/unsuspend.
+        try {
+            $this->db->statement('ALTER TABLE services ADD COLUMN suspended_by_reseller_id INT UNSIGNED NULL AFTER suspension_reason');
         } catch (\Throwable) {}
     }
 

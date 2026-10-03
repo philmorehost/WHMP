@@ -45,7 +45,10 @@ final class AdminResellerController
         // Appended last: this controller is autowired, but keeping new deps at the
         // end is the standing rule here so a hand-built site can never silently
         // rebind the arguments after it.
-        private readonly ResellerDomainSync $domainSync
+        private readonly ResellerDomainSync $domainSync,
+        // The store's customers, listed on the store page so an admin can open any of
+        // them. Nullable so a hand-built instance needs no change.
+        private readonly ?ResellerClientDirectory $customers = null
     ) {
     }
 
@@ -540,6 +543,11 @@ final class AdminResellerController
                 : '_codevault-verify.' . $store['custom_domain'],
             'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
             'chat' => ResellerChat::formValues($store),
+            'customerSummary' => $store === null || $this->customers === null ? null : $this->customers->summary((int) $store['id']),
+            'customers' => $store === null || $this->customers === null
+                ? null
+                : $this->customers->clients((int) $store['id'], trim((string) $request->query('cq', '')), 'all', max(1, (int) $request->query('cpage', 1)), 15),
+            'customerSearch' => trim((string) $request->query('cq', '')),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),

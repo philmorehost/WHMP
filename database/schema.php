@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0209_backfill_reseller_domain_status_for_early_installs.php',
-    'migration_count' => 208,
+    'last_migration' => '0210_reseller_client_management.php',
+    'migration_count' => 209,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -816,6 +816,52 @@ return [
             ],
             'indexes' => [],
             'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'client_impersonation_tokens' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'token_hash' => 'CHAR(64) NOT NULL',
+                'client_id' => 'INT UNSIGNED NOT NULL',
+                'actor_type' => 'ENUM(\'admin\',\'reseller\') NOT NULL',
+                'actor_id' => 'INT UNSIGNED NOT NULL',
+                'actor_label' => 'VARCHAR(191) NOT NULL',
+                'site_reseller_id' => 'INT UNSIGNED NULL',
+                'return_url' => 'VARCHAR(500) NOT NULL',
+                'ip_address' => 'VARCHAR(45) NULL',
+                'expires_at' => 'DATETIME NOT NULL',
+                'used_at' => 'DATETIME NULL',
+                'created_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'uniq_client_impersonation_token' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'token_hash',
+                    ],
+                ],
+                'idx_client_impersonation_client' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'client_id',
+                        'created_at',
+                    ],
+                ],
+            ],
+            'foreign' => [
+                'fk_client_impersonation_client' => [
+                    'column' => 'client_id',
+                    'references' => 'clients',
+                    'referenced_column' => 'id',
+                    'on_delete' => 'CASCADE',
+                    'on_update' => NULL,
+                ],
+            ],
             'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         ],
         'client_migrations' => [
@@ -3840,6 +3886,7 @@ return [
                 'details_sent_at' => 'DATETIME NULL',
                 'status' => 'ENUM(\'pending\', \'active\', \'suspended\', \'cancelled\', \'terminated\') NOT NULL DEFAULT \'pending\'',
                 'suspension_reason' => 'VARCHAR(255) NULL',
+                'suspended_by_reseller_id' => 'INT UNSIGNED NULL',
                 'provisioning_error' => 'TEXT NULL',
                 'next_due_date' => 'DATE NOT NULL',
                 'renewal_reminded_at' => 'DATETIME NULL',
@@ -3891,6 +3938,13 @@ return [
                     'fulltext' => false,
                     'columns' => [
                         'parent_id',
+                    ],
+                ],
+                'idx_services_reseller_hold' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'suspended_by_reseller_id',
                     ],
                 ],
             ],

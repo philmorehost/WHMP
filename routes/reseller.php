@@ -10,6 +10,7 @@ use CodeVault\Reseller\AdminResellerPayoutsController;
 use CodeVault\Reseller\AdminResellerTicketController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
+use CodeVault\Reseller\ClientResellerClientsController;
 use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\ClientResellerMailController;
 use CodeVault\Reseller\ClientResellerMigrationController;
@@ -74,6 +75,23 @@ $router->post('/client/reseller/tickets/{ticketId}/reply', [ClientResellerTicket
 $router->post('/client/reseller/tickets/{ticketId}/escalate', [ClientResellerTicketController::class, 'escalate']);
 // Taking a request back before we answer it — the store resolved it itself after all.
 $router->post('/client/reseller/tickets/{ticketId}/withdraw', [ClientResellerTicketController::class, 'withdraw']);
+
+// The store's own customers: list, details, and what the reseller may do for them —
+// edit details, send a password reset, sign in as them on the store's website, suspend /
+// unsuspend / terminate services, and look after domains. No store id in any path: the
+// store is the signed-in reseller's own, and every customer, service and domain id is
+// looked up THROUGH it (ResellerClientDirectory), so another store's id is not found.
+$router->get('/client/reseller/clients', [ClientResellerClientsController::class, 'index']);
+$router->get('/client/reseller/clients/{id}', [ClientResellerClientsController::class, 'show']);
+$router->post('/client/reseller/clients/{id}/profile', [ClientResellerClientsController::class, 'saveProfile']);
+$router->post('/client/reseller/clients/{id}/password-reset', [ClientResellerClientsController::class, 'sendPasswordReset']);
+$router->post('/client/reseller/clients/{id}/login', [ClientResellerClientsController::class, 'login']);
+$router->post('/client/reseller/clients/{id}/services/{serviceId}/suspend', [ClientResellerClientsController::class, 'suspendService']);
+$router->post('/client/reseller/clients/{id}/services/{serviceId}/unsuspend', [ClientResellerClientsController::class, 'unsuspendService']);
+$router->post('/client/reseller/clients/{id}/services/{serviceId}/terminate', [ClientResellerClientsController::class, 'terminateService']);
+$router->post('/client/reseller/clients/{id}/domains/{domainId}/auto-renew', [ClientResellerClientsController::class, 'domainAutoRenew']);
+$router->post('/client/reseller/clients/{id}/domains/{domainId}/lock', [ClientResellerClientsController::class, 'domainLock']);
+$router->post('/client/reseller/clients/{id}/domains/{domainId}/nameservers', [ClientResellerClientsController::class, 'domainNameservers']);
 
 // Asking us to move a customer INTO this store, or one of its customers OUT to another
 // provider. A request only — a super admin decides (ClientMigrationService). No store
