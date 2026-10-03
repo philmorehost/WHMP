@@ -109,6 +109,23 @@ final class ResellerStoreRepository
     }
 
     /**
+     * The headline and tagline at the top of the store's home page. Blank is
+     * stored as NULL, which the home page reads as "use the default".
+     */
+    public function saveHomepage(int $id, ?string $headline, ?string $tagline): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET home_headline = ?, home_tagline = ?, updated_at = ? WHERE id = ?',
+            [
+                $this->nullIfBlank($headline),
+                $this->nullIfBlank($tagline),
+                (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                $id,
+            ]
+        );
+    }
+
+    /**
      * The store's own support chat. Empty strings are stored as NULL so "not set"
      * is one value rather than two — the difference between '' and NULL would
      * otherwise have to be handled at every read, including in the widget partial

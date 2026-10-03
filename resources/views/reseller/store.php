@@ -201,6 +201,29 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         </form>
     </div>
 
+    <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
+        <h2 class="cv-card__title">Home page</h2>
+        <p>The big headline and the sentence under it at the top of your storefront's home page. Your
+            categories appear automatically under <strong>Services</strong> in the top menu, and a few of your
+            plans are featured on the home page with your prices. Leave a field blank to use the default text.</p>
+        <form method="post" action="/client/reseller/store/homepage"><?= csrf_field() ?>
+            <p>
+                <label for="home_headline">Headline</label><br>
+                <input class="cv-input" type="text" id="home_headline" name="home_headline"
+                       maxlength="<?= \CodeVault\Reseller\ResellerStoreService::HOME_HEADLINE_MAX ?>"
+                       placeholder="<?= e(\CodeVault\Reseller\StorefrontHome::DEFAULT_HEADLINE) ?>"
+                       value="<?= e((string) ($store['home_headline'] ?? '')) ?>">
+            </p>
+            <p>
+                <label for="home_tagline">Tagline</label><br>
+                <textarea class="cv-input" id="home_tagline" name="home_tagline" rows="2"
+                          maxlength="<?= \CodeVault\Reseller\ResellerStoreService::HOME_TAGLINE_MAX ?>"
+                          placeholder="<?= e(\CodeVault\Reseller\StorefrontHome::DEFAULT_TAGLINE) ?>"><?= e((string) ($store['home_tagline'] ?? '')) ?></textarea>
+            </p>
+            <button class="cv-btn" type="submit">Save home page text</button>
+        </form>
+    </div>
+
     <div class="cv-card" style="max-width:56rem;margin:0 auto;">
         <h2 class="cv-card__title">Your support chat</h2>
         <p>This is the chat button on your storefront. Our own chat never appears there — your customers talk to

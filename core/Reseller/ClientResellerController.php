@@ -326,6 +326,40 @@ final class ClientResellerController
         return Response::redirect('/client/reseller/store');
     }
 
+    /**
+     * The headline and tagline at the top of the store's home page. Blank means
+     * "use the default", so clearing a field is how a reseller undoes it.
+     */
+    public function saveStoreHomepage(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $result = $this->stores->saveHomepage(
+            (int) $store['id'],
+            (string) $request->input('home_headline', ''),
+            (string) $request->input('home_tagline', '')
+        );
+
+        $this->session->flash(
+            $result['success'] ? 'reseller_notice' : 'reseller_error',
+            $result['success'] ? 'Home page text saved.' : (string) $result['error']
+        );
+
+        return Response::redirect('/client/reseller/store');
+    }
+
     /** Opens the store. The address label is derived from the name, and can be changed after. */
     public function openStore(Request $request): Response
     {

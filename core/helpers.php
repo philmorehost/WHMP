@@ -204,6 +204,29 @@ if (!function_exists('brand_name_forget')) {
     }
 }
 
+if (!function_exists('current_storefront')) {
+    /**
+     * The reseller store this request is being served as, or null on the
+     * platform's own site (and whenever there is no container yet — installer,
+     * CLI bootstrap, a view rendered in isolation by a test).
+     *
+     * Views use this to choose the storefront chrome (premium header, SERVICES
+     * menu, footer) over the platform's client-area chrome. It never decides
+     * anything about money or access — those read CurrentReseller through
+     * constructor injection like everything else.
+     *
+     * @return array<string, mixed>|null
+     */
+    function current_storefront(): ?array
+    {
+        try {
+            return \CodeVault\Support\App::container()->make(\CodeVault\Reseller\CurrentReseller::class)->get();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+}
+
 if (!function_exists('active_promo_banner')) {
     /**
      * The one promo banner (if any) targeted at the current request path ON THE

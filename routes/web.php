@@ -25,14 +25,16 @@ $router->get('/', function (Request $request, array $params, Container $containe
     // prices: the one combination a white-label store must never show, because the
     // customer cannot tell they are being quoted the platform's retail.
     //
-    // The storefront itself (/store) is already tenant-aware end to end — its
-    // catalogue index, its cache key and its retail pricing all key off the
-    // resolved store — so the fix is to send the apex there rather than to
-    // reproduce any of that here.
+    // So a store gets its OWN home page (StorefrontHome): hero, domain search, a
+    // few featured plans at the store's retail prices, and its categories as
+    // compact cards. It used to redirect to /store, which printed the entire
+    // catalogue on one very long page; the full list now lives under SERVICES in
+    // the menu (/store?group_id=N). Every figure the home page shows comes from
+    // StorefrontCatalogue, which prices through the same retail engine as the cart.
     $tenant = $container->make(\CodeVault\Reseller\CurrentReseller::class);
 
     if ($tenant->get() !== null) {
-        return Response::redirect('/store');
+        return $container->make(\CodeVault\Reseller\StorefrontHome::class)->index($request);
     }
 
     /** @var View $view */

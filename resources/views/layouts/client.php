@@ -18,6 +18,21 @@ $selectedCurrency ??= null;
 $t ??= null;
 $languages ??= null;
 $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2f6fed', 'primaryColorDark' => '#26569c'];
+
+// A reseller's website gets the storefront chrome — premium header with the
+// SERVICES menu, page banner, four-column footer — instead of the platform's
+// client-area bar. Decided by the host that matched (CurrentReseller), never by
+// anything the visitor sends. $storefrontStore can be passed to force it (tests).
+$storefrontHome ??= false;
+$storefrontStore ??= current_storefront();
+$isStorefront = is_array($storefrontStore);
+$storefrontPath = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+// The client area keeps its own page headings; the public pages and the sign-in
+// pages get the storefront's title banner.
+$storefrontBanner = $isStorefront && !$storefrontHome && (
+    !str_starts_with($storefrontPath, '/client/')
+    || in_array(rtrim($storefrontPath, '/'), ['/client/login', '/client/register', '/client/forgot-password', '/client/reset-password'], true)
+);
 ?>
 <!doctype html>
 <html lang="<?= e($t?->code() ?? 'en') ?>" dir="<?= e($t?->dir() ?? 'ltr') ?>" data-skin="client">
@@ -57,12 +72,16 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
         <link rel="stylesheet" href="/assets/css/rtl.css">
     <?php endif; ?>
     <style>:root { --cv-color-brand-500: <?= e($theme['primaryColor']) ?>; --cv-color-brand-600: <?= e($theme['primaryColorDark']) ?>; }</style>
+    <?php if ($isStorefront): ?>
+        <link rel="stylesheet" href="<?= asset('assets/css/storefront.css') ?>">
+        <script src="<?= asset('assets/js/storefront.js') ?>" defer></script>
+    <?php endif; ?>
     <?php foreach ($jsonLd as $schema): ?>
         <script type="application/ld+json"><?= json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
     <?php endforeach; ?>
     <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
-<body data-skin="client">
+<body data-skin="client"<?= $isStorefront ? ' class="sf' . ($storefrontHome ? ' sf--home' : '') . '"' : '' ?>>
 <?= $view->partial('partials.promo-banner') ?>
 <?php if (!empty($_SESSION['original_admin_id'])): ?>
     <div class="cv-no-print" style="background:var(--cv-color-brand-500);color:#ffffff;padding:var(--cv-space-2) var(--cv-space-6);display:flex;justify-content:space-between;align-items:center;font-size:var(--cv-text-sm);font-weight:600;z-index:9999;position:relative;">
@@ -70,6 +89,24 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
         <a href="/client/return-to-admin" style="color:#ffffff;text-decoration:underline;font-weight:700;">Return to Admin Panel &rarr;</a>
     </div>
 <?php endif; ?>
+<?php if ($isStorefront): ?>
+    <?= $view->partial('partials.storefront-header', [
+        'store' => $storefrontStore,
+        'home' => $storefrontHome,
+        'currencies' => $currencies,
+        'selectedCurrency' => $selectedCurrency,
+        't' => $t,
+        'languages' => $languages,
+        'theme' => $theme,
+    ]) ?>
+    <?php if ($storefrontBanner): ?>
+        <?= $view->partial('partials.storefront-page-banner', ['title' => $title ?? null, 'breadcrumbs' => $breadcrumbs ?? null]) ?>
+    <?php endif; ?>
+    <main class="cv-shell__main sf-main<?= $storefrontHome ? ' sf-main--home' : '' ?>">
+        <?= $content ?>
+    </main>
+    <?= $view->partial('partials.storefront-footer', ['store' => $storefrontStore, 't' => $t, 'theme' => $theme]) ?>
+<?php else: ?>
 <?= $view->partial('partials.header', [
     'title' => $title ?? $theme['brandName'],
     'currencies' => $currencies,
@@ -82,6 +119,7 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <?= $content ?>
 </main>
 <?= $view->partial('partials.footer', ['t' => $t, 'theme' => $theme]) ?>
+<?php endif; ?>
 <?php
 // Which chat this page gets is a decision, not an include: a host that matched a
 // store must show the STORE's chat and never the platform's. That rule lives in

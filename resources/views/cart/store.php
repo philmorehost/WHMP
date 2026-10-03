@@ -25,8 +25,24 @@
 // undefined variable is a warning, and a warning printed before a header()
 // turns "one missing brand name" into a broken page.
 $theme ??= [];
+$selectedGroupId ??= null;
 
 $brandName = trim((string) ($theme['brandName'] ?? ''));
+
+// On a reseller's website the storefront banner already titles this page and
+// the SERVICES menu lists the categories, so the catalogue's own hero gives way
+// to a row of category pills. $storefrontCategories can be passed in (tests);
+// otherwise it is read from the store's catalogue.
+$onStorefront = isset($storefrontCategories) || current_storefront() !== null;
+$storefrontCategories ??= null;
+
+if ($onStorefront && $storefrontCategories === null) {
+    try {
+        $storefrontCategories = \CodeVault\Support\App::container()->make(\CodeVault\Reseller\StorefrontCatalogue::class)->categories();
+    } catch (\Throwable) {
+        $storefrontCategories = [];
+    }
+}
 
 // A customer-facing catalogue should not advertise a category that has nothing
 // in it, so a group with no plans is skipped entirely. This is also what lets
@@ -62,7 +78,15 @@ $groupIcon = static function (string $name): string {
 ?>
 <link rel="stylesheet" href="/assets/css/store.css">
 
-<div class="store-shell">
+<div class="store-shell<?= $onStorefront ? ' store-shell--storefront' : '' ?>">
+    <?php if ($onStorefront): ?>
+        <nav class="store-pills" aria-label="Service categories">
+            <a class="store-pills__item<?= $selectedGroupId === null ? ' is-active' : '' ?>" href="/store">All services</a>
+            <?php foreach ((array) $storefrontCategories as $pill): ?>
+                <a class="store-pills__item<?= $selectedGroupId === (int) $pill['id'] ? ' is-active' : '' ?>" href="/store?group_id=<?= (int) $pill['id'] ?>"><?= e((string) $pill['name']) ?></a>
+            <?php endforeach; ?>
+        </nav>
+    <?php else: ?>
     <section class="store-hero">
         <div class="store-hero__inner">
             <div class="store-hero__content">
@@ -106,6 +130,7 @@ $groupIcon = static function (string $name): string {
             <?php endif; ?>
         </div>
     </section>
+    <?php endif; ?>
 
     <?php if ($renderableGroups === []): ?>
         <div class="store-empty">
@@ -120,7 +145,11 @@ $groupIcon = static function (string $name): string {
                 <section class="store-group" id="group-<?= (int) $group['id'] ?>">
                     <div class="store-group__header">
                         <h2 class="store-group__title">
-                            <span aria-hidden="true"><?= $groupIcon((string) ($group['name'] ?? '')) ?></span>
+                            <?php if ($onStorefront): ?>
+                                <span class="sf-chip"><?= CodeVault\Reseller\StorefrontIcons::svg(CodeVault\Reseller\StorefrontIcons::forCategory((string) ($group['name'] ?? ''))) ?></span>
+                            <?php else: ?>
+                                <span aria-hidden="true"><?= $groupIcon((string) ($group['name'] ?? '')) ?></span>
+                            <?php endif; ?>
                             <span><?= e((string) ($group['name'] ?? '')) ?></span>
                             <span class="store-group__count">
                                 <?= count($groupProducts) ?> <?= count($groupProducts) === 1 ? 'plan' : 'plans' ?>
@@ -132,8 +161,9 @@ $groupIcon = static function (string $name): string {
                     </div>
 
                     <div class="store-grid">
-                            <?php foreach ($groupProducts as $product): ?>
-                                <article class="store-card">
+                            <?php foreach ($groupProducts as $index => $product): ?>
+                                <?php $cardFeatures = CodeVault\Reseller\StorefrontHome::features((string) ($product['description'] ?? ''), 8); ?>
+                                <article class="store-card<?= count($groupProducts) >= 3 && $index === 1 ? ' store-card--highlight' : '' ?>">
                                     <h3 class="store-card__name"><?= e((string) ($product['name'] ?? '')) ?></h3>
 
                                     <?php if (trim((string) ($product['description'] ?? '')) !== ''): ?>
@@ -144,7 +174,15 @@ $groupIcon = static function (string $name): string {
                                             // HTML — escaping alone collapsed them into one run-on
                                             // block.
                                             ?>
-                                            <?= CodeVault\Support\FormattedText::toHtml((string) $product['description']) ?>
+                                            <?php if ($cardFeatures !== []): ?>
+                                                <ul class="store-card__features">
+                                                    <?php foreach ($cardFeatures as $feature): ?>
+                                                        <li><?= e($feature) ?></li>
+                                                    <?php endforeach; ?>
+                                                </ul>
+                                            <?php else: ?>
+                                                <?= CodeVault\Support\FormattedText::toHtml((string) $product['description']) ?>
+                                            <?php endif; ?>
                                         </div>
                                     <?php endif; ?>
 

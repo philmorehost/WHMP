@@ -94,6 +94,7 @@ $router->get('/client/reseller/store', [ClientResellerController::class, 'store'
 $router->post('/client/reseller/store', [ClientResellerController::class, 'openStore']);
 $router->post('/client/reseller/store/brand', [ClientResellerController::class, 'saveStoreBrand']);
 $router->post('/client/reseller/store/chat', [ClientResellerController::class, 'saveStoreChat']);
+$router->post('/client/reseller/store/homepage', [ClientResellerController::class, 'saveStoreHomepage']);
 $router->post('/client/reseller/store/domain', [ClientResellerController::class, 'claimStoreDomain']);
 $router->post('/client/reseller/store/verify', [ClientResellerController::class, 'verifyStoreDomain']);
 

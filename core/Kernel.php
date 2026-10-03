@@ -282,6 +282,15 @@ class Kernel
         // answer; null on the platform's own host.
         $this->container->singleton(CurrentReseller::class, fn () => new CurrentReseller());
 
+        // What a storefront sells, for its SERVICES menu, footer and home page.
+        // A singleton so the header, the page and the footer of one request
+        // share one set of catalogue queries.
+        $this->container->singleton(\CodeVault\Reseller\StorefrontCatalogue::class, fn (Container $c) => new \CodeVault\Reseller\StorefrontCatalogue(
+            $c->make(Database::class),
+            $c->make(CurrentReseller::class),
+            $c->make(ResellerRetailPricing::class)
+        ));
+
         $this->container->singleton(Database::class, function (Container $c) {
             /** @var Config $config */
             $config = $c->make(Config::class);

@@ -101,6 +101,41 @@ final class ResellerStoreService
         return ['success' => true, 'error' => null];
     }
 
+    /** Longest headline the hero is designed for; matches the column (migration 0207). */
+    public const HOME_HEADLINE_MAX = 120;
+
+    /** Longest tagline; matches the column. */
+    public const HOME_TAGLINE_MAX = 300;
+
+    /**
+     * The words at the top of the store's home page. Plain text only: both are
+     * escaped on output, and a tag typed here would show up as literal text,
+     * so it is refused instead of being stored to confuse the reseller later.
+     *
+     * @return array{success: bool, error: ?string}
+     */
+    public function saveHomepage(int $storeId, string $headline, string $tagline): array
+    {
+        $headline = trim(preg_replace('/\s+/u', ' ', $headline) ?? '');
+        $tagline = trim(preg_replace('/\s+/u', ' ', $tagline) ?? '');
+
+        if (mb_strlen($headline) > self::HOME_HEADLINE_MAX) {
+            return ['success' => false, 'error' => 'Keep the headline to ' . self::HOME_HEADLINE_MAX . ' characters or fewer.'];
+        }
+
+        if (mb_strlen($tagline) > self::HOME_TAGLINE_MAX) {
+            return ['success' => false, 'error' => 'Keep the tagline to ' . self::HOME_TAGLINE_MAX . ' characters or fewer.'];
+        }
+
+        if ($headline !== strip_tags($headline) || $tagline !== strip_tags($tagline)) {
+            return ['success' => false, 'error' => 'The headline and tagline are plain text — remove any HTML tags.'];
+        }
+
+        $this->stores->saveHomepage($storeId, $headline, $tagline);
+
+        return ['success' => true, 'error' => null];
+    }
+
     /**
      * The store's own support chat.
      *

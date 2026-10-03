@@ -36,6 +36,23 @@ try {
         $domainRows = $domainPricing->all();
         $domainTlds ??= array_map(static fn (array $r): string => (string) $r['tld'], $domainRows);
         $domainFeatured ??= array_slice($domainRows, 0, 4);
+
+        // On a reseller's site the "from" chips must quote the store's retail
+        // price — the figure checkout charges — not our catalogue price.
+        $lookupStore = current_storefront();
+
+        if ($lookupStore !== null) {
+            $lookupRetail = $container->make(\CodeVault\Reseller\ResellerRetailPricing::class);
+
+            foreach ($domainFeatured as $i => $featuredRow) {
+                $domainFeatured[$i]['register_price'] = $lookupRetail->quoteDomain(
+                    (float) $featuredRow['register_price'],
+                    $lookupStore,
+                    (string) $featuredRow['tld'],
+                    'register'
+                )['retail'];
+            }
+        }
     }
 
     if ($currency === null || $currencyService === null) {

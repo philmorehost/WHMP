@@ -51,8 +51,62 @@ final class DomainRegistrationController
         private readonly \CodeVault\Ai\AiSettings $aiSettings,
         private readonly \CodeVault\Activity\ActivityLogger $activity,
         private readonly CurrencyService $currencyService,
-        private readonly CurrencySelection $currencySelection
+        private readonly CurrencySelection $currencySelection,
+        // On a reseller storefront every price this page SHOWS must be the
+        // store's retail price — the one CartService will charge. Optional so
+        // existing constructions (and tests) keep working on the platform site.
+        private readonly ?\CodeVault\Reseller\CurrentReseller $tenant = null,
+        private readonly ?\CodeVault\Reseller\ResellerRetailPricing $retail = null
     ) {
+    }
+
+    /**
+     * A domain_pricing row with its prices as THIS site's customers pay them.
+     *
+     * On the platform site the row is returned untouched. On a store, the
+     * register/transfer/renew figures go through ResellerRetailPricing::
+     * quoteDomain() — the call CartService makes — so the search page, the TLD
+     * table and the storefront home page quote exactly what checkout charges.
+     * Display only: the add-to-cart actions never read a price from here.
+     *
+     * @param array<string, mixed>|null $row
+     * @return array<string, mixed>|null
+     */
+    private function retailRow(?array $row): ?array
+    {
+        $store = $this->tenant?->get();
+
+        if ($row === null || $store === null || $this->retail === null) {
+            return $row;
+        }
+
+        foreach (['register', 'transfer', 'renew'] as $which) {
+            $column = $which . '_price';
+
+            if (isset($row[$column])) {
+                $row[$column] = $this->retail->quoteDomain((float) $row[$column], $store, (string) $row['tld'], $which)['retail'];
+            }
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function retailRows(array $rows): array
+    {
+        return array_map(fn (array $row): array => (array) $this->retailRow($row), $rows);
+    }
+
+    /**
+     * @param array<string, array<int, array<string, mixed>>> $byCategory
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function retailCategories(array $byCategory): array
+    {
+        return array_map(fn (array $rows): array => $this->retailRows($rows), $byCategory);
     }
 
     public function searchForm(Request $request): Response
@@ -74,10 +128,10 @@ final class DomainRegistrationController
             'results' => $query !== '' ? $this->search($query) : [],
             'error' => $request->query('error'),
             'defaultNameservers' => $this->domainSettings->defaultNameservers(),
-            'categories' => $this->domainPricing->allByCategory(),
+            'categories' => $this->retailCategories($this->domainPricing->allByCategory()),
             'featured' => array_values(array_filter([
-                $this->domainPricing->findByTld('.com'),
-                $this->domainPricing->findByTld('.net'),
+                $this->retailRow($this->domainPricing->findByTld('.com')),
+                $this->retailRow($this->domainPricing->findByTld('.net')),
             ])),
             'currency' => $currency,
             'money' => fn (float $baseAmount): string => $this->currencyService->format($baseAmount, $currency),
@@ -113,7 +167,7 @@ final class DomainRegistrationController
             return Response::json(['candidates' => []]);
         }
 
-        $tlds = $this->domainPricing->spinnerEnabled();
+        $tlds = $this->retailRows($this->domainPricing->spinnerEnabled());
 
         if ($tlds === []) {
             // This response reaches a real visitor's browser (this endpoint
@@ -215,7 +269,7 @@ final class DomainRegistrationController
             return Response::json(['checked' => false, 'available' => false, 'message' => self::SUBDOMAIN_GUIDE_MESSAGE]);
         }
 
-        $pricingRow = $this->domainPricing->findByTld($tld);
+        $pricingRow = $this->retailRow($this->domainPricing->findByTld($tld));
 
         if ($pricingRow === null) {
             return Response::json(['checked' => false, 'available' => false, 'message' => "\"{$tld}\" isn't offered here."]);
@@ -355,7 +409,7 @@ final class DomainRegistrationController
             // $tld came straight out of domainPricing->all() inside
             // splitAgainstConfiguredTlds(), so this should always find a
             // row — re-checked anyway in case it was deleted in between.
-            $pricingRow = $this->domainPricing->findByTld($tld);
+            $pricingRow = $this->retailRow($this->domainPricing->findByTld($tld));
 
             if ($pricingRow === null) {
                 return [['tld' => $tld, 'domain' => $name . $tld, 'price' => 0.0, 'offered' => false, 'message' => "\"{$tld}\" isn't offered here."]];
@@ -369,7 +423,7 @@ final class DomainRegistrationController
         }
 
         // No TLD typed — list the name against every configured TLD, WHMCS-style.
-        return array_map(fn (array $pricingRow) => $this->candidate($query, $pricingRow), $this->domainPricing->all());
+        return array_map(fn (array $pricingRow) => $this->candidate($query, $pricingRow), $this->retailRows($this->domainPricing->all()));
     }
 
     /** @param array<string, mixed> $pricingRow */
@@ -476,7 +530,7 @@ final class DomainRegistrationController
                 'error' => $request->query('error'),
                 'domain' => $request->query('domain', ''),
                 'defaultNameservers' => $this->domainSettings->defaultNameservers(),
-                'categories' => $this->domainPricing->allByCategory(),
+                'categories' => $this->retailCategories($this->domainPricing->allByCategory()),
             ]),
         ]));
     }
