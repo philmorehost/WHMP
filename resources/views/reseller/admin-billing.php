@@ -8,6 +8,7 @@
  * @var bool $auto
  * @var float $minimum
  * @var int $dueDays
+ * @var string $billingPeriod
  * @var string|null $notice
  * @var string|null $error
  */
@@ -22,7 +23,9 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
     <p style="color:var(--cv-text-secondary);">
         This page is what the stores <strong>owe us</strong>. The mirror of it — what we
         <strong>owe them</strong>, accrued from the same orders and netted against these cost invoices — is the
-        <a href="/admin/resellers/accounts">reseller accounts</a> report.</p>
+        <a href="/admin/resellers/accounts">reseller accounts</a> report.
+    </p>
+    <p style="color:var(--cv-text-secondary);">
         A customer buying at a reseller's store pays <strong>us</strong> at retail. The order records what it cost
         us — the catalogue price less the reseller discount — and that is what we bill the reseller for, on an
         ordinary invoice against their client account. Cost is never added to the customer's own invoice.
@@ -39,9 +42,11 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">How billing runs</h2>
     <p style="color:var(--cv-text-secondary);">
-        One invoice per store per closed calendar month. A month still in progress is never billed, so a figure
-        that is still growing is never invoiced. Billing is idempotent by construction: an order carries the id of
-        the invoice that billed it, so running twice bills once and a missed month is picked up by the next run.
+        Billing groups each store's accrual by closed period. Monthly periods are calendar months; weekly periods
+        are ISO weeks from Monday 00:00 through the following Monday 00:00 (exclusive). The open period is never
+        billed, and below-minimum amounts carry forward into the next invoice. Billing is idempotent by construction:
+        an order carries the id of the invoice that billed it, so running twice bills once and a missed period is
+        picked up by the next run.
     </p>
     <form method="post" action="/admin/resellers/billing/settings">
         <?= csrf_field() ?>
@@ -49,16 +54,27 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
             <tbody>
             <tr>
                 <td><strong>Bill automatically</strong><br>
-                    <span style="color:var(--cv-text-secondary);">Monthly, from the daily cron. Turn this off and
-                        nothing is invoiced until you press “Bill now”.</span></td>
+                    <span style="color:var(--cv-text-secondary);">The daily cron checks for closed periods. Turn this
+                        off to stop automatic invoices; “Bill now” remains an explicit one-off run.</span></td>
                 <td>
-                    <label><input type="checkbox" name="billing_auto" value="1" <?= $auto ? 'checked' : '' ?>> Run monthly</label>
+                    <label><input type="checkbox" name="billing_auto" value="1" <?= $auto ? 'checked' : '' ?>> Run automatically</label>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Billing period</strong><br>
+                    <span style="color:var(--cv-text-secondary);">Weekly uses ISO weeks, Monday through Sunday.
+                        Switching cadence does not rebill orders already linked to an invoice.</span></td>
+                <td>
+                    <select name="billing_period">
+                        <option value="monthly" <?= $billingPeriod === 'monthly' ? 'selected' : '' ?>>Monthly — calendar month</option>
+                        <option value="weekly" <?= $billingPeriod === 'weekly' ? 'selected' : '' ?>>Weekly — Monday to Sunday</option>
+                    </select>
                 </td>
             </tr>
             <tr>
                 <td><strong>Minimum</strong><br>
                     <span style="color:var(--cv-text-secondary);">Leave at 0 to invoice any amount. Below this, a
-                        month is carried into the next invoice instead of being invoiced on its own.</span></td>
+                        closed period is carried into the next invoice instead of being invoiced on its own.</span></td>
                 <td><input type="number" name="billing_minimum" min="0" step="0.01"
                            value="<?= e(number_format($minimum, 2, '.', '')) ?>"></td>
             </tr>
@@ -75,7 +91,8 @@ $money = static fn (float $amount, string $code): string => number_format($amoun
     <form method="post" action="/admin/resellers/billing/run" style="margin-top:var(--cv-space-3);">
         <?= csrf_field() ?>
         <button class="cv-btn" type="submit">Bill now</button>
-        <span style="color:var(--cv-text-secondary);">Safe to press twice — the second press raises nothing.</span>
+        <span style="color:var(--cv-text-secondary);">Uses the selected cadence, even when automatic billing is off.
+            Safe to press twice — the second press raises nothing.</span>
     </form>
 </div>
 

@@ -367,6 +367,52 @@ final class ResellerLedgerTest extends DatabaseTestCase
         $this->assertTrue($this->service->accountFor($this->storeId, '2026-06-01 00:00:00')['can_withdraw']);
     }
 
+    public function test_a_currency_specific_minimum_is_compared_in_base_units(): void
+    {
+        $this->settings->set('reseller.payout_minimum', '50.00');
+        $this->settings->set('reseller.payout_holding_days', '0');
+        $this->settings->set('reseller.payout_minimums', '{"NGN":"50000.00"}');
+        $this->db->update('UPDATE clients SET currency_id = ? WHERE id = ?', [$this->ngnId, $this->resellerClientId]);
+
+        $sale = $this->storeOrder(40.0, '2026-01-10 09:00:00');
+        $this->service->accrueStoreReceipt($sale['invoiceId'], '2026-01-10 09:00:00');
+
+        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+        $this->assertEqualsWithDelta(50000.0, (float) $account['minimum'], 0.001);
+        $this->assertEqualsWithDelta(50000.0 / 1490.0, (float) $account['minimum_base'], 0.000001);
+        $this->assertTrue($account['can_withdraw'], '40 base units exceed the NGN 50,000 minimum at the current rate');
+
+        // Raising only the NGN threshold beyond the same 40-unit balance must
+        // refuse the payout without changing what the ledger says is owed.
+        $this->settings->set('reseller.payout_minimums', '{"NGN":"65000.00"}');
+        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+        $this->assertFalse($account['can_withdraw']);
+        $this->assertEqualsWithDelta(40.0, (float) $account['balance_base'], 0.001);
+    }
+
+    public function test_an_unconfigured_currency_keeps_the_legacy_base_minimum(): void
+    {
+        $this->settings->set('reseller.payout_minimum', '50.00');
+        $this->settings->set('reseller.payout_minimums', '{"NGN":"50000.00"}');
+
+        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+
+        $this->assertEqualsWithDelta(50.0, (float) $account['minimum_base'], 0.001);
+        $this->assertEqualsWithDelta(50.0, (float) $account['minimum'], 0.001);
+    }
+
+    public function test_the_legacy_minimum_is_converted_for_an_unconfigured_foreign_currency(): void
+    {
+        $this->settings->set('reseller.payout_minimum', '50.00');
+        $this->settings->set('reseller.payout_minimums', '{}');
+        $this->db->update('UPDATE clients SET currency_id = ? WHERE id = ?', [$this->ngnId, $this->resellerClientId]);
+
+        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+
+        $this->assertEqualsWithDelta(50.0, (float) $account['minimum_base'], 0.001);
+        $this->assertEqualsWithDelta(74500.0, (float) $account['minimum'], 0.001);
+    }
+
     // ---------------------------------------------------------------- refunds
 
     public function test_a_refund_appends_a_reversing_entry_and_leaves_the_original(): void

@@ -168,3 +168,180 @@
         transition: none;
     }
 }
+
+
+/* --------------------------------------------------------- issued statement --- */
+
+.rs-document {
+    max-width: 72rem;
+    margin: 0 auto;
+    color: var(--cv-text-primary);
+}
+
+.rs-document__heading {
+    border-top: 0.3rem solid var(--cv-color-brand-500);
+}
+
+.rs-document__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cv-space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--cv-space-3);
+}
+
+.rs-document__actions p {
+    margin: 0;
+}
+
+.rs-document__title {
+    margin: 0;
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+}
+
+.rs-document__number {
+    margin: 0.2rem 0 var(--cv-space-3);
+    font-size: var(--cv-text-lg);
+    font-weight: 700;
+}
+
+.rs-document__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.5rem;
+    margin: 0;
+    color: var(--cv-text-secondary);
+    font-size: var(--cv-text-sm);
+}
+
+.rs-document__note {
+    margin: var(--cv-space-3) 0 0;
+    color: var(--cv-text-secondary);
+    font-size: var(--cv-text-sm);
+    line-height: 1.55;
+}
+
+.rs-document__entries table {
+    width: 100%;
+}
+
+@media (max-width: 640px) {
+    .rs-document__actions {
+        align-items: flex-start;
+    }
+
+    .rs-document__entries {
+        overflow-x: auto;
+    }
+}
+
+@media print {
+    @page {
+        size: A4 landscape;
+        margin: 10mm;
+    }
+
+    body:has(.rs-document) {
+        background: #fff !important;
+        color: #111 !important;
+        font-size: 9pt;
+    }
+
+    body:has(.rs-document) .cv-shell__sidebar,
+    body:has(.rs-document) .cv-sidebar-backdrop,
+    body:has(.rs-document) .cv-shell__topbar,
+    body:has(.rs-document) .cv-topbar,
+    body:has(.rs-document) .cv-mobile-nav,
+    body:has(.rs-document) .cv-promo-banner,
+    body:has(.rs-document) .cv-no-print,
+    body:has(.rs-document) .rs-document__no-print,
+    body:has(.rs-document) #tawkchat-container,
+    body:has(.rs-document) > footer {
+        display: none !important;
+    }
+
+    body:has(.rs-document) .cv-shell,
+    body:has(.rs-document) .cv-shell__body,
+    body:has(.rs-document) .cv-shell__main,
+    body:has(.rs-document) > main {
+        display: block !important;
+        width: auto !important;
+        max-width: none !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+        box-shadow: none !important;
+    }
+
+    .rs-document {
+        max-width: none;
+        margin: 0;
+        color: #111 !important;
+    }
+
+    .rs-document .cv-card {
+        margin: 0 0 7mm !important;
+        padding: 0 !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: #fff !important;
+        box-shadow: none !important;
+        color: #111 !important;
+        break-inside: avoid;
+    }
+
+    .rs-document__entries {
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+    }
+
+    .rs-document__heading {
+        border-top: 0 !important;
+        border-bottom: 1px solid #777 !important;
+        padding-bottom: 4mm !important;
+    }
+
+    .rs-document .cv-card__title,
+    .rs-document__title,
+    .rs-document__number {
+        color: #111 !important;
+    }
+
+    .rs-document table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        font-size: 8pt;
+    }
+
+    .rs-document th,
+    .rs-document td {
+        padding: 2mm !important;
+        border-bottom: 1px solid #bbb !important;
+        color: #111 !important;
+        background: #fff !important;
+        vertical-align: top;
+    }
+
+    .rs-document thead {
+        display: table-header-group;
+    }
+
+    .rs-document tr {
+        break-inside: avoid;
+    }
+
+    .rs-document a {
+        color: #111 !important;
+        text-decoration: none !important;
+    }
+
+    .rs-document__note,
+    .rs-document__meta {
+        color: #333 !important;
+    }
+}

@@ -197,6 +197,18 @@ final class AdminResellerBillingPageTest extends DatabaseTestCase
         $this->assertStringContainsString('nothing new', (string) $this->session->pullFlash('reseller_notice'));
     }
 
+    public function test_bill_now_runs_even_when_scheduled_billing_is_disabled(): void
+    {
+        $this->signInAsSuperAdmin();
+        $this->settings->set('reseller.billing_auto', '0');
+        $this->order(30.0, $this->lastMonth());
+
+        $response = $this->controller->runNow($this->request());
+
+        $this->assertSame(302, $response->status());
+        $this->assertSame(1, $this->invoiceCount(), 'manual billing must bypass only the cron opt-out');
+    }
+
     public function test_bill_now_is_forbidden_without_the_permission(): void
     {
         $this->signIn($this->plainAdminId);
@@ -223,6 +235,25 @@ final class AdminResellerBillingPageTest extends DatabaseTestCase
         $this->assertSame('1', $this->settings->get('reseller.billing_auto'));
         $this->assertSame('0.00', $this->settings->get('reseller.billing_minimum'));
         $this->assertSame('0', $this->settings->get('reseller.billing_due_days'));
+    }
+
+    public function test_billing_cadence_is_saved_and_invalid_values_fall_back_to_monthly(): void
+    {
+        $this->signInAsSuperAdmin();
+
+        $this->controller->saveSettings($this->request([
+            'billing_period' => 'weekly',
+            'billing_minimum' => '0',
+            'billing_due_days' => '7',
+        ]));
+        $this->assertSame('weekly', $this->settings->get('reseller.billing_period'));
+
+        $this->controller->saveSettings($this->request([
+            'billing_period' => 'yearly',
+            'billing_minimum' => '0',
+            'billing_due_days' => '7',
+        ]));
+        $this->assertSame('monthly', $this->settings->get('reseller.billing_period'));
     }
 
     public function test_auto_billing_can_be_turned_off_from_the_form(): void

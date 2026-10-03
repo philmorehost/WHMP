@@ -19,6 +19,12 @@ final class CurrencyService
     ) {
     }
 
+    /** @return array<int, array<string, mixed>> Configured currencies, in display order. */
+    public function all(): array
+    {
+        return $this->currencies->all();
+    }
+
     /** @return array<string, mixed> */
     public function resolveForClient(?array $client): array
     {

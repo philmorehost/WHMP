@@ -41,6 +41,7 @@ final class PermissionRegistry
     public const WIDGETS_MANAGE = 'widgets.manage';
     public const SECURITY_QUESTIONS_MANAGE = 'security_questions.manage';
     public const RESELLERS_MANAGE = 'resellers.manage';
+    public const RESELLER_STATEMENTS_ISSUE = 'resellers.statements.issue';
 
     /**
      * @return array<string, array{label: string, group: string}> permission
@@ -78,6 +79,7 @@ final class PermissionRegistry
             self::WIDGETS_MANAGE => ['label' => 'Activate & configure dashboard widgets', 'group' => 'Configuration'],
             self::SECURITY_QUESTIONS_MANAGE => ['label' => 'Activate & configure security question modules', 'group' => 'Security'],
             self::RESELLERS_MANAGE => ['label' => 'Manage resellers, reseller API keys & reseller discounts', 'group' => 'Billing'],
+            self::RESELLER_STATEMENTS_ISSUE => ['label' => 'Issue numbered reseller account statements', 'group' => 'Billing'],
         ];
     }
 

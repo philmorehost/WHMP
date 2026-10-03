@@ -40,26 +40,33 @@ $kindLabels = [
 $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity['address'] ?? ''))));
 ?>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Statement <?= e((string) $document['number']) ?></h1>
-    <p><a href="/admin/resellers/<?= $clientId ?>/statement">&larr; Back to the account</a> &middot;
-        <a href="/admin/resellers/<?= $clientId ?>/account">Full ledger</a> &middot;
-        <a href="/admin/resellers/<?= $clientId ?>/account/export">Export CSV</a></p>
-    <p style="color:var(--cv-text-secondary);">
-        Issued <?= e((string) $document['issued_at']) ?> &middot; covering
-        <strong><?= e($fromDate) ?></strong> to <strong><?= e($toDate) ?></strong> &middot;
-        <?= (int) $document['entry_count'] ?> entr<?= (int) $document['entry_count'] === 1 ? 'y' : 'ies' ?>
+<link rel="stylesheet" href="/assets/css/reseller.css">
+<article class="rs-document" aria-labelledby="reseller-statement-title">
+<div class="cv-card rs-document__heading">
+    <div class="rs-document__actions rs-document__no-print">
+        <p><a href="/admin/resellers/<?= $clientId ?>/statement">&larr; Back to the account</a> &middot;
+            <a href="/admin/resellers/<?= $clientId ?>/account">Full ledger</a> &middot;
+            <a href="/admin/resellers/<?= $clientId ?>/account/export">Export CSV</a></p>
+        <button class="cv-btn" type="button" data-print-document>Print / Save as PDF</button>
+    </div>
+    <h1 class="rs-document__title" id="reseller-statement-title">Account statement</h1>
+    <p class="rs-document__number">Statement <?= e((string) $document['number']) ?></p>
+    <p class="rs-document__meta">
+        <span><strong>Issue date:</strong> <?= e(substr((string) $document['issued_at'], 0, 10)) ?></span>
+        <span><strong>Statement period:</strong> <?= e($fromDate) ?> to <?= e($toDate) ?></span>
+        <span><strong>Entries:</strong> <?= (int) $document['entry_count'] ?></span>
+        <span><strong>Ledger currency:</strong> <?= e($baseCode !== '' ? $baseCode : 'base currency') ?></span>
     </p>
 </div>
 
 <?php if ($error !== null && $error !== ''): ?>
-    <div class="cv-alert cv-alert--error"><?= e((string) $error) ?></div>
+    <div class="cv-alert cv-alert--error rs-document__no-print"><?= e((string) $error) ?></div>
 <?php endif; ?>
 <?php if ($notice !== null && $notice !== ''): ?>
-    <div class="cv-alert cv-alert--success"><?= e((string) $notice) ?></div>
+    <div class="cv-alert cv-alert--success rs-document__no-print"><?= e((string) $notice) ?></div>
 <?php endif; ?>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<div class="cv-card rs-document__parties" style="margin-bottom:var(--cv-space-4);">
     <table class="cv-table">
         <thead>
         <tr><th>Issued by</th><th>Issued to</th></tr>
@@ -92,13 +99,14 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
         </tr>
         </tbody>
     </table>
-    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
-        The issuer details above are the ones recorded when this statement was issued, not the current settings —
-        so a later change of name, address or VAT number cannot restate a document that has already gone out.
+    <p class="rs-document__note">
+        This is a statement of reseller account activity, not a customer sales invoice or confirmation of a bank
+        transfer. Ledger figures and entries are frozen as issued; the issuer details above are the snapshot recorded
+        at issue.
     </p>
 </div>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<div class="cv-card rs-document__summary" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Summary</h2>
     <table class="cv-table">
         <thead>
@@ -135,7 +143,7 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
     </p>
 </div>
 
-<div class="cv-card">
+<div class="cv-card rs-document__entries">
     <h2 class="cv-card__title">Entries as issued</h2>
     <table class="cv-table">
         <thead>
@@ -196,3 +204,4 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
         </tbody>
     </table>
 </div>
+</article>

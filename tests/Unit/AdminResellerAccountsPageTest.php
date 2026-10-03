@@ -61,6 +61,7 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
     private int $superAdminId;
     private int $plainAdminId;
     private int $managerAdminId;
+    private int $statementIssuerAdminId;
     private int $resellerClientId;
     private int $storeId;
 
@@ -80,10 +81,15 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         $superRoleId = $roles->create('Super Admin', true, []);
         $supportRoleId = $roles->create('Support', false, []);
         $managerRoleId = $roles->create('Reseller Manager', false, [PermissionRegistry::RESELLERS_MANAGE]);
+        $statementIssuerRoleId = $roles->create('Statement Issuer', false, [
+            PermissionRegistry::RESELLERS_MANAGE,
+            PermissionRegistry::RESELLER_STATEMENTS_ISSUE,
+        ]);
 
         $this->superAdminId = $this->insertAdmin('root', 'root@example.test', $superRoleId, $now);
         $this->plainAdminId = $this->insertAdmin('support', 'support@example.test', $supportRoleId, $now);
         $this->managerAdminId = $this->insertAdmin('manager', 'manager@example.test', $managerRoleId, $now);
+        $this->statementIssuerAdminId = $this->insertAdmin('issuer', 'issuer@example.test', $statementIssuerRoleId, $now);
 
         $configDir = sys_get_temp_dir() . '/codevault-accounts-page-' . uniqid();
         mkdir($configDir);
@@ -276,6 +282,39 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         // balance, and a negative minimum would make an overdrawn account claimable.
         $this->assertSame('0', $this->settings->get('reseller.payout_holding_days'));
         $this->assertSame('0.00', $this->settings->get('reseller.payout_minimum'));
+    }
+
+    public function test_the_page_exposes_a_currency_specific_minimum_for_each_configured_currency(): void
+    {
+        $this->signInAsSuperAdmin();
+        (new CurrencyRepository($this->db))->create('NGN', '₦', 1490.0);
+
+        $body = (string) $this->controller->index($this->request())->body();
+
+        $this->assertStringContainsString('payout_minimums[USD]', $body);
+        $this->assertStringContainsString('payout_minimums[NGN]', $body);
+        $this->assertStringContainsString('Current base equivalent', $body);
+    }
+
+    public function test_saving_currency_minimums_clamps_negative_values_and_ignores_unknown_codes(): void
+    {
+        $this->signInAsSuperAdmin();
+        (new CurrencyRepository($this->db))->create('NGN', '₦', 1490.0);
+
+        $this->controller->saveSettings($this->request([
+            'payout_holding_days' => '30',
+            'payout_minimums' => [
+                'USD' => '25.75',
+                'NGN' => '-10',
+                'ZZZ' => '999999',
+            ],
+        ]));
+
+        $minimums = json_decode((string) $this->settings->get('reseller.payout_minimums', '{}'), true);
+        $this->assertIsArray($minimums);
+        $this->assertSame('25.75', $minimums['USD']);
+        $this->assertSame('0.00', $minimums['NGN']);
+        $this->assertArrayNotHasKey('ZZZ', $minimums);
     }
 
     public function test_changing_the_holding_period_applies_to_receipts_posted_afterwards(): void
@@ -661,6 +700,43 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
 
     // ------------------------------------------------- issued statements
 
+    public function test_read_permission_alone_cannot_issue_an_immutable_statement(): void
+    {
+        $this->signIn($this->managerAdminId);
+
+        $body = (string) $this->controller->statement(
+            $this->request(),
+            ['clientId' => (string) $this->resellerClientId]
+        )->body();
+        $this->assertStringNotContainsString('Issue for', $body);
+
+        $response = $this->controller->issueStatement(
+            $this->request(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        );
+
+        $this->assertSame(403, $response->status());
+        $this->assertCount(0, $this->statements->listing($this->storeId));
+    }
+
+    public function test_statement_issuer_permission_shows_and_allows_the_issue_action(): void
+    {
+        $this->signIn($this->statementIssuerAdminId);
+
+        $body = (string) $this->controller->statement(
+            $this->request(),
+            ['clientId' => (string) $this->resellerClientId]
+        )->body();
+        $this->assertStringContainsString('Issue for', $body);
+
+        $response = $this->controller->issueStatement(
+            $this->request(['from' => '2026-08-01', 'to' => '2026-08-31']),
+            ['clientId' => (string) $this->resellerClientId]
+        );
+        $this->assertSame(302, $response->status());
+        $this->assertCount(1, $this->statements->listing($this->storeId));
+    }
+
     public function test_issuing_a_statement_issues_the_period_that_was_posted(): void
     {
         $this->signInAsSuperAdmin();
@@ -737,6 +813,9 @@ final class AdminResellerAccountsPageTest extends DatabaseTestCase
         ])->body();
 
         $this->assertStringContainsString((string) $issued['number'], $body);
+        $this->assertStringContainsString('Account statement', $body);
+        $this->assertStringContainsString('data-print-document', $body);
+        $this->assertStringContainsString('not a customer sales invoice', $body);
         $this->assertStringContainsString('80.00', $body);
         $this->assertStringContainsString('2026-08-01', $body);
     }

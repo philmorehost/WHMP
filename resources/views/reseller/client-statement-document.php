@@ -19,6 +19,9 @@
 $money = static fn (float $amount, string $code): string => number_format($amount, 2) . ($code === '' ? '' : ' ' . $code);
 
 $identity = is_array($document['identity'] ?? null) ? $document['identity'] : [];
+$issuerName = trim((string) ($identity['legal_name'] ?? '')) !== ''
+    ? (string) $identity['legal_name']
+    : 'not provided at issue';
 $lines = is_array($document['lines'] ?? null) ? $document['lines'] : [];
 $theirCode = (string) ($document['currency_code'] ?? '');
 $inArrears = (float) $document['closing_base'] < 0;
@@ -36,26 +39,30 @@ $kindLabels = [
 $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity['address'] ?? ''))));
 ?>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <header class="rs-head">
-        <h1 class="rs-head__title">Statement <?= e((string) $document['number']) ?></h1>
-    </header>
-    <?= $view->render('partials.reseller-nav') ?>
-    <p style="color:var(--cv-text-secondary);">
-        <strong><?= e((string) ($identity['legal_name'] ?? '') !== '' ? (string) $identity['legal_name'] : brand_name()) ?></strong>
-        &middot; issued <?= e(substr((string) $document['issued_at'], 0, 10)) ?> &middot;
-        covering <strong><?= e($fromDate) ?></strong> to <strong><?= e($toDate) ?></strong>
+<article class="rs-document" aria-labelledby="reseller-statement-title">
+<div class="cv-card rs-document__heading" style="margin-bottom:var(--cv-space-4);">
+    <div class="rs-document__actions rs-document__no-print">
+        <?= $view->render('partials.reseller-nav') ?>
+        <button class="cv-btn" type="button" data-print-document>Print / Save as PDF</button>
+    </div>
+    <h1 class="rs-document__title" id="reseller-statement-title">Account statement</h1>
+    <p class="rs-document__number">Statement <?= e((string) $document['number']) ?></p>
+    <p class="rs-document__meta">
+        <span><strong>Issued by:</strong> <?= e($issuerName) ?></span>
+        <span><strong>Issue date:</strong> <?= e(substr((string) $document['issued_at'], 0, 10)) ?></span>
+        <span><strong>Statement period:</strong> <?= e($fromDate) ?> to <?= e($toDate) ?></span>
+        <span><strong>Ledger currency:</strong> <?= e($baseCode !== '' ? $baseCode : 'base currency') ?></span>
     </p>
 
     <?php if ($error !== null && $error !== ''): ?>
-        <div class="cv-alert cv-alert--error"><?= e((string) $error) ?></div>
+        <div class="cv-alert cv-alert--error rs-document__no-print"><?= e((string) $error) ?></div>
     <?php endif; ?>
     <?php if ($notice !== null && $notice !== ''): ?>
-        <div class="cv-alert cv-alert--success"><?= e((string) $notice) ?></div>
+        <div class="cv-alert cv-alert--success rs-document__no-print"><?= e((string) $notice) ?></div>
     <?php endif; ?>
 </div>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<div class="cv-card rs-document__parties" style="margin-bottom:var(--cv-space-4);">
     <table class="cv-table">
         <thead>
         <tr><th>From</th><th>To</th></tr>
@@ -63,7 +70,7 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
         <tbody>
         <tr>
             <td>
-                <strong><?= e((string) ($identity['legal_name'] ?? '') !== '' ? (string) $identity['legal_name'] : brand_name()) ?></strong>
+                <strong><?= e($issuerName) ?></strong>
                 <?php foreach ($addressLines as $line): ?>
                     <br><?= e((string) $line) ?>
                 <?php endforeach; ?>
@@ -87,9 +94,14 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
         </tr>
         </tbody>
     </table>
+    <p class="rs-document__note">
+        This is a statement of reseller account activity, not a customer sales invoice or confirmation of a bank
+        transfer. Ledger figures and entries are frozen as issued; the issuer details above are the snapshot recorded
+        at issue.
+    </p>
 </div>
 
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<div class="cv-card rs-document__summary" style="margin-bottom:var(--cv-space-4);">
     <h2 class="cv-card__title">Summary</h2>
     <table class="cv-table">
         <thead>
@@ -127,7 +139,7 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
     </p>
 </div>
 
-<div class="cv-card">
+<div class="cv-card rs-document__entries">
     <h2 class="cv-card__title">Entries as issued</h2>
     <table class="cv-table">
         <thead>
@@ -174,3 +186,4 @@ $addressLines = array_filter(array_map('trim', explode("\n", (string) ($identity
         </tbody>
     </table>
 </div>
+</article>

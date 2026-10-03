@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Reseller;
 
 use CodeVault\Billing\CurrencyService;
+use DateTimeImmutable;
 use CodeVault\Clients\ClientRepository;
 
 /**
@@ -20,10 +21,11 @@ use CodeVault\Clients\ClientRepository;
  * converted once with the reseller's live rate. Conversion lives here and
  * nowhere else, so the report and the invoice cannot disagree about a figure.
  *
- * **Which periods are billable.** A calendar month is only billable once it has
- * closed, and an accrual below the configured minimum is carried forward into
- * the next invoice rather than invoiced on its own. That is why duePeriods()
- * walks months in order instead of selecting "everything older than a cutoff":
+ * **Which periods are billable.** A configured calendar month or ISO week is
+ * billable only once it has closed, and an accrual below the configured minimum
+ * is carried forward into the next invoice rather than invoiced on its own. That
+ * is why duePeriods() walks closed periods in order instead of selecting
+ * "everything older than a cutoff":
  * a cron that runs late, twice, or after an outage produces exactly the same
  * invoices as one that ran on time.
  */
@@ -54,22 +56,30 @@ final class ResellerCostService
         );
     }
 
+    public const CADENCE_MONTHLY = 'monthly';
+    public const CADENCE_WEEKLY = 'weekly';
+
     /**
-     * Cost ready to invoice: every unbilled order in a CLOSED calendar month,
-     * grouped by store and month, oldest first.
+     * Cost ready to invoice: every unbilled order in a CLOSED billing period,
+     * grouped by store and period, oldest first. Weekly periods follow ISO-8601:
+     * Monday 00:00 through the next Monday 00:00 (exclusive).
      *
-     * A month whose accrual is zero, or below the minimum, is not billed:
-     * its orders are carried into the next month that clears the bar, and the
-     * invoice records every month it covers. Orders below a minimum that is
-     * never cleared stay unbilled and keep showing as unbilled in the report —
-     * a figure that is hard to bill must not become a figure that disappears.
+     * A period whose accrual is zero, or below the minimum, is not billed: its
+     * orders are carried into the next period that clears the bar, and the invoice
+     * records every period it covers. Orders below a minimum that is never
+     * cleared stay unbilled and visible in the report rather than disappearing.
      *
      * @return array<int, array<string, mixed>>
      */
-    public function duePeriods(string $today, float $minimum = 0.0): array
-    {
-        // Only months that have ended: this month is still accruing.
-        $cutoff = substr($today, 0, 7) . '-01 00:00:00';
+    public function duePeriods(
+        string $today,
+        float $minimum = 0.0,
+        string $cadence = self::CADENCE_MONTHLY
+    ): array {
+        $cadence = $cadence === self::CADENCE_WEEKLY
+            ? self::CADENCE_WEEKLY
+            : self::CADENCE_MONTHLY;
+        $cutoff = $this->periodStart($today, $cadence);
 
         $byStore = [];
         foreach ($this->costs->unbilledBefore($cutoff) as $order) {
@@ -87,20 +97,26 @@ final class ResellerCostService
 
             // The SQL already ordered by created_at, so building these buckets
             // in encounter order leaves them oldest-first without re-sorting.
-            $months = [];
+            // ISO week keys use the ISO week-year (`o`), which differs from the
+            // calendar year for the first and last days of some years.
+            $periods = [];
             foreach ($orders as $order) {
-                $months[substr((string) $order['created_at'], 0, 7)][] = $order;
+                $date = new DateTimeImmutable((string) $order['created_at']);
+                $key = $cadence === self::CADENCE_WEEKLY
+                    ? $date->format('o-\WW')
+                    : $date->format('Y-m');
+                $periods[$key][] = $order;
             }
 
             $carry = [];
-            $carryMonths = [];
+            $carryPeriods = [];
             $carryAmount = 0.0;
 
-            foreach ($months as $month => $monthOrders) {
+            foreach ($periods as $periodKey => $periodOrders) {
                 $amount = $carryAmount;
                 $priced = [];
 
-                foreach ($monthOrders as $order) {
+                foreach ($periodOrders as $order) {
                     // Each order's converted figure is kept on the row: the
                     // invoice's line items and their total then come from ONE
                     // conversion, so they cannot disagree by a cent.
@@ -116,12 +132,12 @@ final class ResellerCostService
                 }
 
                 $amount = round($amount, 2);
-                $covered = array_merge($carryMonths, [$month]);
+                $covered = array_merge($carryPeriods, [$periodKey]);
                 $combined = array_merge($carry, $priced);
 
                 if ($amount <= 0.0 || $amount < $minimum) {
                     $carry = $combined;
-                    $carryMonths = $covered;
+                    $carryPeriods = $covered;
                     $carryAmount = $amount;
                     continue;
                 }
@@ -131,19 +147,37 @@ final class ResellerCostService
                     'client' => $context['client'],
                     'store' => $context['store'],
                     'currency' => $context['currency'],
-                    'period' => $month,
+                    'period' => $periodKey,
+                    'cadence' => $cadence,
                     'covers' => $covered,
                     'orders' => $combined,
                     'amount' => $amount,
                 ];
 
                 $carry = [];
-                $carryMonths = [];
+                $carryPeriods = [];
                 $carryAmount = 0.0;
             }
         }
 
         return $due;
+    }
+
+    /** Start of the current (still-open) billing period, as a SQL datetime. */
+    private function periodStart(string $today, string $cadence): string
+    {
+        $date = new DateTimeImmutable($today);
+
+        if ($cadence === self::CADENCE_WEEKLY) {
+            // ISO weekday 1 is Monday. Offset explicitly rather than relying on
+            // locale or a relative-date phrase; this keeps week boundaries stable.
+            $daysSinceMonday = (int) $date->format('N') - 1;
+            $date = $date->modify('-' . $daysSinceMonday . ' days');
+        } else {
+            $date = $date->modify('first day of this month');
+        }
+
+        return $date->setTime(0, 0, 0)->format('Y-m-d H:i:s');
     }
 
     /**

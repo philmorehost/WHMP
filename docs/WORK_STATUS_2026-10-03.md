@@ -2,6 +2,12 @@
 
 **Date:** 2026-10-03 · **Branch:** `BUYAFROBEATS2` · **HEAD:** `3a95998` · **Working tree:** clean, in sync with origin
 
+> **Continuation update (2026-10-03):** This document remains the original hand-off snapshot. The
+> suitable follow-ups below were implemented in the Arena patchset on
+> `arena/01a0ffd6-whmp`. Arena pins this checkout to that branch, so `WHMP2.0` was not created.
+> PHP and `vendor/` are unavailable in this environment; the newly added tests and PHP lint have
+> not been run, and browser print output remains unverified.
+
 ---
 
 ## Scope and provenance
@@ -215,18 +221,19 @@ the test catches it; a gate nobody has seen fail is a gate nobody should trust.
 | Ticket suites (`TicketRelatedItem\|Split\|Merge\|ClientTicketController`) | 22 / 91 |
 | `AdminClientMessageTabTest\|ClientTicketControllerTest` | 14 / 50 |
 | Earlier in this engagement: storefront, nav, portal-page batches | 49 / 212 · 95 / 408 · 100 / 447 |
+| Arena follow-up: PHP lint and new billing/payout/statement tests | Not run — PHP CLI and `vendor/` are unavailable; print output was not browser-verified |
 
 ---
 
-# 4. Remaining — needs your decision
+# 4. Remaining decisions and current status
 
 | Item | Recommendation |
 |---|---|
 | **The 297 historical mismatches** | **Leave them.** Import debris: `discount_amount = 0` with `total < subtotal`, created 2016-03-01 → 2026-06-22, all at `00:00:00`, no credit note behind any, 149 zeroed write-offs, none unpaid |
 | **Invoice 3419** — 5% late fee applied twice | Cosmetic, on a cancelled invoice; the only duplicate among 536. Clean or leave |
 | **`whmp_prod_snapshot`** | Your production data in a local database. Drop, or keep and point the app at it to develop against real data |
-| **Statement issuing permission** | Gated on `resellers.manage` — the same permission that merely *reads* the account, though issuing is write-and-irreversible. May deserve a narrower gate |
-| **Statement legal layout** | Field names are conventional; no jurisdiction-specific tax-document format. Figures and the freeze do not change — only the rendering |
+| **Statement issuing permission** | Implemented in the Arena follow-up: reading remains gated on `resellers.manage`; issuing additionally requires `resellers.statements.issue`. The permission is exposed in the role matrix and enforced by the controller. |
+| **Statement legal layout** | Implemented as a generic print-friendly account statement with frozen issuer details, figures and entries, plus print/save-as-PDF support. It is explicitly not a customer sales invoice or confirmation of transfer. No jurisdiction-specific tax-document format was added; that still needs a jurisdiction/legal decision. |
 
 # 5. Remaining — needs you, cannot be automated
 
@@ -238,14 +245,17 @@ the test catches it; a gate nobody has seen fail is a gate nobody should trust.
 3. **Paystack / Flutterwave** have never run against the real APIs. The pipeline around them is tested
    (signed webhook, idempotency, no false payment); a sandbox key closes it.
 
-# 6. Remaining — unbuilt features
+# 6. Unbuilt features and follow-up status
 
 - **Automatic payout rails** (`disburse()` / `transfer()`). *Verified still missing* — the only
   `transfer()` methods in the codebase are registrar **domain** transfers. `GatewayModule` has no
   payout concept. Destinations already exist, so only the rail is absent.
-- **Weekly cost billing.** *Verified*: `duePeriods()` groups by `substr(created_at, 0, 7)`, so calendar
-  months only, and the settings deliberately do not offer weekly.
-- **Per-currency payout minimum** — one `50.00` figure for all currencies, deliberately deferred.
+- **Weekly cost billing — implemented in the Arena follow-up.** Monthly remains the default; admins may
+  select monthly or ISO-week cadence. Closed weeks use Monday boundaries, the open week is excluded,
+  below-minimum accrual carries forward, and the scheduled/manual jobs use the saved cadence.
+- **Per-currency payout minimum — implemented in the Arena follow-up.** Explicit nominal thresholds are
+  stored by currency code and converted to base units at the current FX rate for eligibility. Currencies
+  without an explicit entry retain the legacy base-currency minimum as their fallback.
 - **`client_credit_ledger` following a currency change** — its rows mix client-currency grants with
   base-currency credit-note totals, so no single factor fits. Needs the convention settled first.
 - **CSF / nginx firewall sync** — BruteGuard's app-level gate is live; the real firewall sync needs a

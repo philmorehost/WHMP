@@ -236,6 +236,57 @@ final class ResellerCostBillingTest extends DatabaseTestCase
         $this->costs->markBilled([$orderId], 999999);
     }
 
+    // ---------------------------------------------------------- weekly cadence
+
+    public function test_weekly_periods_use_iso_monday_boundaries_and_exclude_the_open_week(): void
+    {
+        // ISO week 40 of 2026 is Monday 28 September through Sunday 4 October.
+        // The exact next Monday boundary starts the still-open week and must not
+        // be included in a run made on that Monday.
+        $monday = $this->order(30.0, '2026-09-28 09:00:00');
+        $sunday = $this->order(20.0, '2026-10-04 23:59:59');
+        $nextMonday = $this->order(90.0, '2026-10-05 00:00:00');
+
+        $periods = $this->service->duePeriods('2026-10-05', 0.0, ResellerCostService::CADENCE_WEEKLY);
+
+        $this->assertCount(1, $periods);
+        $this->assertSame('2026-W40', $periods[0]['period']);
+        $this->assertSame([$monday, $sunday], array_map(
+            static fn (array $order): int => (int) $order['id'],
+            $periods[0]['orders']
+        ));
+        $this->assertEqualsWithDelta(50.0, (float) $periods[0]['amount'], 0.001);
+        $this->assertSame(0, $this->stampOn($nextMonday));
+    }
+
+    public function test_the_billing_job_uses_the_saved_weekly_cadence(): void
+    {
+        $this->settings->set('reseller.billing_period', ResellerCostService::CADENCE_WEEKLY);
+        $this->order(30.0, $this->lastClosedWeek());
+
+        $this->job->handle();
+
+        $this->assertSame(1, $this->invoiceCount());
+        $this->assertEqualsWithDelta(30.0, (float) $this->onlyInvoice()['subtotal'], 0.001);
+    }
+
+    public function test_a_below_minimum_week_is_carried_into_the_next_closed_week(): void
+    {
+        $small = $this->order(10.0, '2026-09-21 12:00:00'); // ISO week 39
+        $large = $this->order(60.0, '2026-09-28 12:00:00'); // ISO week 40
+
+        $periods = $this->service->duePeriods('2026-10-05', 50.0, ResellerCostService::CADENCE_WEEKLY);
+
+        $this->assertCount(1, $periods);
+        $this->assertSame('2026-W40', $periods[0]['period']);
+        $this->assertSame(['2026-W39', '2026-W40'], $periods[0]['covers']);
+        $this->assertEqualsWithDelta(70.0, (float) $periods[0]['amount'], 0.001);
+        $this->assertSame([$small, $large], array_map(
+            static fn (array $order): int => (int) $order['id'],
+            $periods[0]['orders']
+        ));
+    }
+
     // ----------------------------------------------------------- currency
 
     public function test_an_order_in_the_base_currency_is_converted_into_the_resellers_currency(): void
@@ -494,6 +545,16 @@ final class ResellerCostBillingTest extends DatabaseTestCase
         return $month
             ->setDate((int) $month->format('Y'), (int) $month->format('m'), $safeDay)
             ->format('Y-m-d H:i:s');
+    }
+
+    /** An order in the most recently closed ISO week. */
+    private function lastClosedWeek(): string
+    {
+        $today = new DateTimeImmutable('today');
+        $daysSinceMonday = (int) $today->format('N') - 1;
+        $startThisWeek = $today->modify('-' . $daysSinceMonday . ' days')->setTime(0, 0, 0);
+
+        return $startThisWeek->modify('-1 day')->setTime(12, 0, 0)->format('Y-m-d H:i:s');
     }
 
     /** An invoice row the cost stamp may legally point at. */
