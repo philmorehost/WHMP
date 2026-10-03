@@ -592,7 +592,7 @@ final class NocixDedicatedServerModule implements ProvisioningModule, LinksRemot
     private function decode(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the Nocix API.', 'data' => null];
+            return ['success' => false, 'message' => ProviderHttpError::explain($response, 'Nocix'), 'data' => null];
         }
 
         $decoded = json_decode($response['body'], true);
@@ -608,7 +608,7 @@ final class NocixDedicatedServerModule implements ProvisioningModule, LinksRemot
         }
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
-            return ['success' => false, 'message' => "Nocix API error (HTTP {$response['status']}).", 'data' => null];
+            return ['success' => false, 'message' => ProviderHttpError::explain($response, 'Nocix'), 'data' => null];
         }
 
         if ($decoded === null && strtolower(trim($response['body'])) !== 'null') {

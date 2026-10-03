@@ -484,9 +484,25 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
 
     public function testConnection(array $params): array
     {
-        $response = $this->call($params['server'], 'GET', '/vps', null);
+        if (trim((string) ($params['server']['api_token'] ?? '')) === '') {
+            return ['success' => false, 'message' => 'No InterServer API key is saved on this server record. Edit it and paste the key into the API Key field.'];
+        }
 
-        return $this->toResult($response, 'Connected — API key is valid.');
+        $response = $this->call($params['server'], 'GET', '/vps', null);
+        $decoded = $this->decode($response);
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message'] !== '' ? $decoded['message'] : ProviderHttpError::explain($response, 'InterServer')];
+        }
+
+        // The listing is a JSON array of rows (empty when the account has none).
+        if (!is_array($decoded['data']) || !array_is_list($decoded['data'])) {
+            return ['success' => false, 'message' => 'InterServer answered, but not with the expected VPS list (HTTP ' . $response['status'] . '). The API address may have changed; please report this.'];
+        }
+
+        $count = count($decoded['data']);
+
+        return ['success' => true, 'message' => "Connected. The API key is valid; {$count} VPS" . ($count === 1 ? '' : 's') . ' found on the InterServer account.'];
     }
 
     /**
@@ -884,7 +900,9 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
      */
     private function call(array $server, string $method, string $path, ?array $body): array
     {
-        $headers = ['X-API-KEY' => (string) ($server['api_token'] ?? ''), 'Accept' => 'application/json'];
+        // A key saved with a stray space or line break (pasted from an email) is
+        // otherwise rejected; keys never contain whitespace.
+        $headers = ['X-API-KEY' => (string) preg_replace('/\s+/', '', (string) ($server['api_token'] ?? '')), 'Accept' => 'application/json'];
         $encodedBody = null;
 
         if ($body !== null) {
@@ -914,14 +932,16 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
     private function decode(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => 'Could not reach the hosting provider API.', 'data' => null];
+            return ['success' => false, 'message' => ProviderHttpError::explain($response, 'InterServer'), 'data' => null];
         }
 
         $decoded = json_decode($response['body'], true);
         $ok = $response['status'] >= 200 && $response['status'] < 300;
 
         if (!is_array($decoded)) {
-            return ['success' => $ok, 'message' => '', 'data' => null];
+            // A failure with an HTML or empty body (a Cloudflare block page, a proxy
+            // error) used to come back with no message at all.
+            return ['success' => $ok, 'message' => $ok ? '' : ProviderHttpError::explain($response, 'InterServer'), 'data' => null];
         }
 
         // VPSCancel documents a `success` flag; the /vps/order (addVps)
@@ -937,7 +957,12 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
             $ok = $ok && (bool) $decoded['continue'];
         }
 
-        $message = (string) ($decoded['text'] ?? $decoded['message'] ?? $decoded['error'] ?? '');
+        $raw = $decoded['text'] ?? $decoded['message'] ?? $decoded['error'] ?? '';
+        $message = is_scalar($raw) ? (string) $raw : '';
+
+        if ($response['status'] < 200 || $response['status'] >= 300) {
+            $message = ProviderHttpError::explain($response, 'InterServer', $message);
+        }
 
         return ['success' => $ok, 'message' => $message, 'data' => $decoded];
     }

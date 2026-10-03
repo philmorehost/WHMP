@@ -655,4 +655,89 @@ final class InterServerVpsProvisioningModuleTest extends TestCase
         $this->assertStringContainsString('account password', $result['message']);
         $this->assertCount(0, $this->http->requests);
     }
+
+    public function test_test_connection_reports_how_many_vps_were_found(): void
+    {
+        $this->http->respondWith(200, json_encode([['vps_id' => '1'], ['vps_id' => '2']]));
+
+        $result = $this->module->testConnection(['server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertStringContainsString('2 VPSs found', $result['message']);
+        $this->assertSame('ISK123', $this->http->lastRequest()['headers']['X-API-KEY']);
+    }
+
+    public function test_an_empty_account_still_connects(): void
+    {
+        $this->http->respondWith(200, '[]');
+
+        $result = $this->module->testConnection(['server' => $this->server]);
+
+        $this->assertTrue($result['success']);
+        $this->assertStringContainsString('0 VPSs found', $result['message']);
+    }
+
+    public function test_a_rejected_key_says_so(): void
+    {
+        $this->http->respondWith(401, json_encode(['code' => 401, 'message' => 'Invalid API Key']));
+
+        $result = $this->module->testConnection(['server' => $this->server]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('rejected the API key (HTTP 401): Invalid API Key', $result['message']);
+    }
+
+    public function test_a_cloudflare_block_page_is_named_instead_of_a_blank_failure(): void
+    {
+        $this->http->respondWith(403, '<!DOCTYPE html><title>Attention Required! | Cloudflare</title>');
+
+        $result = $this->module->testConnection(['server' => $this->server]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('firewall (Cloudflare) blocked', $result['message']);
+    }
+
+    public function test_a_transport_error_carries_the_curl_reason(): void
+    {
+        $http = new class implements \CodeVault\Provisioning\HttpClient {
+            public function request(string $method, string $url, array $headers = [], ?string $body = null): array
+            {
+                return ['status' => 0, 'body' => '', 'error' => 'SSL certificate problem: unable to get local issuer certificate [cURL 60]'];
+            }
+        };
+
+        $result = (new InterServerVpsProvisioningModule($http))->testConnection(['server' => $this->server]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('unable to get local issuer certificate', $result['message']);
+        $this->assertStringContainsString('CA bundle', $result['message']);
+    }
+
+    public function test_a_200_that_is_not_the_vps_list_is_not_called_connected(): void
+    {
+        $this->http->respondWith(200, '<html>Welcome</html>');
+
+        $result = $this->module->testConnection(['server' => $this->server]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('not with the expected VPS list', $result['message']);
+    }
+
+    public function test_whitespace_in_a_saved_key_is_removed_before_sending(): void
+    {
+        $this->http->respondWith(200, '[]');
+
+        $this->module->testConnection(['server' => ['api_token' => " ISK\n123 \r\n"]]);
+
+        $this->assertSame('ISK123', $this->http->lastRequest()['headers']['X-API-KEY']);
+    }
+
+    public function test_no_saved_key_fails_without_a_request(): void
+    {
+        $result = $this->module->testConnection(['server' => ['api_token' => '']]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('No InterServer API key', $result['message']);
+        $this->assertCount(0, $this->http->requests);
+    }
 }

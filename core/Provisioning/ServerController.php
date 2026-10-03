@@ -262,14 +262,22 @@ final class ServerController
     {
         $groupId = $request->input('server_group_id');
         $port = trim((string) $request->input('api_port', ''));
+        $slug = (string) $request->input('module_slug', 'local');
+        $token = trim((string) $request->input('api_token', ''));
+
+        // InterServer keys are long single strings. One copied from an email or a
+        // wrapped page can pick up line breaks or spaces, which make it invalid.
+        if (str_contains($slug, 'interserver')) {
+            $token = (string) preg_replace('/\s+/', '', $token);
+        }
 
         return [
             'server_group_id' => $groupId !== null && $groupId !== '' ? (int) $groupId : null,
             'name' => trim((string) $request->input('name', '')),
             'hostname' => trim((string) $request->input('hostname', '')),
-            'module_slug' => (string) $request->input('module_slug', 'local'),
+            'module_slug' => $slug,
             'api_username' => trim((string) $request->input('api_username', '')) ?: null,
-            'api_token' => trim((string) $request->input('api_token', '')) ?: null,
+            'api_token' => $token !== '' ? $token : null,
             'api_port' => $port === '' ? null : (int) $port,
             'use_ssl' => $request->input('use_ssl') ? 1 : 0,
             'active' => $request->input('active') ? 1 : 0,

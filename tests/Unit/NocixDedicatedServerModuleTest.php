@@ -160,7 +160,7 @@ final class NocixDedicatedServerModuleTest extends TestCase
         $result = $this->module->testConnection(['server' => $this->server]);
 
         $this->assertFalse($result['success']);
-        $this->assertSame('Could not reach the Nocix API.', $result['message']);
+        $this->assertStringContainsString('Could not connect to Nocix', $result['message']);
     }
 
     public function test_restart_calls_reboot_server(): void

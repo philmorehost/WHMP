@@ -15,7 +15,9 @@ interface HttpClient
 {
     /**
      * @param array<string, string> $headers
-     * @return array{status: int, body: string}
+     * `status` is 0 when no HTTP response arrived; `error` then says why.
+     *
+     * @return array{status: int, body: string, error?: string}
      */
     public function request(string $method, string $url, array $headers = [], ?string $body = null): array;
 }
