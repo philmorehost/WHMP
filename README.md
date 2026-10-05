@@ -180,6 +180,22 @@ The VNC console first allows the client's own public IPv4 (InterServer accepts V
 one allowed address) and then shows the host and port. If WHMP is behind a proxy, make
 sure `Request::ip()` sees the real client address.
 
+**Why did a client button open a ticket?** Open the client's service in the admin area
+and click **Run self-service check** in the link card. It walks through everything the
+buttons need, in order: the assigned server, the API key, which VPS the service is, the
+live details, reverse DNS, backups, OS templates and the saved account password. Each
+step shows ✅ or ❌, InterServer's own message, and which client buttons it breaks, and
+the raw API requests and responses are shown underneath. The check only reads: it never
+reboots, snapshots or changes the VPS. The reason is also written in the body of every
+ticket a button opens.
+
+When InterServer answers and gives its own reason for refusing (HTTP 400, 409 or 422, for
+example "VPS is not active" or "Backups are disabled for this type"), the client sees
+that reason on the page and no ticket is opened, because staff could not make it succeed
+either. The provider is not named, so reseller stores stay white-labelled. OS reinstall
+and restore are the exception: a 400 there can mean the saved account password is
+wrong, so those still become tickets.
+
 **Seeing the provider's real answer:** on a server's edit page, Test Connection shows an
 **API response details** panel. It contains the exact request, the HTTP status, the
 response headers and body, the IP connected to, and any cURL error. API keys, passwords

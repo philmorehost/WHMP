@@ -594,7 +594,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
 
         $response = $this->call($params['server'], 'POST', "/vps/{$vpsId}/reinstall_os", $body);
 
-        return $this->toResult($response, 'VPS OS reinstallation has been queued.');
+        return $this->toResult($response, 'VPS OS reinstallation has been queued.', false);
     }
 
     /**
@@ -635,7 +635,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
 
         $response = $this->call($params['server'], 'POST', "/vps/{$ref}/restore", ['backup' => $backup, 'password' => $password]);
 
-        return $this->toResult($response, 'Restore has been queued. Allow up to 10 minutes for it to complete.');
+        return $this->toResult($response, 'Restore has been queued. Allow up to 10 minutes for it to complete.', false);
     }
 
     /** {@inheritDoc} */
@@ -913,26 +913,45 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
         return $this->http->request($method, self::BASE_URL . $path, $headers, $encodedBody);
     }
 
-    /** @param array{status: int, body: string} $response */
-    private function toResult(array $response, string $successMessage = 'OK'): array
+    /**
+     * A failure InterServer explained itself with a 400/409/422 (the VPS is not
+     * active, backups are disabled for this VPS type, the snapshot limit is reached,
+     * an invalid PTR hostname) is flagged `refused`, with InterServer's own words in
+     * `providerMessage`. Nobody at the host can make it succeed, so the client is
+     * told why instead of a support ticket being opened. Reinstall and restore opt
+     * out: their 400 can mean the saved account password is wrong, which is for the
+     * admin to fix.
+     *
+     * @param array{status: int, body: string} $response
+     */
+    private function toResult(array $response, string $successMessage = 'OK', bool $flagRefusals = true): array
     {
         $decoded = $this->decode($response);
 
         if (!$decoded['success']) {
-            return ['success' => false, 'message' => $decoded['message']];
+            $result = ['success' => false, 'message' => $decoded['message']];
+
+            if ($flagRefusals && in_array((int) $response['status'], [400, 409, 422], true) && $decoded['providerMessage'] !== '') {
+                $result['refused'] = true;
+                $result['providerMessage'] = $decoded['providerMessage'];
+            }
+
+            return $result;
         }
 
         return ['success' => true, 'message' => $decoded['message'] !== '' ? $decoded['message'] : $successMessage];
     }
 
     /**
+     * `providerMessage` is InterServer's own text, before any explanation is added.
+     *
      * @param array{status: int, body: string} $response
-     * @return array{success: bool, message: string, data: mixed}
+     * @return array{success: bool, message: string, data: mixed, providerMessage: string}
      */
     private function decode(array $response): array
     {
         if ($response['status'] === 0) {
-            return ['success' => false, 'message' => ProviderHttpError::explain($response, 'InterServer'), 'data' => null];
+            return ['success' => false, 'message' => ProviderHttpError::explain($response, 'InterServer'), 'data' => null, 'providerMessage' => ''];
         }
 
         $decoded = json_decode($response['body'], true);
@@ -941,7 +960,7 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
         if (!is_array($decoded)) {
             // A failure with an HTML or empty body (a Cloudflare block page, a proxy
             // error) used to come back with no message at all.
-            return ['success' => $ok, 'message' => $ok ? '' : ProviderHttpError::explain($response, 'InterServer'), 'data' => null];
+            return ['success' => $ok, 'message' => $ok ? '' : ProviderHttpError::explain($response, 'InterServer'), 'data' => null, 'providerMessage' => ''];
         }
 
         // VPSCancel documents a `success` flag; the /vps/order (addVps)
@@ -958,12 +977,13 @@ final class InterServerVpsProvisioningModule implements ProvisioningModule, Link
         }
 
         $raw = $decoded['text'] ?? $decoded['message'] ?? $decoded['error'] ?? '';
-        $message = is_scalar($raw) ? (string) $raw : '';
+        $message = is_scalar($raw) ? trim((string) $raw) : '';
+        $providerMessage = $message;
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
             $message = ProviderHttpError::explain($response, 'InterServer', $message);
         }
 
-        return ['success' => $ok, 'message' => $message, 'data' => $decoded];
+        return ['success' => $ok, 'message' => $message, 'data' => $decoded, 'providerMessage' => $providerMessage];
     }
 }

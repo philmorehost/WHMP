@@ -1082,6 +1082,19 @@ final class ClientServiceController
             );
         }
 
+        // The provider answered and explained why it will not do this (the VPS is not
+        // running, backups are disabled for its type, the snapshot limit is reached).
+        // Staff cannot make that succeed either, so the client is told why instead of
+        // a ticket being opened. The provider is not named: reseller stores are
+        // white-labelled.
+        if (!empty($result['refused']) && trim((string) ($result['providerMessage'] ?? '')) !== '') {
+            return $this->back(
+                (int) $service['id'],
+                null,
+                'The server could not do this right now: ' . trim((string) $result['providerMessage'])
+            );
+        }
+
         return $this->openRequestTicket(
             $request,
             $service,

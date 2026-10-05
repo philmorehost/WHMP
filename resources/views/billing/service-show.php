@@ -474,6 +474,14 @@ $clientActions = $isNocix ? 'restart and OS reload buttons act' : "power, consol
             <?php endif; ?>
         <?php endif; ?>
 
+        <div style="margin-top:var(--cv-space-3);padding-top:var(--cv-space-3);border-top:1px dashed var(--cv-border-default);">
+            <div style="display:flex;align-items:center;gap:var(--cv-space-2);flex-wrap:wrap;">
+                <button type="button" class="admin-service-btn admin-service-btn--secondary" data-remote-check="<?= $id ?>" data-token="<?= e(csrf_token()) ?>">🩺 Run self-service check</button>
+                <small style="color:var(--cv-text-secondary);">Shows exactly why a client button would open a ticket. Read-only: it does not reboot, snapshot or change the <?= e($machineWord) ?>.</small>
+            </div>
+            <div data-remote-check-result="<?= $id ?>" style="margin-top:var(--cv-space-3);"></div>
+        </div>
+
         <small style="color:var(--cv-text-secondary);display:block;margin-top:var(--cv-space-3);">
             <?php if ($isNocix): ?>
                 ℹ️ Through the Nocix API the client can restart the server and reload its OS. After a reload they can reveal

@@ -237,6 +237,191 @@ final class ProvisioningService
         }
     }
 
+    /**
+     * Read-only walk through everything the client's server buttons depend on, for
+     * the admin's "self-service check". It answers "why did this button open a
+     * ticket?" without anyone pressing a real button: nothing here reboots, wipes,
+     * snapshots or changes the machine. Each step says what it checked, whether it
+     * passed, the provider's own message, and which client buttons depend on it.
+     *
+     * `ok` is true (pass), false (fail: those buttons open tickets) or null (a
+     * warning, or skipped because an earlier step failed).
+     *
+     * @return array{success: bool, message: string, steps: array<int, array{key: string, label: string, ok: ?bool, message: string, affects: string}>}
+     */
+    public function selfServiceCheck(int $serviceId): array
+    {
+        $steps = [];
+        $add = static function (string $key, string $label, ?bool $ok, string $message, string $affects = '') use (&$steps): void {
+            $steps[] = ['key' => $key, 'label' => $label, 'ok' => $ok, 'message' => $message, 'affects' => $affects];
+        };
+        $finish = static function (string $message) use (&$steps): array {
+            $failed = array_filter($steps, static fn (array $s): bool => $s['ok'] === false);
+
+            return ['success' => $failed === [], 'message' => $message, 'steps' => $steps];
+        };
+        $all = 'every server button';
+
+        $service = $this->services->find($serviceId);
+
+        if ($service === null) {
+            $add('service', 'Service record', false, 'Service not found.', $all);
+
+            return $finish('Service not found.');
+        }
+
+        $server = ($service['server_id'] ?? null) === null ? null : $this->servers->find((int) $service['server_id']);
+        $module = $server === null ? null : $this->resolveModule((string) $server['module_slug']);
+
+        if ($server === null || !$module instanceof LinksRemoteServices) {
+            $why = $server === null
+                ? 'No server is assigned to this service. Set "Assigned Server" (Edit Service Details) to your InterServer VPS or Nocix server record and save.'
+                : "The assigned server \"{$server['name']}\" uses the \"{$server['module_slug']}\" module, which has no client self-service. Assign the InterServer VPS or Nocix server record instead.";
+            $add('server', 'Assigned server', false, $why, $all);
+
+            return $finish('Client self-service is off for this service: ' . $why);
+        }
+
+        $provider = $module instanceof NocixDedicatedServerModule ? 'Nocix' : 'InterServer';
+        $machine = $provider === 'Nocix' ? 'dedicated server' : 'VPS';
+        $add('server', 'Assigned server', true, "{$server['name']} ({$server['module_slug']})" . (empty($server['active']) && array_key_exists('active', $server) ? ' · this server record is disabled' : ''));
+
+        $status = (string) ($service['status'] ?? '');
+        $add(
+            'status',
+            'Service status',
+            $status === 'active' ? true : null,
+            $status === 'active'
+                ? 'Active.'
+                : "The service is \"{$status}\". The client only gets live server controls while it is active.",
+            $status === 'active' ? '' : $all
+        );
+
+        [, $params] = $this->moduleAndParamsFor($serviceId);
+        $params = $params !== [] ? $params : ['server' => $this->withSecrets($server)] + $service;
+
+        try {
+            $listing = $module->remoteServices($params['server']);
+        } catch (\Throwable $e) {
+            $listing = ['success' => false, 'message' => $e->getMessage(), 'services' => []];
+        }
+
+        if (!$listing['success']) {
+            $add('account', "{$provider} API", false, (string) $listing['message'], $all);
+
+            return $finish("WHMP could not read the {$provider} account, so every client server button opens a ticket.");
+        }
+
+        $count = count($listing['services']);
+        $add('account', "{$provider} API", true, "Connected. {$count} {$machine}" . ($count === 1 ? '' : 's') . " on the {$provider} account.");
+
+        try {
+            $resolved = $module->resolveRemote($params);
+        } catch (\Throwable $e) {
+            $resolved = ['ref' => null, 'via' => 'none'];
+        }
+
+        if (($resolved['ref'] ?? null) === null) {
+            $add('link', "Which {$machine} this service is", false, "No {$machine} on the {$provider} account is linked to this service or matches its hostname or IP. Choose it in the link box above and press Link.", $all);
+
+            return $finish("This service is not linked to a {$machine} on the {$provider} account, so every client server button opens a ticket.");
+        }
+
+        $label = (string) $resolved['ref'];
+        $known = false;
+
+        foreach ($listing['services'] as $row) {
+            // InterServer still accepts the legacy integer id, so a link stored that way counts.
+            if (in_array((string) $resolved['ref'], [(string) ($row['ref'] ?? ''), (string) ($row['id'] ?? '')], true)) {
+                $label = (string) ($row['label'] ?? $label);
+                $known = true;
+            }
+        }
+
+        $via = ['linked' => 'linked by an admin', 'hostname' => 'matched by hostname', 'ip' => 'matched by IP', 'username' => 'matched by username'][$resolved['via']] ?? (string) $resolved['via'];
+        $add(
+            'link',
+            "Which {$machine} this service is",
+            $known ? true : false,
+            $known
+                ? "{$label} ({$via})."
+                : "Linked to \"{$label}\", but no {$machine} with that id is on the {$provider} account any more. Link it again.",
+            $known ? '' : $all
+        );
+
+        if (!$known) {
+            return $finish("The linked {$machine} is no longer on the {$provider} account.");
+        }
+
+        // Read-only calls, each named after the buttons that need it.
+        $reads = $provider === 'Nocix'
+            ? [
+                ['osTemplates', 'templates', 'Operating systems (os-list)', 'OS reload'],
+                ['reloadStatus', null, 'OS reload status (reloadstatus)', 'OS reload progress, Show login details'],
+            ]
+            : [
+                ['info', null, 'Live details (GET /vps/{id})', 'status panel, VNC console'],
+                ['reverseDnsEntries', 'ips', 'Reverse DNS (GET /vps/{id}/reverse_dns)', 'reverse DNS / PTR'],
+                ['listBackups', 'backups', 'Backups (GET /vps/{id}/backups)', 'snapshot list, restore'],
+                ['osTemplates', 'templates', 'OS templates (GET /vps/{id}/reinstall_os)', 'OS reinstall'],
+            ];
+
+        foreach ($reads as [$method, $listKey, $label, $affects]) {
+            if (!method_exists($module, $method)) {
+                continue;
+            }
+
+            try {
+                $result = $module->{$method}($params);
+            } catch (\Throwable $e) {
+                $result = ['success' => false, 'message' => $e->getMessage()];
+            }
+
+            $detail = '';
+
+            if ($result['success'] && $listKey !== null) {
+                $n = count((array) ($result[$listKey] ?? []));
+                $detail = match ($listKey) {
+                    'ips' => "{$n} IP" . ($n === 1 ? '' : 's') . ' returned.',
+                    'backups' => $n === 0 ? 'No backups yet (the client can take one with Snapshot).' : "{$n} backup" . ($n === 1 ? '' : 's') . ' found.',
+                    default => $n === 0 ? 'The provider listed no operating systems for this machine.' : "{$n} operating system" . ($n === 1 ? '' : 's') . ' offered.',
+                };
+            } elseif ($result['success'] && $method === 'info') {
+                $info = (array) ($result['info'] ?? []);
+                $detail = trim('Status: ' . ((string) ($info['status'] ?? '') ?: 'not reported') . ((string) ($info['serviceStatus'] ?? '') !== '' && ($info['serviceStatus'] ?? '') !== ($info['status'] ?? '') ? " (service {$info['serviceStatus']})" : '') . '.');
+            } elseif ($result['success'] && $method === 'reloadStatus') {
+                $detail = ($result['status'] ?? null) === null ? 'No OS reload has been run yet.' : 'Latest reload: ' . (string) $result['status'] . '.';
+            }
+
+            $add(
+                $method,
+                $label,
+                (bool) $result['success'],
+                $result['success'] ? ($detail !== '' ? $detail : 'OK.') : ((string) ($result['message'] ?? '') ?: 'Failed with no message.'),
+                $result['success'] ? '' : $affects
+            );
+        }
+
+        if ($provider === 'InterServer') {
+            $hasPassword = ((string) ($params['server']['account_password'] ?? '')) !== '';
+            $add(
+                'account_password',
+                'InterServer account password (for reinstall and restore)',
+                $hasPassword ? true : false,
+                $hasPassword
+                    ? 'Saved on the server record. It is only checked by InterServer when a reinstall or restore actually runs.'
+                    : 'Not saved. InterServer re-checks the account password on OS reinstall and backup restore, so those two open tickets until it is saved (Admin → Servers → edit → Account password).',
+                $hasPassword ? '' : 'OS reinstall, backup restore'
+            );
+        }
+
+        $failed = array_values(array_filter($steps, static fn (array $s): bool => $s['ok'] === false));
+
+        return $finish($failed === []
+            ? "Everything the client's server buttons need answered correctly. Power, snapshot and console are not run by this check because they change the machine."
+            : count($failed) . ' check' . (count($failed) === 1 ? '' : 's') . ' failed. The buttons listed against them open support tickets until it is fixed.');
+    }
+
     /** Whether the server behind this id runs a module that links remote machines. */
     public function serverLinksRemoteServices(?int $serverId): bool
     {

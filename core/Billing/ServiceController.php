@@ -11,6 +11,7 @@ use CodeVault\Catalog\BillingCycle;
 use CodeVault\Catalog\ProductPricingRepository;
 use CodeVault\Catalog\ProductRepository;
 use CodeVault\Clients\ClientRepository;
+use CodeVault\Provisioning\HttpExchangeLog;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Queue\QueueInterface;
 use CodeVault\Request;
@@ -388,6 +389,46 @@ final class ServiceController
         );
 
         return $back('Linked to ' . $match['label'] . '. The client can now control this server from their account.');
+    }
+
+    /**
+     * The admin's "self-service check" (JSON): read-only, see
+     * ProvisioningService::selfServiceCheck(). Returns each step plus the raw
+     * provider exchanges, with the server's API key and account password hidden.
+     */
+    public function remoteCheck(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $service = $this->services->find($id);
+
+        if ($service === null) {
+            return Response::json(['success' => false, 'message' => 'Service not found.', 'steps' => [], 'exchanges' => []], 404);
+        }
+
+        $server = isset($service['server_id']) ? $this->servers->find((int) $service['server_id']) : null;
+        $secrets = [$server['api_token'] ?? null, $server['account_secret'] ?? null];
+
+        HttpExchangeLog::start();
+
+        try {
+            $result = $this->provisioning->selfServiceCheck($id);
+        } catch (\Throwable $e) {
+            $result = ['success' => false, 'message' => 'The check stopped: ' . $e->getMessage(), 'steps' => []];
+        } finally {
+            $exchanges = HttpExchangeLog::stop($secrets);
+        }
+
+        return Response::json([
+            'success' => (bool) $result['success'],
+            'message' => (string) $result['message'],
+            'steps' => $result['steps'],
+            'exchanges' => $exchanges,
+            'testedAt' => gmdate('Y-m-d H:i:s') . ' UTC',
+        ])->withHeader('Cache-Control', 'no-store');
     }
 
     /** The provider a linking module talks to, for the admin card's wording. */

@@ -21,6 +21,7 @@ $router->post('/admin/services/{id}/create-account', [ServiceController::class, 
 $router->post('/admin/services/{id}/retry-provisioning', [ServiceController::class, 'retryProvisioning']);
 $router->post('/admin/services/{id}/edit', [ServiceController::class, 'updateDetails']);
 $router->post('/admin/services/{id}/remote-link', [ServiceController::class, 'linkRemote']);
+$router->post('/admin/services/{id}/remote-check', [ServiceController::class, 'remoteCheck']);
 $router->post('/admin/services/{id}/send-details', [ServiceController::class, 'sendDetails']);
 $router->post('/admin/services/{id}/status', [ServiceController::class, 'setStatus']);
 

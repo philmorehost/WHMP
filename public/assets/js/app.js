@@ -585,6 +585,95 @@
         }
     }
 
+    // Admin service page: "Run self-service check". Lists each read-only check
+    // with its result and the buttons that depend on it, then the raw provider
+    // answers. Everything is set with textContent.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-remote-check]');
+        if (!btn) {
+            return;
+        }
+
+        var id = btn.getAttribute('data-remote-check');
+        var out = document.querySelector('[data-remote-check-result="' + id + '"]');
+        var originalLabel = btn.textContent;
+
+        btn.disabled = true;
+        btn.textContent = 'Checking…';
+        if (out) {
+            out.textContent = '';
+        }
+
+        fetch('/admin/services/' + id + '/remote-check', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: '_token=' + encodeURIComponent(btn.getAttribute('data-token') || ''),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (out) {
+                renderRemoteCheck(out, data);
+            }
+        })
+        .catch(function () {
+            if (out) {
+                addLine(out, 'The check could not be run (the request failed). Reload the page and try again.', true, '#f87171');
+            }
+        })
+        .finally(function () {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        });
+    });
+
+    function renderRemoteCheck(container, data) {
+        container.textContent = '';
+
+        var summary = document.createElement('div');
+        summary.className = 'cv-alert ' + (data.success ? 'cv-alert--success' : 'cv-alert--error');
+        summary.style.cssText = 'margin-bottom:10px;';
+        summary.textContent = (data.success ? '✅ ' : '❌ ') + (data.message || '');
+        container.appendChild(summary);
+
+        var list = document.createElement('ol');
+        list.style.cssText = 'margin:0 0 10px 0;padding-left:1.2rem;font-size:.85rem;';
+        (Array.isArray(data.steps) ? data.steps : []).forEach(function (step) {
+            var li = document.createElement('li');
+            li.style.cssText = 'margin-bottom:8px;';
+            var icon = step.ok === true ? '✅' : (step.ok === false ? '❌' : '⚠️');
+            var head = document.createElement('div');
+            head.style.cssText = 'font-weight:600;';
+            head.textContent = icon + ' ' + step.label;
+            li.appendChild(head);
+            var msg = document.createElement('div');
+            msg.style.cssText = 'word-break:break-word;color:' + (step.ok === false ? '#f87171' : 'var(--cv-text-secondary)') + ';';
+            msg.textContent = step.message || '';
+            li.appendChild(msg);
+            if (step.affects) {
+                var affects = document.createElement('div');
+                affects.style.cssText = 'font-size:.75rem;margin-top:2px;';
+                affects.textContent = 'Client buttons affected: ' + step.affects;
+                li.appendChild(affects);
+            }
+            list.appendChild(li);
+        });
+        container.appendChild(list);
+
+        var raw = document.createElement('details');
+        raw.open = !data.success;
+        var rawSummary = document.createElement('summary');
+        rawSummary.textContent = 'Raw API requests and responses (' + (Array.isArray(data.exchanges) ? data.exchanges.length : 0) + ')';
+        rawSummary.style.cssText = 'cursor:pointer;font-weight:600;font-size:.85rem;margin-bottom:8px;';
+        raw.appendChild(rawSummary);
+        var rawBody = document.createElement('div');
+        raw.appendChild(rawBody);
+        container.appendChild(raw);
+        renderServerTestExchanges(rawBody, data);
+    }
+
     // Builds the "API response details" panel from the test's recorded exchanges.
     // Everything is set with textContent: provider bodies are untrusted HTML.
     function renderServerTestExchanges(container, data) {
@@ -714,7 +803,11 @@
     }
 
     function buildServerTestReport(data, exchanges) {
-        var lines = ['WHMP server connection test' + (data.testedAt ? ' - ' + data.testedAt : ''), 'Result: ' + (data.success ? 'OK' : 'FAILED') + ' - ' + (data.message || ''), ''];
+        var lines = [(Array.isArray(data.steps) ? 'WHMP self-service check' : 'WHMP server connection test') + (data.testedAt ? ' - ' + data.testedAt : ''), 'Result: ' + (data.success ? 'OK' : 'FAILED') + ' - ' + (data.message || ''), ''];
+        (Array.isArray(data.steps) ? data.steps : []).forEach(function (step) {
+            lines.push('[' + (step.ok === true ? 'PASS' : (step.ok === false ? 'FAIL' : 'WARN')) + '] ' + step.label + ': ' + (step.message || '') + (step.affects ? ' (affects: ' + step.affects + ')' : ''));
+        });
+        if (Array.isArray(data.steps) && data.steps.length) { lines.push(''); }
         exchanges.forEach(function (x, i) {
             lines.push('=== Request ' + (i + 1) + ' ===');
             lines.push(x.method + ' ' + x.url);
