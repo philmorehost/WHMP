@@ -2671,6 +2671,13 @@
             return;
         }
 
+        // An input with its own live search (the admin clients box) is left to it.
+        // Both used to run: this one cancelled the other's timer and then found no
+        // .cv-table to update, so typing showed nothing until Enter was pressed.
+        if (target.matches('[data-own-live-search]')) {
+            return;
+        }
+
         clearTimeout(searchDebounceTimer);
         searchDebounceTimer = setTimeout(function () {
             var form = target.closest('form');
@@ -2697,18 +2704,31 @@
                 var parser = new DOMParser();
                 var doc = parser.parseFromString(html, 'text/html');
 
-                var targets = [
-                    { selector: '.cv-table', replacer: '.cv-table' },
-                    { selector: '.cv-datatable__pagination', replacer: '.cv-datatable__pagination' }
-                ];
+                // A page marks its results area with data-live-results (and an id):
+                // the whole area is swapped, so the "no results" state and the
+                // pagination update too. Older pages fall back to .cv-table.
+                var areas = document.querySelectorAll('[data-live-results][id]');
+                if (areas.length) {
+                    areas.forEach(function (area) {
+                        var fresh = doc.getElementById(area.id);
+                        if (fresh) {
+                            area.innerHTML = fresh.innerHTML;
+                        }
+                    });
+                } else {
+                    var targets = [
+                        { selector: '.cv-table', replacer: '.cv-table' },
+                        { selector: '.cv-datatable__pagination', replacer: '.cv-datatable__pagination' }
+                    ];
 
-                targets.forEach(function (t) {
-                    var oldEl = document.querySelector(t.selector);
-                    var newEl = doc.querySelector(t.replacer);
-                    if (oldEl && newEl) {
-                        oldEl.innerHTML = newEl.innerHTML;
-                    }
-                });
+                    targets.forEach(function (t) {
+                        var oldEl = document.querySelector(t.selector);
+                        var newEl = doc.querySelector(t.replacer);
+                        if (oldEl && newEl) {
+                            oldEl.innerHTML = newEl.innerHTML;
+                        }
+                    });
+                }
                 
                 window.history.replaceState(null, '', url.toString());
             })
@@ -3042,7 +3062,9 @@
     var clientSearchInput = document.getElementById('client-search-input');
     var clientResultsContainer = document.getElementById('admin-client-results');
     if (clientSearchInput && clientResultsContainer) {
-        var searchDebounceTimer = null;
+        // Its own name: a shared `var searchDebounceTimer` with the generic live
+        // search above meant each cancelled the other's pending search.
+        var clientSearchDebounceTimer = null;
         var searchRequestSeq = 0;
         var clientSearchXhr = null;
         var clientSearchMessage = null;
@@ -3067,6 +3089,22 @@
                 }
                 clientResultsContainer.innerHTML = clientSearchXhr.responseText;
                 clientSearchMessage = null;
+
+                // Keep the address bar and the CSV export on the same search, so a
+                // reload, Back or Export shows what is on screen.
+                var pageUrl = new URL(window.location.href);
+                if (query.trim() === '') {
+                    pageUrl.searchParams.delete('q');
+                } else {
+                    pageUrl.searchParams.set('q', query);
+                }
+                pageUrl.searchParams.delete('page');
+                window.history.replaceState(null, '', pageUrl.toString());
+                var exportLink = document.querySelector('a[href^="/admin/clients/export"]');
+                if (exportLink) {
+                    exportLink.setAttribute('href', '/admin/clients/export?q=' + encodeURIComponent(query));
+                }
+
                 clientSearchInput.focus();
                 clientSearchInput.setSelectionRange(clientSearchInput.value.length, clientSearchInput.value.length);
             };
@@ -3085,11 +3123,11 @@
         }
 
         clientSearchInput.addEventListener('input', function () {
-            clearTimeout(searchDebounceTimer);
+            clearTimeout(clientSearchDebounceTimer);
             var query = this.value;
-            searchDebounceTimer = setTimeout(function () {
+            clientSearchDebounceTimer = setTimeout(function () {
                 performClientSearch(query);
-            }, 400);
+            }, 300);
         });
     }
 

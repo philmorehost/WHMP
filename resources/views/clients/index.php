@@ -337,7 +337,7 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
 <!-- Toolbar -->
 <div class="admin-toolbar">
     <form method="get" action="/admin/clients" class="admin-toolbar__search" id="admin-clients-search-form">
-        <input type="text" name="q" id="client-search-input" value="<?= e($search) ?>" placeholder="Search by name, email, or company..." aria-label="Search clients">
+        <input type="text" name="q" id="client-search-input" data-own-live-search autocomplete="off" value="<?= e($search) ?>" placeholder="Search by name, email, or company..." aria-label="Search clients">
         <button class="admin-btn admin-btn--secondary" type="submit">🔍 Search</button>
     </form>
     <div class="admin-toolbar__actions">
