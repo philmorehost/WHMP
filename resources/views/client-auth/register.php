@@ -36,6 +36,7 @@ $accountExists ??= null;
         </div>
     <?php endif; ?>
 
+    <?= $view->partial('partials.free-reseller-resume-note') ?>
     <form method="post" action="/client/register" style="display:flex;flex-direction:column;gap:var(--cv-space-3);width:100%;box-sizing:border-box;"><?= csrf_field() ?>
         <input type="hidden" name="ref" value="<?= e($refCode) ?>">
         <div class="cv-field" style="margin-bottom:0;">

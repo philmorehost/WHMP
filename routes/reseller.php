@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use CodeVault\Reseller\AdminClientMigrationController;
+use CodeVault\Reseller\AdminFreeResellerController;
+use CodeVault\Reseller\FreeResellerController;
 use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
 use CodeVault\Reseller\AdminResellerDomainController;
@@ -142,6 +144,11 @@ $router->get('/admin/resellers/docs', [AdminResellerController::class, 'docs']);
 // parameterised store routes below so these literal paths cannot be read as a
 // client id. "Bill now" is safe to press twice — an order carries the id of the
 // invoice that billed it, so idempotency is a property of the data.
+// The Free Reseller programme's settings (adverts, landing page copy, demo stores).
+// A literal path, so it sits before the parameterised routes like the pages above.
+$router->get('/admin/resellers/free-programme', [AdminFreeResellerController::class, 'index']);
+$router->post('/admin/resellers/free-programme', [AdminFreeResellerController::class, 'save']);
+
 $router->get('/admin/resellers/billing', [AdminResellerBillingController::class, 'index']);
 $router->post('/admin/resellers/billing/settings', [AdminResellerBillingController::class, 'saveSettings']);
 $router->post('/admin/resellers/billing/run', [AdminResellerBillingController::class, 'runNow']);
@@ -243,3 +250,13 @@ $router->get('/admin/resellers/{clientId}/statements/{statementId}', [AdminResel
 // store routes above, so a client with no store still lands somewhere that can
 // explain why rather than on a 404.
 $router->get('/admin/resellers/{clientId}/account', [AdminResellerAccountsController::class, 'show']);
+
+// The Free Reseller programme's public pages — the platform's own marketing, so the
+// controller answers 404 on every reseller store's host. Applying reuses the normal
+// store, domain and cart steps; a guest's answers wait in the session while they
+// register or sign in (ClientAuthController sends them back to /free-reseller/apply).
+$router->get('/free-reseller', [FreeResellerController::class, 'landing']);
+$router->get('/free-reseller/apply', [FreeResellerController::class, 'applyForm']);
+$router->post('/free-reseller/apply', [FreeResellerController::class, 'apply']);
+$router->post('/free-reseller/apply/discard', [FreeResellerController::class, 'discardDraft']);
+$router->get('/free-reseller/welcome', [FreeResellerController::class, 'welcome']);

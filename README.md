@@ -152,6 +152,34 @@ The reseller control panel (`/client/reseller…`) and the admin's reseller page
 - **Colours:** everything uses theme tokens, so a tenant's brand colour carries through.
 - **Navigation:** the admin's programme-wide reseller pages share one nav (`partials/reseller-admin-nav.php`).
 
+### Free Reseller programme
+
+A public offer of free reseller websites, advertised on the **main website only**.
+
+- **Landing page:** `/free-reseller` explains:
+  - how resellers earn, with a worked example and an earnings calculator;
+  - what they can sell, from the live catalogue;
+  - who collects payment and when payouts happen;
+  - that we handle servers and support;
+  - how to activate a domain (TXT or CNAME, admin approval, SSL);
+  - the master-reseller (second tier) model;
+  - the free features, admin demo links and an FAQ.
+- **Live rules:** every figure on the page is read from the setting that enforces it: discounts, `reseller.payout_holding_days`, payout minimum, cost billing period, maximum markup and the platform address domain.
+- **Application:** `/free-reseller/apply` takes a business name, a store ID and a domain. The domain is either a new one (live availability check; it goes into the normal cart for checkout) or one the applicant already owns.
+  - **Guests:** their answers are kept in the session (`free_reseller_draft`) while they register (email code and PIN) or sign in. `ClientAuthController::afterSignIn()` then sends them back to finish.
+  - **On submit:** the controller follows the same steps as the Reseller area: `ResellerStoreService::openForClient`, then `claimDomain`, then `ResellerDomainSync::syncStore`.
+  - **Afterwards:** `/free-reseller/welcome` shows the exact DNS records and the next steps.
+- **Adverts:** these are a "Get Free Reseller" strip on public pages, a home-page section and sidebar link, a header menu link, and a dismissible card on direct clients' dashboards. `FreeResellerProgramme::advertFor()` decides every placement:
+  - never on a reseller's store;
+  - never to a store's customer;
+  - never to someone who already runs a store.
+  - All `/free-reseller` routes return 404 on store hosts.
+- **Admin:** *Resellers → Free programme* (`/admin/resellers/free-programme`) has:
+  - switches for programme open/closed, the public banner and the dashboard advert;
+  - the headline, introduction and banner text;
+  - up to six demo links (http(s) only).
+  - While the programme is closed, visitors see a "not open" notice and admins see a marked preview.
+
 ## InterServer VPS: client self-service
 
 Clients control their InterServer VPS from their service page: start, restart and stop;

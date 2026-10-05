@@ -134,6 +134,8 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
     </main>
     <?= $view->partial('partials.storefront-footer', ['store' => $storefrontStore, 't' => $t, 'theme' => $theme]) ?>
 <?php else: ?>
+<?php // The platform's own marketing: only ever in this (main website) branch. ?>
+<?= $view->partial('partials.free-reseller-strip') ?>
 <?= $view->partial('partials.header', [
     'title' => $title ?? $theme['brandName'],
     'currencies' => $currencies,

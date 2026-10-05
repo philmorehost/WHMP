@@ -53,6 +53,17 @@ if ($currencies === null || $selectedCurrency === null) {
     }
 }
 ?>
+<?php
+// The Free Reseller link — the platform's own marketing. This header is only used
+// on the main website (a store gets partials/storefront-header), and advertFor()
+// also hides it from anyone who already resells.
+$freeResellerNav = \CodeVault\Reseller\FreeResellerProgramme::advertFor(\CodeVault\Reseller\FreeResellerProgramme::PLACEMENT_NAV) !== null;
+?>
+<style>
+.cv-nav-free-reseller { display: inline-flex; align-items: center; gap: 6px; color: #16a34a !important; text-decoration: none; font-weight: 800; }
+.cv-nav-free-reseller span { background: #22c55e; color: #052e16; font-size: .62rem; letter-spacing: .06em; padding: 2px 6px; border-radius: 999px; }
+.cv-nav-free-reseller:hover { text-decoration: underline; }
+</style>
 <header class="cv-topbar" style="position:relative;display:flex;align-items:center;justify-content:space-between;padding:var(--cv-space-4) var(--cv-space-6);border-bottom:1px solid var(--cv-border-default);">
     <a href="/client/dashboard" style="text-decoration:none; color:inherit; display:flex;align-items:center;gap:var(--cv-space-2);flex-shrink:0;font-weight:bold;">
         <?php if (!empty($theme['logoUrl'])): ?>
@@ -102,6 +113,9 @@ if ($currencies === null || $selectedCurrency === null) {
 
         <a href="/client/invoices" style="color:var(--cv-text-primary); text-decoration:none;">Billing</a>
         <a href="/client/tickets" style="color:var(--cv-text-primary); text-decoration:none;">Support</a>
+        <?php if ($freeResellerNav): ?>
+            <a href="/free-reseller" class="cv-nav-free-reseller">Free Reseller <span>FREE</span></a>
+        <?php endif; ?>
     </nav>
 
     <button type="button" class="cv-mobile-menu-toggle" data-mobile-menu-toggle aria-label="Toggle menu" aria-expanded="false">
@@ -120,6 +134,9 @@ if ($currencies === null || $selectedCurrency === null) {
         <a href="/client/emails">My Emails</a>
         <a href="/client/payment-methods">Payment Methods</a>
         <a href="/client/tickets">Support</a>
+        <?php if ($freeResellerNav): ?>
+            <a href="/free-reseller" style="font-weight:800;color:#16a34a;">🎁 Get Free Reseller</a>
+        <?php endif; ?>
     </nav>
 
     <style>

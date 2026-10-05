@@ -421,6 +421,10 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
 <!-- Domain register/transfer lookup — the client index page (dashboard),
      where the client's services are listed. Theme-adaptive, so it reads
      correctly in both light and dark themes. -->
+<!-- Free Reseller programme advert — direct platform clients on the main
+     website who do not already resell (partials/free-reseller-advert.php). -->
+<?= $view->partial('partials.free-reseller-advert') ?>
+
 <?= $view->partial('partials.domain-lookup') ?>
 
 <!-- MAIN 2-COL GRID -->

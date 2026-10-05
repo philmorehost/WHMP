@@ -11,6 +11,7 @@ $resetSuccess ??= false;
         <div class="cv-field-success" style="margin-bottom:var(--cv-space-3);">Your password has been reset. You can now log in.</div>
     <?php endif; ?>
 
+    <?= $view->partial('partials.free-reseller-resume-note') ?>
     <?php if ($error): ?>
         <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= str_contains($error, '<a ') ? $error : e($error) ?></div>
     <?php endif; ?>

@@ -164,12 +164,9 @@ final class ClientAuthController
         if ($result->isSuccess()) {
             $this->guard->login($result->client);
 
-            // If client was placing an order, resume checkout by redirecting to /cart
-            if (!empty($this->session->get('cart_items', []))) {
-                return Response::redirect('/cart');
-            }
-
-            return Response::redirect('/client/dashboard');
+            // Resume what they were doing: a Free Reseller application, an order
+            // (the cart), or simply the dashboard.
+            return $this->afterSignIn();
         }
 
         $message = $result->status === 'blocked' ? 'Access denied. <a href="/client/recover-pin" style="color:var(--cv-color-brand-500);text-decoration:underline;">Recover with Security PIN</a>' : 'Invalid email or password.';
@@ -218,11 +215,7 @@ final class ClientAuthController
         $this->session->remove(self::PENDING_2FA_SESSION_KEY);
         $this->guard->login($client);
 
-        if (!empty($this->session->get('cart_items', []))) {
-            return Response::redirect('/cart');
-        }
-
-        return Response::redirect('/client/dashboard');
+        return $this->afterSignIn();
     }
 
     /** @return array<string, mixed>|null */
@@ -458,6 +451,25 @@ final class ClientAuthController
         $this->registrationOtps->invalidate($pending['email']);
         $this->affiliateService->registerReferral($pending['refCode'], (int) $result['client']['id']);
         $this->guard->login($result['client']);
+
+        return $this->afterSignIn();
+    }
+
+    /**
+     * Where a client lands once they are signed in.
+     *
+     * A Free Reseller application started as a guest comes first: the applicant
+     * left the form only to get an account, and their answers are waiting at
+     * /free-reseller/apply. Main website only — that programme is never offered on
+     * a reseller's store, so a draft can never pull a store's customer into it.
+     * Otherwise an order in progress resumes at the cart, as it always has.
+     */
+    private function afterSignIn(): Response
+    {
+        if ($this->currentStore?->id() === null
+            && is_array($this->session->get(\CodeVault\Reseller\FreeResellerProgramme::DRAFT_SESSION_KEY))) {
+            return Response::redirect('/free-reseller/apply?resume=1');
+        }
 
         if (!empty($this->session->get('cart_items', []))) {
             return Response::redirect('/cart');
