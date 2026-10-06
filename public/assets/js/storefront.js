@@ -1,6 +1,6 @@
 /*
- * Storefront behaviour — reseller websites only (loaded by layouts/client.php
- * when the request is on a store's host).
+ * Storefront behaviour — reseller websites, and the main website in its premium
+ * design (loaded by layouts/client.php whenever it renders the storefront chrome).
  *
  * An external file rather than inline <script>: the CSP allows 'self' scripts
  * and nonce'd inline ones, and a file needs neither a nonce nor a view change.
@@ -56,6 +56,38 @@
             drawerToggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
             drawerToggle.setAttribute('aria-label', opening ? 'Close menu' : 'Open menu');
             document.body.classList.toggle('sf-drawer-open', opening);
+            return;
+        }
+
+        // "Copy" buttons (coupon codes on the deals page).
+        var copy = event.target.closest('[data-sf-copy]');
+        if (copy) {
+            var text = copy.getAttribute('data-sf-copy');
+            var done = function () {
+                var label = copy.getAttribute('data-sf-copied') || 'Copied';
+                var original = copy.textContent;
+                copy.textContent = label;
+                copy.classList.add('is-copied');
+                window.setTimeout(function () {
+                    copy.textContent = original;
+                    copy.classList.remove('is-copied');
+                }, 1800);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done, function () {});
+            } else {
+                var field = document.createElement('textarea');
+                field.value = text;
+                document.body.appendChild(field);
+                field.select();
+                try {
+                    document.execCommand('copy');
+                    done();
+                } catch (e) {
+                    /* nothing to do: the code is still visible to copy by hand */
+                }
+                document.body.removeChild(field);
+            }
             return;
         }
 

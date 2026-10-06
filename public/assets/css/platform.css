@@ -1,0 +1,497 @@
+/* ============================================================================
+ * Platform site — the MAIN website's premium extras.
+ *
+ * Loaded by layouts/client.php only on the platform's own host when the premium
+ * design is on (body.sf.sf--platform). It sits on top of storefront.css and uses
+ * the same rules: colours come from --cv-color-brand-500/600 and the sf-* tokens
+ * only, so changing the primary colour in Admin → Theme recolours everything.
+ *
+ * Never loaded on a reseller's store.
+ * ========================================================================== */
+
+/* ------------------------------------------------------------- header --- */
+
+.sf--platform .sf-nav__link {
+    white-space: nowrap;
+}
+
+.sf--platform .sf-nav__link--promo {
+    gap: 0.45rem;
+}
+
+.sf--platform .sf-nav__pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--cv-radius-full);
+    background: var(--sf-gradient);
+    color: #ffffff;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    line-height: 1;
+}
+
+.sf--platform .sf-drawer__nav .sf-nav__pill {
+    margin-left: 0.5rem;
+}
+
+@media (max-width: 1400px) {
+    .sf--platform .sf-nav {
+        gap: 0.1rem;
+    }
+
+    .sf--platform .sf-nav__link {
+        padding: 0.6rem 0.7rem;
+    }
+
+    .sf--platform .sf-navbar__inner {
+        gap: 1rem;
+    }
+}
+
+/* ------------------------------------------------------------- footer --- */
+
+.sf--platform .sf-footer__grid--platform {
+    grid-template-columns: 1.3fr 1fr 1fr 0.9fr 1.5fr;
+}
+
+.sf--platform .sf-footer__contact span {
+    overflow-wrap: anywhere;
+}
+
+.sf--platform .sf-footer__address {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    color: var(--sf-on-dark-muted);
+    font-size: var(--cv-text-sm);
+    line-height: 1.5;
+}
+
+.sf--platform .sf-footer__address .sf-icon {
+    margin-top: 0.15rem;
+    color: var(--cv-color-brand-500);
+}
+
+@media (max-width: 1080px) {
+    .sf--platform .sf-footer__grid--platform {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .sf--platform .sf-footer__grid--platform .sf-footer__brand {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 640px) {
+    .sf--platform .sf-footer__grid--platform {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+/* ------------------------------------------------------- services grid --- */
+
+.pf-services {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+    gap: 1rem;
+}
+
+.pf-service {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    gap: 1rem;
+    padding: 1.35rem 2.75rem 1.35rem 1.25rem;
+    border-radius: var(--sf-radius);
+    background: var(--cv-bg-surface);
+    border: 1px solid var(--cv-border-subtle);
+    box-shadow: var(--sf-shadow-card);
+    color: var(--cv-text-primary);
+    text-decoration: none;
+    overflow: hidden;
+    transition: transform var(--cv-transition-base), box-shadow var(--cv-transition-base), border-color var(--cv-transition-base);
+}
+
+.pf-service::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--sf-gradient);
+    transform: scaleY(0);
+    transform-origin: top;
+    transition: transform var(--cv-transition-base);
+}
+
+.pf-service:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--sf-shadow-lift);
+    border-color: color-mix(in srgb, var(--cv-color-brand-500) 35%, transparent);
+}
+
+.pf-service:hover::before {
+    transform: scaleY(1);
+}
+
+.pf-service:hover .sf-chip {
+    background: var(--sf-gradient);
+    color: #ffffff;
+}
+
+.pf-service:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--cv-color-brand-500) 55%, transparent);
+    outline-offset: 2px;
+}
+
+.pf-service__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.pf-service__name {
+    font-family: var(--cv-font-heading);
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.pf-service__text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--cv-text-secondary);
+    font-size: var(--cv-text-sm);
+    line-height: 1.45;
+}
+
+.pf-service__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin-top: auto;
+    padding-top: 0.35rem;
+    font-size: var(--cv-text-xs);
+    color: var(--cv-text-secondary);
+}
+
+.pf-service__price b {
+    color: var(--cv-color-brand-600);
+    font-size: var(--cv-text-sm);
+    font-weight: 800;
+}
+
+.pf-service__count {
+    padding: 0.15rem 0.55rem;
+    border-radius: var(--cv-radius-full);
+    background: var(--sf-tint-strong);
+    color: var(--cv-color-brand-600);
+    font-weight: 700;
+}
+
+.pf-service__arrow {
+    position: absolute;
+    top: 1.35rem;
+    right: 1.15rem;
+    display: inline-flex;
+    color: var(--cv-text-secondary);
+    transition: transform var(--cv-transition-base), color var(--cv-transition-base);
+}
+
+.pf-service:hover .pf-service__arrow {
+    color: var(--cv-color-brand-500);
+    transform: translateX(4px);
+}
+
+/* ---------------------------------------------------------- guarantees --- */
+
+.pf-guarantees {
+    position: relative;
+    overflow: hidden;
+    padding: clamp(3.5rem, 8vw, 6rem) 0;
+    background: var(--sf-hero-bg);
+    color: #ffffff;
+}
+
+.pf-guarantees::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(color-mix(in srgb, #ffffff 12%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+    mask-image: radial-gradient(ellipse at center, #000000 10%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse at center, #000000 10%, transparent 75%);
+    pointer-events: none;
+}
+
+.pf-guarantees .sf-container {
+    position: relative;
+    z-index: 1;
+}
+
+.sf-heading--light h2 {
+    color: #ffffff;
+}
+
+.sf-heading--light p {
+    color: var(--sf-on-dark-muted);
+}
+
+.pf-guarantees__grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1.25rem;
+}
+
+.pf-guarantee {
+    padding: 1.6rem 1.5rem;
+    border-radius: var(--sf-radius);
+    background: color-mix(in srgb, #ffffff 5%, transparent);
+    border: 1px solid var(--sf-line-dark);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: transform var(--cv-transition-base), background var(--cv-transition-base), border-color var(--cv-transition-base);
+}
+
+.pf-guarantee:hover {
+    transform: translateY(-4px);
+    background: color-mix(in srgb, #ffffff 9%, transparent);
+    border-color: color-mix(in srgb, var(--cv-color-brand-500) 55%, transparent);
+}
+
+.pf-guarantee__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 16px;
+    background: var(--sf-gradient);
+    color: #ffffff;
+    box-shadow: var(--sf-glow);
+}
+
+.pf-guarantee__icon .sf-icon {
+    width: 1.4rem;
+    height: 1.4rem;
+}
+
+.pf-guarantee h3 {
+    margin: 1.1rem 0 0.45rem;
+    color: #ffffff;
+    font-size: 1.05rem;
+}
+
+.pf-guarantee p {
+    margin: 0;
+    color: var(--sf-on-dark-muted);
+    font-size: var(--cv-text-sm);
+    line-height: 1.6;
+}
+
+/* ------------------------------------------------- free reseller promo --- */
+
+
+.pf-reseller {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 2rem;
+    align-items: center;
+    padding: clamp(2rem, 5vw, 3.5rem);
+    border-radius: var(--sf-radius-lg);
+    background:
+        radial-gradient(ellipse 55% 80% at 100% 0%, color-mix(in srgb, var(--cv-color-brand-500) 45%, transparent), transparent 70%),
+        linear-gradient(135deg, var(--sf-ink) 0%, var(--sf-ink-2) 60%, var(--sf-ink-3) 100%);
+    color: #ffffff;
+    box-shadow: var(--sf-shadow-lift);
+    overflow: hidden;
+}
+
+.pf-reseller h2 {
+    margin: 1rem 0 0.75rem;
+    color: #ffffff;
+    font-size: clamp(1.6rem, 3.6vw, 2.4rem);
+    font-weight: 800;
+    line-height: 1.15;
+}
+
+.pf-reseller__copy > p {
+    margin: 0;
+    max-width: 38rem;
+    color: var(--sf-on-dark-muted);
+    line-height: 1.65;
+}
+
+.pf-reseller__ticks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem 1.25rem;
+    margin: 1.5rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pf-reseller__ticks li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: var(--cv-text-sm);
+}
+
+.pf-reseller__ticks .sf-icon {
+    color: var(--cv-color-brand-500);
+}
+
+.pf-reseller__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.75rem;
+}
+
+.pf-reseller__art {
+    position: relative;
+    min-height: 15rem;
+}
+
+.pf-reseller__card {
+    position: absolute;
+    top: 0;
+    left: 8%;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.9rem 1.15rem;
+    border-radius: 16px;
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    box-shadow: var(--sf-shadow-lift);
+    animation: pf-bob 6s ease-in-out infinite;
+}
+
+.pf-reseller__card small,
+.pf-reseller__card strong {
+    display: block;
+}
+
+.pf-reseller__card small {
+    color: var(--cv-text-secondary);
+    font-size: var(--cv-text-xs);
+}
+
+.pf-reseller__card--b {
+    top: 36%;
+    left: 34%;
+    animation-delay: -2s;
+}
+
+.pf-reseller__card--c {
+    top: 70%;
+    left: 4%;
+    animation-delay: -4s;
+}
+
+@keyframes pf-bob {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-8px);
+    }
+}
+
+/* ------------------------------------------------------------------ FAQ --- */
+
+.pf-faq__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.pf-faq__email {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 1rem;
+    font-size: var(--cv-text-sm);
+}
+
+.pf-faq__email a {
+    color: var(--cv-color-brand-600);
+    font-weight: 700;
+}
+
+/* ----------------------------------------------------------- responsive --- */
+
+@media (max-width: 1080px) {
+    .pf-guarantees__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .pf-reseller {
+        grid-template-columns: 1fr;
+    }
+
+    .pf-reseller__art {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .pf-guarantees__grid,
+    .pf-reseller__ticks {
+        grid-template-columns: 1fr;
+    }
+
+    .pf-services {
+        grid-template-columns: 1fr;
+    }
+
+    .pf-reseller__actions .sf-btn {
+        width: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pf-reseller__card {
+        animation: none;
+    }
+
+    .pf-service,
+    .pf-guarantee {
+        transition: none;
+    }
+}
+
+/* ------------------------------------------------ full-width page shells --- */
+
+/* The Free Reseller pages bring their own full-bleed sections. */
+.sf--platform .sf-main:has(> .fr) {
+    max-width: none;
+    padding: 0;
+}
+
+.pf-service > .sf-chip {
+    align-self: flex-start;
+}
+
+/* The platform bar carries more links than a store's, so the signed-in menu
+   shows just the avatar until there is room for its label. */
+@media (max-width: 1440px) {
+    .sf--platform .sf-account__label {
+        display: none;
+    }
+}

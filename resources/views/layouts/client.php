@@ -26,13 +26,22 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
 $storefrontHome ??= false;
 $storefrontStore ??= current_storefront();
 $isStorefront = is_array($storefrontStore);
+// The MAIN website wears the same premium chrome (Admin → Theme → Website design,
+// on by default), with the platform's own extras switched on by `platform => true`
+// below. Never on a store: $platformPremium is forced false whenever a store matched.
+$platformPremium = !$isStorefront && (bool) ($platformPremium ?? platform_premium_site());
+$premiumChrome = $isStorefront || $platformPremium;
 $storefrontPath = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
 // The reseller control panel gets its own modern skin, scoped to one class on <main>
 // so nothing outside /client/reseller changes.
 $resellerPanel = \CodeVault\Reseller\ResellerEligibility::isResellerAreaPath($storefrontPath);
 // The client area keeps its own page headings; the public pages and the sign-in
 // pages get the storefront's title banner.
-$storefrontBanner = $isStorefront && !$storefrontHome && (
+// Pages that open with their own full-width hero (the Free Reseller landing and
+// welcome pages) skip it; a controller can also pass pageBanner => false.
+$pageBanner ??= null;
+$storefrontBanner = $premiumChrome && !$storefrontHome && $pageBanner !== false
+    && !in_array(rtrim($storefrontPath, '/'), ['/free-reseller', '/free-reseller/welcome'], true) && (
     !str_starts_with($storefrontPath, '/client/')
     || in_array(rtrim($storefrontPath, '/'), ['/client/login', '/client/register', '/client/forgot-password', '/client/reset-password'], true)
 );
@@ -75,9 +84,12 @@ $storefrontBanner = $isStorefront && !$storefrontHome && (
         <link rel="stylesheet" href="/assets/css/rtl.css">
     <?php endif; ?>
     <style>:root { --cv-color-brand-500: <?= e($theme['primaryColor']) ?>; --cv-color-brand-600: <?= e($theme['primaryColorDark']) ?>; }</style>
-    <?php if ($isStorefront): ?>
+    <?php if ($premiumChrome): ?>
         <link rel="stylesheet" href="<?= asset('assets/css/storefront.css') ?>">
         <script src="<?= asset('assets/js/storefront.js') ?>" defer></script>
+    <?php endif; ?>
+    <?php if ($platformPremium): ?>
+        <link rel="stylesheet" href="<?= asset('assets/css/platform.css') ?>">
     <?php endif; ?>
     <?php foreach ($jsonLd as $schema): ?>
         <script type="application/ld+json"><?= json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
@@ -87,7 +99,7 @@ $storefrontBanner = $isStorefront && !$storefrontHome && (
     <?php endif; ?>
     <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
-<body data-skin="client"<?= $isStorefront ? ' class="sf' . ($storefrontHome ? ' sf--home' : '') . '"' : '' ?>>
+<body data-skin="client"<?= $premiumChrome ? ' class="sf' . ($platformPremium ? ' sf--platform' : '') . ($storefrontHome ? ' sf--home' : '') . '"' : '' ?>>
 <?= $view->partial('partials.promo-banner') ?>
 <?php
 // Signed in on the customer's behalf through a one-time link (ClientImpersonation) —
@@ -116,8 +128,13 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
         <a href="/client/return-to-admin" style="color:#ffffff;text-decoration:underline;font-weight:700;">Return to Admin Panel &rarr;</a>
     </div>
 <?php endif; ?>
-<?php if ($isStorefront): ?>
+<?php if ($platformPremium): ?>
+    <?php // The platform's own marketing: only ever on the main website. ?>
+    <?= $view->partial('partials.free-reseller-strip') ?>
+<?php endif; ?>
+<?php if ($premiumChrome): ?>
     <?= $view->partial('partials.storefront-header', [
+        'platform' => $platformPremium,
         'store' => $storefrontStore,
         'home' => $storefrontHome,
         'currencies' => $currencies,
@@ -132,7 +149,7 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
     <main class="cv-shell__main sf-main<?= $storefrontHome ? ' sf-main--home' : '' ?><?= $resellerPanel ? ' rs-panel' : '' ?>">
         <?= $content ?>
     </main>
-    <?= $view->partial('partials.storefront-footer', ['store' => $storefrontStore, 't' => $t, 'theme' => $theme]) ?>
+    <?= $view->partial('partials.storefront-footer', ['store' => $storefrontStore, 't' => $t, 'theme' => $theme, 'platform' => $platformPremium]) ?>
 <?php else: ?>
 <?php // The platform's own marketing: only ever in this (main website) branch. ?>
 <?= $view->partial('partials.free-reseller-strip') ?>

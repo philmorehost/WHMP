@@ -227,6 +227,19 @@ if (!function_exists('current_storefront')) {
     }
 }
 
+if (!function_exists('platform_premium_site')) {
+    /**
+     * True when this request is on the MAIN website and the main website uses
+     * the premium design (Admin → Theme → Website design). Always false on a
+     * store's host — a store has its own chrome — and whenever there is no
+     * container or settings yet, so isolated view renders keep the classic look.
+     */
+    function platform_premium_site(): bool
+    {
+        return \CodeVault\Theme\PlatformSite::premiumEnabled();
+    }
+}
+
 if (!function_exists('active_promo_banner')) {
     /**
      * The one promo banner (if any) targeted at the current request path ON THE

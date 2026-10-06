@@ -63,6 +63,10 @@ final class StorefrontLayoutTest extends TestCase
                     'store.no_products_in_group' => 'No plans in this group just now.',
                 ]),
                 'money' => static fn (float $amount): string => '$' . number_format($amount, 2),
+                // The main website's premium design is a site setting; pin it off so
+                // these tests see the classic catalogue whatever an earlier test left
+                // in the shared container.
+                'platformPremium' => false,
             ]);
         } finally {
             restore_error_handler();

@@ -715,6 +715,357 @@
     margin-top: 0.75rem;
 }
 
+/* ---------------------------------------------------------------- deals --- */
+
+.sf-deals__intro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.sf-deals__intro h2 {
+    margin: 0.8rem 0 0.4rem;
+    font-size: clamp(1.4rem, 3vw, 1.9rem);
+    font-weight: 800;
+}
+
+.sf-deals__intro p {
+    margin: 0;
+    max-width: 36rem;
+    color: var(--cv-text-secondary);
+}
+
+.sf-deals__intro-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.sf-deals__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+    gap: 1.25rem;
+}
+
+.sf-deal {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1.6rem;
+    border-radius: var(--sf-radius);
+    background: var(--cv-bg-surface);
+    border: 1px solid var(--cv-border-subtle);
+    box-shadow: var(--sf-shadow-card);
+    overflow: hidden;
+    transition: transform var(--cv-transition-base), box-shadow var(--cv-transition-base);
+}
+
+.sf-deal::before {
+    content: '';
+    position: absolute;
+    top: -3.5rem;
+    right: -3.5rem;
+    width: 9rem;
+    height: 9rem;
+    border-radius: 50%;
+    background: var(--sf-tint-strong);
+}
+
+.sf-deal:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--sf-shadow-lift);
+}
+
+.sf-deal__top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.sf-deal__badge {
+    padding: 0.3rem 0.7rem;
+    border-radius: var(--cv-radius-full);
+    background: var(--sf-gradient);
+    color: #ffffff;
+    font-size: var(--cv-text-xs);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.sf-deal__expiry {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--cv-text-secondary);
+    font-size: var(--cv-text-xs);
+    font-weight: 600;
+}
+
+.sf-deal__amount {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+}
+
+.sf-deal__amount strong {
+    font-family: var(--cv-font-heading);
+    font-size: clamp(2rem, 4vw, 2.6rem);
+    font-weight: 800;
+    line-height: 1;
+    color: var(--cv-color-brand-600);
+}
+
+.sf-deal__amount span {
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--cv-text-secondary);
+}
+
+.sf-deal__text {
+    margin: 0;
+    color: var(--cv-text-secondary);
+    font-size: var(--cv-text-sm);
+}
+
+.sf-deal__code {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.4rem 0.4rem 1rem;
+    border: 2px dashed color-mix(in srgb, var(--cv-color-brand-500) 45%, transparent);
+    border-radius: 14px;
+    background: var(--sf-tint);
+}
+
+.sf-deal__code code {
+    font-family: var(--cv-font-mono);
+    font-size: var(--cv-text-base);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--cv-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sf-deal__copy {
+    flex-shrink: 0;
+    padding: 0.5rem 0.9rem;
+    border: 0;
+    border-radius: 10px;
+    background: var(--cv-bg-surface);
+    color: var(--cv-color-brand-600);
+    font: 700 var(--cv-text-xs) / 1 var(--cv-font-sans);
+    cursor: pointer;
+    box-shadow: var(--sf-shadow-card);
+}
+
+.sf-deal__copy.is-copied {
+    background: var(--cv-color-brand-500);
+    color: #ffffff;
+}
+
+.sf-deals__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: clamp(2.5rem, 6vw, 4rem) 1.5rem;
+    border-radius: var(--sf-radius-lg);
+    border: 1px dashed var(--cv-border-default);
+    background: var(--sf-tint);
+    text-align: center;
+}
+
+.sf-deals__empty h3 {
+    margin: 0.5rem 0 0;
+    font-size: 1.3rem;
+}
+
+.sf-deals__empty p {
+    margin: 0 0 0.5rem;
+    max-width: 30rem;
+    color: var(--cv-text-secondary);
+}
+
+/* -------------------------------------------------------- account menu --- */
+
+/* The signed-in customer's menu at the right of the bar: an avatar button that
+   opens the client-area shortcuts. Anchored to the right edge so it never runs
+   off the screen. */
+.sf-account__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.3rem 0.85rem 0.3rem 0.3rem;
+    border: 1px solid var(--cv-border-subtle);
+    border-radius: var(--cv-radius-full);
+    background: var(--cv-bg-surface);
+    color: var(--cv-text-primary);
+    font: 700 var(--cv-text-sm) / 1 var(--cv-font-sans);
+    cursor: pointer;
+    transition: border-color var(--cv-transition-fast), box-shadow var(--cv-transition-fast);
+}
+
+.sf-account__toggle:hover,
+.sf-account.is-open .sf-account__toggle {
+    border-color: color-mix(in srgb, var(--cv-color-brand-500) 45%, transparent);
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--cv-color-brand-500) 18%, transparent);
+}
+
+.sf-account__toggle:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--cv-color-brand-500) 55%, transparent);
+    outline-offset: 2px;
+}
+
+.sf-header--overlay .sf-account__toggle {
+    background: color-mix(in srgb, #ffffff 8%, transparent);
+    border-color: var(--sf-line-dark);
+    color: #ffffff;
+}
+
+.sf-account__avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--sf-gradient);
+    color: #ffffff;
+    font-size: var(--cv-text-sm);
+    font-weight: 800;
+}
+
+.sf-account:hover .sf-account__toggle .sf-icon--xs,
+.sf-account.is-open .sf-account__toggle .sf-icon--xs {
+    transform: rotate(180deg);
+}
+
+.sf-account__toggle .sf-icon--xs {
+    transition: transform var(--cv-transition-base);
+}
+
+.sf-account__label {
+    white-space: nowrap;
+}
+
+@media (max-width: 1320px) {
+    .sf-account__label {
+        display: none;
+    }
+}
+
+.sf-dropdown--end {
+    left: auto;
+    right: 0;
+    transform: translate(0, 8px);
+}
+
+.sf-nav__item:hover > .sf-dropdown--end,
+.sf-nav__item:focus-within > .sf-dropdown--end,
+.sf-nav__item.is-open > .sf-dropdown--end {
+    transform: translate(0, 0);
+}
+
+.sf-account .sf-dropdown {
+    min-width: 16rem;
+    padding-bottom: 0.25rem;
+}
+
+.sf-account .sf-dropdown a {
+    margin: 0.15rem 0.4rem;
+    padding: 0.55rem 0.75rem;
+}
+
+.sf-account__head {
+    margin: 0.4rem 0.4rem 0.25rem;
+    padding: 0.85rem 0.8rem 0.75rem;
+    border-bottom: 1px solid var(--cv-border-subtle);
+}
+
+.sf-account__head strong,
+.sf-account__head small {
+    display: block;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sf-account__logout {
+    margin: 0.25rem 0.4rem 0.4rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid var(--cv-border-subtle);
+}
+
+.sf-account__logout button {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--cv-color-danger-500);
+    font: 700 var(--cv-text-sm) / 1.2 var(--cv-font-sans);
+    text-align: left;
+    cursor: pointer;
+}
+
+.sf-account__logout button:hover {
+    background: color-mix(in srgb, var(--cv-color-danger-500) 9%, transparent);
+}
+
+.sf-account__logout .sf-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.sf-topbar__link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--sf-on-dark-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.sf-topbar__link:hover {
+    color: #ffffff;
+}
+
+.sf-drawer__logout {
+    margin: 0;
+}
+
+/* A catalogue with many categories gets a three-column mega menu. */
+.sf-mega--wide {
+    width: min(60rem, calc(100vw - 2rem));
+}
+
+.sf-mega--wide .sf-mega__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Too wide to hang off the SERVICES button, so it centres under the whole bar. */
+.sf-navbar__inner {
+    position: relative;
+}
+
+.sf-nav__item:has(> .sf-mega--wide) {
+    position: static;
+}
+
 /* ------------------------------------------------------------ main shell --- */
 
 .sf .sf-main {

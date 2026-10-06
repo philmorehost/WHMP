@@ -15,7 +15,8 @@ final class ThemeController
     public function __construct(
         private readonly AuthGuard $guard,
         private readonly View $view,
-        private readonly ThemeSettings $theme
+        private readonly ThemeSettings $theme,
+        private readonly ?\CodeVault\Settings\SettingsRepository $settings = null
     ) {
     }
 
@@ -26,6 +27,34 @@ final class ThemeController
         }
 
         return $this->render(['theme' => $this->theme->get(), 'error' => null, 'saved' => false]);
+    }
+
+    /**
+     * Admin → Theme → Website design: the main website's look (premium or
+     * classic) and the words on its home page. Stores are unaffected — they
+     * always use their own storefront design and their own headline.
+     */
+    public function updateWebsite(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        if ($this->settings === null) {
+            return $this->render(['theme' => $this->theme->get(), 'error' => 'Settings are not available.', 'saved' => false]);
+        }
+
+        $design = (string) $request->input('site_design', PlatformSite::DESIGN_PREMIUM) === PlatformSite::DESIGN_CLASSIC
+            ? PlatformSite::DESIGN_CLASSIC
+            : PlatformSite::DESIGN_PREMIUM;
+        $clip = static fn (string $value, int $max): string => mb_substr(trim(strip_tags($value)), 0, $max);
+
+        $this->settings->set(PlatformSite::DESIGN_KEY, $design);
+        $this->settings->set(PlatformSite::HEADLINE_KEY, $clip((string) $request->input('home_headline', ''), 120));
+        $this->settings->set(PlatformSite::TAGLINE_KEY, $clip((string) $request->input('home_tagline', ''), 320));
+        $this->settings->set(PlatformSite::TRUST_KEY, $clip((string) $request->input('trust_line', ''), 160));
+
+        return $this->render(['theme' => $this->theme->get(), 'error' => null, 'saved' => true, 'websiteSaved' => true]);
     }
 
     public function update(Request $request): Response
@@ -98,6 +127,14 @@ final class ThemeController
     /** @param array<string, mixed> $data */
     private function render(array $data): Response
     {
+        $data['website'] = [
+            'design' => PlatformSite::premiumFor($this->settings?->get(PlatformSite::DESIGN_KEY, PlatformSite::DESIGN_PREMIUM))
+                ? PlatformSite::DESIGN_PREMIUM
+                : PlatformSite::DESIGN_CLASSIC,
+            'headline' => (string) ($this->settings?->get(PlatformSite::HEADLINE_KEY, '') ?? ''),
+            'tagline' => (string) ($this->settings?->get(PlatformSite::TAGLINE_KEY, '') ?? ''),
+            'trust' => (string) ($this->settings?->get(PlatformSite::TRUST_KEY, '') ?? ''),
+        ];
         $content = $this->view->render('theme.index', $data);
 
         return Response::html($this->view->render('layouts.admin', [

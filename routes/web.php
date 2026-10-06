@@ -37,6 +37,12 @@ $router->get('/', function (Request $request, array $params, Container $containe
         return $container->make(\CodeVault\Reseller\StorefrontHome::class)->index($request);
     }
 
+    // The main website's premium home page (Admin → Theme → Website design). The
+    // classic page below stays available as a fallback when the admin picks it.
+    if (\CodeVault\Theme\PlatformSite::premiumEnabled()) {
+        return $container->make(\CodeVault\Theme\PlatformHome::class)->index($request);
+    }
+
     /** @var View $view */
     $view = $container->make(View::class);
     /** @var SeoTags $seo */

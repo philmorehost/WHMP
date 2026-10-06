@@ -33,7 +33,9 @@ $brandName = trim((string) ($theme['brandName'] ?? ''));
 // the SERVICES menu lists the categories, so the catalogue's own hero gives way
 // to a row of category pills. $storefrontCategories can be passed in (tests);
 // otherwise it is read from the store's catalogue.
-$onStorefront = isset($storefrontCategories) || current_storefront() !== null;
+// The main website in its premium design (platform_premium_site) wears the
+// same chrome, so it gets the same banner + category pills.
+$onStorefront = isset($storefrontCategories) || current_storefront() !== null || (bool) ($platformPremium ?? platform_premium_site());
 $storefrontCategories ??= null;
 
 if ($onStorefront && $storefrontCategories === null) {

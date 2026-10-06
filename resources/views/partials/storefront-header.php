@@ -29,6 +29,15 @@
  * @var array<string, mixed>|null $client                  injectable for tests
  * @var int|null $cartCount                                injectable for tests
  * @var callable|null $money                               injectable for tests
+ * @var bool|null $platform                                true ONLY from the main-website branch of layouts/client.php
+ * @var array<string, string>|null $contact                injectable for tests (platform mode)
+ * @var int|null $unreadNotifications                      injectable for tests
+ * @var bool|null $freeResellerNav                         injectable for tests (platform mode)
+ *
+ * Platform mode (`platform => true`) is the MAIN website wearing this chrome. It
+ * adds the platform's own extras — company contact details, Knowledgebase,
+ * network status, Affiliates, the Free Reseller link — and is never set on a
+ * store's host, so none of those can appear on a reseller's website.
  */
 use CodeVault\Reseller\StorefrontIcons as Icon;
 
@@ -43,6 +52,10 @@ $categories ??= null;
 $client ??= null;
 $cartCount ??= null;
 $money ??= null;
+$platform = (bool) ($platform ?? false);
+$contact ??= null;
+$unreadNotifications ??= null;
+$freeResellerNav ??= null;
 
 // Each lookup stands alone: one missing service (a view rendered without a
 // session, say) must not blank the menu or the currency switcher with it.
@@ -86,18 +99,28 @@ if ($logo !== '' && (str_starts_with($logo, '/assets') || str_starts_with($logo,
 
 $supportEmail = trim((string) ($store['support_email'] ?? ''));
 $whatsapp = '';
+$phone = '';
 
-try {
-    $ownerPhone = null;
+if ($platform) {
+    // The platform's own company details — never a store's, never on a store.
+    $contact ??= \CodeVault\Theme\PlatformSite::contact();
+    $supportEmail = trim((string) ($contact['email'] ?? ''));
+    $whatsapp = (string) ($contact['whatsapp'] ?? '');
+    $phone = $whatsapp === '' ? trim((string) ($contact['phone'] ?? '')) : '';
+    $freeResellerNav ??= \CodeVault\Reseller\FreeResellerProgramme::advertFor(\CodeVault\Reseller\FreeResellerProgramme::PLACEMENT_NAV) !== null;
+} else {
+    try {
+        $ownerPhone = null;
 
-    if (!\CodeVault\Reseller\ResellerChat::isConfigured($store) && (int) ($store['client_id'] ?? 0) > 0) {
-        $owner = \CodeVault\Support\App::container()->make(\CodeVault\Clients\ClientRepository::class)->find((int) $store['client_id']);
-        $ownerPhone = $owner === null ? null : (string) ($owner['phone'] ?? '');
+        if (!\CodeVault\Reseller\ResellerChat::isConfigured($store) && (int) ($store['client_id'] ?? 0) > 0) {
+            $owner = \CodeVault\Support\App::container()->make(\CodeVault\Clients\ClientRepository::class)->find((int) $store['client_id']);
+            $ownerPhone = $owner === null ? null : (string) ($owner['phone'] ?? '');
+        }
+
+        $whatsapp = (string) (\CodeVault\Reseller\ResellerChat::whatsappDigitsFor($store, $ownerPhone) ?? '');
+    } catch (\Throwable) {
+        $whatsapp = (string) (\CodeVault\Reseller\ResellerChat::whatsappDigitsFor($store, null) ?? '');
     }
-
-    $whatsapp = (string) (\CodeVault\Reseller\ResellerChat::whatsappDigitsFor($store, $ownerPhone) ?? '');
-} catch (\Throwable) {
-    $whatsapp = (string) (\CodeVault\Reseller\ResellerChat::whatsappDigitsFor($store, null) ?? '');
 }
 
 $path = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
@@ -116,6 +139,33 @@ $cycleShort = static function (?string $cycle): string {
     };
 };
 $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+$freeResellerNav = $platform && (bool) $freeResellerNav;
+
+if ($client !== null && $unreadNotifications === null) {
+    $unreadNotifications = $resolve(static fn ($c) => $c->make(\CodeVault\Notifications\ClientNotificationRepository::class)->unreadCount((int) $client['id']));
+}
+
+$unreadNotifications = (int) ($unreadNotifications ?? 0);
+$clientName = $client === null ? '' : trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
+$clientName = $clientName !== '' ? $clientName : (string) ($client['email'] ?? 'My account');
+$clientInitial = strtoupper(mb_substr($clientName, 0, 1)) ?: 'A';
+
+// The signed-in customer's shortcuts. The same generic client-area routes on
+// every site; the affiliate scheme is the platform's, so only in platform mode.
+$accountLinks = [
+    ['/client/dashboard', 'panel', 'Dashboard'],
+    ['/client/services', 'server', 'My services'],
+    ['/client/domains', 'globe', 'My domains'],
+    ['/client/invoices', 'wallet', 'Invoices'],
+    ['/client/tickets', 'ticket', 'Support tickets'],
+    ['/client/emails', 'mail', 'My emails'],
+    ['/client/payment-methods', 'lock', 'Payment methods'],
+    ['/client/account', 'user', 'Account settings'],
+];
+
+if ($platform) {
+    $accountLinks[] = ['/client/affiliate', 'trend', 'Affiliates'];
+}
 ?>
 <header class="sf-header<?= $home ? ' sf-header--overlay' : '' ?>" data-sf-header>
     <div class="sf-topbar">
@@ -127,7 +177,13 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
                 <?php if ($whatsapp !== ''): ?>
                     <a href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><?= Icon::svg('phone') ?><span>+<?= e($whatsapp) ?></span></a>
                 <?php endif; ?>
-                <?php if ($supportEmail === '' && $whatsapp === ''): ?>
+                <?php if ($phone !== ''): ?>
+                    <a href="tel:<?= e((string) preg_replace('/[^\d+]/', '', $phone)) ?>"><?= Icon::svg('phone') ?><span><?= e($phone) ?></span></a>
+                <?php endif; ?>
+                <?php if ($platform): ?>
+                    <a href="/status" class="sf-hide-sm"><?= Icon::svg('trend') ?><span>Network status</span></a>
+                <?php endif; ?>
+                <?php if ($supportEmail === '' && $whatsapp === '' && $phone === ''): ?>
                     <span><?= Icon::svg('headset') ?><span>Questions? <a href="/client/tickets/create">Contact our team</a></span></span>
                 <?php endif; ?>
             </div>
@@ -154,6 +210,9 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
                 <?php endif; ?>
                 <?php if ($client !== null): ?>
                     <a href="/client/dashboard"><?= Icon::svg('user') ?><span>My account</span></a>
+                    <form method="post" action="/client/logout" class="sf-topbar__form"><?= csrf_field() ?>
+                        <button type="submit" class="sf-topbar__link">Sign out</button>
+                    </form>
                 <?php else: ?>
                     <a href="/client/login"><?= Icon::svg('user') ?><span>Sign in</span></a>
                     <a href="/client/register" class="sf-hide-sm">Create account</a>
@@ -180,7 +239,7 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
                     <button type="button" class="sf-nav__link<?= $isActive('/store') ? ' is-active' : '' ?>" aria-expanded="false" aria-haspopup="true" data-sf-dropdown-toggle>
                         Services <?= Icon::svg('chevron', 'sf-icon sf-icon--xs') ?>
                     </button>
-                    <div class="sf-mega" role="menu">
+                    <div class="sf-mega<?= count($categories) > 8 ? ' sf-mega--wide' : '' ?>" role="menu">
                         <div class="sf-mega__grid">
                             <?php foreach ($categories as $category): ?>
                                 <a class="sf-mega__item" role="menuitem" href="/store?group_id=<?= (int) $category['id'] ?>">
@@ -226,8 +285,16 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
                         <?php if ($whatsapp !== ''): ?>
                             <a role="menuitem" href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><?= Icon::svg('phone') ?><span><strong>Chat on WhatsApp</strong><small>+<?= e($whatsapp) ?></small></span></a>
                         <?php endif; ?>
+                        <?php if ($platform): ?>
+                            <a role="menuitem" href="/kb"><?= Icon::svg('code') ?><span><strong>Knowledgebase</strong><small>Guides and answers</small></span></a>
+                            <a role="menuitem" href="/status"><?= Icon::svg('trend') ?><span><strong>Network status</strong><small>Live service health</small></span></a>
+                        <?php endif; ?>
                     </div>
                 </div>
+
+                <?php if ($freeResellerNav): ?>
+                    <a class="sf-nav__link sf-nav__link--promo<?= $isActive('/free-reseller') ? ' is-active' : '' ?>" href="/free-reseller">Free Reseller <span class="sf-nav__pill">Free</span></a>
+                <?php endif; ?>
             </nav>
 
             <div class="sf-navbar__actions">
@@ -240,7 +307,29 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
                     <?php if ($cartCount > 0): ?><span class="sf-badge"><?= $cartCount > 99 ? '99+' : $cartCount ?></span><?php endif; ?>
                 </a>
                 <?php if ($client !== null): ?>
-                    <a href="/client/dashboard" class="sf-btn sf-btn--primary sf-hide-md">Client area</a>
+                    <a href="/client/notifications" class="sf-iconbtn sf-hide-sm" aria-label="Notifications<?= $unreadNotifications > 0 ? ' (' . $unreadNotifications . ' unread)' : '' ?>">
+                        <svg class="sf-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10.5V7a5 5 0 0 0-10 0v3.5L1.5 12.5h13L13 10.5z"/><path d="M6.3 14a1.8 1.8 0 0 0 3.4 0"/></svg>
+                        <?php if ($unreadNotifications > 0): ?><span class="sf-badge"><?= $unreadNotifications > 99 ? '99+' : $unreadNotifications ?></span><?php endif; ?>
+                    </a>
+                    <div class="sf-nav__item sf-account sf-hide-md" data-sf-dropdown>
+                        <button type="button" class="sf-account__toggle" aria-expanded="false" aria-haspopup="true" data-sf-dropdown-toggle>
+                            <span class="sf-account__avatar" aria-hidden="true"><?= e($clientInitial) ?></span>
+                            <span class="sf-account__label">Client area</span>
+                            <?= Icon::svg('chevron', 'sf-icon sf-icon--xs') ?>
+                        </button>
+                        <div class="sf-dropdown sf-dropdown--end" role="menu">
+                            <div class="sf-account__head">
+                                <strong><?= e($clientName) ?></strong>
+                                <?php if (!empty($client['email'])): ?><small><?= e((string) $client['email']) ?></small><?php endif; ?>
+                            </div>
+                            <?php foreach ($accountLinks as [$href, $icon, $label]): ?>
+                                <a role="menuitem" href="<?= e($href) ?>"><?= Icon::svg($icon) ?><span><strong><?= e($label) ?></strong></span></a>
+                            <?php endforeach; ?>
+                            <form method="post" action="/client/logout" class="sf-account__logout"><?= csrf_field() ?>
+                                <button type="submit" role="menuitem"><?= Icon::svg('arrow') ?><span>Sign out</span></button>
+                            </form>
+                        </div>
+                    </div>
                 <?php else: ?>
                     <a href="<?= $home ? '#plans' : '/store' ?>" class="sf-btn sf-btn--primary sf-hide-md">Get started</a>
                 <?php endif; ?>
@@ -254,7 +343,7 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
     <div class="sf-drawer" id="sf-drawer" data-sf-drawer hidden>
         <nav class="sf-drawer__nav" aria-label="Mobile">
             <a href="/">Home</a>
-            <details open>
+            <details<?= count($categories) > 8 ? '' : ' open' ?>>
                 <summary>Services <?= Icon::svg('chevron', 'sf-icon sf-icon--xs') ?></summary>
                 <?php foreach ($categories as $category): ?>
                     <a class="sf-drawer__sub" href="/store?group_id=<?= (int) $category['id'] ?>">
@@ -269,15 +358,34 @@ $redirectBack = (string) ($_SERVER['REQUEST_URI'] ?? '/');
                 <a class="sf-drawer__sub" href="/domains/transfer"><?= Icon::svg('transfer') ?>Transfer a domain</a>
             </details>
             <a href="/deals">Deals</a>
+            <?php if ($freeResellerNav): ?>
+                <a href="/free-reseller">Free Reseller <span class="sf-nav__pill">Free</span></a>
+            <?php endif; ?>
             <a href="/client/tickets/create">Support</a>
+            <?php if ($platform): ?>
+                <a class="sf-drawer__sub" href="/kb"><?= Icon::svg('code') ?>Knowledgebase</a>
+                <a class="sf-drawer__sub" href="/status"><?= Icon::svg('trend') ?>Network status</a>
+            <?php endif; ?>
             <?php if ($supportEmail !== ''): ?>
                 <a class="sf-drawer__sub" href="mailto:<?= e($supportEmail) ?>"><?= Icon::svg('mail') ?><?= e($supportEmail) ?></a>
             <?php endif; ?>
             <?php if ($whatsapp !== ''): ?>
                 <a class="sf-drawer__sub" href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><?= Icon::svg('phone') ?>+<?= e($whatsapp) ?></a>
             <?php endif; ?>
+            <?php if ($phone !== ''): ?>
+                <a class="sf-drawer__sub" href="tel:<?= e((string) preg_replace('/[^\d+]/', '', $phone)) ?>"><?= Icon::svg('phone') ?><?= e($phone) ?></a>
+            <?php endif; ?>
             <?php if ($client !== null): ?>
+                <details>
+                    <summary>My account <?= Icon::svg('chevron', 'sf-icon sf-icon--xs') ?></summary>
+                    <?php foreach ($accountLinks as [$href, $icon, $label]): ?>
+                        <a class="sf-drawer__sub" href="<?= e($href) ?>"><?= Icon::svg($icon) ?><?= e($label) ?></a>
+                    <?php endforeach; ?>
+                </details>
                 <a href="/client/dashboard" class="sf-btn sf-btn--primary sf-btn--block">Client area</a>
+                <form method="post" action="/client/logout" class="sf-drawer__logout"><?= csrf_field() ?>
+                    <button type="submit" class="sf-btn sf-btn--ghost sf-btn--block">Sign out</button>
+                </form>
             <?php else: ?>
                 <a href="/client/login" class="sf-btn sf-btn--ghost sf-btn--block">Sign in</a>
                 <a href="/client/register" class="sf-btn sf-btn--primary sf-btn--block">Create account</a>

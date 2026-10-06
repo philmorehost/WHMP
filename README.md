@@ -180,6 +180,30 @@ A public offer of free reseller websites, advertised on the **main website only*
   - up to six demo links (http(s) only).
   - While the programme is closed, visitors see a "not open" notice and admins see a marked preview.
 
+### Main website design (premium)
+
+The main website (the platform's own host) now uses the same premium hosting design as the reseller
+storefronts, on **every public page**: home, store and product pages, cart, domain register/transfer, deals,
+knowledgebase, sign-in/register, and the client area.
+
+- **Home page** (`CodeVault\Theme\PlatformHome`, view `pages/home-premium.php`): hero with live "from" prices,
+  domain search with TLD prices, a services grid (every category, its lowest price and plan count), popular
+  plans in tabs, the guarantees band, the Free Reseller offer (when it is advertised), an "all in one place"
+  split with real counts, three steps and an FAQ with WhatsApp/ticket buttons.
+- **Header**: contact strip (company email, WhatsApp/phone, network status, currency, sign in), sticky menu
+  with a Services mega menu, Domains, Deals, Support (tickets, WhatsApp, Knowledgebase, network status) and
+  Free Reseller. Signed-in customers get an account menu (dashboard, services, domains, invoices, tickets,
+  emails, payment methods, account, affiliates, sign out) and a notifications bell.
+- **Footer**: services, domains & account, company pages (Free Reseller, affiliates, knowledgebase, status,
+  terms) and contact details from **Settings → Company** (email, phone, WhatsApp, address).
+- **Admin → Theme → Website design**: switch between *Premium* (default) and *Classic*, and set the home-page
+  headline, tagline and the line under "Why customers choose us". Colours follow the theme's primary colour.
+
+Isolation: the platform-only parts (company contacts, knowledgebase/status links, affiliates, Free Reseller)
+are rendered only when `layouts/client.php` passes `platform => true`, which it does only in its main-website
+branch. A reseller store never receives them. Platform-only styles live in `public/assets/css/platform.css`,
+loaded only on the main website.
+
 ## InterServer VPS: client self-service
 
 Clients control their InterServer VPS from their service page: start, restart and stop;
