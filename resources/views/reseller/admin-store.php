@@ -185,6 +185,18 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                     <?php endif; ?>
                 </td>
             </tr>
+            <tr>
+                <th>Sign in with Google</th>
+                <td>
+                    <?php if ((int) ($store['google_enabled'] ?? 0) === 1 && trim((string) ($store['google_client_id'] ?? '')) !== ''): ?>
+                        <span class="cv-badge cv-badge--success">On</span> using the reseller's own Google app
+                    <?php elseif (trim((string) ($store['google_client_id'] ?? '')) !== ''): ?>
+                        <span class="cv-badge">Off</span> keys saved, switched off
+                    <?php else: ?>
+                        <span class="cv-badge">Off</span>
+                    <?php endif; ?>
+                </td>
+            </tr>
             <tr><th>Opened</th><td><?= e((string) ($store['created_at'] ?? '')) ?></td></tr>
             </tbody>
         </table>

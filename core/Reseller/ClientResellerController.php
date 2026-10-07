@@ -55,7 +55,9 @@ final class ClientResellerController
         // reason as above; without them the overview simply shows less.
         private readonly ?ResellerStoreRepository $storeRows = null,
         private readonly ?ResellerClientDirectory $directory = null,
-        private readonly ?ResellerLedgerService $ledger = null
+        private readonly ?ResellerLedgerService $ledger = null,
+        // "Sign in with Google" for the store. Optional and last, as above.
+        private readonly ?\CodeVault\Clients\GoogleSignIn $google = null
     ) {
     }
 
@@ -371,7 +373,124 @@ final class ClientResellerController
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),
             'docsUrl' => '/client/reseller/docs',
+            'google' => $store === null ? null : $this->googleFormValues($store),
         ]);
+    }
+
+    /**
+     * What the store's "Sign in with Google" card shows. The secret itself is never
+     * sent back to the browser — only whether one is saved.
+     *
+     * @param array<string, mixed> $store
+     * @return array<string, mixed>
+     */
+    private function googleFormValues(array $store): array
+    {
+        $google = $this->googleSignIn();
+        $custom = ResellerStoreLocator::normaliseHost((string) ($store['custom_domain'] ?? ''));
+        $free = $this->locator->platformAddressFor($store);
+
+        $callbacks = array_merge(
+            $free === null ? [] : \CodeVault\Clients\GoogleSignIn::callbackUrlsFor([$free], $this->locator->platformScheme()),
+            $custom === '' ? [] : \CodeVault\Clients\GoogleSignIn::callbackUrlsFor([$custom], 'https')
+        );
+        $origins = array_map(static fn (string $url): string => substr($url, 0, -strlen(\CodeVault\Clients\GoogleSignIn::CALLBACK_PATH)), $callbacks);
+
+        return [
+            'allowed' => $google === null || $google->resellersAllowed(),
+            'enabled' => (int) ($store['google_enabled'] ?? 0) === 1,
+            'clientId' => (string) ($store['google_client_id'] ?? ''),
+            'hasSecret' => trim((string) ($store['google_client_secret'] ?? '')) !== '',
+            'live' => $google !== null && $google->storeCredentials($store) !== null,
+            'callbackUrls' => $callbacks,
+            'origins' => $origins,
+            'customPending' => $custom !== '' && empty($store['domain_verified_at']),
+        ];
+    }
+
+    /**
+     * Turns "Sign in with Google" on or off for the store, with the reseller's OWN
+     * Google app. Their customers then come back to the store's own address and see
+     * the reseller's name on Google's consent screen — never ours.
+     */
+    public function saveStoreGoogle(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+        $google = $this->googleSignIn();
+
+        if ($store === null || $this->storeRows === null || $google === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $storeId = (int) $store['id'];
+
+        if ((string) $request->input('google_action', '') === 'remove') {
+            $this->storeRows->clearGoogle($storeId);
+            $this->session->flash('reseller_notice', 'Google sign-in removed from your store, and your Google keys were deleted.');
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        $enabled = (string) $request->input('google_enabled', '') === '1';
+
+        if ($enabled && !$google->resellersAllowed()) {
+            $this->session->flash('reseller_error', 'Google sign-in is not available for stores at the moment.');
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        $result = \CodeVault\Clients\GoogleSignIn::validateStoreSettings(
+            $enabled,
+            (string) $request->input('google_client_id', ''),
+            (string) $request->input('google_client_secret', ''),
+            trim((string) ($store['google_client_secret'] ?? '')) !== ''
+        );
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        try {
+            $sealed = $result['secret'] === null ? null : $google->sealSecret($result['secret']);
+        } catch (\Throwable) {
+            $this->session->flash('reseller_error', 'Your Google secret could not be stored securely. Please contact support.');
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        $this->storeRows->saveGoogle($storeId, $result['enabled'], $result['clientId'], $sealed);
+
+        $this->session->flash(
+            'reseller_notice',
+            $result['enabled']
+                ? 'Google sign-in is ON — your customers now see "Sign in with Google" on your login and sign-up pages.'
+                : 'Google sign-in saved and switched off. Your customers sign in with email and password.'
+        );
+
+        return Response::redirect('/client/reseller/store#google-signin');
+    }
+
+    private function googleSignIn(): ?\CodeVault\Clients\GoogleSignIn
+    {
+        if ($this->google !== null) {
+            return $this->google;
+        }
+
+        try {
+            return \CodeVault\Support\App::container()->make(\CodeVault\Clients\GoogleSignIn::class);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

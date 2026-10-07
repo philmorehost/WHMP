@@ -22,20 +22,51 @@
 
         <hr style="border:0;border-top:1px solid var(--cv-border-default);margin:var(--cv-space-4) 0;">
 
-        <h3 style="margin-top:0;font-size:var(--cv-text-md);">Google OAuth 2.0 Client Setup</h3>
+        <?php
+        $googleHasSecret ??= false;
+        $googleResellersAllowed ??= true;
+        $googleOn = trim((string) ($googleClientId ?? '')) !== '' && $googleHasSecret;
+        ?>
+        <h3 style="margin-top:0;font-size:var(--cv-text-md);display:flex;align-items:center;gap:var(--cv-space-2);flex-wrap:wrap;">
+            Sign in with Google — main website
+            <?php if ($googleOn): ?>
+                <span class="cv-badge cv-badge--success">On</span>
+            <?php else: ?>
+                <span class="cv-badge">Off</span>
+            <?php endif; ?>
+        </h3>
         <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-bottom:var(--cv-space-3);">
-            To enable Google Sign-In: Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--cv-color-brand-500);">Google Cloud Console</a> &rsaquo; Create Credentials &rsaquo; OAuth client ID (Web Application).<br>
-            Set Authorized redirect URIs to: <code style="background:var(--cv-bg-surface-sunken);padding:2px 6px;border-radius:4px;"><?= e(rtrim((string) ($appUrl ?? 'http://localhost'), '/')) ?>/client/auth/google/callback</code>
+            The button appears on the client login and registration pages once <strong>both</strong> the client ID and the
+            secret are saved. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="color:var(--cv-color-brand-500);">Google Cloud Console</a> &rsaquo; Create Credentials &rsaquo; OAuth client ID (Web Application).<br>
+            Set Authorized redirect URIs to: <code style="background:var(--cv-bg-surface-sunken);padding:2px 6px;border-radius:4px;user-select:all;"><?= e(rtrim((string) ($appUrl ?? 'http://localhost'), '/')) ?>/client/auth/google/callback</code>
         </p>
 
         <div class="cv-field">
             <label class="cv-label">Google OAuth Client ID</label>
-            <input class="cv-input" name="google_client_id" value="<?= e($googleClientId ?? '') ?>" placeholder="e.g. 1234567890-xxx.apps.googleusercontent.com">
+            <input class="cv-input" name="google_client_id" value="<?= e($googleClientId ?? '') ?>" placeholder="e.g. 1234567890-xxx.apps.googleusercontent.com" autocomplete="off">
         </div>
 
         <div class="cv-field">
             <label class="cv-label">Google OAuth Client Secret</label>
-            <input class="cv-input" type="password" name="google_client_secret" value="<?= e($googleClientSecret ?? '') ?>" placeholder="e.g. GOCSPX-xxxxxxxxxxxx">
+            <input class="cv-input" type="password" name="google_client_secret" value="" autocomplete="new-password"
+                   placeholder="<?= $googleHasSecret ? '•••••••• saved — leave blank to keep it' : 'e.g. GOCSPX-xxxxxxxxxxxx' ?>">
+            <?php if ($googleHasSecret): ?>
+                <label style="display:flex;align-items:center;gap:var(--cv-space-2);margin-top:var(--cv-space-2);font-size:var(--cv-text-xs);cursor:pointer;">
+                    <input type="checkbox" name="google_clear_secret" value="1"> Delete the saved secret (turns Google sign-in off)
+                </label>
+            <?php endif; ?>
+        </div>
+
+        <div class="cv-field">
+            <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                <input type="checkbox" name="google_resellers_allowed" value="1" <?= $googleResellersAllowed ? 'checked' : '' ?>>
+                Let resellers offer "Sign in with Google" on their stores
+            </label>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-1);">
+                Each reseller connects <strong>their own</strong> Google app in <em>Reseller panel &rsaquo; Your store</em>, so their
+                customers see the reseller's brand on Google and come back to the reseller's own address. Stores never use the
+                main website's Google app. Untick to hide the button on every store.
+            </p>
         </div>
 
         <button class="cv-btn" type="submit">Save Security Settings</button>

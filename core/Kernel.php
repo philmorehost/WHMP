@@ -282,6 +282,17 @@ class Kernel
         // answer; null on the platform's own host.
         $this->container->singleton(CurrentReseller::class, fn () => new CurrentReseller());
 
+        // "Sign in with Google" for whichever site is being served: the platform's
+        // own Google app on the main website, a reseller's own app on their store.
+        // A short timeout — someone is waiting on the sign-in page.
+        $this->container->bind(\CodeVault\Clients\GoogleSignIn::class, fn (Container $c) => new \CodeVault\Clients\GoogleSignIn(
+            $c->make(SettingsRepository::class),
+            $c->make(Config::class),
+            $c->make(CurrentReseller::class),
+            new \CodeVault\Security\SecretBox($c->make(Config::class)),
+            new CurlHttpClient(timeoutSeconds: 20)
+        ));
+
         // What a storefront sells, for its SERVICES menu, footer and home page.
         // A singleton so the header, the page and the footer of one request
         // share one set of catalogue queries.

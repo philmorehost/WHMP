@@ -34,7 +34,7 @@ final class SecurityController
         }
 
         $configuredUrl = (string) \CodeVault\Support\App::container()->make(\CodeVault\Config::class)->env('APP_URL', '');
-        $appUrl = ($configuredUrl !== '' && !str_contains($configuredUrl, 'localhost')) ? $configuredUrl : $request->baseUrl();
+        $appUrl = \CodeVault\Clients\GoogleSignIn::platformBaseUrl($configuredUrl, $request->baseUrl());
 
         $content = $this->view->render('security.index', [
             'recentAttempts' => $this->attempts->recent(50),
@@ -42,8 +42,11 @@ final class SecurityController
             'countryRules' => $this->countryRules->all(),
             'accountLocks' => $this->accountLocks->activeLocks(),
             'twoFactorEnabled' => $this->settings->get('security.2fa_enabled', '1') === '1',
-            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
-            'googleClientSecret' => $this->settings->get('auth.google_client_secret', ''),
+            'googleClientId' => $this->settings->get(\CodeVault\Clients\GoogleSignIn::KEY_CLIENT_ID, ''),
+            // Never the secret itself: a password field pre-filled with it would put it
+            // in the page source of every admin screen load.
+            'googleHasSecret' => trim((string) $this->settings->get(\CodeVault\Clients\GoogleSignIn::KEY_CLIENT_SECRET, '')) !== '',
+            'googleResellersAllowed' => (string) $this->settings->get(\CodeVault\Clients\GoogleSignIn::KEY_RESELLERS_ALLOWED, '1') !== '0',
             'appUrl' => $appUrl,
         ]);
 
@@ -60,8 +63,22 @@ final class SecurityController
         }
 
         $this->settings->set('security.2fa_enabled', (string) $request->input('two_factor_enabled', '') === '1' ? '1' : '0');
-        $this->settings->set('auth.google_client_id', trim((string) $request->input('google_client_id', '')));
-        $this->settings->set('auth.google_client_secret', trim((string) $request->input('google_client_secret', '')));
+        $this->settings->set(\CodeVault\Clients\GoogleSignIn::KEY_CLIENT_ID, trim((string) $request->input('google_client_id', '')));
+
+        // The secret is never shown back, so a blank field means "keep the saved one";
+        // the tick-box is how it is deleted.
+        $secret = trim((string) $request->input('google_client_secret', ''));
+
+        if ((string) $request->input('google_clear_secret', '') === '1') {
+            $this->settings->set(\CodeVault\Clients\GoogleSignIn::KEY_CLIENT_SECRET, '');
+        } elseif ($secret !== '') {
+            $this->settings->set(\CodeVault\Clients\GoogleSignIn::KEY_CLIENT_SECRET, $secret);
+        }
+
+        $this->settings->set(
+            \CodeVault\Clients\GoogleSignIn::KEY_RESELLERS_ALLOWED,
+            (string) $request->input('google_resellers_allowed', '') === '1' ? '1' : '0'
+        );
 
         return Response::redirect('/admin/security');
     }

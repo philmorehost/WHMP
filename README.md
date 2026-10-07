@@ -204,6 +204,29 @@ are rendered only when `layouts/client.php` passes `platform => true`, which it 
 branch. A reseller store never receives them. Platform-only styles live in `public/assets/css/platform.css`,
 loaded only on the main website.
 
+### Sign in with Google (main website and reseller stores)
+
+`CodeVault\Clients\GoogleSignIn` runs "Sign in with Google" for **whichever site is being served**:
+
+- **Main website** — Admin → Security: paste the Google OAuth client ID **and** secret (the button appears
+  only when both are saved). Redirect URI: `{APP_URL}/client/auth/google/callback`. The secret is never shown
+  back on the page; leave it blank to keep it, or tick *Delete the saved secret*.
+- **Reseller stores** — Reseller panel → Your store → *Sign in with Google*: the reseller pastes **their own**
+  Google client ID and secret and ticks *Show "Sign in with Google" on my store*. The card lists the exact
+  redirect URIs to give Google (the store's free address and its own domain). Their customers see the
+  reseller's brand on Google's consent screen, come back to the store's own address, and new sign-ups become
+  the **store's** customers. The secret is stored encrypted with `APP_KEY` (`SecretBox`).
+- Admin → Security → *Let resellers offer "Sign in with Google" on their stores* switches it off for every
+  store at once (on by default). Admin → Resellers → a store shows whether it is on.
+
+Isolation rules: a store **never** uses the platform's Google app (and vice versa); an existing account that
+belongs to another provider is refused, exactly as with a password. Hardening: a single-use `state` (15
+minutes) is checked on every callback, only Google-**verified** email addresses are accepted, closed accounts
+are refused, and an account with two-factor sign-in still has to enter its code after Google.
+
+Migration `0213_reseller_google_signin` adds `google_enabled`, `google_client_id` and `google_client_secret`
+to `resellers`.
+
 ## InterServer VPS: client self-service
 
 Clients control their InterServer VPS from their service page: start, restart and stop;

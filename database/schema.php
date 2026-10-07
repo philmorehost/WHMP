@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0212_vps_remote_link.php',
-    'migration_count' => 211,
+    'last_migration' => '0213_reseller_google_signin.php',
+    'migration_count' => 212,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -3558,6 +3558,9 @@ return [
                 'chat_configured_at' => 'DATETIME NULL',
                 'home_headline' => 'VARCHAR(120) NULL',
                 'home_tagline' => 'VARCHAR(300) NULL',
+                'google_enabled' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'google_client_id' => 'VARCHAR(191) NULL',
+                'google_client_secret' => 'TEXT NULL',
             ],
             'primary' => [
                 'id',

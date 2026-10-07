@@ -160,6 +160,39 @@ final class ResellerStoreRepository
     }
 
     /**
+     * The store's "Sign in with Google" settings. A null $sealedSecret keeps the saved
+     * secret (the form never shows it back, so a blank field means "unchanged");
+     * switching Google off keeps the credentials, so switching it back on is one click.
+     */
+    public function saveGoogle(int $id, bool $enabled, ?string $clientId, ?string $sealedSecret): void
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        if ($sealedSecret === null) {
+            $this->db->update(
+                'UPDATE resellers SET google_enabled = ?, google_client_id = ?, updated_at = ? WHERE id = ?',
+                [$enabled ? 1 : 0, $this->nullIfBlank($clientId), $now, $id]
+            );
+
+            return;
+        }
+
+        $this->db->update(
+            'UPDATE resellers SET google_enabled = ?, google_client_id = ?, google_client_secret = ?, updated_at = ? WHERE id = ?',
+            [$enabled ? 1 : 0, $this->nullIfBlank($clientId), $sealedSecret, $now, $id]
+        );
+    }
+
+    /** Forgets the store's Google credentials entirely (and switches Google off). */
+    public function clearGoogle(int $id): void
+    {
+        $this->db->update(
+            'UPDATE resellers SET google_enabled = 0, google_client_id = NULL, google_client_secret = NULL, updated_at = ? WHERE id = ?',
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+    }
+
+    /**
      * The store's own support chat. Empty strings are stored as NULL so "not set"
      * is one value rather than two — the difference between '' and NULL would
      * otherwise have to be handled at every read, including in the widget partial
