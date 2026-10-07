@@ -225,7 +225,9 @@ minutes) is checked on every callback, only Google-**verified** email addresses 
 are refused, and an account with two-factor sign-in still has to enter its code after Google.
 
 Migration `0213_reseller_google_signin` adds `google_enabled`, `google_client_id` and `google_client_secret`
-to `resellers`.
+to `resellers`. Nothing to run by hand: like every migration, it is applied automatically on the first page
+load after the update is uploaded, and SchemaReconciler adds the columns from `database/schema.php` if it
+ever fails. Until then a store simply shows no Google button.
 
 ## InterServer VPS: client self-service
 
