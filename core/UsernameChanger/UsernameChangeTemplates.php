@@ -29,6 +29,8 @@ final class UsernameChangeTemplates
     public const STAFF_FAILED = 'username_change.staff_failed';
     public const STAFF_MISMATCH = 'username_change.staff_mismatch';
     public const STORE_APPROVAL = 'username_change.store_approval';
+    public const PIN_CODE = 'username_change.pin_code';
+    public const PIN_CHANGED = 'username_change.pin_changed';
 
     /** @return array<string, array{name: string, subject: string, body: string}> */
     public static function all(): array
@@ -91,13 +93,31 @@ final class UsernameChangeTemplates
                 'subject' => 'Approval needed: username change for {{domain}}',
                 'body' => '<p>Hello,</p><p>Your customer {{client_name}} asked to change the cPanel username of <strong>{{domain}}</strong> from {{old_username}} to <strong>{{new_username}}</strong>.</p><p><strong>Reason:</strong> {{reason}}</p><p><a href="{{panel_url}}">Approve or decline it in your reseller panel</a>.</p>',
             ],
+            self::PIN_CODE => [
+                'name' => 'Security PIN: Reset Code',
+                'subject' => 'Your Security PIN reset code: {{code}}',
+                'body' => '<p>Hello {{client_name}},</p><p>Use this code to set a new Security PIN on your account:</p><p style="font-size:24px;letter-spacing:6px;font-weight:700;">{{code}}</p><p>It expires in {{minutes}} minutes. If you did not ask for this, ignore this email — your PIN has not changed.</p>' . $sign,
+            ],
+            self::PIN_CHANGED => [
+                'name' => 'Security PIN: Changed',
+                'subject' => 'Your Security PIN was changed',
+                'body' => '<p>Hello {{client_name}},</p><p>The Security PIN on your account was changed on {{changed_at}}.</p><p>If this was not you, sign in and change your password and PIN straight away from <a href="{{account_url}}">your account</a>, and contact support.</p>' . $sign,
+            ],
         ];
     }
 
-    /** Inserts any template that is missing. Never overwrites an existing one. */
-    public static function ensure(Database $db): void
+    /**
+     * Inserts any template that is missing. Never overwrites an existing one.
+     *
+     * @param array<int, string>|null $only limit to these keys
+     */
+    public static function ensure(Database $db, ?array $only = null): void
     {
         foreach (self::all() as $key => $template) {
+            if ($only !== null && !in_array($key, $only, true)) {
+                continue;
+            }
+
             $db->insert(
                 'INSERT IGNORE INTO email_templates (`key`, name, subject, body_html, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
                 [$key, $template['name'], $template['subject'], $template['body']]

@@ -18,6 +18,12 @@ $router->get('/client/services/{id}/username/warm', [ClientUsernameController::c
 $router->post('/client/services/{id}/username', [ClientUsernameController::class, 'submit']);
 $router->post('/client/services/{id}/username/{rid}/cancel', [ClientUsernameController::class, 'cancel']);
 $router->post('/client/services/{id}/username/{rid}/resend', [ClientUsernameController::class, 'resend']);
+// In-modal Security PIN reset (wrong / forgotten / locked / never set).
+$router->post('/client/services/{id}/username/pin/code', [ClientUsernameController::class, 'pinCode']);
+$router->post('/client/services/{id}/username/pin', [ClientUsernameController::class, 'pinSave']);
+// In-modal payment of the fee: wallet, or any gateway via the invoice routes.
+$router->get('/client/services/{id}/username/pay', [ClientUsernameController::class, 'payPanel']);
+$router->post('/client/services/{id}/username/{rid}/pay/wallet', [ClientUsernameController::class, 'payWallet']);
 
 // Emailed confirmation — works signed out, on the site it was issued for.
 $router->get('/username-change/confirm/{token}', [ClientUsernameController::class, 'confirmPage']);

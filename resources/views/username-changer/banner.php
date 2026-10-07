@@ -16,7 +16,12 @@
 $sid = (int) $ucn['service_id'];
 $open = $ucn['open'] ?? null;
 $accent = (string) ($ucn['accent'] ?? '');
-$json = json_encode($ucn, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
+$pay = $ucn['pay'] ?? null;
+$pin = $ucn['pin'] ?? null;
+$hasPin = !empty($ucn['has_pin']);
+$fee = (string) ($ucn['fee'] ?? '');
+$paymentReturn = (string) ($_GET['payment'] ?? '');
+$json = json_encode(array_diff_key($ucn, ['pay' => true, 'history' => true]), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 ?>
 <link rel="stylesheet" href="/assets/css/username-changer.css">
 <div class="ucn" id="ucn-<?= $sid ?>" data-ucn-root="<?= $sid ?>"<?php if ($accent !== ''): ?> style="--ucn-accent: <?= e($accent) ?>;"<?php endif; ?>>
@@ -55,12 +60,20 @@ $json = json_encode($ucn, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX
                 <button type="button" class="ucn-icon-btn" data-ucn-close aria-label="Close">✕</button>
             </header>
 
-            <div class="ucn-flash" data-ucn-flash hidden></div>
+            <?php if ($paymentReturn === 'success'): ?>
+                <div class="ucn-flash ucn-flash--ok" data-ucn-flash>Payment received — thank you. Your username change is on its way.</div>
+            <?php elseif ($paymentReturn === 'failed' || $paymentReturn === 'error'): ?>
+                <div class="ucn-flash ucn-flash--bad" data-ucn-flash>The payment was not completed. You can try again below.</div>
+            <?php else: ?>
+                <div class="ucn-flash" data-ucn-flash hidden></div>
+            <?php endif; ?>
 
             <?php if (is_array($open)): ?>
                 <section class="ucn-open">
                     <p>Your request to change to <strong><?= e((string) $open['new']) ?></strong> is <strong><?= e((string) $open['label']) ?></strong>.</p>
-                    <?php if (!empty($open['invoice_id'])): ?>
+                    <?php if (is_array($pay)): ?>
+                        <?= $view->render('username-changer.pay-panel', ['pay' => $pay]) ?>
+                    <?php elseif (!empty($open['invoice_id']) && $open['status'] === 'awaiting_payment'): ?>
                         <p><a class="ucn-btn ucn-btn--primary" href="/client/invoices/<?= (int) $open['invoice_id'] ?>">Pay invoice #<?= (int) $open['invoice_id'] ?></a></p>
                     <?php endif; ?>
                     <div class="ucn-row">
@@ -87,6 +100,7 @@ $json = json_encode($ucn, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX
                         <li class="is-active" data-ucn-step-dot="1">New name</li>
                         <li data-ucn-step-dot="2">What changes</li>
                         <li data-ucn-step-dot="3">Confirm</li>
+                        <?php if ($fee !== ''): ?><li data-ucn-step-dot="4">Pay</li><?php endif; ?>
                     </ol>
 
                     <section class="ucn-step" data-ucn-step="1">
@@ -141,15 +155,33 @@ $json = json_encode($ucn, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX
                             <?php endforeach; ?>
                         </div>
                         <div data-ucn-pin hidden>
-                            <label class="ucn-label" for="ucn-pin-<?= $sid ?>">Security PIN</label>
-                            <input class="ucn-input" id="ucn-pin-<?= $sid ?>" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12">
+                            <?php if ($hasPin || !is_array($pin)): ?>
+                                <div class="ucn-labelrow">
+                                    <label class="ucn-label" for="ucn-pin-<?= $sid ?>">Security PIN</label>
+                                    <?php if (is_array($pin)): ?><button type="button" class="ucn-link" data-ucn-pin-open="forgot">Forgot PIN?</button><?php endif; ?>
+                                </div>
+                                <input class="ucn-input" id="ucn-pin-<?= $sid ?>" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="<?= (int) ($pin['max'] ?? 12) ?>" data-ucn-pin-input>
+                            <?php else: ?>
+                                <div class="ucn-pin-missing" data-ucn-pin-missing>
+                                    <p>You haven't set a Security PIN yet. Set one now — it takes a moment and you'll stay right here.</p>
+                                    <button type="button" class="ucn-btn" data-ucn-pin-open="missing">Set a Security PIN</button>
+                                </div>
+                                <input class="ucn-input" id="ucn-pin-<?= $sid ?>" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="<?= (int) $pin['max'] ?>" data-ucn-pin-input hidden>
+                            <?php endif; ?>
                         </div>
+                        <?php if ($fee !== ''): ?>
+                            <p class="ucn-fee"><?= !empty($ucn['approval'])
+                                ? 'Fee: <strong>' . e($fee) . '</strong> — you can pay from your wallet or online once the request is approved.'
+                                : 'Next: pay <strong>' . e($fee) . '</strong> from your wallet or online, and the change runs straight away.' ?></p>
+                        <?php endif; ?>
                         <div class="ucn-actions">
                             <button type="button" class="ucn-btn ucn-btn--ghost" data-ucn-back>Back</button>
                             <button type="submit" class="ucn-btn ucn-btn--primary" data-ucn-submit>Request change</button>
                         </div>
                     </section>
                 </form>
+                <?php // Outside the form: the Pay step holds forms of its own. ?>
+                <section class="ucn-step ucn-step--pay" data-ucn-step="4" data-ucn-paystep hidden aria-live="polite"></section>
             <?php endif; ?>
 
             <?php if (!empty($ucn['history'])): ?>
@@ -168,6 +200,53 @@ $json = json_encode($ucn, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX
                 </details>
             <?php endif; ?>
         </div>
+
+        <?php if (is_array($pin)): ?>
+            <div class="ucn-pinm" data-ucn-pinm hidden>
+                <div class="ucn-pinm__backdrop" data-ucn-pinm-close></div>
+                <div class="ucn-pinm__dialog" role="dialog" aria-modal="true" aria-labelledby="ucn-pinm-title-<?= $sid ?>">
+                    <header class="ucn-modal__head">
+                        <div>
+                            <h3 class="ucn-modal__title" id="ucn-pinm-title-<?= $sid ?>" data-ucn-pinm-title><?= $hasPin ? 'Reset your Security PIN' : 'Set a Security PIN' ?></h3>
+                            <p class="ucn-modal__sub" data-ucn-pinm-reason>Your username change is kept — close this when you're done to carry on.</p>
+                        </div>
+                        <button type="button" class="ucn-icon-btn" data-ucn-pinm-close aria-label="Close">✕</button>
+                    </header>
+                    <div class="ucn-flash" data-ucn-pinm-flash hidden></div>
+                    <form class="ucn-pinm__form" method="post" action="/client/services/<?= $sid ?>/username/pin" data-ucn-pinm-form novalidate>
+                        <?= csrf_field() ?>
+                        <p class="ucn-label">First, confirm it's you</p>
+                        <div class="ucn-seg" role="radiogroup">
+                            <?php foreach ($pin['methods'] as $i => $m): ?>
+                                <label class="ucn-seg__opt">
+                                    <input type="radio" name="via" value="<?= e($m) ?>" <?= $i === 0 ? 'checked' : '' ?> data-ucn-pinm-via>
+                                    <span><?= $m === 'code' ? 'Email me a code' : 'Use my password' ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <div data-ucn-pinm-section="code">
+                            <div class="ucn-row ucn-row--tight">
+                                <input class="ucn-input ucn-input--code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" aria-label="Code from email" data-ucn-pinm-code>
+                                <button type="button" class="ucn-btn" data-ucn-pinm-send>Send code</button>
+                            </div>
+                            <p class="ucn-muted">We'll email it to <?= e((string) $pin['email']) ?>.</p>
+                        </div>
+                        <?php if (in_array('password', $pin['methods'], true)): ?>
+                            <div data-ucn-pinm-section="password" hidden>
+                                <input class="ucn-input" name="current_password" type="password" autocomplete="current-password" placeholder="Your account password" aria-label="Account password">
+                            </div>
+                        <?php endif; ?>
+                        <label class="ucn-label" for="ucn-newpin-<?= $sid ?>">New Security PIN</label>
+                        <input class="ucn-input" id="ucn-newpin-<?= $sid ?>" name="new_pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="<?= (int) $pin['min'] ?>" maxlength="<?= (int) $pin['max'] ?>" placeholder="<?= (int) $pin['min'] ?>–<?= (int) $pin['max'] ?> characters" data-ucn-pinm-new>
+                        <input class="ucn-input" name="new_pin_confirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="<?= (int) $pin['max'] ?>" placeholder="Repeat the new PIN" aria-label="Repeat the new PIN" style="margin-top:8px;">
+                        <div class="ucn-actions">
+                            <button type="button" class="ucn-btn ucn-btn--ghost" data-ucn-pinm-close>Close</button>
+                            <button type="submit" class="ucn-btn ucn-btn--primary" data-ucn-pinm-save>Save PIN</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 <script src="/assets/js/username-changer.js" defer></script>

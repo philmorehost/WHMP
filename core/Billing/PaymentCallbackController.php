@@ -394,11 +394,37 @@ final class PaymentCallbackController
 
             $this->recordIfNew($slug, $verification, $invoiceId);
 
-            return Response::redirect("/client/invoices/{$invoiceId}?payment=success");
+            return Response::redirect($this->afterPaymentUrl($invoiceId, 'success'));
         }
 
         error_log("[PAYMENT] Payment verification FAILED for invoice {$invoiceId}");
-        return Response::redirect("/client/invoices/{$invoiceId}?payment=failed");
+        return Response::redirect($this->afterPaymentUrl($invoiceId, 'failed'));
+    }
+
+    /**
+     * Where the client lands after the gateway: the invoice page, unless the page
+     * they paid from asked to get them back (e.g. the username changer's Pay step
+     * remembers the service page in the session). Only local paths are honoured,
+     * so the session can never turn this into an open redirect.
+     */
+    private function afterPaymentUrl(int $invoiceId, string $outcome): string
+    {
+        $default = "/client/invoices/{$invoiceId}?payment={$outcome}";
+
+        try {
+            $map = \CodeVault\Support\App::container()->make(\CodeVault\Session\SessionManager::class)->get('pay_return');
+            $path = is_array($map) ? (string) ($map[$invoiceId] ?? '') : '';
+        } catch (\Throwable) {
+            return $default;
+        }
+
+        if ($path === '' || $path[0] !== '/' || str_starts_with($path, '//') || str_contains($path, '\\') || preg_match('/[\r\n]/', $path) === 1) {
+            return $default;
+        }
+
+        [$base, $fragment] = array_pad(explode('#', $path, 2), 2, null);
+
+        return $base . (str_contains($base, '?') ? '&' : '?') . 'payment=' . $outcome . ($fragment !== null ? '#' . $fragment : '');
     }
 
     public function webhook(Request $request, array $params): Response

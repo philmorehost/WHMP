@@ -159,6 +159,55 @@ final class UsernameChangeNotifier
         ]), (int) $owner['id']);
     }
 
+    /**
+     * The 6-digit code that lets a client reset their Security PIN from the
+     * username modal. Written as the client's own brand (the store's for a store
+     * customer) and sent WITHOUT a client id, so it is not mirrored into in-app
+     * notifications: the code proves control of the mailbox, and anyone holding
+     * the session could read a notification.
+     *
+     * @param array<string, mixed> $client id, email, first_name, last_name, reseller_id
+     */
+    public function pinCode(array $client, string $code, int $minutes): void
+    {
+        $email = (string) ($client['email'] ?? '');
+
+        if ($email === '') {
+            return;
+        }
+
+        $this->ensureTemplates();
+        $storeId = ($client['reseller_id'] ?? null) === null ? null : (int) $client['reseller_id'];
+
+        try {
+            $store = $storeId !== null && $this->stores !== null ? $this->stores->find($storeId) : null;
+            // A store customer whose store row cannot be read is still branded by
+            // the dispatcher's own lookup — never forced to the platform's brand.
+            $mailer = $store !== null ? $this->mail->onBehalfOfStore($store) : ($storeId === null ? $this->mail->onBehalfOfPlatform() : $this->mail);
+            $mailer->sendTemplate(UsernameChangeTemplates::PIN_CODE, $email, $this->clientVars($client, [
+                'code' => $code,
+                'minutes' => (string) $minutes,
+            ]));
+        } catch (Throwable) {
+            // Best-effort; the client can ask for another code.
+        }
+    }
+
+    /** @param array<string, mixed> $client */
+    public function pinChanged(array $client): void
+    {
+        $email = (string) ($client['email'] ?? '');
+
+        if ($email === '') {
+            return;
+        }
+
+        $this->ensureTemplates();
+        $this->send(UsernameChangeTemplates::PIN_CHANGED, $email, $this->clientVars($client, [
+            'changed_at' => date('Y-m-d H:i'),
+        ]), (int) $client['id']);
+    }
+
     public static function statusLabel(string $status): string
     {
         return match ($status) {
@@ -260,6 +309,41 @@ final class UsernameChangeNotifier
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed>  $client
+     * @param array<string, string> $extra
+     * @return array<string, string>
+     */
+    private function clientVars(array $client, array $extra = []): array
+    {
+        $storeId = ($client['reseller_id'] ?? null) === null ? null : (int) $client['reseller_id'];
+        $vars = [
+            'client_name' => trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? '')) ?: 'there',
+            'account_url' => $this->siteUrl($storeId) . '/client/account/profile',
+            'company_name' => (string) ($this->settings->get('theme.brand_name', 'CodeVault') ?: 'CodeVault'),
+        ];
+        $out = [];
+
+        foreach ($vars + $extra as $key => $value) {
+            $out[$key] = htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+        }
+
+        return $out;
+    }
+
+    /** Templates added after migration 0214 exist before cron's first run re-seeds them. */
+    private function ensureTemplates(): void
+    {
+        if ($this->db === null) {
+            return;
+        }
+
+        try {
+            UsernameChangeTemplates::ensure($this->db, [UsernameChangeTemplates::PIN_CODE, UsernameChangeTemplates::PIN_CHANGED]);
+        } catch (Throwable) {
+        }
     }
 
     /** @return array<string, mixed>|null */

@@ -18,7 +18,12 @@
 
         <?php if ($result !== null): ?>
             <div class="ucn-flash ucn-flash--<?= !empty($result['ok']) ? 'ok' : 'bad' ?>" style="margin-top:14px;"><?= e((string) $result['message']) ?></div>
-            <?php if (!empty($result['ok']) && $request !== null): ?>
+            <?php if (!empty($result['ok']) && $request !== null && ($result['status'] ?? '') === 'awaiting_payment'): ?>
+                <p>One last step: pay the fee from your wallet or online, and the change runs straight away.</p>
+                <p class="ucn-actions" style="justify-content:flex-start;">
+                    <a class="ucn-btn ucn-btn--primary" href="/client/services/<?= (int) $request['service_id'] ?>#change-username">Pay now</a>
+                </p>
+            <?php elseif (!empty($result['ok']) && $request !== null): ?>
                 <p class="ucn-muted">You can follow the request on <a href="/client/services/<?= (int) $request['service_id'] ?>">your service page</a>.</p>
             <?php endif; ?>
         <?php elseif ($request === null): ?>

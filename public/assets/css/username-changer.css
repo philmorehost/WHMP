@@ -179,3 +179,51 @@ input.ucn-input[name="new_username"] { font-family: var(--cv-font-mono, ui-monos
 .ucn-chip.is-checking { opacity: .6; }
 .ucn-chip.is-verified { border-style: solid; }
 .ucn-chip.is-verified::before { content: "✓ "; color: var(--ucn-ok, #16a34a); }
+
+/* Small text-style button ("Forgot PIN?"). */
+.ucn-link { appearance: none; border: 0; background: none; padding: 0; color: var(--ucn-accent); font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.ucn-link:hover { text-decoration: underline; }
+.ucn-labelrow { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ucn-labelrow .ucn-label { margin-bottom: 6px; }
+.ucn-pin-missing { margin-top: 10px; padding: 12px; border: 1px dashed color-mix(in srgb, var(--ucn-accent) 50%, var(--ucn-border)); border-radius: 12px; font-size: .86rem; }
+.ucn-pin-missing p { margin: 0 0 10px; }
+.ucn-input.is-attention { border-color: var(--ucn-bad); animation: ucn-shake .3s ease; }
+@keyframes ucn-shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+/* Security PIN modal — stacked over the username modal, which stays put. */
+.ucn-pinm { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 16px; }
+.ucn-pinm[hidden] { display: none; }
+.ucn-pinm__backdrop { position: absolute; inset: 0; background: rgba(10, 14, 22, .35); }
+.ucn-pinm__dialog { position: relative; width: min(440px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: var(--ucn-surface); color: var(--ucn-text); border: 1px solid var(--ucn-border); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, .32); animation: ucn-pop .16s ease; }
+@keyframes ucn-pop { from { transform: translateY(8px) scale(.98); opacity: 0; } }
+.ucn-pinm__form .ucn-input { padding-right: 14px; }
+.ucn-seg { display: flex; gap: 6px; padding: 4px; border-radius: 12px; background: var(--ucn-sunken); margin-bottom: 10px; }
+.ucn-seg__opt { flex: 1; position: relative; cursor: pointer; }
+.ucn-seg__opt input { position: absolute; opacity: 0; pointer-events: none; }
+.ucn-seg__opt span { display: block; text-align: center; padding: 8px 10px; border-radius: 9px; font-size: .82rem; font-weight: 600; color: var(--ucn-muted); }
+.ucn-seg__opt input:checked + span { background: var(--ucn-surface); color: var(--ucn-text); box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+.ucn-seg__opt input:focus-visible + span { outline: 2px solid var(--ucn-accent); }
+.ucn-row--tight { flex-wrap: nowrap; align-items: stretch; }
+.ucn-row--tight .ucn-input { flex: 1; min-width: 0; }
+.ucn-input--code { font-family: var(--cv-font-mono, ui-monospace, monospace); letter-spacing: .3em; }
+
+/* Pay step */
+.ucn-pay__due { display: grid; gap: 2px; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--ucn-accent) 8%, var(--ucn-sunken)); margin-bottom: 12px; }
+.ucn-pay__label { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--ucn-muted); }
+.ucn-pay__amount { font-size: 1.6rem; line-height: 1.2; }
+.ucn-pay__options { display: grid; gap: 8px; }
+.ucn-payopt { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--ucn-border); border-radius: 12px; margin: 0; }
+.ucn-payopt form { margin: 0; }
+.ucn-payopt__text { display: grid; gap: 2px; font-size: .88rem; }
+.ucn-payopt--wallet:not(.is-short) { border-color: color-mix(in srgb, var(--ucn-ok) 45%, var(--ucn-border)); background: color-mix(in srgb, var(--ucn-ok) 5%, transparent); }
+.ucn-payopt__short { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ucn-payopt--manual { display: block; }
+.ucn-payopt--manual summary { cursor: pointer; font-size: .88rem; }
+.ucn-pay__bank { white-space: normal; font-size: .84rem; margin: 10px 0 6px; padding: 10px; border-radius: 10px; background: var(--ucn-sunken); }
+.ucn-pay__foot { margin: 12px 0 0; }
+.ucn-pay__note { display: grid; gap: 10px; justify-items: start; }
+@media (max-width: 640px) {
+    .ucn-pinm { place-items: end stretch; padding: 0; }
+    .ucn-pinm__dialog { width: 100%; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+    .ucn-payopt .ucn-btn, .ucn-payopt form { width: 100%; justify-content: center; }
+}

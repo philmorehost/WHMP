@@ -21,6 +21,15 @@
  *      verified one by one in the background; taken ones disappear and verified
  *      ones get a tick, so clicking a chip is an instant, true answer.
  *
+ * Security PIN: when a PIN confirmation fails (wrong, locked out, or never set)
+ * a PIN modal opens ON TOP of the username modal. The client verifies by emailed
+ * code or password, sets a new PIN, closes it, and is back on the Confirm step
+ * with everything they entered still in place (the new PIN filled in).
+ *
+ * Payment: when the fee is on and the request is confirmed straight away, the
+ * modal moves to a Pay step (wallet in one click, or any gateway) instead of
+ * sending the client off to find the invoice.
+ *
  * No framework, no globals beyond one IIFE; works with the CSP (external file).
  */
 (function () {
@@ -67,7 +76,10 @@
             warmUrl: '/client/services/' + sid + '/username/warm',
             warmed: null,
             retryTimer: null,
-            chipBusy: false
+            chipBusy: false,
+            hasPin: !!data.has_pin,
+            pinm: $(root, '[data-ucn-pinm]'),
+            resendTimer: null
         };
 
         state.localRule = function (name) {
@@ -274,6 +286,7 @@
 
     function close(state) {
         if (!state.modal) { return; }
+        closePinModal(state, true);
         state.modal.classList.remove('is-open');
         document.documentElement.classList.remove('ucn-lock');
         setTimeout(function () { state.modal.hidden = true; }, 180);
@@ -298,6 +311,184 @@
         }).then(function (r) { return r.json().catch(function () { return { ok: false, message: 'Unexpected response (HTTP ' + r.status + ').' }; }); })
           .then(function (res) { flash(state, !!res.ok, res.message || (res.ok ? 'Done.' : 'Something went wrong.')); if (onDone) { onDone(res); } })
           .catch(function () { flash(state, false, 'Network error — please try again.'); if (onDone) { onDone({ ok: false }); } });
+    }
+
+    // Back to this page with the modal open on the request's new state (and
+    // without a stale ?payment= notice from an earlier gateway return).
+    function reloadToModal() {
+        var search = window.location.search.replace(/([?&])payment=[^&]*(&|$)/, '$1').replace(/[?&]$/, '');
+        var target = window.location.pathname + search + '#change-username';
+        if (search !== window.location.search) { window.location.href = target; return; }
+        if (window.location.hash !== '#change-username' && window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', target);
+        }
+        window.location.reload();
+    }
+
+    // ---------------------------------------------------------------- Pay step
+
+    function showPayStep(state, res) {
+        var holder = $(state.root, '[data-ucn-paystep]');
+        if (!holder) { setTimeout(reloadToModal, 1200); return; }
+        getJson('/client/services/' + state.sid + '/username/pay').then(function (p) {
+            if (!p || !p.ok || !p.html) { setTimeout(reloadToModal, 1200); return; }
+            holder.innerHTML = p.html;
+            flash(state, true, 'Confirmed. Pay now to finish — your username changes as soon as the payment clears.');
+            showStep(state, 4);
+            var first = $(holder, '[data-ucn-wallet-btn], .ucn-payopt .ucn-btn--primary');
+            if (first) { first.focus({ preventScroll: true }); }
+        }).catch(function () { setTimeout(reloadToModal, 1200); });
+    }
+
+    // -------------------------------------------------------- Security PIN modal
+
+    var PIN_REASONS = {
+        pin: 'That PIN didn\'t match. Set a new one here, then close this window to carry on — your username change is kept.',
+        pin_locked: 'Too many PIN attempts. Setting a new PIN unlocks it straight away — your username change is kept.',
+        pin_missing: 'You haven\'t set a Security PIN yet. Set one now, then close this window to carry on.',
+        forgot: 'Set a new PIN here, then close this window to carry on — your username change is kept.',
+        missing: 'Choose a PIN you\'ll remember. You can use it to confirm sensitive changes instantly.'
+    };
+
+    function pinFailed(state, res) {
+        var input = $(state.root, '[data-ucn-pin-input]');
+        if (input && !input.hidden) {
+            input.value = '';
+            input.classList.remove('is-attention');
+            void input.offsetWidth; // restart the shake
+            input.classList.add('is-attention');
+        }
+        if (!state.pinm) { return; } // no in-modal reset: the flash already explains
+        openPinModal(state, res.code);
+    }
+
+    function openPinModal(state, reason) {
+        var m = state.pinm;
+        if (!m) { return; }
+        var form = $(m, '[data-ucn-pinm-form]');
+        if (form) { form.reset(); syncVia(state); }
+        var title = $(m, '[data-ucn-pinm-title]');
+        if (title) { title.textContent = state.hasPin ? 'Reset your Security PIN' : 'Set a Security PIN'; }
+        var why = $(m, '[data-ucn-pinm-reason]');
+        if (why) { why.textContent = PIN_REASONS[reason] || PIN_REASONS.forgot; }
+        var f = $(m, '[data-ucn-pinm-flash]');
+        if (f) { f.hidden = true; f.textContent = ''; } // the reason line says why
+        state.pinReturnFocus = document.activeElement;
+        m.hidden = false;
+        var first = $(m, '[data-ucn-pinm-via]:checked');
+        var target = first && first.value === 'password' ? $(m, 'input[name="current_password"]') : $(m, '[data-ucn-pinm-send]');
+        setTimeout(function () { if (target) { target.focus(); } }, 30);
+    }
+
+    function closePinModal(state, silent) {
+        if (!state.pinm || state.pinm.hidden) { return; }
+        state.pinm.hidden = true;
+        if (silent) { return; }
+        var input = $(state.root, '[data-ucn-pin-input]');
+        if (input && !input.hidden) { input.focus(); return; }
+        if (state.pinReturnFocus && state.pinReturnFocus.focus) { state.pinReturnFocus.focus(); }
+    }
+
+    function syncVia(state) {
+        if (!state.pinm) { return; }
+        var checked = $(state.pinm, '[data-ucn-pinm-via]:checked');
+        var via = checked ? checked.value : 'code';
+        $all(state.pinm, '[data-ucn-pinm-section]').forEach(function (sec) { sec.hidden = sec.getAttribute('data-ucn-pinm-section') !== via; });
+    }
+
+    function pinFlash(state, ok, msg) {
+        var f = state.pinm && $(state.pinm, '[data-ucn-pinm-flash]');
+        if (!f) { return; }
+        f.hidden = false;
+        f.className = 'ucn-flash ucn-flash--' + (ok ? 'ok' : 'bad');
+        f.textContent = msg;
+    }
+
+    function postJson(url, body) {
+        body.append('ajax', '1');
+        return fetch(url, {
+            method: 'POST', body: body, credentials: 'same-origin',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (r) { return r.json().catch(function () { return { ok: false, message: 'Unexpected response (HTTP ' + r.status + ').' }; }); });
+    }
+
+    function wirePinModal(state) {
+        var m = state.pinm;
+        var root = state.root;
+
+        // Openers inside the username modal ("Forgot PIN?", "Set a Security PIN").
+        root.addEventListener('click', function (e) {
+            var opener = e.target.closest && e.target.closest('[data-ucn-pin-open]');
+            if (opener) { e.preventDefault(); openPinModal(state, opener.getAttribute('data-ucn-pin-open')); }
+        });
+        if (!m) { return; }
+
+        var form = $(m, '[data-ucn-pinm-form]');
+        var token = function () { var t = form && form.querySelector('input[name="_token"]'); return t ? t.value : ''; };
+
+        m.addEventListener('click', function (e) {
+            if (e.target.closest('[data-ucn-pinm-close]')) { e.preventDefault(); closePinModal(state); }
+        });
+        $all(m, '[data-ucn-pinm-via]').forEach(function (r) { r.addEventListener('change', function () { syncVia(state); }); });
+        syncVia(state);
+
+        var send = $(m, '[data-ucn-pinm-send]');
+        if (send) {
+            send.addEventListener('click', function () {
+                send.disabled = true;
+                send.textContent = 'Sending…';
+                var body = new FormData();
+                body.append('_token', token());
+                postJson('/client/services/' + state.sid + '/username/pin/code', body).then(function (res) {
+                    pinFlash(state, !!res.ok, res.message || (res.ok ? 'Code sent.' : 'Could not send a code.'));
+                    if (res.ok) {
+                        var code = $(m, '[data-ucn-pinm-code]');
+                        if (code) { code.focus(); }
+                        var left = 30;
+                        clearInterval(state.resendTimer);
+                        send.textContent = 'Resend in ' + left + 's';
+                        state.resendTimer = setInterval(function () {
+                            left -= 1;
+                            if (left <= 0) { clearInterval(state.resendTimer); send.disabled = false; send.textContent = 'Resend code'; return; }
+                            send.textContent = 'Resend in ' + left + 's';
+                        }, 1000);
+                    } else {
+                        send.disabled = false;
+                        send.textContent = 'Send code';
+                    }
+                }).catch(function () { send.disabled = false; send.textContent = 'Send code'; pinFlash(state, false, 'Network error — please try again.'); });
+            });
+        }
+
+        if (form) {
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var save = $(m, '[data-ucn-pinm-save]');
+                var newPin = (form.querySelector('[name="new_pin"]') || {}).value || '';
+                if (save) { save.disabled = true; save.textContent = 'Saving…'; }
+                postJson(form.getAttribute('action'), new FormData(form)).then(function (res) {
+                    if (save) { save.disabled = false; save.textContent = 'Save PIN'; }
+                    pinFlash(state, !!res.ok, res.message || (res.ok ? 'Saved.' : 'Something went wrong.'));
+                    if (!res.ok) { return; }
+                    state.hasPin = true;
+                    // Back in the username modal: PIN field shown and filled in,
+                    // ready to submit again.
+                    var missing = $(root, '[data-ucn-pin-missing]');
+                    if (missing) { missing.hidden = true; }
+                    var input = $(root, '[data-ucn-pin-input]');
+                    if (input) { input.hidden = false; input.value = newPin; input.classList.remove('is-attention'); }
+                    flash(state, true, 'Security PIN updated. Press “Request change” to continue.');
+                    setTimeout(function () {
+                        closePinModal(state, true);
+                        var submit = $(root, '[data-ucn-submit]');
+                        if (submit) { submit.focus(); }
+                    }, 900);
+                }).catch(function () {
+                    if (save) { save.disabled = false; save.textContent = 'Save PIN'; }
+                    pinFlash(state, false, 'Network error — please try again.');
+                });
+            });
+        }
     }
 
     function wire(state) {
@@ -352,10 +543,15 @@
                 if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
                 post(state, state.form, function (res) {
                     if (res.ok) {
-                        setTimeout(function () { window.location.reload(); }, 1600);
+                        if (res.status === 'awaiting_payment') { showPayStep(state, res); return; }
+                        setTimeout(function () { reloadToModal(); }, 1600);
                     } else if (btn) {
                         btn.disabled = false;
                         btn.textContent = 'Request change';
+                        if (res.code === 'pin' || res.code === 'pin_locked' || res.code === 'pin_missing') {
+                            pinFailed(state, res);
+                            return;
+                        }
                         if (res.code && ['taken', 'pending', 'server', 'prefix8', 'unverified', 'reserved', 'chars', 'short', 'long', 'test_prefix', 'same'].indexOf(res.code) !== -1) {
                             state.cache.delete(state.input.value);
                             showStep(state, 1);
@@ -376,7 +572,31 @@
         });
 
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && state.modal && !state.modal.hidden) { close(state); }
+            if (e.key !== 'Escape' || !state.modal || state.modal.hidden) { return; }
+            if (state.pinm && !state.pinm.hidden) { closePinModal(state); return; } // inner modal first
+            close(state);
+        });
+
+        wirePinModal(state);
+
+        // Wallet payment (in the Pay step, or the open-request view on load).
+        root.addEventListener('submit', function (e) {
+            var f = e.target;
+            if (f.matches && f.matches('[data-ucn-wallet]')) {
+                e.preventDefault();
+                var b = $(f, '[data-ucn-wallet-btn]');
+                var label = b ? b.textContent : '';
+                if (b) { b.disabled = true; b.textContent = 'Paying…'; }
+                post(state, f, function (res) {
+                    if (res.ok) {
+                        $all(root, '[data-ucn-pay] button, [data-ucn-pay] a.ucn-btn').forEach(function (x) { x.disabled = true; });
+                        setTimeout(function () { reloadToModal(); }, 1600);
+                    } else if (b) { b.disabled = false; b.textContent = label; }
+                });
+            } else if (f.matches && f.matches('[data-ucn-gateway]')) {
+                var gb = $(f, 'button[type="submit"]');
+                if (gb) { setTimeout(function () { gb.disabled = true; gb.textContent = 'Redirecting…'; }, 0); }
+            }
         });
     }
 

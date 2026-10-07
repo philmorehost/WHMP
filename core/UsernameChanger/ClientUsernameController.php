@@ -43,7 +43,9 @@ final class ClientUsernameController
         private readonly UsernameChangerSettings $settings,
         private readonly Database $db,
         private readonly ?CurrentReseller $site = null,
-        private readonly ?CurrencyService $currency = null
+        private readonly ?CurrencyService $currency = null,
+        private readonly ?UsernameChangePayment $payment = null,
+        private readonly ?UsernameChangePinReset $pinReset = null
     ) {
     }
 
@@ -157,6 +159,108 @@ final class ClientUsernameController
             'actor_type' => 'client',
             'actor_id' => (int) $client['id'],
         ]);
+
+        return $this->reply($request, (int) $service['id'], $result, $result['ok'] ? 200 : 422);
+    }
+
+    /**
+     * POST /client/services/{id}/username/pin/code — emails a code that lets the
+     * client reset their Security PIN without leaving the modal.
+     */
+    public function pinCode(Request $request, array $params): Response
+    {
+        [$service, $client, $deny] = $this->owned($params);
+
+        if ($deny !== null) {
+            return $deny;
+        }
+
+        if ($this->pinReset === null) {
+            return self::json(['ok' => false, 'message' => 'PIN reset is not available here.'], 404);
+        }
+
+        $result = $this->pinReset->sendCode($client);
+
+        return self::json($result, $result['ok'] ? 200 : 429);
+    }
+
+    /**
+     * POST /client/services/{id}/username/pin — sets a new Security PIN after
+     * verifying by emailed code or account password. Clears the PIN lockout.
+     */
+    public function pinSave(Request $request, array $params): Response
+    {
+        [$service, $client, $deny] = $this->owned($params);
+
+        if ($deny !== null) {
+            return $deny;
+        }
+
+        if ($this->pinReset === null) {
+            return self::json(['ok' => false, 'message' => 'PIN reset is not available here.'], 404);
+        }
+
+        $via = (string) $request->input('via', 'code');
+        $result = $this->pinReset->reset(
+            $client,
+            $via,
+            (string) $request->input($via === 'password' ? 'current_password' : 'code', ''),
+            (string) $request->input('new_pin', ''),
+            (string) $request->input('new_pin_confirm', '')
+        );
+
+        return self::json($result, $result['ok'] ? 200 : 422);
+    }
+
+    /**
+     * GET /client/services/{id}/username/pay — the Pay step for the service's
+     * request that is waiting on its fee, as an HTML fragment (the same partial
+     * the page renders), so the modal can show it right after a PIN-confirmed
+     * submit without a reload.
+     */
+    public function payPanel(Request $request, array $params): Response
+    {
+        [$service, $client, $deny] = $this->owned($params);
+
+        if ($deny !== null) {
+            return $deny;
+        }
+
+        $open = $this->requests->openForService((int) $service['id']);
+        $pay = $open === null ? null : $this->paySummary($open, $client);
+
+        if ($pay === null) {
+            return self::json(['ok' => false, 'message' => 'Nothing to pay for this service.', 'status' => $open['status'] ?? null], 404);
+        }
+
+        return self::json([
+            'ok' => true,
+            'invoice_id' => $pay['invoice_id'],
+            'html' => $this->view->render('username-changer.pay-panel', ['pay' => $pay]),
+        ])->withHeader('Cache-Control', 'no-store');
+    }
+
+    /** POST /client/services/{id}/username/{rid}/pay/wallet */
+    public function payWallet(Request $request, array $params): Response
+    {
+        [$service, $client, $deny] = $this->owned($params);
+
+        if ($deny !== null) {
+            return $deny;
+        }
+
+        $r = $this->ownRequest($service, (int) $params['rid']) ? $this->requests->find((int) $params['rid']) : null;
+
+        if ($r === null || $this->payment === null) {
+            return $this->reply($request, (int) $service['id'], ['ok' => false, 'message' => 'Request not found.'], 404);
+        }
+
+        $result = $this->payment->payWithWallet($r, $client);
+
+        if ($result['ok']) {
+            $after = $this->requests->find((int) $r['id']);
+            $result['status'] = $after['status'] ?? null;
+        }
 
         return $this->reply($request, (int) $service['id'], $result, $result['ok'] ? 200 : 422);
     }
@@ -292,9 +396,13 @@ final class ClientUsernameController
 
         $methods = $this->settings->confirmMethods();
 
-        if (!$policy['has_pin']) {
+        // Without a PIN the PIN option still shows when the in-modal PIN setup
+        // is available — choosing it offers to set one on the spot.
+        if (!$policy['has_pin'] && $this->pinReset === null) {
             $methods = array_values(array_diff($methods, ['pin']));
         }
+
+        $pay = $open === null ? null : $this->paySummary($open, $client);
 
         return [
             'service_id' => (int) $policy['service_id'],
@@ -312,6 +420,14 @@ final class ClientUsernameController
             'require_reason' => $this->settings->requireReason(),
             'methods' => $methods === [] ? ['email'] : $methods,
             'fee' => $this->feeLabel($policy, $client),
+            'has_pin' => (bool) $policy['has_pin'],
+            'pin' => $this->pinReset === null ? null : [
+                'methods' => $this->pinReset->methods($client),
+                'email' => UsernameChangePinReset::maskEmail((string) ($client['email'] ?? '')),
+                'min' => UsernameChangePinReset::PIN_MIN,
+                'max' => UsernameChangePinReset::PIN_MAX,
+            ],
+            'pay' => $pay,
             'open' => $open === null ? null : [
                 'id' => (int) $open['id'],
                 'new' => (string) $open['new_username'],
@@ -349,6 +465,38 @@ final class ClientUsernameController
         } catch (Throwable) {
             return number_format((float) $pricing['price'], 2);
         }
+    }
+
+    /**
+     * The Pay step's data for an open request, and — so a gateway payment brings
+     * the client back here rather than to the bare invoice — the service page
+     * remembered as that invoice's return address.
+     *
+     * @param array<string, mixed> $open
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>|null
+     */
+    private function paySummary(array $open, array $client): ?array
+    {
+        if ($this->payment === null) {
+            return null;
+        }
+
+        try {
+            $pay = $this->payment->summary($open, $client);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($pay !== null) {
+            $this->session->set(UsernameChangePayment::RETURN_SESSION_KEY, UsernameChangePayment::withReturn(
+                $this->session->get(UsernameChangePayment::RETURN_SESSION_KEY),
+                (int) $pay['pay_invoice_id'],
+                '/client/services/' . (int) $open['service_id'] . '#change-username'
+            ));
+        }
+
+        return $pay;
     }
 
     /** Session-based limiter: costs no database write per keystroke. */

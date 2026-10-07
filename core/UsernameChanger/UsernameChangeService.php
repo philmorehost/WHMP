@@ -82,6 +82,12 @@ final class UsernameChangeService
         $methods = $this->settings->confirmMethods();
         $method = (string) ($opts['method'] ?? $methods[0]);
 
+        // Chose a PIN but has never set one: say so (the modal then offers to set
+        // it on the spot) rather than silently switching to an email link.
+        if ($method === 'pin' && in_array('pin', $methods, true) && !$policy['has_pin']) {
+            return self::fail('You have not set a Security PIN yet. Set one now to confirm instantly, or choose the email link.', 'pin_missing');
+        }
+
         if (!in_array($method, $methods, true) || ($method === 'pin' && !$policy['has_pin'])) {
             $method = in_array('email', $methods, true) ? 'email' : '';
         }
@@ -105,11 +111,11 @@ final class UsernameChangeService
         // PIN: checked BEFORE anything is created, so a wrong PIN leaves no row.
         if ($method === 'pin') {
             if (!$this->requests->hit('pin:' . $policy['client_id'], 5, 3600)) {
-                return self::fail('Too many PIN attempts. Please confirm by email instead, or try again later.', 'pin_locked');
+                return self::fail('Too many PIN attempts. Reset your Security PIN to continue, or confirm by email instead.', 'pin_locked');
             }
 
             if (!$this->pinMatches((int) $policy['client_id'], (string) ($opts['pin'] ?? ''))) {
-                return self::fail('That Security PIN is not correct.', 'pin');
+                return self::fail('That Security PIN is not correct. Forgotten it? You can reset it here.', 'pin');
             }
         }
 

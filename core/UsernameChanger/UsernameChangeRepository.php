@@ -387,7 +387,7 @@ final class UsernameChangeRepository
         $row = $this->db->selectOne('SELECT hits, window_start FROM username_change_throttle WHERE throttle_key = ?', [$key]);
 
         if ($row === null || (new DateTimeImmutable((string) $row['window_start']))->getTimestamp() + $windowSeconds < $now->getTimestamp()) {
-            $this->db->statement(
+            $this->db->update(
                 'REPLACE INTO username_change_throttle (throttle_key, hits, window_start) VALUES (?, 1, ?)',
                 [$key, $now->format('Y-m-d H:i:s')]
             );
@@ -402,6 +402,12 @@ final class UsernameChangeRepository
         $this->db->update('UPDATE username_change_throttle SET hits = hits + 1 WHERE throttle_key = ?', [$key]);
 
         return true;
+    }
+
+    /** Forgets a throttle counter — e.g. PIN attempts once the PIN has been reset. */
+    public function clearHits(string $key): void
+    {
+        $this->db->delete('DELETE FROM username_change_throttle WHERE throttle_key = ?', [$key]);
     }
 
     public function pruneThrottle(): void
