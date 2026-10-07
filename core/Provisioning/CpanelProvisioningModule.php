@@ -40,8 +40,16 @@ final class CpanelProvisioningModule implements ProvisioningModule
     private const CREATE_VERIFY_ATTEMPTS = 3;
     private const CREATE_VERIFY_DELAY_SECONDS = 3;
 
+    /**
+     * @param HttpClient|null $quickHttp Short-timeout client for the read-only
+     *        checks a person waits on while typing (verify_new_username). The
+     *        main client keeps the long timeout createacct/modifyacct need; a
+     *        hung WHM must never freeze the username modal for minutes.
+     *        Optional and trailing so hand-built instances keep working.
+     */
     public function __construct(
-        private readonly HttpClient $http
+        private readonly HttpClient $http,
+        private readonly ?HttpClient $quickHttp = null
     ) {
     }
 
@@ -203,7 +211,7 @@ final class CpanelProvisioningModule implements ProvisioningModule
     {
         $decoded = $this->decode($this->call($params['server'], 'verify_new_username', [
             'user' => (string) $params['new_username'],
-        ]));
+        ], quick: true));
 
         $reachable = !str_starts_with($decoded['reason'], 'Could not reach')
             && !str_starts_with($decoded['reason'], 'Unexpected response')
@@ -369,7 +377,7 @@ final class CpanelProvisioningModule implements ProvisioningModule
     }
 
     /** @param array<string, mixed> $server */
-    private function call(array $server, string $function, array $query): array
+    private function call(array $server, string $function, array $query, bool $quick = false): array
     {
         $port = $server['api_port'] ?? self::DEFAULT_PORT;
         $scheme = ($server['use_ssl'] ?? true) ? 'https' : 'http';
@@ -386,7 +394,7 @@ final class CpanelProvisioningModule implements ProvisioningModule
             ? "whm {$username}:{$token}" 
             : "Basic " . base64_encode("{$username}:{$token}");
 
-        return $this->http->request('GET', $url, [
+        return ($quick && $this->quickHttp !== null ? $this->quickHttp : $this->http)->request('GET', $url, [
             'Authorization' => $authHeader,
         ]);
     }

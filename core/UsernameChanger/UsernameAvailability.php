@@ -9,22 +9,35 @@ use CodeVault\Provisioning\ProvisioningService;
 use DateTimeImmutable;
 
 /**
- * Is a username free? Two speeds:
+ * Is a username free?
  *
- *  - fast()  — the live check behind the modal. Local rules plus three indexed
- *              lookups (services.username, open requests, the cron-refreshed copy
- *              of every WHM account on the server). No network, no writes: it
- *              answers in about a millisecond of database time, so the modal can
- *              ask on every pause in typing without the client ever feeling it.
- *  - deep()  — fast() plus WHM's own `verify_new_username`. Run once at submit and
- *              again just before the rename (plan §5 rules 8–9).
+ *  - fast()  — local rules plus indexed lookups: services.username, open
+ *              requests, and the local copy of every WHM account on the server.
+ *              No network. Settles invalid and known-taken names in about a
+ *              millisecond of database time.
+ *  - live()  — fast() and then, only for a name that passed, WHM's own
+ *              `verify_new_username` over a short-timeout client. The local copy
+ *              can be stale or empty (cron not running, a fresh install, an
+ *              account created in WHM a minute ago), so "free locally" is never
+ *              reported as "available" without asking the server. This backs the
+ *              modal's live check, the admin manual check, submit, and the final
+ *              check before the rename. A server that cannot be reached is
+ *              `unverified` — never "available".
+ *  - deep()  — the same as live(); kept for existing callers.
  *
- * Neither ever returns WHO holds a name — only whether it is free.
+ * A name WHM rejects as an existing account is added to the local copy at once,
+ * so the next check of it (by anyone) is settled locally, and ensureFresh()
+ * re-syncs a stale copy when the modal opens instead of waiting for cron.
+ *
+ * Nothing here ever returns WHO holds a name — only whether it is free.
  */
 final class UsernameAvailability
 {
     /** How old the server account copy may get before cron refreshes it. */
     public const ACCOUNT_CACHE_MINUTES = 15;
+
+    /** How long one on-demand refresh attempt holds off the next for a server. */
+    public const REFRESH_RETRY_SECONDS = 120;
 
     public function __construct(
         private readonly Database $db,
@@ -59,28 +72,87 @@ final class UsernameAvailability
      * fast() and then the server itself. A server that cannot be reached is
      * reported as such (`unverified`), never as "available".
      *
+     * @param array<string, mixed> $service id, server_id, username
+     * @return array{ok: bool, code: string, message: string}
+     */
+    public function live(string $name, array $service): array
+    {
+        $fast = $this->fast($name, $service);
+
+        if (!$fast['ok'] || $this->provisioning === null || ($service['server_id'] ?? null) === null) {
+            return $fast;
+        }
+
+        $name = UsernamePolicy::normalise($name);
+        $whm = $this->provisioning->verifyNewUsername((int) $service['id'], $name);
+
+        if (!$whm['reachable']) {
+            return ['ok' => false, 'code' => 'unverified', 'message' => 'We couldn\'t reach the hosting server to confirm this name. Please try again in a moment.'];
+        }
+
+        if (!$whm['available']) {
+            $message = self::friendlyServerReason((string) $whm['message']);
+
+            if (self::meansExistingAccount((string) $whm['message'])) {
+                $this->rememberTaken((int) $service['server_id'], $name);
+            }
+
+            return ['ok' => false, 'code' => 'server', 'message' => $message];
+        }
+
+        return $fast;
+    }
+
+    /**
      * @param array<string, mixed> $service
      * @return array{ok: bool, code: string, message: string}
      */
     public function deep(string $name, array $service): array
     {
-        $fast = $this->fast($name, $service);
+        return $this->live($name, $service);
+    }
 
-        if (!$fast['ok'] || $this->provisioning === null) {
-            return $fast;
+    /**
+     * Re-syncs the server's account copy when it is older than the cache window
+     * (or was never synced), so the live check does not depend on cron having
+     * run. At most one attempt per server every REFRESH_RETRY_SECONDS, claimed
+     * with a single conditional UPDATE so a burst of modal opens triggers one
+     * listaccts, not one each. Returns true when a refresh ran and succeeded.
+     */
+    public function ensureFresh(int $serverId): bool
+    {
+        if ($this->provisioning === null || $serverId <= 0) {
+            return false;
         }
 
-        $whm = $this->provisioning->verifyNewUsername((int) $service['id'], UsernamePolicy::normalise($name));
+        $row = $this->db->selectOne('SELECT accounts_synced_at FROM username_change_servers WHERE server_id = ?', [$serverId]);
+        $staleBefore = (new DateTimeImmutable('-' . self::ACCOUNT_CACHE_MINUTES . ' minutes'))->format('Y-m-d H:i:s');
+        $synced = $row['accounts_synced_at'] ?? null;
 
-        if (!$whm['reachable']) {
-            return ['ok' => false, 'code' => 'unverified', 'message' => 'We could not reach the hosting server to confirm this name. Please try again in a few minutes.'];
+        if ($synced !== null && (string) $synced >= $staleBefore) {
+            return false;
         }
 
-        if (!$whm['available']) {
-            return ['ok' => false, 'code' => 'server', 'message' => self::friendlyServerReason((string) $whm['message'])];
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        if ($row === null) {
+            // A placeholder old enough to be claimed straight away.
+            $this->db->insert(
+                'INSERT IGNORE INTO username_change_servers (server_id, account_count, updated_at) VALUES (?, 0, ?)',
+                [$serverId, '2000-01-01 00:00:00']
+            );
         }
 
-        return $fast;
+        $claimed = $this->db->update(
+            'UPDATE username_change_servers SET updated_at = ? WHERE server_id = ? AND updated_at < ? AND (accounts_synced_at IS NULL OR accounts_synced_at < ?)',
+            [$now, $serverId, (new DateTimeImmutable('-' . self::REFRESH_RETRY_SECONDS . ' seconds'))->format('Y-m-d H:i:s'), $staleBefore]
+        );
+
+        if ($claimed !== 1) {
+            return false;
+        }
+
+        return $this->refreshServer($serverId) !== null;
     }
 
     /**
@@ -306,6 +378,14 @@ final class UsernameAvailability
         };
     }
 
+    /** Whether a WHM rejection reason says an account by that name already exists. */
+    public static function meansExistingAccount(string $reason): bool
+    {
+        $r = strtolower($reason);
+
+        return str_contains($r, 'already exists') || str_contains($r, 'in use') || str_contains($r, 'taken');
+    }
+
     /** WHM's reason, in plain words, without leaking server details. */
     public static function friendlyServerReason(string $reason): string
     {
@@ -318,6 +398,23 @@ final class UsernameAvailability
             str_contains($r, 'too long'), str_contains($r, 'length') => 'That name is too long for the server.',
             default => 'The server does not accept that username. Please choose another.',
         };
+    }
+
+    /**
+     * Adds a name WHM just reported as an existing account to the local copy,
+     * so the next check of it is settled without a network call. The next full
+     * refresh replaces the copy wholesale, so a wrong entry cannot linger.
+     */
+    private function rememberTaken(int $serverId, string $name): void
+    {
+        try {
+            $this->db->insert(
+                'INSERT IGNORE INTO username_change_server_accounts (server_id, username, prefix8, domain, synced_at) VALUES (?, ?, ?, NULL, ?)',
+                [$serverId, substr($name, 0, 32), substr($name, 0, 8), (new DateTimeImmutable())->format('Y-m-d H:i:s')]
+            );
+        } catch (\Throwable) {
+            // A cache write must never turn a correct answer into an error.
+        }
     }
 
     /** @param array<string, mixed> $fields */

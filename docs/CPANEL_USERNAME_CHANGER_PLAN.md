@@ -50,7 +50,7 @@ core/UsernameChanger/                     (new namespace CodeVault\UsernameChang
 ├── UsernameChangerAddon.php              AddonModule: metadata, activate/deactivate, admin summary
 ├── UsernamePolicy.php                    pure rules: format, length, reserved words, suggestions
 ├── PolicyResolver.php                    effective policy = global ⊕ product ⊕ store ⊕ client
-├── UsernameAvailability.php              local checks + WHM verify_new_username (short cache)
+├── UsernameAvailability.php              local checks + live WHM verify_new_username + on-demand account sync
 ├── UsernameChangeRepository.php          requests + events tables
 ├── UsernameChangeService.php             the state machine (request, confirm, approve, decline, cancel, run)
 ├── UsernameChangeExecutor.php            claim lock → preflight → WHM rename → verify → sync
@@ -448,41 +448,76 @@ Every phase ships with:
 
 ---
 
-## 15. Instant precheck
+## 15. Instant — and true — precheck
 
-The client should never feel a wait between typing and seeing whether a name works.
+The client should never feel a wait between typing and seeing whether a name works, and **"available" must
+mean the hosting server agrees**.
+
+> **Revision (live WHM check).** The first build answered the live check from our own records only (no WHM
+> call). The copy of WHM's account list behind that is filled by cron, so when cron had not run (or the
+> refresh failed) the copy was empty. The modal then showed **"available" for names that already existed
+> on the server**, and WHM rejected them at submit. The precheck now confirms every locally-free name with
+> WHM itself, as described below.
 
 **In the browser** (`public/assets/js/username-changer.js`):
 - The rules (length, `^[a-z][a-z0-9]*$`, no leading digit, no `test…`, the reserved list) are embedded in the
   page and checked **on every keystroke with no network**. Most typos get their answer in under a frame.
 - Only "is it free?" goes to the server. It is **debounced 120 ms**, the previous request is **aborted**
-  (`AbortController`) when the client keeps typing, and each answer is **cached** for the life of the modal.
-  Re-typing a name, or going back to one, is instant.
-- The server's suggestions are **pre-checked and pre-seeded** into that cache, so clicking a chip is instant.
-- "Checking…" only appears if the answer takes longer than **160 ms**. A spinner that flashes briefly reads
-  as lag, not speed.
-- **Warm-up:** hovering or focusing the *Change* button sends one cheap request, which opens the
-  connection and session before the modal is even open.
-- If the check cannot be reached, the client may continue. The server checks again at submit.
+  (`AbortController`) when the client keeps typing, and each settled answer is **cached** for the life of the
+  modal. Re-typing a name, or going back to one, is instant.
+- "Checking with the server…" only appears if the answer takes longer than **160 ms**.
+- **Suggestions are never assumed free.** When the modal opens, the chips are verified **one at a time in the
+  background** (never more than one request in flight). Taken chips disappear and free ones get a ✓ and a
+  cached answer, so clicking a chip is an instant, true answer.
+- **"Couldn't reach the hosting server"** (`unverified`) is a warning, not a verdict. It is never cached and
+  keeps *Next* disabled. The check retries once by itself after 2.5 s, and typing again re-checks too.
+- **Warm-up:** hovering or focusing the *Change* button calls `GET /client/services/{id}/username/warm`. That
+  opens the connection and re-syncs the server's account copy if it is stale (see below), before the first
+  keystroke.
 
-**On the server** (`UsernameAvailability::fast`):
-- **No WHM call.** At most four indexed lookups:
-  1. `services.username` (newly indexed);
+**On the server** (`UsernameAvailability`):
+- `fast()`: rules plus at most four **indexed lookups**:
+  1. `services.username`;
   2. open requests' reserved names;
-  3. the cron-refreshed copy of the server's accounts (`username_change_server_accounts`);
+  3. the local copy of the server's accounts (`username_change_server_accounts`);
   4. the first-8 rule on MySQL servers.
-- No writes beyond the session rate counter. The answer carries `Cache-Control: private, max-age=20`.
-- Suggestions are checked in **one query per source for all candidates together**.
-- WHM's own `verify_new_username` (`deep()`) runs **once at submit** and again right before the rename. It
-  never runs per keystroke. So speed costs no safety.
-- The cron job refreshes each server's account list every 15 minutes, and immediately after every rename.
-  Admins can also refresh it from Settings → cPanel servers.
 
-Verified with a DOM test of the real script:
-- a rule violation is answered with zero requests;
-- a suggested name with zero requests;
-- 7 quick keystrokes produce exactly one request;
-- a re-typed name is answered from the cache.
+  Invalid and known-taken names are settled here in about a millisecond, **with no WHM call**.
+- `live()`: `fast()` and then, **only for a name that passed**, WHM's `verify_new_username`. The call uses a
+  **short-timeout HTTP client** (6 s; the module's main client keeps the 300 s that `createacct` needs).
+  - WHM says taken → `server`, with a plain-words reason. A name WHM reports as an existing account is
+    **added to the local copy at once**, so the next check of it, by anyone, is local.
+  - WHM unreachable → `unverified`. It is **never** reported as available, and it is sent with
+    `Cache-Control: no-store`.
+  - Settled answers carry `private, max-age=20`.
+- `live()` backs the client check, the admin manual check, submit, and the final check before the rename.
+  `deep()` is now an alias of it.
+- **The session lock is released** (`SessionManager::release()`) before the WHM call. PHP file sessions
+  serialise requests, so without this a slow WHM answer would queue the next keystroke's request.
+- `ensureFresh(serverId)`, called by the warm endpoint, re-syncs a server's account copy when it is older
+  than 15 minutes or was never synced. That means a fresh install works without cron.
+  - A single conditional `UPDATE … WHERE updated_at < now − 2 min` claims the refresh, so a burst of modal
+    opens triggers one `listaccts`, not one each.
+  - The endpoint releases the session and ignores client aborts.
+  - Cron still refreshes every 15 minutes and right after every rename. Admins can refresh from
+    Settings → cPanel servers.
+- Rate limit: 90 checks a minute per session (a session counter, no database write).
+
+**Typical timings:** about a millisecond for local verdicts. For a free name, one WHM round-trip, usually well
+under the 160 ms spinner threshold on a nearby server.
+
+**Verified:**
+- `tests/Unit/UsernameLiveCheckTest.php` runs the real `ProvisioningService` and cPanel module against a
+  scripted WHM. It covers the reported bug (empty local copy, WHM has the account → taken), WHM-free →
+  available, unreachable → `unverified`, known-taken names never reaching WHM, the on-demand refresh and
+  its claim, and the short-timeout client wiring.
+- A DOM test of the real script checks that:
+  - the warm endpoint is called on hover;
+  - chips are verified (a taken one is dropped, a free one is ticked);
+  - a server-taken name is rejected;
+  - `unverified` is retried and never cached;
+  - rule violations make zero requests;
+  - 7 keystrokes make exactly 1 request.
 
 ---
 

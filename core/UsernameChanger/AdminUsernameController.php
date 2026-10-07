@@ -186,7 +186,13 @@ final class AdminUsernameController
         $name = UsernamePolicy::normalise((string) $request->query('u', ''));
         $result = $this->availability->fast($name, $service);
 
-        return Response::json($result + ['u' => $name])->withHeader('Cache-Control', 'private, max-age=10');
+        if ($result['ok']) {
+            // Free locally — confirm with WHM (the only authority).
+            $this->session->release();
+            $result = $this->availability->live($name, $service);
+        }
+
+        return Response::json($result + ['u' => $name])->withHeader('Cache-Control', $result['code'] === 'unverified' ? 'no-store' : 'private, max-age=10');
     }
 
     public function settingsPage(Request $request): Response

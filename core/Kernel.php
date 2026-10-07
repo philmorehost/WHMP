@@ -734,7 +734,13 @@ class Kernel
         // create() also re-verifies via accountsummary after a dropped
         // connection, so a slow-but-successful create reports success.
         $this->container->singleton(CpanelProvisioningModule::class, function (Container $c) {
-            return new CpanelProvisioningModule(new CurlHttpClient(timeoutSeconds: 300, verifySsl: false));
+            // The second client is for verify_new_username, which a person
+            // waits on while typing in the username changer: 6s, so a hung
+            // WHM reports "couldn't reach the server" instead of a spinner.
+            return new CpanelProvisioningModule(
+                new CurlHttpClient(timeoutSeconds: 300, verifySsl: false),
+                new CurlHttpClient(timeoutSeconds: 6, verifySsl: false)
+            );
         });
 
         $this->container->singleton(\CodeVault\CpanelTools\CpanelUapiClient::class, function (Container $c) {

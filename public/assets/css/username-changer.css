@@ -175,3 +175,7 @@ input.ucn-input[name="new_username"] { font-family: var(--cv-font-mono, ui-monos
     .ucn-modal__dialog, .ucn-modal__backdrop, .ucn-btn { transition: none; }
     .ucn-status--wait { animation: none; }
 }
+/* Suggestion chips: verified with the server in the background. */
+.ucn-chip.is-checking { opacity: .6; }
+.ucn-chip.is-verified { border-style: solid; }
+.ucn-chip.is-verified::before { content: "✓ "; color: var(--ucn-ok, #16a34a); }

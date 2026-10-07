@@ -14,6 +14,7 @@ use CodeVault\UsernameChanger\ResellerUsernameController;
 // Client — main site and every store, owner of the service only.
 $router->get('/client/services/{id}/username', [ClientUsernameController::class, 'show']);
 $router->get('/client/services/{id}/username/check', [ClientUsernameController::class, 'check']);
+$router->get('/client/services/{id}/username/warm', [ClientUsernameController::class, 'warm']);
 $router->post('/client/services/{id}/username', [ClientUsernameController::class, 'submit']);
 $router->post('/client/services/{id}/username/{rid}/cancel', [ClientUsernameController::class, 'cancel']);
 $router->post('/client/services/{id}/username/{rid}/resend', [ClientUsernameController::class, 'resend']);

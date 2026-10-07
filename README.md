@@ -246,9 +246,16 @@ of reseller stores, white-labelled. Full design: `docs/CPANEL_USERNAME_CHANGER_P
 
   Optional admin or reseller approval comes next, then the WHM `modifyacct` rename, which is verified even
   if the connection drops. Finally the service record is synced.
-- **Instant precheck:** the rules are checked in the browser on every keystroke. The "is it free?" check is
-  debounced, cancellable and cached, and reads only local tables, never WHM. Each server's account list is
-  refreshed by cron every 15 minutes. WHM's own check runs at submit and again before the rename.
+- **Fast, server-confirmed precheck:** the rules are checked in the browser on every keystroke. The "is it
+  free?" check is debounced, cancellable and cached:
+  - names already taken in WHMP's records are rejected in about a millisecond;
+  - a name that is free locally is then **confirmed with WHM** (`verify_new_username`, 6-second timeout), so
+    "available" always means the server agrees;
+  - if WHM can't be reached, the modal says so and retries. It never shows the name as available.
+
+  Suggestion chips are verified in the background before they show a ✓. Opening the modal re-syncs the
+  server's account list if it is more than 15 minutes old, so this works even without cron. WHM is asked
+  again at submit and right before the rename.
 - **Payment (ON/OFF, off by default):** Settings & pricing → *Charge a fee*. When it is on:
   - the client pays after confirming and after any approval, and the rename runs once the invoice is paid;
   - resellers set their own price at or above their cost, under *Reseller Area → Username requests*. The

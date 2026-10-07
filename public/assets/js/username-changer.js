@@ -8,12 +8,18 @@
  *   2. Only a locally-valid name asks the server "is it free?". That request is
  *      debounced (120 ms), cancellable (AbortController — a newer keystroke
  *      kills the older request), and cached per name, so going back to a name
- *      you already tried is instant. Suggestions the server already vetted are
- *      pre-seeded into the cache.
- *   3. Hovering or focusing the Change button warms the connection, so the
- *      first real check does not pay for a cold TLS handshake.
- *   4. The server answer is indexed database lookups only (no WHM call); WHM is
- *      consulted once at submit.
+ *      you already tried is instant.
+ *   3. The server settles known-taken names from its records in about a
+ *      millisecond; a name free in the records is then confirmed with WHM
+ *      itself, so "available" always means the hosting server agreed. "Checking
+ *      with the server…" only appears if that takes longer than 160 ms. A server
+ *      that cannot be reached is a retryable warning — never cached, never
+ *      shown as available.
+ *   4. Hovering or focusing the Change button warms the connection AND asks the
+ *      server to re-sync its copy of the WHM account list if it is stale.
+ *   5. Suggestion chips are never assumed free: when the modal opens they are
+ *      verified one by one in the background; taken ones disappear and verified
+ *      ones get a tick, so clicking a chip is an instant, true answer.
  *
  * No framework, no globals beyond one IIFE; works with the CSP (external file).
  */
@@ -58,13 +64,11 @@
             step: 1,
             lastFocus: null,
             checkUrl: '/client/services/' + sid + '/username/check?u=',
-            warmed: false
+            warmUrl: '/client/services/' + sid + '/username/warm',
+            warmed: null,
+            retryTimer: null,
+            chipBusy: false
         };
-
-        // Names the server already proved free when it drew the page.
-        (data.suggestions || []).forEach(function (s) {
-            state.cache.set(s, { ok: true, code: 'ok', message: 'Available.', u: s });
-        });
 
         state.localRule = function (name) {
             if (name === '') { return ['empty', 'Enter a username.']; }
@@ -100,14 +104,61 @@
         if (!state.chips || !Array.isArray(list)) { return; }
         state.chips.textContent = '';
         list.forEach(function (s) {
-            state.cache.set(s, state.cache.get(s) || { ok: true, code: 'ok', message: 'Available.', u: s });
+            var known = state.cache.get(s);
+            if (known && !known.ok) { return; } // already known to be taken
             var b = document.createElement('button');
             b.type = 'button';
             b.className = 'ucn-chip';
             b.setAttribute('data-ucn-chip', s);
             b.textContent = s;
+            if (known && known.ok) { b.classList.add('is-verified'); b.title = 'Available on the server'; }
             state.chips.appendChild(b);
         });
+        verifyChips(state);
+    }
+
+    function getJson(url, signal) {
+        return fetch(url, {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            signal: signal
+        }).then(function (r) { return r.json(); });
+    }
+
+    // Checks suggestion chips one at a time in the background (never more than
+    // one request in flight, so it cannot crowd out what the person types).
+    // Taken chips are removed; free ones get a tick and a cached answer.
+    function verifyChips(state) {
+        if (state.chipBusy || !state.chips || !state.modal || state.modal.hidden) { return; }
+        var next = $all(state.chips, '[data-ucn-chip]').filter(function (b) {
+            return !b.classList.contains('is-verified') && !b.hasAttribute('data-ucn-unverified');
+        })[0];
+        if (!next) { return; }
+        var name = next.getAttribute('data-ucn-chip');
+        var known = state.cache.get(name);
+        if (known) { markChip(state, next, known); verifyChips(state); return; }
+        state.chipBusy = true;
+        next.classList.add('is-checking');
+        var done = function (res) {
+            state.chipBusy = false;
+            next.classList.remove('is-checking');
+            if (res && res.code === 'slow_down') { return; }
+            if (res && res.code && res.code !== 'unverified') { state.cache.set(name, res); }
+            markChip(state, next, res || { code: 'unverified' });
+            setTimeout(function () { verifyChips(state); }, 0);
+        };
+        getJson(state.checkUrl + encodeURIComponent(name)).then(done).catch(function () { done({ code: 'unverified' }); });
+    }
+
+    function markChip(state, chip, res) {
+        if (res.ok) {
+            chip.classList.add('is-verified');
+            chip.title = 'Available on the server';
+        } else if (res.code === 'unverified') {
+            chip.setAttribute('data-ucn-unverified', '1'); // keep it; checked when picked
+        } else if (chip.parentNode) {
+            chip.parentNode.removeChild(chip);
+        }
     }
 
     function applyResult(state, name, res) {
@@ -117,6 +168,18 @@
             state.okFor = name;
             setVerdict(state, 'ok', '✓ “' + name + '” is available.');
             setNextEnabled(state, true);
+        } else if (res.code === 'unverified') {
+            // The hosting server did not answer in time. Not "available", not
+            // "taken" — retry once on our own, then leave it to the person.
+            state.okFor = null;
+            setVerdict(state, 'wait', res.message || 'We couldn\'t reach the hosting server. Please try again.');
+            setNextEnabled(state, false);
+            if (!res.retried) {
+                clearTimeout(state.retryTimer);
+                state.retryTimer = setTimeout(function () {
+                    if (state.input.value === name) { check(state, true); }
+                }, 2500);
+            }
         } else {
             state.okFor = null;
             setVerdict(state, res.code === 'slow_down' ? 'wait' : 'bad', res.message || 'Not available.');
@@ -125,7 +188,7 @@
         if (res.suggestions && res.suggestions.length) { renderChips(state, res.suggestions); }
     }
 
-    function check(state) {
+    function check(state, isRetry) {
         var raw = state.input.value;
         var name = raw.toLowerCase().replace(/\s+/g, '');
         if (name !== raw) {
@@ -138,6 +201,7 @@
 
         clearTimeout(state.timer);
         clearTimeout(state.spinnerTimer);
+        clearTimeout(state.retryTimer);
         if (state.controller) { state.controller.abort(); state.controller = null; }
         state.okFor = null;
         setNextEnabled(state, false);
@@ -153,34 +217,36 @@
 
         // Only show "checking…" if the answer is not back almost at once —
         // a spinner that flashes for 30 ms reads as lag, not speed.
-        state.spinnerTimer = setTimeout(function () { setVerdict(state, 'wait', 'Checking…'); }, SPINNER_DELAY_MS);
+        state.spinnerTimer = setTimeout(function () { setVerdict(state, 'wait', 'Checking with the server…'); }, SPINNER_DELAY_MS);
 
         state.timer = setTimeout(function () {
             var ctl = typeof AbortController === 'function' ? new AbortController() : null;
             state.controller = ctl;
-            fetch(state.checkUrl + encodeURIComponent(name), {
-                credentials: 'same-origin',
-                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                signal: ctl ? ctl.signal : undefined
-            }).then(function (r) { return r.json(); }).then(function (res) {
-                if (res && res.code !== 'slow_down') { state.cache.set(name, res); }
-                applyResult(state, name, res || {});
+            getJson(state.checkUrl + encodeURIComponent(name), ctl ? ctl.signal : undefined).then(function (res) {
+                res = res || {};
+                // Momentary answers are never cached: a retry must really retry.
+                if (res.code !== 'slow_down' && res.code !== 'unverified') { state.cache.set(name, res); }
+                if (isRetry) { res.retried = true; }
+                applyResult(state, name, res);
             }).catch(function (err) {
                 if (err && err.name === 'AbortError') { return; }
                 clearTimeout(state.spinnerTimer);
-                if (state.input.value === name) { setVerdict(state, 'wait', 'Could not check right now — you can still continue; we check again when you submit.'); state.okFor = name; setNextEnabled(state, true); }
+                if (state.input.value === name) {
+                    state.okFor = null;
+                    setNextEnabled(state, false);
+                    setVerdict(state, 'wait', 'Could not check right now — please try again in a moment.');
+                }
             });
-        }, DEBOUNCE_MS);
+        }, isRetry ? 0 : DEBOUNCE_MS);
     }
 
+    // Opens the connection and asks the server to re-sync its copy of the WHM
+    // account list if it is stale — before the first keystroke. Resolves when
+    // done (or failed); never blocks typing.
     function warm(state) {
-        if (state.warmed) { return; }
-        state.warmed = true;
-        // A cheap request that opens (and keeps alive) the connection and the
-        // session before the first real keystroke check.
-        try {
-            fetch(state.checkUrl + encodeURIComponent(String(state.data.current || '')), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } }).catch(function () {});
-        } catch (e) { /* ignore */ }
+        if (state.warmed) { return state.warmed; }
+        state.warmed = getJson(state.warmUrl).catch(function () { return null; });
+        return state.warmed;
     }
 
     function showStep(state, n) {
@@ -201,7 +267,8 @@
         state.modal.hidden = false;
         document.documentElement.classList.add('ucn-lock');
         requestAnimationFrame(function () { state.modal.classList.add('is-open'); });
-        warm(state);
+        // Verify the suggestion chips once the account copy is fresh.
+        warm(state).then(function () { verifyChips(state); });
         if (state.input) { setTimeout(function () { state.input.focus(); }, 30); }
     }
 

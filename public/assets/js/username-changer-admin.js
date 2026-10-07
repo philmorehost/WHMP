@@ -31,13 +31,19 @@
         if (ctl) { ctl.abort(); }
         var bad = local(n);
         if (bad !== null) { say(bad ? 'bad' : '', bad || ''); return; }
-        if (cache.has(n)) { var c = cache.get(n); say(c.ok ? 'ok' : 'bad', c.ok ? '✓ Available' : c.message); return; }
+        if (cache.has(n)) { var c = cache.get(n); say(c.ok ? 'ok' : 'bad', c.ok ? '✓ Available on the server' : c.message); return; }
         timer = setTimeout(function () {
             ctl = typeof AbortController === 'function' ? new AbortController() : null;
+            var slow = setTimeout(function () { if (input.value === n) { say('', 'Checking with the server…'); } }, 160);
             fetch('/admin/username-changer/check?service_id=' + sid + '&u=' + encodeURIComponent(n), { credentials: 'same-origin', signal: ctl ? ctl.signal : undefined })
                 .then(function (r) { return r.json(); })
-                .then(function (res) { cache.set(n, res); if (input.value === n) { say(res.ok ? 'ok' : 'bad', res.ok ? '✓ Available' : res.message); } })
-                .catch(function () {});
+                .then(function (res) {
+                    clearTimeout(slow);
+                    // "Couldn't reach the server" is momentary: show it, never cache it.
+                    if (res.code !== 'unverified') { cache.set(n, res); }
+                    if (input.value === n) { say(res.ok ? 'ok' : 'bad', res.ok ? '✓ Available on the server' : res.message); }
+                })
+                .catch(function () { clearTimeout(slow); });
         }, 120);
     });
     if (input.value) { input.dispatchEvent(new Event('input')); }

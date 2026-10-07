@@ -20,9 +20,12 @@ use Throwable;
  * signed-in owner of the service only. While the add-on is off every route is a
  * plain 404, so nothing reveals the feature exists.
  *
- * The live check is built for speed: no database writes (its rate limit lives in
- * the session), indexed reads only, and a short private cache header so the
- * browser's own cache absorbs repeat look-ups.
+ * The live check is built for speed without trading away truth: invalid and
+ * known-taken names are settled by indexed local reads in about a millisecond;
+ * a name that is free locally is then confirmed with WHM itself (short timeout,
+ * session lock released first so typing never queues requests). Its rate limit
+ * lives in the session (no database write per keystroke) and settled answers
+ * carry a short private cache header so the browser absorbs repeat look-ups.
  */
 final class ClientUsernameController
 {
@@ -78,6 +81,15 @@ final class ClientUsernameController
         $name = UsernamePolicy::normalise((string) $request->query('u', ''));
         $ctx = ['id' => (int) $service['id'], 'server_id' => $service['server_id'], 'username' => (string) $service['username']];
         $result = $this->availability->fast($name, $ctx);
+
+        if ($result['ok']) {
+            // Free in our records — now ask the server, which is the only
+            // authority (the local account copy can be stale or empty). The
+            // session is released first: nothing below writes to it.
+            $this->session->release();
+            $result = $this->availability->live($name, $ctx);
+        }
+
         $out = ['ok' => $result['ok'], 'code' => $result['code'], 'message' => $result['message'], 'u' => $name];
 
         if (!$result['ok'] && in_array($result['code'], ['taken', 'pending', 'prefix8', 'reserved', 'test_prefix', 'same', 'server'], true)) {
@@ -88,7 +100,38 @@ final class ClientUsernameController
             ]);
         }
 
-        return self::json($out)->withHeader('Cache-Control', 'private, max-age=20');
+        // "Could not reach the server" is momentary — never let a cache keep it.
+        return self::json($out)->withHeader('Cache-Control', $result['code'] === 'unverified' ? 'no-store' : 'private, max-age=20');
+    }
+
+    /**
+     * GET /client/services/{id}/username/warm — called when the modal is about
+     * to open. Re-syncs the server's account copy if it is stale (or was never
+     * synced because cron is not running), so taken names and suggestions are
+     * right from the first keystroke. Cheap when fresh: one indexed read.
+     */
+    public function warm(Request $request, array $params): Response
+    {
+        [$service, , $deny] = $this->owned($params);
+
+        if ($deny !== null) {
+            return $deny;
+        }
+
+        $refreshed = false;
+
+        if ($service['server_id'] !== null) {
+            $this->session->release();
+            ignore_user_abort(true);
+
+            try {
+                $refreshed = $this->availability->ensureFresh((int) $service['server_id']);
+            } catch (Throwable) {
+                $refreshed = false;
+            }
+        }
+
+        return self::json(['ok' => true, 'refreshed' => $refreshed])->withHeader('Cache-Control', 'no-store');
     }
 
     /** POST /client/services/{id}/username — create the request. */
