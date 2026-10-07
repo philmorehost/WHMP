@@ -5,6 +5,7 @@
 /** @var string|null $message */
 /** @var bool $cpanelToolsAvailable */
 /** @var bool $domainChangerAvailable */
+/** @var array<string, mixed>|null $usernameChanger cPanel Username Changer modal data (null = not offered) */
 /** @var array<string, mixed> $currency */
 /** @var array<string, mixed>|null $pendingCancellation */
 /** @var string $kind 'shared' | 'vps' | 'dedicated' */
@@ -17,6 +18,7 @@
 $id = (int) $service['id'];
 $cpanelToolsAvailable ??= false;
 $domainChangerAvailable ??= false;
+$usernameChanger ??= null;
 
 // Which surface this service gets is decided by the controller from the
 // assigned server's module, not re-derived here from the product name. The
@@ -588,9 +590,19 @@ $cpanelTabs = [
 
                         <?php if (!empty($service['username'])): ?>
                             <div class="svc-info-label">cPanel Username:</div>
-                            <div class="svc-info-val"><?= e((string) $service['username']) ?></div>
+                            <div class="svc-info-val">
+                                <?= e((string) $service['username']) ?>
+                                <?php if (is_array($usernameChanger)): ?>
+                                    <button type="button" class="svc-btn svc-btn--secondary" style="padding:2px 10px;font-size:0.72rem;margin-left:8px;"
+                                        data-ucn-open="<?= $id ?>">✏️ Change</button>
+                                <?php endif; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
+
+                    <?php if (is_array($usernameChanger)): ?>
+                        <?= $view->render('username-changer.banner', ['ucn' => $usernameChanger]) ?>
+                    <?php endif; ?>
 
                     <?php
                     // Real disk usage from WHM's accountsummary. diskLimitMb is

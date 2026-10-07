@@ -229,6 +229,36 @@ to `resellers`. Nothing to run by hand: like every migration, it is applied auto
 load after the update is uploaded, and SchemaReconciler adds the columns from `database/schema.php` if it
 ever fails. Until then a store simply shows no Google button.
 
+## cPanel Username Changer (add-on)
+
+Lets customers rename the cPanel account of their hosting from the service page. This includes customers
+of reseller stores, white-labelled. Full design: `docs/CPANEL_USERNAME_CHANGER_PLAN.md`.
+
+- **Off until activated:** Admin → Addons → *cPanel Username Changer* → Activate. While it is inactive there
+  is no UI, and every endpoint returns 404. Manage it at `/admin/username-changer`: dashboard, manual
+  change with preflight, settings and pricing, and the audit log. There is a ✏️ shortcut beside the username
+  on the admin service page.
+- **Client flow:** a *Change* button and banner beside the cPanel username open a modal (a bottom sheet on
+  phones). The client:
+  1. picks a name with an instant live check and suggestions;
+  2. ticks what changes;
+  3. confirms by email link or Security PIN.
+
+  Optional admin or reseller approval comes next, then the WHM `modifyacct` rename, which is verified even
+  if the connection drops. Finally the service record is synced.
+- **Instant precheck:** the rules are checked in the browser on every keystroke. The "is it free?" check is
+  debounced, cancellable and cached, and reads only local tables, never WHM. Each server's account list is
+  refreshed by cron every 15 minutes. WHM's own check runs at submit and again before the rename.
+- **Payment (ON/OFF, off by default):** Settings & pricing → *Charge a fee*. When it is on:
+  - the client pays after confirming and after any approval, and the rename runs once the invoice is paid;
+  - resellers set their own price at or above their cost, under *Reseller Area → Username requests*. The
+    margin is credited to their balance on payment and reversed on refund. Sub-resellers buy at their
+    upline's price, and the upline earns the difference.
+- **Reseller panel:** stores see only their own customers' requests. They can make the rules stricter
+  (never looser), approve requests themselves (when the platform does not), and set their price.
+- **Cron:** `cpanel-username-changer` runs every 5 minutes. It runs queued renames, retries with backoff,
+  expires links, reconciles payments, refreshes account lists and prunes history.
+
 ## InterServer VPS: client self-service
 
 Clients control their InterServer VPS from their service page: start, restart and stop;

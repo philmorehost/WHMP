@@ -1230,6 +1230,7 @@ final class ClientServiceController
             'serverLogin' => $serverLogin,
             'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
             'domainChangerAvailable' => $this->isOnCpanelServer($service) && $this->addons->isActive(self::DOMAIN_CHANGER_SLUG),
+            'usernameChanger' => $this->usernameChangerFor($id, $client),
             'currency' => $currency,
             // services.amount is written once at checkout via
             // CheckoutService::buildOrder(), which locks currency through
@@ -1255,6 +1256,26 @@ final class ClientServiceController
      * @param array<string, mixed> $params
      * @return array{0: array<string, mixed>|null, 1: array<string, mixed>|null, 2: Response|null}
      */
+    /**
+     * The cPanel Username Changer banner/modal data, or null when it must not
+     * show (add-on off, not a cPanel service, policy says no). Resolved from the
+     * container rather than injected so this controller's constructor — built
+     * by hand in tests — is unchanged, and any failure only hides the banner.
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>|null
+     */
+    private function usernameChangerFor(int $serviceId, array $client): ?array
+    {
+        try {
+            return \CodeVault\Support\App::container()
+                ->make(\CodeVault\UsernameChanger\ClientUsernameController::class)
+                ->bannerFor($serviceId, $client);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     private function ownedService(array $params): array
     {
         $client = $this->guard->currentClient();

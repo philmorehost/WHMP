@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0213_reseller_google_signin.php',
-    'migration_count' => 212,
+    'last_migration' => '0214_cpanel_username_changer.php',
+    'migration_count' => 213,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -3968,6 +3968,13 @@ return [
                         'suspended_by_reseller_id',
                     ],
                 ],
+                'idx_services_username' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'username',
+                    ],
+                ],
             ],
             'foreign' => [
                 'fk_services_client' => [
@@ -4401,6 +4408,257 @@ return [
                     'on_update' => NULL,
                 ],
             ],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'username_change_events' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'request_id' => 'INT UNSIGNED NOT NULL',
+                'event' => 'VARCHAR(32) NOT NULL',
+                'actor_type' => 'VARCHAR(10) NOT NULL',
+                'actor_id' => 'INT UNSIGNED NULL',
+                'ip' => 'VARCHAR(45) NULL',
+                'detail' => 'TEXT NULL',
+                'created_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'idx_uce_request' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'request_id',
+                        'id',
+                    ],
+                ],
+                'idx_uce_created' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'created_at',
+                    ],
+                ],
+            ],
+            'foreign' => [
+                'fk_uce_request' => [
+                    'column' => 'request_id',
+                    'references' => 'username_change_requests',
+                    'referenced_column' => 'id',
+                    'on_delete' => 'CASCADE',
+                    'on_update' => NULL,
+                ],
+            ],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'username_change_policies' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'scope' => 'VARCHAR(8) NOT NULL',
+                'scope_id' => 'INT UNSIGNED NOT NULL',
+                'enabled' => 'TINYINT(1) NULL',
+                'max_changes' => 'SMALLINT UNSIGNED NULL',
+                'cooldown_days' => 'SMALLINT UNSIGNED NULL',
+                'approval' => 'VARCHAR(10) NULL',
+                'allow_db_rename' => 'TINYINT(1) NULL',
+                'client_mode' => 'VARCHAR(8) NULL',
+                'extra_changes' => 'SMALLINT UNSIGNED NULL',
+                'fee' => 'DECIMAL(12,2) NULL',
+                'note' => 'VARCHAR(255) NULL',
+                'updated_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'uniq_ucp_scope' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'scope',
+                        'scope_id',
+                    ],
+                ],
+            ],
+            'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'username_change_requests' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'service_id' => 'INT UNSIGNED NOT NULL',
+                'client_id' => 'INT UNSIGNED NOT NULL',
+                'reseller_id' => 'INT UNSIGNED NULL',
+                'server_id' => 'INT UNSIGNED NULL',
+                'old_username' => 'VARCHAR(16) NOT NULL',
+                'new_username' => 'VARCHAR(16) NOT NULL',
+                'reason' => 'VARCHAR(500) NULL',
+                'rename_db_objects' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'status' => 'VARCHAR(24) NOT NULL',
+                'confirm_method' => 'VARCHAR(8) NULL',
+                'confirm_token_hash' => 'CHAR(64) NULL',
+                'confirm_expires_at' => 'DATETIME NULL',
+                'confirm_sent_count' => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+                'confirm_last_sent_at' => 'DATETIME NULL',
+                'pin_attempts' => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+                'confirmed_at' => 'DATETIME NULL',
+                'decided_by_type' => 'VARCHAR(10) NULL',
+                'decided_by_id' => 'INT UNSIGNED NULL',
+                'decided_at' => 'DATETIME NULL',
+                'decline_reason' => 'VARCHAR(500) NULL',
+                'fee_amount' => 'DECIMAL(12,2) NULL',
+                'fee_currency_id' => 'INT UNSIGNED NULL',
+                'fee_retail' => 'DECIMAL(12,2) NULL',
+                'fee_cost' => 'DECIMAL(12,2) NULL',
+                'fee_upline_cost' => 'DECIMAL(12,2) NULL',
+                'invoice_id' => 'INT UNSIGNED NULL',
+                'paid_at' => 'DATETIME NULL',
+                'fee_credited_at' => 'DATETIME NULL',
+                'fee_reversed_at' => 'DATETIME NULL',
+                'attempts' => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+                'next_attempt_at' => 'DATETIME NULL',
+                'lock_token' => 'CHAR(32) NULL',
+                'locked_at' => 'DATETIME NULL',
+                'last_error' => 'TEXT NULL',
+                'server_response' => 'TEXT NULL',
+                'sync_state' => 'VARCHAR(12) NULL',
+                'requested_by_type' => 'VARCHAR(10) NOT NULL',
+                'requested_by_id' => 'INT UNSIGNED NULL',
+                'ip' => 'VARCHAR(45) NULL',
+                'created_at' => 'DATETIME NOT NULL',
+                'updated_at' => 'DATETIME NOT NULL',
+                'completed_at' => 'DATETIME NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'uniq_ucr_token' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'confirm_token_hash',
+                    ],
+                ],
+                'idx_ucr_status' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'status',
+                        'next_attempt_at',
+                    ],
+                ],
+                'idx_ucr_service' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'service_id',
+                        'status',
+                    ],
+                ],
+                'idx_ucr_client' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'client_id',
+                    ],
+                ],
+                'idx_ucr_reseller' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'reseller_id',
+                        'status',
+                    ],
+                ],
+                'idx_ucr_new' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'new_username',
+                        'status',
+                    ],
+                ],
+                'idx_ucr_invoice' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'invoice_id',
+                    ],
+                ],
+            ],
+            'foreign' => [
+                'fk_ucr_service' => [
+                    'column' => 'service_id',
+                    'references' => 'services',
+                    'referenced_column' => 'id',
+                    'on_delete' => 'CASCADE',
+                    'on_update' => NULL,
+                ],
+            ],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'username_change_server_accounts' => [
+            'columns' => [
+                'server_id' => 'INT UNSIGNED NOT NULL',
+                'username' => 'VARCHAR(32) NOT NULL',
+                'prefix8' => 'VARCHAR(8) NOT NULL',
+                'domain' => 'VARCHAR(191) NULL',
+                'synced_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'server_id',
+                'username',
+            ],
+            'indexes' => [
+                'idx_ucsa_username' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'username',
+                    ],
+                ],
+                'idx_ucsa_prefix' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'server_id',
+                        'prefix8',
+                    ],
+                ],
+            ],
+            'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'username_change_servers' => [
+            'columns' => [
+                'server_id' => 'INT UNSIGNED NOT NULL',
+                'db_engine' => 'VARCHAR(10) NULL',
+                'db_engine_override' => 'VARCHAR(10) NULL',
+                'account_count' => 'INT UNSIGNED NOT NULL DEFAULT 0',
+                'accounts_synced_at' => 'DATETIME NULL',
+                'last_error' => 'VARCHAR(255) NULL',
+                'updated_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'server_id',
+            ],
+            'indexes' => [],
+            'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'username_change_throttle' => [
+            'columns' => [
+                'throttle_key' => 'VARCHAR(120) NOT NULL',
+                'hits' => 'INT UNSIGNED NOT NULL DEFAULT 0',
+                'window_start' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'throttle_key',
+            ],
+            'indexes' => [],
+            'foreign' => [],
             'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         ],
         'widget_modules' => [

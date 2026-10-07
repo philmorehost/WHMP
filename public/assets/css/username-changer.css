@@ -1,0 +1,177 @@
+/* cPanel Username Changer — banner + modal (bottom sheet on phones).
+   Theme-independent: reads the site's tokens when present, falls back otherwise. */
+.ucn {
+    --ucn-accent: var(--cv-color-accent, #2f6fed);
+    --ucn-surface: var(--cv-bg-surface, #ffffff);
+    --ucn-sunken: var(--cv-bg-surface-sunken, #f5f7fa);
+    --ucn-text: var(--cv-text-primary, #14171c);
+    --ucn-muted: var(--cv-text-secondary, #5b6472);
+    --ucn-border: var(--cv-border-default, #dde1e6);
+    --ucn-ok: #16a34a;
+    --ucn-bad: #dc2626;
+    --ucn-wait: #b45309;
+    --ucn-radius: 14px;
+    font-family: inherit;
+    margin: 0 0 20px;
+}
+
+.ucn-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid var(--ucn-border);
+    border-radius: var(--ucn-radius);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--ucn-accent) 9%, transparent), transparent 70%);
+}
+.ucn-banner__icon {
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: var(--ucn-accent);
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--ucn-accent) 35%, transparent);
+}
+.ucn-banner__text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.ucn-banner__label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ucn-muted); width: 100%; }
+.ucn-banner__name { font-size: 1.05rem; font-family: var(--cv-font-mono, ui-monospace, monospace); color: var(--ucn-text); }
+.ucn-banner__hint { font-size: .8rem; color: var(--ucn-muted); }
+
+.ucn-btn {
+    appearance: none;
+    border: 1px solid var(--ucn-border);
+    background: var(--ucn-surface);
+    color: var(--ucn-text);
+    border-radius: 10px;
+    padding: 9px 16px;
+    font: inherit;
+    font-weight: 600;
+    font-size: .88rem;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: transform .08s ease, box-shadow .15s ease, opacity .15s;
+}
+.ucn-btn:hover { transform: translateY(-1px); }
+.ucn-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.ucn-btn--primary { background: var(--ucn-accent); border-color: var(--ucn-accent); color: #fff; box-shadow: 0 4px 12px color-mix(in srgb, var(--ucn-accent) 30%, transparent); }
+.ucn-btn--ghost { background: transparent; }
+.ucn-icon-btn { appearance: none; border: 0; background: transparent; color: var(--ucn-muted); font-size: 1.1rem; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+.ucn-icon-btn:hover { background: var(--ucn-sunken); }
+
+.ucn-pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--ucn-sunken); color: var(--ucn-muted); }
+.ucn-pill--completed { background: color-mix(in srgb, var(--ucn-ok) 15%, transparent); color: var(--ucn-ok); }
+.ucn-pill--failed, .ucn-pill--declined { background: color-mix(in srgb, var(--ucn-bad) 14%, transparent); color: var(--ucn-bad); }
+.ucn-pill--awaiting_confirmation, .ucn-pill--pending_approval, .ucn-pill--awaiting_payment, .ucn-pill--queued, .ucn-pill--processing { background: color-mix(in srgb, var(--ucn-wait) 15%, transparent); color: var(--ucn-wait); }
+
+/* Modal */
+.ucn-lock { overflow: hidden; }
+.ucn-modal { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; }
+.ucn-modal[hidden] { display: none; }
+.ucn-modal__backdrop { position: absolute; inset: 0; background: rgba(10, 14, 22, .55); backdrop-filter: blur(3px); opacity: 0; transition: opacity .18s ease; }
+.ucn-modal__dialog {
+    position: relative;
+    width: min(560px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    background: var(--ucn-surface);
+    color: var(--ucn-text);
+    border: 1px solid var(--ucn-border);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
+    transform: translateY(10px) scale(.985);
+    opacity: 0;
+    transition: transform .18s ease, opacity .18s ease;
+}
+.ucn-modal.is-open .ucn-modal__backdrop { opacity: 1; }
+.ucn-modal.is-open .ucn-modal__dialog { transform: none; opacity: 1; }
+.ucn-modal__head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+.ucn-modal__title { margin: 0; font-size: 1.2rem; font-family: var(--cv-font-heading, inherit); }
+.ucn-modal__sub { margin: 4px 0 0; font-size: .82rem; color: var(--ucn-muted); }
+
+.ucn-steps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 0 0 16px; counter-reset: ucn; }
+.ucn-steps li { flex: 1; font-size: .72rem; color: var(--ucn-muted); padding-top: 8px; border-top: 3px solid var(--ucn-border); counter-increment: ucn; }
+.ucn-steps li::before { content: counter(ucn) ". "; }
+.ucn-steps li.is-active { color: var(--ucn-text); border-color: var(--ucn-accent); font-weight: 600; }
+.ucn-steps li.is-done { border-color: color-mix(in srgb, var(--ucn-accent) 45%, transparent); }
+
+.ucn-label { display: block; font-size: .8rem; font-weight: 600; margin: 12px 0 6px; }
+.ucn-field { position: relative; }
+.ucn-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 40px 12px 14px;
+    border: 1.5px solid var(--ucn-border);
+    border-radius: 12px;
+    background: var(--ucn-sunken);
+    color: var(--ucn-text);
+    font: inherit;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color .12s, box-shadow .12s;
+}
+input.ucn-input[name="new_username"] { font-family: var(--cv-font-mono, ui-monospace, monospace); letter-spacing: .02em; }
+.ucn-input:focus { border-color: var(--ucn-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ucn-accent) 18%, transparent); }
+.ucn-input[aria-invalid="true"] { border-color: var(--ucn-bad); }
+.ucn-textarea { padding-right: 14px; resize: vertical; min-height: 60px; }
+.ucn-status { position: absolute; right: 14px; top: 50%; width: 16px; height: 16px; margin-top: -8px; border-radius: 50%; }
+.ucn-status--ok { background: var(--ucn-ok); }
+.ucn-status--ok::after { content: "✓"; color: #fff; font-size: 11px; position: absolute; inset: 0; display: grid; place-items: center; }
+.ucn-status--bad { background: var(--ucn-bad); }
+.ucn-status--bad::after { content: "!"; color: #fff; font-size: 11px; font-weight: 700; position: absolute; inset: 0; display: grid; place-items: center; }
+.ucn-status--wait { border: 2px solid color-mix(in srgb, var(--ucn-wait) 30%, transparent); border-top-color: var(--ucn-wait); animation: ucn-spin .6s linear infinite; }
+@keyframes ucn-spin { to { transform: rotate(360deg); } }
+
+.ucn-verdict { margin: 8px 0 0; font-size: .82rem; color: var(--ucn-muted); min-height: 1.3em; }
+.ucn-verdict--ok { color: var(--ucn-ok); font-weight: 600; }
+.ucn-verdict--bad { color: var(--ucn-bad); }
+.ucn-verdict--wait { color: var(--ucn-wait); }
+
+.ucn-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ucn-chip { appearance: none; border: 1px dashed color-mix(in srgb, var(--ucn-accent) 55%, var(--ucn-border)); background: transparent; color: var(--ucn-text); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: .8rem; font-family: var(--cv-font-mono, ui-monospace, monospace); cursor: pointer; }
+.ucn-chip:hover { background: color-mix(in srgb, var(--ucn-accent) 10%, transparent); border-style: solid; }
+
+.ucn-fee { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--ucn-sunken); font-size: .82rem; }
+.ucn-lead { margin: 0 0 10px; }
+.ucn-check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--ucn-border); border-radius: 10px; margin: 0 0 8px; font-size: .86rem; cursor: pointer; }
+.ucn-check input { margin-top: 3px; accent-color: var(--ucn-accent); }
+.ucn-check--opt { border-style: dashed; }
+.ucn-check code, .ucn-open code { font-size: .8rem; }
+.ucn-muted { color: var(--ucn-muted); font-size: .82rem; }
+.ucn-methods { display: grid; gap: 8px; }
+.ucn-method { display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--ucn-border); border-radius: 12px; cursor: pointer; font-size: .88rem; }
+.ucn-method input { accent-color: var(--ucn-accent); }
+.ucn-method:has(input:checked) { border-color: var(--ucn-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ucn-accent) 15%, transparent); }
+.ucn-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.ucn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.ucn-row form { margin: 0; }
+.ucn-open p { margin: 0 0 12px; }
+
+.ucn-flash { padding: 10px 12px; border-radius: 10px; margin: 0 0 12px; font-size: .86rem; }
+.ucn-flash--ok { background: color-mix(in srgb, var(--ucn-ok) 12%, transparent); color: var(--ucn-ok); }
+.ucn-flash--bad { background: color-mix(in srgb, var(--ucn-bad) 12%, transparent); color: var(--ucn-bad); }
+
+.ucn-history { margin-top: 18px; border-top: 1px solid var(--ucn-border); padding-top: 12px; font-size: .84rem; }
+.ucn-history summary { cursor: pointer; font-weight: 600; }
+.ucn-history ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; }
+.ucn-history li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+@media (max-width: 640px) {
+    .ucn-banner { flex-wrap: wrap; }
+    .ucn-banner .ucn-btn { width: 100%; justify-content: center; }
+    .ucn-modal { place-items: end stretch; padding: 0; }
+    .ucn-modal__dialog { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; transform: translateY(40px); padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
+    .ucn-modal__dialog::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 4px; background: var(--ucn-border); margin: -6px auto 12px; }
+    .ucn-actions { position: sticky; bottom: 0; background: var(--ucn-surface); padding-top: 10px; }
+    .ucn-actions .ucn-btn { flex: 1; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ucn-modal__dialog, .ucn-modal__backdrop, .ucn-btn { transition: none; }
+    .ucn-status--wait { animation: none; }
+}

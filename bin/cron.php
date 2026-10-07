@@ -116,6 +116,12 @@ $scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     $scheduler->register($kernel->container->make(ServicePruningJob::class));
     $scheduler->register($kernel->container->make(DomainPruningJob::class));
 
+    // cPanel Username Changer: runs queued renames, expires unconfirmed
+    // requests, reconciles fee invoices and refreshes the per-server account
+    // copy that keeps the live username check instant. A no-op while the add-on
+    // is inactive.
+    $scheduler->register($kernel->container->make(\CodeVault\UsernameChanger\UsernameChangeCronJob::class));
+
     // Drains queued campaign emails a few per minute so a large campaign
     // never floods the mail host in one burst.
     $scheduler->register($kernel->container->make(CampaignDispatchJob::class));

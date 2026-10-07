@@ -42,6 +42,21 @@ $items = [
     '/client/reseller/docs' => 'API docs',
 ];
 
+// Username requests — only while the super admin has the cPanel Username Changer add-on on
+// and open to reseller stores. Any failure (no container in a unit test, table not migrated
+// yet) simply leaves the link out.
+try {
+    $ucnContainer = \CodeVault\Support\App::container();
+    if ($ucnContainer->make(\CodeVault\Modules\AddonModuleRepository::class)->isActive(\CodeVault\UsernameChanger\UsernameChangeCronJob::SLUG)
+        && $ucnContainer->make(\CodeVault\UsernameChanger\UsernameChangerSettings::class)->storesAllowed()) {
+        $items = array_slice($items, 0, 5, true)
+            + ['/client/reseller/username-requests' => 'Username requests']
+            + array_slice($items, 5, null, true);
+    }
+} catch (\Throwable) {
+    // leave the nav as it is
+}
+
 // One stroke icon per destination (24px grid, currentColor) so the bar reads at a glance
 // and inherits the active/hover colour without a second asset.
 $icons = [
@@ -56,6 +71,7 @@ $icons = [
     '/client/reseller/account' => '<path d="M20 12V8H6a2 2 0 0 1 0-4h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>',
     '/client/reseller/statements' => '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>',
     '/client/reseller/docs' => '<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>',
+    '/client/reseller/username-requests' => '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h1"/><path d="M17.5 14.5l2 2-4.5 4.5H13v-2z"/>',
 ];
 
 if ($active === '') {

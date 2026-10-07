@@ -192,6 +192,139 @@ final class CpanelProvisioningModule implements ProvisioningModule
         return $this->toResult($response);
     }
 
+    /**
+     * Asks WHM whether $params['new_username'] could be used as a new account
+     * name (WHM API 1 `verify_new_username`). A conflict comes back as
+     * metadata.result = 0 with the reason in metadata.reason. Read-only.
+     *
+     * @return array{success: bool, available: bool, reachable: bool, message: string}
+     */
+    public function verifyNewUsername(array $params): array
+    {
+        $decoded = $this->decode($this->call($params['server'], 'verify_new_username', [
+            'user' => (string) $params['new_username'],
+        ]));
+
+        $reachable = !str_starts_with($decoded['reason'], 'Could not reach')
+            && !str_starts_with($decoded['reason'], 'Unexpected response')
+            && !str_starts_with($decoded['reason'], 'Unrecognized');
+
+        return [
+            'success' => $reachable,
+            'available' => $decoded['success'],
+            'reachable' => $reachable,
+            'message' => $decoded['success'] ? 'Available.' : $decoded['reason'],
+        ];
+    }
+
+    /**
+     * Renames the cPanel account (WHM `modifyacct user=<old> newuser=<new>`).
+     * With rename_db=true WHM also renames the account's databases and
+     * database users to the new prefix (`rename_database_objects=1`).
+     *
+     * A dropped connection is NOT taken as failure: WHM keeps working after
+     * the socket closes, so the caller verifies with accountExists().
+     *
+     * @return array{success: bool, message: string, transport_error?: bool, raw?: string}
+     */
+    public function changeUsername(array $params): array
+    {
+        $query = [
+            'user' => (string) $params['username'],
+            'newuser' => (string) $params['new_username'],
+        ];
+
+        if (!empty($params['rename_db'])) {
+            $query['rename_database_objects'] = '1';
+        }
+
+        $response = $this->call($params['server'], 'modifyacct', $query);
+        $decoded = $this->decode($response);
+
+        return [
+            'success' => $decoded['success'],
+            'message' => $decoded['success'] ? 'Username changed.' : $decoded['reason'],
+            'transport_error' => (int) ($response['status'] ?? 0) === 0,
+            'raw' => substr((string) ($response['body'] ?? ''), 0, 2000),
+        ];
+    }
+
+    /**
+     * Whether an account named $params['username'] exists on the server
+     * (`accountsummary`). `known` is false when the server could not be
+     * asked — never read an unreachable server as "account missing".
+     *
+     * @return array{known: bool, exists: bool, domain: ?string, message: string}
+     */
+    public function accountExists(array $params): array
+    {
+        $response = $this->call($params['server'], 'accountsummary', ['user' => (string) $params['username']]);
+
+        if ((int) ($response['status'] ?? 0) === 0) {
+            return ['known' => false, 'exists' => false, 'domain' => null, 'message' => 'Could not reach the WHM server.'];
+        }
+
+        $decoded = $this->decode($response);
+        $acct = $decoded['data']['acct'][0] ?? null;
+
+        if ($decoded['success'] && is_array($acct)) {
+            return ['known' => true, 'exists' => true, 'domain' => isset($acct['domain']) ? (string) $acct['domain'] : null, 'message' => 'Account exists.'];
+        }
+
+        $json = json_decode((string) ($response['body'] ?? ''), true);
+        $known = is_array($json);
+
+        return ['known' => $known, 'exists' => false, 'domain' => null, 'message' => $decoded['reason']];
+    }
+
+    /**
+     * Every account on the server, as [username => domain] (`listaccts
+     * want=user,domain`). Used to keep the local availability cache fresh so
+     * the client-side precheck never has to wait on WHM.
+     *
+     * @return array{success: bool, accounts: array<string, string>, message: string}
+     */
+    public function listAccounts(array $params): array
+    {
+        $decoded = $this->decode($this->call($params['server'], 'listaccts', ['want' => 'user,domain']));
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'accounts' => [], 'message' => $decoded['reason']];
+        }
+
+        $accounts = [];
+
+        foreach ((array) ($decoded['data']['acct'] ?? []) as $acct) {
+            if (is_array($acct) && isset($acct['user'])) {
+                $accounts[strtolower((string) $acct['user'])] = strtolower((string) ($acct['domain'] ?? ''));
+            }
+        }
+
+        return ['success' => true, 'accounts' => $accounts, 'message' => count($accounts) . ' accounts.'];
+    }
+
+    /**
+     * 'mysql' | 'mariadb' | null (unknown) — decides whether the "first 8
+     * characters must be unique" rule applies on this server.
+     */
+    public function databaseEngine(array $params): ?string
+    {
+        $decoded = $this->decode($this->call($params['server'], 'current_mysql_version', []));
+
+        if (!$decoded['success']) {
+            return null;
+        }
+
+        $server = strtolower((string) ($decoded['data']['server'] ?? ''));
+        $version = strtolower((string) ($decoded['data']['version'] ?? ''));
+
+        if ($server === 'mariadb' || str_contains($version, 'mariadb')) {
+            return 'mariadb';
+        }
+
+        return $server === 'mysql' || $version !== '' ? 'mysql' : null;
+    }
+
     public function singleSignOn(array $params): array
     {
         $response = $this->call($params['server'], 'create_user_session', [

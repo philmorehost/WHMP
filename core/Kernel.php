@@ -851,6 +851,7 @@ class Kernel
             $manager->register(AddonModule::class, 'system-diagnostics', $c->make(SystemDiagnosticsAddon::class));
             $manager->register(AddonModule::class, 'domain-changer', $c->make(DomainChangerAddon::class));
             $manager->register(AddonModule::class, 'tawk-to', $c->make(TawkToAddon::class));
+            $manager->register(AddonModule::class, 'cpanel-username-changer', $c->make(\CodeVault\UsernameChanger\UsernameChangerAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
             $manager->register(WidgetModule::class, 'ai-insights', $c->make(AiInsightsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));
@@ -928,6 +929,21 @@ class Kernel
         $this->container->singleton(DomainChangerAddon::class, function (Container $c) {
             return new DomainChangerAddon($c->make(Database::class));
         });
+
+        // cPanel Username Changer — every collaborator shared per request, so the
+        // settings memo and the resolver's lookups are built once.
+        foreach ([
+            \CodeVault\UsernameChanger\UsernameChangeRepository::class,
+            \CodeVault\UsernameChanger\UsernameChangerSettings::class,
+            \CodeVault\UsernameChanger\PolicyResolver::class,
+            \CodeVault\UsernameChanger\UsernameAvailability::class,
+            \CodeVault\UsernameChanger\UsernameChangeNotifier::class,
+            \CodeVault\UsernameChanger\UsernameChangeService::class,
+            \CodeVault\UsernameChanger\UsernameChangeExecutor::class,
+            \CodeVault\UsernameChanger\UsernameChangerAddon::class,
+        ] as $usernameChangerClass) {
+            $this->container->singleton($usernameChangerClass);
+        }
 
         $this->container->singleton(TawkToAddon::class, function (Container $c) {
             return new TawkToAddon($c->make(AddonModuleRepository::class));
@@ -1131,6 +1147,38 @@ class Kernel
         //
         // Wrapped like every listener here — the refund has already happened by the
         // time this runs, so a bookkeeping failure must not surface as an error.
+        // cPanel Username Changer: a paid fee invoice releases its request to the
+        // rename queue and credits the resellers' resale margins; a refund takes the
+        // margins back. Registered whether or not the add-on is active, so an invoice
+        // raised while it was on is still honoured if it is paid after it is switched
+        // off. One indexed lookup by invoice_id — nothing at all for other invoices.
+        $hooks->register(HookPoints::INVOICE_PAID, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $this->container->make(\CodeVault\UsernameChanger\UsernameChangeService::class)->invoicePaid((int) $invoiceId);
+            } catch (\Throwable) {
+                // Cron reconciles awaiting_payment requests against invoice status.
+            }
+        });
+
+        $hooks->register(HookPoints::INVOICE_REFUNDED, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $this->container->make(\CodeVault\UsernameChanger\UsernameChangeService::class)->invoiceRefunded((int) $invoiceId);
+            } catch (\Throwable) {
+            }
+        });
+
         $hooks->register(HookPoints::INVOICE_REFUNDED, function (array $payload) {
             $invoiceId = $payload['invoiceId'] ?? null;
 

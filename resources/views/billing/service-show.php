@@ -246,7 +246,21 @@ $isCpanelSharedHosting ??= false;
             </div>
             <div class="admin-service-meta__item">
                 <span class="admin-service-meta__label">👤 Username</span>
-                <span class="admin-service-meta__value"><?= e((string) ($service['username'] ?? '-')) ?></span>
+                <span class="admin-service-meta__value"><?= e((string) ($service['username'] ?? '-')) ?>
+                    <?php
+                    // Shortcut into the cPanel Username Changer while the add-on is active.
+                    $ucnShortcut = false;
+                    if (!empty($isCpanelSharedHosting) && !empty($service['username'])) {
+                        try {
+                            $ucnShortcut = \CodeVault\Support\App::container()->make(\CodeVault\Modules\AddonModuleRepository::class)
+                                ->isActive(\CodeVault\UsernameChanger\UsernameChangeCronJob::SLUG);
+                        } catch (\Throwable) {
+                            $ucnShortcut = false;
+                        }
+                    }
+                    ?>
+                    <?php if ($ucnShortcut): ?><a href="/admin/username-changer/manual?service_id=<?= (int) $service['id'] ?>" style="font-size:.8em;margin-left:6px;" title="Rename this cPanel account">✏️ Change</a><?php endif; ?>
+                </span>
             </div>
         </div>
 

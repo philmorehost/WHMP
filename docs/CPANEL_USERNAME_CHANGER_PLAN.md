@@ -1,10 +1,14 @@
 # cPanel Username Changer — implementation plan
 
-Status: **plan, not built yet** · Target: WHMP add-on module `cpanel-username-changer` · Migration `0214`
+Status: **implemented** · WHMP add-on module `cpanel-username-changer` · Migration `0214`
+
+> **Revision 2** (after review): the precheck must feel instant (new §15), and the super admin can switch a
+> **fee ON/OFF**. When it is on, resellers can resell the change above the admin's fee and keep the margin
+> (new §16). Everything else in this plan stands.
 
 Inspired by *cPanel Username Changer for WHMCS* (TIVRO, WHMCS Marketplace #9086), re-designed for WHMP:
 
-- **free**: no fees, no invoices, no licence check;
+- **free by default**: no licence check, and no fee unless the super admin switches payment on (§16);
 - **for everyone** once the super admin activates it, including **customers of reseller stores**;
 - **white-label** on stores;
 - built on WHMP's own provisioning, mail, cron, hooks and reseller isolation, so it adds **no new
@@ -20,11 +24,11 @@ does not have.
 | Area | WHMCS add-on | WHMP version |
 |---|---|---|
 | Request flow | Client picks a new username on the service page, confirms the impact and confirms by email; can track and cancel the request | Same. **+** the client can confirm with their **Security PIN** instead of an email link (instant). Email remains available and is the default |
-| Live check | Availability is checked as the client types; alternatives are suggested | Same. Suggestions come from the domain, the client's name and the current username. **+** each suggestion is pre-checked before it is shown |
+| Live check | Availability is checked as the client types; alternatives are suggested | Same, built to feel **instant** (§15): rules judged in the browser on every keystroke, a 120 ms debounced, cancellable, cached server check that never calls WHM, and suggestions pre-checked and pre-cached |
 | Validation | Length limits; cPanel format; reserved words; checked across WHMCS and against WHM; checked again before running | Same, plus every cPanel rule from the WHM docs (see §5). **+** the "first 8 characters must be unique" rule is applied automatically on MySQL servers (it is not needed on MariaDB) |
 | Policy | Off by default; global settings with per-product and per-client overrides; number of changes allowed; unlimited option; cooldown; which statuses may request; cPanel only | Same. **+** a **per-store policy**: a reseller can *tighten*, never loosen, what the super admin allows |
 | Approval | Optional admin approval; decline with a reason; admin changes skip every limit | Same. **+** **reseller approval**: a store owner can approve or decline their own customers' requests from the reseller panel |
-| Fees | Invoices, taxes, release on payment | **Removed on purpose** (the module is free). The status machine leaves room to add fees later without a migration |
+| Fees | Invoices, taxes, release on payment | **An ON/OFF switch** (off by default). When on: one admin fee (with per-product overrides), invoiced only after confirmation and any approval, and the rename runs once the invoice is paid. **+** resellers set their own price at or above their cost and the margin is credited to their balance; sub-resellers too, with the upline earning its share. Refunds reverse the credits (§16) |
 | Execution | WHM API 1; immediate or queued via cron; locking; runtime checks; multi-server; detects external changes; retries | Same, using `CpanelProvisioningModule::call()`. **+** if the connection drops, the result is verified (as `createacct` already does). **+** optional **"also rename databases"** (`rename_database_objects`), only if the admin allows it and the client opts in |
 | Sync | Updates the stored username; fallback; mismatch detection; admin alert; completion email | Same. **+** a one-click **"Sync from server"** button for a mismatch |
 | Admin | Dashboard, queue, filters, inline actions, request detail, manual tool, product policies, client overrides, audit log, pending badge, service-page shortcut | Same, using WHMP's modern admin cards. **+** a **preflight / dry run** on the manual tool |
@@ -101,6 +105,13 @@ decided_by_type       VARCHAR(10) NULL              'admin' | 'reseller' | 'syst
 decided_by_id         INT UNSIGNED NULL
 decided_at            DATETIME NULL
 decline_reason        VARCHAR(500) NULL
+fee_amount            DECIMAL(12,2) NULL            what was invoiced, in the client's currency (§16)
+fee_currency_id       INT UNSIGNED NULL
+fee_retail            DECIMAL(12,2) NULL            price charged, catalog currency
+fee_cost              DECIMAL(12,2) NULL            the store's cost (NULL for platform customers)
+fee_upline_cost       DECIMAL(12,2) NULL            the upline's cost, for a sub-reseller's customer
+invoice_id            INT UNSIGNED NULL
+paid_at / fee_credited_at / fee_reversed_at  DATETIME NULL   (the last two are idempotency claims)
 attempts              TINYINT UNSIGNED NOT NULL DEFAULT 0
 next_attempt_at       DATETIME NULL
 lock_token            CHAR(32) NULL                 execution claim
@@ -113,7 +124,7 @@ requested_by_id       INT UNSIGNED NULL
 ip                    VARCHAR(45) NULL
 created_at / updated_at / completed_at  DATETIME
 INDEX (status, next_attempt_at), INDEX (service_id), INDEX (client_id), INDEX (reseller_id, status),
-INDEX (new_username)
+INDEX (new_username, status), INDEX (invoice_id)
 ```
 
 **`username_change_events`**: the full trail. Columns: id, request_id (FK, cascade), event (e.g.
@@ -125,10 +136,16 @@ created_at.
 'store','client'), scope_id, enabled TINYINT NULL, max_changes SMALLINT NULL (0 = unlimited), cooldown_days
 SMALLINT NULL, approval VARCHAR(10) NULL ('none'|'admin'|'reseller'), allow_db_rename TINYINT NULL,
 client_mode VARCHAR(8) NULL ('waive'|'block', client scope only), extra_changes SMALLINT NULL, note
-VARCHAR(255) NULL, updated_at. UNIQUE (scope, scope_id).
+VARCHAR(255) NULL, **fee DECIMAL(12,2) NULL** (product scope: the admin fee for that product; store scope: the
+store's resale price), updated_at. UNIQUE (scope, scope_id).
 
 **`username_change_throttle`**: a small rate-limit table: key VARCHAR(120) PK, hits, window_start. It is
 needed because the cache may be the per-request `ArrayCache`.
+
+**`username_change_server_accounts`** (server_id, username, prefix8, domain) and **`username_change_servers`**
+(server_id, db_engine, db_engine_override, account_count, accounts_synced_at, last_error): a cron-refreshed
+copy of every WHM account per server. The instant precheck reads it instead of calling WHM (§15).
+Migration 0214 also adds an index on `services.username`.
 
 **Global settings** (`settings` table, prefix `username_changer.`): `enabled_default` (0), `min_length` (5),
 `max_length` (16), `allow_leading_digit` (0, which cPanel forbids anyway), `reserved_extra` (list),
@@ -136,11 +153,13 @@ needed because the cache may be the per-request `ArrayCache`.
 `product_types` ('shared,reseller'), `approval` ('none'), `confirm_methods` ('email,pin'),
 `confirm_ttl_hours` (48, allowed range 1–720), `execution` ('immediate'|'queued'), `max_attempts` (3),
 `allow_db_rename` (0), `require_reason` (0), `retention_days` (365), `stores_allowed` (1),
-`store_approval_allowed` (1), `staff_alert_email` (blank = the admin email in the company settings).
+`store_approval_allowed` (1), `staff_alert_email` (blank = the admin email in the company settings),
+`first8_rule` ('auto'|'on'|'off'), `heading`, `accent`, and the payment settings `fee_enabled` (0), `fee` (0.00, catalog
+currency) and `store_pricing` (1 = resellers may resell).
 
 The emails are seeded into `email_templates` as editable rows:
 `username_change.confirm`, `.submitted`, `.approved`, `.declined`, `.completed`, `.failed`,
-`.staff_new`, `.staff_failed`, `.staff_mismatch`. The cron job re-creates any that an admin deleted.
+`.payment_due`, `.store_approval`, `.staff_new`, `.staff_failed`, `.staff_mismatch`. The cron job re-creates any that an admin deleted.
 
 ---
 
@@ -156,6 +175,9 @@ request ──► awaiting_confirmation ──confirm──► pending_approval 
 ```
 
 - When no approval is required, `pending_approval` is skipped.
+- When payment is **on** and the client owes a fee, an approved/confirmed request goes to **`awaiting_payment`**
+  with an invoice; paying it moves the request to `queued`. Cancelling the request cancels an unpaid invoice;
+  cancelling the invoice cancels the request (cron reconciliation).
 - When execution is set to **immediate**, the request is dispatched as a Queue `Job` the moment it reaches
   `queued`, so the browser never waits on WHM. The cron job picks up anything left over.
 - **One open request per service.** A new request is refused while another is in a non-final state.
@@ -231,11 +253,10 @@ effective = global settings
 | Route | Purpose |
 |---|---|
 | `GET  /client/services/{id}/username` | Modal data (JSON): current name, rules, remaining changes, cooldown, history |
-| `GET  /client/services/{id}/username/check?u=` | Live availability + suggestions (throttled: 30/min per session, 120/hour per client) |
-| `POST /client/services/{id}/username` | Create the request (CSRF; impact tick-box required; reason if required; confirmation method) |
+| `GET  /client/services/{id}/username/check?u=` | Live availability + suggestions (90/min per session; local DB only, see §15) |
+| `POST /client/services/{id}/username` | Create the request (CSRF; impact tick-boxes; reason if required; confirmation method `email` or `pin` — a PIN confirms in the same call, 5 tries/hour then email only) |
 | `POST /client/services/{id}/username/{rid}/cancel` | Cancel own pending request |
 | `POST /client/services/{id}/username/{rid}/resend` | Resend the confirmation email (max 3, at least 5 minutes apart) |
-| `POST /client/services/{id}/username/{rid}/pin` | Confirm with the Security PIN (5 tries, then locked to email) |
 | `GET  /username-change/confirm/{token}` | Standalone confirmation page. Works signed-out; single-use; served on the **store's own host** for store customers |
 
 **The modal UI** uses the premium `sf-*` styles on the storefront and on the premium main site, and `cv-*`
@@ -274,6 +295,7 @@ Below the steps it shows the history and status of previous requests.
   as `ResellerClientDirectory`.
 - Approve or decline when the effective approval is `reseller`.
 - A **store policy** card, limited to making the rules stricter.
+- A **Your price** card when payment is on and resale is allowed: cost, price (never below cost) and the live margin.
 - Store owners **cannot** run renames directly. That stays with the customer flow or the super admin, to
   keep server-side power with the platform.
 
@@ -421,4 +443,94 @@ Every phase ships with:
 4. **Approval** is set to *none* by default (which still needs the client's email or PIN confirmation). The
    super admin can require admin approval, or let stores require their own.
 5. **One completed change per service** by default, with a 30-day cooldown.
-6. **No fees.** The design leaves an `awaiting_payment` state free if monetisation is ever wanted.
+6. **Payment is OFF by default.** When the super admin switches it on, the default lets resellers resell
+   (`store_pricing` = 1); a store that sets no price charges exactly its cost.
+
+---
+
+## 15. Instant precheck
+
+The client should never feel a wait between typing and seeing whether a name works.
+
+**In the browser** (`public/assets/js/username-changer.js`):
+- The rules (length, `^[a-z][a-z0-9]*$`, no leading digit, no `test…`, the reserved list) are embedded in the
+  page and checked **on every keystroke with no network**. Most typos get their answer in under a frame.
+- Only "is it free?" goes to the server. It is **debounced 120 ms**, the previous request is **aborted**
+  (`AbortController`) when the client keeps typing, and each answer is **cached** for the life of the modal.
+  Re-typing a name, or going back to one, is instant.
+- The server's suggestions are **pre-checked and pre-seeded** into that cache, so clicking a chip is instant.
+- "Checking…" only appears if the answer takes longer than **160 ms**. A spinner that flashes briefly reads
+  as lag, not speed.
+- **Warm-up:** hovering or focusing the *Change* button sends one cheap request, which opens the
+  connection and session before the modal is even open.
+- If the check cannot be reached, the client may continue. The server checks again at submit.
+
+**On the server** (`UsernameAvailability::fast`):
+- **No WHM call.** At most four indexed lookups:
+  1. `services.username` (newly indexed);
+  2. open requests' reserved names;
+  3. the cron-refreshed copy of the server's accounts (`username_change_server_accounts`);
+  4. the first-8 rule on MySQL servers.
+- No writes beyond the session rate counter. The answer carries `Cache-Control: private, max-age=20`.
+- Suggestions are checked in **one query per source for all candidates together**.
+- WHM's own `verify_new_username` (`deep()`) runs **once at submit** and again right before the rename. It
+  never runs per keystroke. So speed costs no safety.
+- The cron job refreshes each server's account list every 15 minutes, and immediately after every rename.
+  Admins can also refresh it from Settings → cPanel servers.
+
+Verified with a DOM test of the real script:
+- a rule violation is answered with zero requests;
+- a suggested name with zero requests;
+- 7 quick keystrokes produce exactly one request;
+- a re-typed name is answered from the cache.
+
+---
+
+## 16. Payment (ON/OFF) and reseller resale
+
+**Switch.** Admin → cPanel Username Changer → Settings & pricing → 💳 *Charge a fee for each username change*.
+- **Off (default):** every change is free, and nothing below applies.
+- **On:** the admin sets the **fee** in the catalog (pricing) currency. A product override can set a
+  different fee per product.
+
+**Who pays what** (all in catalog currency; `PolicyResolver::pricing()`):
+
+| Customer | Pays | Who earns |
+|---|---|---|
+| Platform customer | the admin fee **F** | platform |
+| Customer of a store | the store's price **P₁**, never below F (blank = F) | store earns **P₁ − F** |
+| Customer of a sub-reseller | the sub-reseller's price **P₂**, never below its cost **C₂ = max(P₁, F)** | sub-reseller earns **P₂ − C₂**; the upline store earns **C₂ − F** |
+
+This is the same cost chain as product pricing: a sub-reseller buys at its upline's price.
+
+**Resale settings:**
+- A store sets its price on *Reseller Area → Username requests → Your price*. The page shows its cost and
+  the live margin, and the server refuses a price below cost.
+- The admin can switch resale off (`store_pricing` = 0). Stores then charge exactly the admin fee and earn
+  nothing.
+
+**When the client is charged:**
+1. Only after the client confirms (email/PIN) and after any approval. Nobody pays for a request that is
+   declined.
+2. An invoice is raised in the client's own currency (denominated, as all WHMP invoices are). The request
+   waits in `awaiting_payment`. The banner shows *Pay invoice #…*, and the client gets a store-branded
+   *payment due* email.
+3. On `INVOICE_PAID`, the request is queued and the rename runs. The cron job also reconciles invoices paid
+   by routes that fire no hook, and cancels requests whose invoice was cancelled.
+
+**Who never pays:** admin renames, and clients with a *waive* override.
+
+**Crediting resellers:**
+- On payment, `ResellerLedgerService::creditFeeShare` posts the store's margin (`adjustment`). It also posts
+  the upline's share (`upline_margin`) for a sub-reseller's customer, scaled to the invoiced amount and
+  converted to base like every store receipt. Holding days apply as for other earnings.
+- A claim column (`fee_credited_at`) makes the credit **idempotent**, so a repeated hook never pays twice.
+- On `INVOICE_REFUNDED`, the shares are **reversed** once (`fee_reversed_at`). A refund never un-renames
+  the account.
+
+**Isolation:**
+- The store sees only its own customers' requests and its own cost and price, never the server.
+- Invoices and emails carry only the store's brand.
+
+Covered by an end-to-end test: request → confirm on the store's host → invoice for P₂ → paid → both
+resellers credited → repeated hook ignored → refund → both reversed exactly once.

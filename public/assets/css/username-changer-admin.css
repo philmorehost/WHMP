@@ -1,0 +1,60 @@
+/* cPanel Username Changer — admin + reseller panel screens. */
+.uca { max-width: 72rem; margin: 0 auto; }
+.uca-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.uca-head h1 { margin: 0; font-size: 1.5rem; }
+.uca-head p { margin: 4px 0 0; color: var(--cv-text-secondary); font-size: var(--cv-text-sm, .875rem); }
+.uca-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; padding: 4px; border-radius: 12px; background: var(--cv-bg-surface-sunken, #f5f7fa); width: fit-content; }
+.uca-tabs a { padding: 8px 14px; border-radius: 9px; text-decoration: none; color: var(--cv-text-secondary); font-weight: 600; font-size: .86rem; display: inline-flex; gap: 6px; align-items: center; }
+.uca-tabs a.is-active { background: var(--cv-bg-surface, #fff); color: var(--cv-text-primary); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.uca-count { background: var(--cv-color-danger-500, #dc2626); color: #fff; border-radius: 999px; font-size: .68rem; padding: 1px 7px; }
+.uca-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.uca-stat { padding: 16px; border-radius: 14px; border: 1px solid var(--cv-border-default); background: var(--cv-bg-surface); position: relative; overflow: hidden; }
+.uca-stat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--uca-c, var(--cv-color-accent, #2f6fed)); }
+.uca-stat b { display: block; font-size: 1.6rem; line-height: 1.1; }
+.uca-stat span { font-size: .78rem; color: var(--cv-text-secondary); }
+.uca-card { border: 1px solid var(--cv-border-default); background: var(--cv-bg-surface); border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+.uca-card h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.uca-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.uca-filter .cv-input { max-width: 260px; }
+.uca-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+.uca-table th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--cv-text-secondary); padding: 8px 10px; border-bottom: 1px solid var(--cv-border-default); }
+.uca-table td { padding: 10px; border-bottom: 1px solid var(--cv-border-subtle, #eef0f3); vertical-align: middle; }
+.uca-table tr:hover td { background: var(--cv-bg-surface-sunken, #f7f8fa); }
+.uca-mono { font-family: var(--cv-font-mono, ui-monospace, monospace); }
+.uca-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: .72rem; font-weight: 700; background: var(--cv-bg-surface-sunken); color: var(--cv-text-secondary); white-space: nowrap; }
+.uca-pill--completed { background: rgba(22,163,74,.12); color: #15803d; }
+.uca-pill--failed, .uca-pill--declined, .uca-pill--mismatch { background: rgba(220,38,38,.12); color: #b91c1c; }
+.uca-pill--pending_approval, .uca-pill--awaiting_payment, .uca-pill--queued, .uca-pill--processing, .uca-pill--awaiting_confirmation { background: rgba(217,119,6,.13); color: #b45309; }
+.uca-inline { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.uca-inline form { margin: 0; display: inline-flex; gap: 6px; }
+.uca-btn-sm { padding: 5px 10px !important; font-size: .78rem !important; }
+.uca-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.uca-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.uca-field label { font-weight: 700; font-size: .82rem; }
+.uca-field small { color: var(--cv-text-secondary); font-size: .74rem; }
+.uca-checks { display: flex; flex-wrap: wrap; gap: 10px; }
+.uca-checks label { font-weight: 500; display: inline-flex; gap: 6px; align-items: center; }
+.uca-switch { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--cv-border-default); border-radius: 12px; cursor: pointer; margin-bottom: 10px; }
+.uca-switch:has(input:checked) { border-color: var(--cv-color-accent, #2f6fed); background: color-mix(in srgb, var(--cv-color-accent, #2f6fed) 6%, transparent); }
+.uca-switch input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--cv-color-accent, #2f6fed); }
+.uca-switch strong { display: block; }
+.uca-switch span { color: var(--cv-text-secondary); font-size: .8rem; }
+.uca-dl { display: grid; grid-template-columns: 170px 1fr; gap: 8px 14px; font-size: .88rem; margin: 0; }
+.uca-dl dt { color: var(--cv-text-secondary); }
+.uca-dl dd { margin: 0; word-break: break-word; }
+.uca-timeline { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--cv-border-default); }
+.uca-timeline li { position: relative; padding: 0 0 12px 16px; font-size: .84rem; }
+.uca-timeline li::before { content: ""; position: absolute; left: -6px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--cv-color-accent, #2f6fed); }
+.uca-timeline small { color: var(--cv-text-secondary); }
+.uca-pre { white-space: pre-wrap; background: var(--cv-bg-surface-sunken); padding: 10px; border-radius: 8px; font-size: .78rem; max-height: 220px; overflow: auto; }
+.uca-split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.uca-money { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+.uca-money div { padding: 12px; border-radius: 12px; background: var(--cv-bg-surface-sunken); }
+.uca-money b { display: block; font-size: 1.1rem; }
+.uca-money span { font-size: .74rem; color: var(--cv-text-secondary); }
+.uca-verdict { font-size: .82rem; min-height: 1.2em; margin-top: 6px; }
+.uca-verdict--ok { color: #15803d; font-weight: 600; }
+.uca-verdict--bad { color: #b91c1c; }
+@media (max-width: 900px) { .uca-split { grid-template-columns: 1fr; } .uca-dl { grid-template-columns: 1fr; } .uca-money { grid-template-columns: 1fr; } }
+.uca-margin { font-size: 1.4rem; font-weight: 800; color: var(--cv-color-success-500, #16a34a); padding: 6px 0; }
+.uca-tabs--muted .uca-count { background: var(--cv-text-secondary, #6b7280); }

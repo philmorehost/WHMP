@@ -260,6 +260,85 @@ final class ResellerLedgerService
     }
 
     /**
+     * Credit a reseller its share of a paid add-on fee that is not an order — the
+     * cPanel Username Changer's resale margin. The customer paid the store's price,
+     * we keep what the store owes upstream, and the difference is posted here.
+     *
+     * Kind `adjustment` for the store's own margin and `upline_margin` for an
+     * upline's share of a sub-reseller's sale, so both read correctly on the
+     * account page. The amount is given in the INVOICE's currency and converted to
+     * base exactly as receipts are; it is held for the same holding period because
+     * it is funded by the same kind of customer payment.
+     *
+     * Idempotency is the CALLER's job (an atomic claim on its own row): adjustment
+     * and upline_margin entries carry no unique key on invoice_id.
+     */
+    public function creditFeeShare(int $resellerId, string $kind, float $amount, ?int $currencyId, float $currencyRate, int $invoiceId, string $description, ?string $now = null): ?int
+    {
+        if (!in_array($kind, ['adjustment', 'upline_margin'], true)) {
+            return null;
+        }
+
+        $base = round($this->baseAmount($amount, $currencyId, $currencyRate), 2);
+
+        if ($base < 0.01) {
+            return null;
+        }
+
+        $store = $this->stores->find($resellerId);
+
+        if ($store === null) {
+            return null;
+        }
+
+        $now ??= $this->now();
+
+        return $this->ledger->append([
+            'reseller_id' => $resellerId,
+            'client_id' => ($store['client_id'] ?? null) === null ? null : (int) $store['client_id'],
+            'kind' => $kind,
+            'amount' => $base,
+            'withdrawable_at' => $this->withdrawableFrom($now),
+            'order_id' => null,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => mb_substr($description, 0, 250),
+            'admin_id' => null,
+            'created_at' => $now,
+        ]);
+    }
+
+    /**
+     * Take back a share creditFeeShare() posted, because the fee was refunded.
+     * Withdrawable immediately (negative), for the reason reverseStoreReceipt()
+     * gives: a refund is money we no longer hold.
+     */
+    public function reverseFeeShare(int $resellerId, string $kind, float $amount, ?int $currencyId, float $currencyRate, int $invoiceId, string $description, ?string $now = null): ?int
+    {
+        $reversalKind = $kind === 'upline_margin' ? 'upline_margin_reversal' : 'adjustment';
+        $base = round($this->baseAmount($amount, $currencyId, $currencyRate), 2);
+        $store = $this->stores->find($resellerId);
+
+        if ($base < 0.01 || $store === null) {
+            return null;
+        }
+
+        return $this->ledger->append([
+            'reseller_id' => $resellerId,
+            'client_id' => ($store['client_id'] ?? null) === null ? null : (int) $store['client_id'],
+            'kind' => $reversalKind,
+            'amount' => -$base,
+            'withdrawable_at' => null,
+            'order_id' => null,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => mb_substr($description, 0, 250),
+            'admin_id' => null,
+            'created_at' => $now ?? $this->now(),
+        ]);
+    }
+
+    /**
      * cost_total − upline_cost_total in the order's currency, or null when the order
      * has no upline share (a first-tier store, or a sub-reseller priced at or under
      * the upline's own cost).

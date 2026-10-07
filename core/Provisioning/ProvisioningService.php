@@ -497,6 +497,161 @@ final class ProvisioningService
     }
 
     /**
+     * Asks the service's server whether $newUsername is free (cPanel
+     * `verify_new_username`). Read-only.
+     *
+     * @return array{success: bool, available: bool, reachable: bool, message: string}
+     */
+    public function verifyNewUsername(int $serviceId, string $newUsername): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null || !method_exists($module, 'verifyNewUsername')) {
+            return ['success' => false, 'available' => false, 'reachable' => false, 'message' => $error ?? 'This server module cannot check usernames.'];
+        }
+
+        return $module->verifyNewUsername(array_merge($params, ['new_username' => $newUsername]));
+    }
+
+    /**
+     * Whether $username exists as an account on the service's server.
+     *
+     * @return array{known: bool, exists: bool, domain: ?string, message: string}
+     */
+    public function accountExists(int $serviceId, string $username): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null || !method_exists($module, 'accountExists')) {
+            return ['known' => false, 'exists' => false, 'domain' => null, 'message' => $error ?? 'This server module cannot look up accounts.'];
+        }
+
+        return $module->accountExists(array_merge($params, ['username' => $username]));
+    }
+
+    /**
+     * Renames the account on the live server, then — only once the server
+     * confirms the new name exists — updates `services.username`. The same
+     * order changeDomain() uses: a failed rename never leaves WHMP claiming a
+     * name the server does not have.
+     *
+     * A dropped connection is not a failure by itself: WHM finishes the job
+     * after the socket closes, so accountsummary on the NEW name decides.
+     *
+     * @return array{success: bool, renamed: bool, synced: bool, transient: bool, message: string, raw: string}
+     */
+    public function changeUsername(int $serviceId, string $newUsername, bool $renameDatabases = false, ?int $requestId = null, int $verifyAttempts = 3, int $verifyDelaySeconds = 3): array
+    {
+        [$module, $params, $error] = $this->moduleAndParamsFor($serviceId);
+
+        if ($error !== null) {
+            return ['success' => false, 'renamed' => false, 'synced' => false, 'transient' => false, 'message' => $error, 'raw' => ''];
+        }
+
+        if (!method_exists($module, 'changeUsername')) {
+            return ['success' => false, 'renamed' => false, 'synced' => false, 'transient' => false, 'message' => 'Changing the username is not supported by this server module.', 'raw' => ''];
+        }
+
+        $oldUsername = (string) $params['username'];
+        $result = $module->changeUsername(array_merge($params, ['new_username' => $newUsername, 'rename_db' => $renameDatabases]));
+        $raw = (string) ($result['raw'] ?? '');
+        $transport = !empty($result['transport_error']);
+
+        $renamed = false;
+
+        if (($result['success'] ?? false) || $transport) {
+            for ($i = 0; $i < max(1, $verifyAttempts); $i++) {
+                $check = method_exists($module, 'accountExists')
+                    ? $module->accountExists(array_merge($params, ['username' => $newUsername]))
+                    : ['known' => true, 'exists' => (bool) ($result['success'] ?? false)];
+
+                if ($check['known'] && $check['exists']) {
+                    $renamed = true;
+                    break;
+                }
+
+                if ($check['known'] && !$transport) {
+                    break;
+                }
+
+                if ($i + 1 < $verifyAttempts && $verifyDelaySeconds > 0) {
+                    sleep($verifyDelaySeconds);
+                }
+            }
+        }
+
+        if (!$renamed) {
+            $message = ($result['success'] ?? false)
+                ? 'The server accepted the rename but the new account name could not be confirmed.'
+                : (string) ($result['message'] ?? 'Rename failed.');
+            $this->recordFailure($serviceId, $message);
+
+            return ['success' => false, 'renamed' => false, 'synced' => false, 'transient' => $transport, 'message' => $message, 'raw' => $raw];
+        }
+
+        $synced = true;
+
+        try {
+            $this->services->updateDetails($serviceId, ['username' => $newUsername]);
+        } catch (\Throwable) {
+            $synced = false;
+        }
+
+        $this->clearFailure($serviceId);
+        $this->hooks->fire(HookPoints::AFTER_MODULE_CHANGE_USERNAME, [
+            'serviceId' => $serviceId,
+            'oldUsername' => $oldUsername,
+            'newUsername' => $newUsername,
+            'requestId' => $requestId,
+        ]);
+
+        return ['success' => true, 'renamed' => true, 'synced' => $synced, 'transient' => false, 'message' => 'Username changed.', 'raw' => $raw];
+    }
+
+    /**
+     * Every account on a server as [username => domain], for the local
+     * availability cache. Empty + success=false when the server cannot answer.
+     *
+     * @return array{success: bool, accounts: array<string, string>, message: string}
+     */
+    public function serverAccounts(int $serverId): array
+    {
+        [$module, $server] = $this->moduleForServer($serverId);
+
+        if ($module === null || !method_exists($module, 'listAccounts')) {
+            return ['success' => false, 'accounts' => [], 'message' => 'Server cannot list accounts.'];
+        }
+
+        return $module->listAccounts(['server' => $server]);
+    }
+
+    /** 'mysql' | 'mariadb' | null when unknown. */
+    public function serverDatabaseEngine(int $serverId): ?string
+    {
+        [$module, $server] = $this->moduleForServer($serverId);
+
+        if ($module === null || !method_exists($module, 'databaseEngine')) {
+            return null;
+        }
+
+        return $module->databaseEngine(['server' => $server]);
+    }
+
+    /** @return array{0: ?ProvisioningModule, 1: array<string, mixed>} */
+    private function moduleForServer(int $serverId): array
+    {
+        $server = $this->servers->find($serverId);
+
+        if ($server === null) {
+            return [null, []];
+        }
+
+        $module = $this->resolveModule((string) $server['module_slug']);
+
+        return [$module, $module === null ? [] : $this->withSecrets($server)];
+    }
+
+    /**
      * Switches the account to a new hosting package on the live server (WHM
      * changepackage for cPanel). The billing-side upgrade (product/price) is
      * handled separately by ProrationService; this only pushes the new
