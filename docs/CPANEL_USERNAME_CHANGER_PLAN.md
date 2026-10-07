@@ -569,3 +569,94 @@ This is the same cost chain as product pricing: a sub-reseller buys at its uplin
 
 Covered by an end-to-end test: request → confirm on the store's host → invoice for P₂ → paid → both
 resellers credited → repeated hook ignored → refund → both reversed exactly once.
+
+## 17. Security PIN recovery and paying inside the modal
+
+**Goal:** a forgotten PIN or an unpaid fee must never strand the client halfway. Both are handled
+without leaving the username modal and without losing what the client already entered.
+
+### 17.1 PIN recovery (`UsernameChangePinReset`)
+
+- **When it opens.** The submit endpoint returns a code with every PIN failure, and the modal reacts:
+
+  | Code | Meaning | What the client sees |
+  |---|---|---|
+  | `pin` | wrong PIN | the field is cleared and highlighted, and the PIN modal opens as *Reset your Security PIN* |
+  | `pin_locked` | 5 wrong tries in an hour | the PIN modal explains the lock-out; a new PIN lifts it at once |
+  | `pin_missing` | the client never set a PIN | the PIN modal opens as *Set a Security PIN* |
+
+  The client can also open it at any time: *Forgot PIN?* beside the field, or *Set a Security PIN*
+  in place of the field when there is no PIN yet.
+- **Layered, not replacing.** The PIN modal sits on top of the username modal. Esc, the ✕ button
+  and the backdrop close only the PIN modal. The username, the ticked acknowledgements and the
+  chosen method stay as they were. After saving, the new PIN is filled in, focus moves to
+  *Request change*, and nothing is resubmitted without the client.
+- **Proving who it is.** The client chooses one of two ways:
+  - **Emailed code (default).** A 6-digit code is sent to the client's own address, shown masked
+    (`a••@example.com`).
+    - The code expires in 10 minutes, five wrong tries burn it, and it works only once.
+    - It is tied to the client id, and only its hash is kept in the session.
+    - Sending is limited to 3 codes every 15 minutes, with a 30-second resend countdown in the UI.
+    - The email is sent without a client id, so the code is **never** copied into in-app
+      notifications.
+    - Store customers get it from the store's own sender (§9).
+  - **Account password.** Offered only when the account has one. Accounts created through Google
+    sign-in have a random password, so they see the code option only. Legacy phpass hashes are
+    accepted.
+- **Saving.** The PIN must be 4–12 characters and typed twice. It is hashed with Argon2id when the
+  server has it, otherwise PHP's default algorithm (`password_verify` accepts both). The `pin:<client>`
+  lock-out counter is cleared, and a "Your Security PIN was changed" notice is emailed.
+- **Endpoints.** Both are owner-only and CSRF-checked:
+  - `POST /client/services/{id}/username/pin/code`
+  - `POST /client/services/{id}/username/pin`, with `via`, `code` or `current_password`, `new_pin`
+    and `new_pin_confirm`.
+
+### 17.2 Paying the fee (`UsernameChangePayment`)
+
+When the fee is on (§16), a request that reaches `awaiting_payment` has an invoice. The client
+pays it from inside the modal:
+
+- **Straight after confirming** (PIN, or no approval needed), the modal moves to a 4th step,
+  **Pay**. It is loaded from `GET /client/services/{id}/username/pay`.
+- **Later** (after an email confirmation or an approval), the open-request view shows the same
+  Pay panel whenever the modal is opened. The emailed-link confirmation page shows a **Pay now**
+  button that leads there.
+- **The Pay panel shows:**
+  - **Wallet:** the balance and one-click *Pay from wallet*
+    (`POST /client/services/{id}/username/{rid}/pay/wallet`).
+    - The payment goes through `CreditService::applyToInvoice`, the same path as the invoice page,
+      so INVOICE_PAID fires and the rename is queued.
+    - A wallet that does not cover the full amount is never part-charged. The client sees the
+      shortfall and a link to *Add funds*.
+    - A MySQL `GET_LOCK` per invoice stops a double click from paying twice. The invoice is
+      re-read inside the lock.
+  - **Gateways:** every enabled gateway that has keys configured. Credit is excluded, and gateways
+    without keys are hidden.
+    - PayHub uses its inline popup.
+    - Manual or bank transfer shows the bank details.
+    - Other gateways post to the normal `/client/invoices/{id}/pay/{slug}`.
+  - **Combined invoices:** if the fee was merged into a combined invoice, the panel points to that
+    invoice instead.
+- **Coming back from a gateway.** Before payment, the service page records
+  `session.pay_return[invoice] = /client/services/{id}#change-username`, keeping the latest 10.
+  - The gateway callback sends the client back there with `?payment=success|failed`. The modal
+    reopens with a matching notice.
+  - Only local paths are honoured: `//host`, backslashes and CR/LF are refused.
+  - Invoices without an entry return to the invoice page as before.
+- **Settlement is unchanged:** paid → `settlePaid` → queued (or run inline), and the reseller
+  margin is credited as in §16.
+
+### 17.3 Tests
+
+- `tests/Unit/UsernamePinAndPaymentTest.php` has 18 tests covering:
+  - PIN reset by password and by code, including expiry, the five-try burn, a code issued to
+    another client, and Google accounts;
+  - lifting the lock-out, the masked address, and the code never being mirrored into
+    notifications;
+  - the Pay summary, gateway filtering, wallet settlement through INVOICE_PAID, no part-charging,
+    the double-click lock and combined invoices;
+  - the return map and the callback's open-redirect guard;
+  - rendering of the modal and Pay panel, including that forms are never nested.
+- A jsdom run (37 checks) drives the real rendered modal:
+  - a PIN failure opens the PIN modal; send code, save, then return with state kept;
+  - Esc layering, the Pay step, and wallet payment followed by a reload into the modal.

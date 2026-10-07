@@ -261,6 +261,12 @@ of reseller stores, white-labelled. Full design: `docs/CPANEL_USERNAME_CHANGER_P
   - resellers set their own price at or above their cost, under *Reseller Area → Username requests*. The
     margin is credited to their balance on payment and reversed on refund. Sub-resellers buy at their
     upline's price, and the upline earns the difference.
+- **Forgotten Security PIN:** if the PIN is wrong, locked out or was never set, a PIN modal opens on top
+  of the username modal. The client confirms by emailed code (or account password) and sets a new PIN.
+  The PIN modal then closes, and the username change carries on with everything still filled in.
+- **Paying inside the modal:** when the fee is on, confirming leads to a *Pay* step. The client can pay in
+  one click from the wallet (only if it covers the full amount; no part-charging) or with any configured
+  gateway. After a gateway payment the client returns to the service page with the modal open.
 - **Reseller panel:** stores see only their own customers' requests. They can make the rules stricter
   (never looser), approve requests themselves (when the platform does not), and set their price.
 - **Cron:** `cpanel-username-changer` runs every 5 minutes. It runs queued renames, retries with backoff,
