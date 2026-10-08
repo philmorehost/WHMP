@@ -92,7 +92,9 @@ final class InvalidEmailBlockerAddon implements AddonModule
         $allow = e(implode("\n", $s['allow']));
         $blocked = (int) $stats['blocked'];
         $skipped = (int) $stats['skipped30'];
-        $blockedLabel = $blocking ? 'addresses blocked now' : 'addresses marked invalid';
+        $skippedNoun = $skipped === 1 ? 'email' : 'emails';
+        $noun = $blocked === 1 ? 'address' : 'addresses';
+        $blockedLabel = $blocking ? $noun . ' blocked now' : $noun . ' marked invalid';
 
         $rows = '';
 
@@ -119,7 +121,7 @@ final class InvalidEmailBlockerAddon implements AddonModule
                 email of any type is sent to them. Each skipped email is still written to the email log (status
                 <em>suppressed</em>) and still appears in the client's in-app notifications.
             </p>
-            <p style="margin:0;"><strong>{$blocked}</strong> {$blockedLabel} · <strong>{$skipped}</strong> emails skipped in the last 30 days ·
+            <p style="margin:0;"><strong>{$blocked}</strong> {$blockedLabel} · <strong>{$skipped}</strong> {$skippedNoun} skipped in the last 30 days ·
                 <a href="/admin/email-validation">Open Email Validation</a></p>
         </div>
 
