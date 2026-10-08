@@ -552,6 +552,8 @@ $cpanelTabs = [
         </div>
     </div>
 
+    <?= $view->render('cloudflare.service-card', ['service' => $service]) ?>
+
     <?php if ($isShared): ?>
         <!--
             Shared hosting deliberately has no "Server Technical Information"

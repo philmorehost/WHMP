@@ -293,6 +293,16 @@ class Kernel
             new CurlHttpClient(timeoutSeconds: 20)
         ));
 
+        // Cloudflare add-on: the token is SecretBox-encrypted, and API calls get a
+        // short timeout — a client may be waiting on the page.
+        $this->container->bind(\CodeVault\Cloudflare\CloudflareSettings::class, fn (Container $c) => new \CodeVault\Cloudflare\CloudflareSettings(
+            $c->make(SettingsRepository::class),
+            new \CodeVault\Security\SecretBox($c->make(Config::class)),
+            new CurlHttpClient(timeoutSeconds: 20)
+        ));
+
+        $this->container->bind(\CodeVault\Cloudflare\NameserverGateway::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\DomainServiceNameservers::class));
+
         // What a storefront sells, for its SERVICES menu, footer and home page.
         // A singleton so the header, the page and the footer of one request
         // share one set of catalogue queries.
@@ -862,6 +872,7 @@ class Kernel
             $manager->register(AddonModule::class, 'tawk-to', $c->make(TawkToAddon::class));
             $manager->register(AddonModule::class, 'cpanel-username-changer', $c->make(\CodeVault\UsernameChanger\UsernameChangerAddon::class));
             $manager->register(AddonModule::class, \CodeVault\Mail\EmailSuppression::SLUG, $c->make(\CodeVault\Modules\Addons\InvalidEmailBlockerAddon::class));
+            $manager->register(AddonModule::class, \CodeVault\Cloudflare\CloudflareCronJob::SLUG, $c->make(\CodeVault\Cloudflare\CloudflareAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
             $manager->register(WidgetModule::class, 'ai-insights', $c->make(AiInsightsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));

@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0215_email_log_suppressed_status.php',
-    'migration_count' => 214,
+    'last_migration' => '0216_cloudflare.php',
+    'migration_count' => 215,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -1180,6 +1180,101 @@ return [
                     'on_update' => NULL,
                 ],
             ],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'cloudflare_activity' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'zone_id' => 'INT UNSIGNED NOT NULL',
+                'actor_type' => 'VARCHAR(10) NOT NULL',
+                'actor_id' => 'INT UNSIGNED NULL',
+                'action' => 'VARCHAR(60) NOT NULL',
+                'summary' => 'VARCHAR(255) NOT NULL',
+                'created_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'idx_cfa_zone' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'zone_id',
+                        'id',
+                    ],
+                ],
+            ],
+            'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'cloudflare_zones' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'service_id' => 'INT UNSIGNED NULL',
+                'client_id' => 'INT UNSIGNED NOT NULL',
+                'reseller_id' => 'INT UNSIGNED NULL',
+                'cf_zone_id' => 'VARCHAR(32) NOT NULL',
+                'name' => 'VARCHAR(253) NOT NULL',
+                'status' => 'VARCHAR(20) NOT NULL DEFAULT \'pending\'',
+                'name_servers' => 'TEXT NULL',
+                'original_name_servers' => 'TEXT NULL',
+                'ns_switched_by_us' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'paused' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'paused_by_us' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'delete_after' => 'DATETIME NULL',
+                'delete_reason' => 'VARCHAR(40) NULL',
+                'backup_bind' => 'MEDIUMTEXT NULL',
+                'last_error' => 'VARCHAR(255) NULL',
+                'reminders_sent' => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+                'activated_at' => 'DATETIME NULL',
+                'last_checked_at' => 'DATETIME NULL',
+                'last_synced_at' => 'DATETIME NULL',
+                'deleted_at' => 'DATETIME NULL',
+                'created_at' => 'DATETIME NOT NULL',
+                'updated_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'uniq_cf_zone' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'cf_zone_id',
+                    ],
+                ],
+                'idx_cf_service' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'service_id',
+                    ],
+                ],
+                'idx_cf_client' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'client_id',
+                    ],
+                ],
+                'idx_cf_status' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'status',
+                    ],
+                ],
+                'idx_cf_delete' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'delete_after',
+                    ],
+                ],
+            ],
+            'foreign' => [],
             'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         ],
         'configurable_option_groups' => [
