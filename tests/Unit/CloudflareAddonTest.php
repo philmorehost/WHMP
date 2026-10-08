@@ -778,6 +778,9 @@ final class CloudflareAddonTest extends TestCase
         $option = new CloudflareProductOption($this->db, $this->settings);
         $html = $view->render('cloudflare.admin-settings', ['settings' => $this->settings, 'hasToken' => true, 'accounts' => [], 'products' => $option->products(), 'attached' => $option->attachedProductIds()]);
         $this->assertStringContainsString('Verify &amp; save', $html);
+        $this->assertStringContainsString('.cfa{display:grid;gap:18px;color:var(--cv-text-primary,#0f172a)}', $html, 'Cloudflare admin text explicitly follows the active light/dark theme');
+        $this->assertStringContainsString('background:var(--cv-bg-surface,#fff);color:var(--cv-text-primary,#0f172a)', $html, 'Cloudflare cards use the design-system surface and text tokens');
+        $this->assertStringNotContainsString('var(--cv-surface', $html, 'Cloudflare admin uses the actual theme token names');
         $this->assertStringContainsString('Account Filter Lists', $html, 'the extra Cache Rules permission is documented');
         $this->assertStringContainsString('Zone · Zone · Read', $html, 'zone discovery read scope is documented');
         $this->assertStringContainsString('Zone · DNS · Read', $html, 'import DNS read scope is documented');
