@@ -75,6 +75,11 @@ $feedback = [
                 <?= (int) $sentCount ?> of <?= (int) $totalRecipients ?> sent (<?= $percent ?>%) &nbsp;&bull;&nbsp;
                 <?= (int) $remaining ?> remaining. The cron sends a batch each minute — you can safely leave this page.
             </div>
+            <?php if (($skippedInvalid ?? 0) > 0): ?>
+                <div style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin-top:6px;">
+                    🚫 <?= (int) $skippedInvalid ?> invalid address(es) were left out by the Invalid Email Blocker.
+                </div>
+            <?php endif; ?>
             <?php if ($failedCount > 0): ?>
                 <div style="font-size:var(--cv-text-sm);color:#ef4444;margin-top:6px;">
                     ⚠️ <?= (int) $failedCount ?> recipient(s) failed to send — see the Sent column below for the reason.
@@ -122,7 +127,7 @@ $feedback = [
     <?php elseif ($campaign['status'] === 'draft'): ?>
         <?php if (($queuedCount ?? null) !== null): ?>
             <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
-                <?= (int) $queuedCount ?> recipient(s) queued.
+                <?= (int) $queuedCount ?> recipient(s) queued.<?php if (($skippedInvalid ?? 0) > 0): ?> <?= (int) $skippedInvalid ?> invalid address(es) left out by the Invalid Email Blocker.<?php endif; ?>
             </div>
         <?php endif; ?>
         <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/send" data-confirm="Queue this campaign for sending?"><?= csrf_field() ?>

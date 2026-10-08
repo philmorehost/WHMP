@@ -26,6 +26,32 @@ final class EmailLogRepository
         );
     }
 
+    /**
+     * Logs an email that was deliberately NOT sent (Invalid Email Blocker), with
+     * the reason, so the email log still shows every message the system meant
+     * to send. Nothing is queued for it.
+     *
+     * Falls back to 'failed' if the database has not yet been migrated to know
+     * the 'suppressed' status (migration 0215), rather than losing the record.
+     */
+    public function createSuppressed(string $toEmail, string $subject, ?string $templateKey, ?int $clientId, string $reason): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $error = 'Not sent — invalid address: ' . $reason;
+
+        try {
+            return (int) $this->db->insert(
+                'INSERT INTO email_log (to_email, subject, template_key, client_id, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [$toEmail, $subject, $templateKey, $clientId, 'suppressed', $error, $now]
+            );
+        } catch (\Throwable) {
+            return (int) $this->db->insert(
+                'INSERT INTO email_log (to_email, subject, template_key, client_id, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [$toEmail, $subject, $templateKey, $clientId, 'failed', $error, $now]
+            );
+        }
+    }
+
     public function markSent(int $id): void
     {
         $this->db->update(

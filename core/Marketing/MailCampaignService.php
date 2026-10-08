@@ -7,6 +7,7 @@ namespace CodeVault\Marketing;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Mail\EmailContent;
 use CodeVault\Mail\EmailDispatcher;
+use CodeVault\Mail\EmailSuppression;
 use Throwable;
 
 /**
@@ -32,8 +33,19 @@ final class MailCampaignService
     public function __construct(
         private readonly MailCampaignRepository $campaigns,
         private readonly ClientRepository $clients,
-        private readonly EmailDispatcher $mail
+        private readonly EmailDispatcher $mail,
+        // Invalid Email Blocker: addresses it would skip are left out of the
+        // recipient list entirely, so the campaign's counts are honest.
+        private readonly ?EmailSuppression $suppression = null
     ) {
+    }
+
+    /** Recipients left out of the last queue() call because their address is invalid. */
+    private int $skippedInvalid = 0;
+
+    public function skippedInvalid(): int
+    {
+        return $this->skippedInvalid;
     }
 
     /**
@@ -233,6 +245,7 @@ final class MailCampaignService
 
         $recipients = [];
         $seen = [];
+        $this->skippedInvalid = 0;
 
         foreach ($clients as $client) {
             $email = strtolower(trim((string) $client['email']));
@@ -242,6 +255,11 @@ final class MailCampaignService
             }
 
             $seen[$email] = true;
+
+            if ($this->isBlocked($email)) {
+                continue;
+            }
+
             $recipients[] = ['client_id' => (int) $client['id'], 'email' => $email];
         }
 
@@ -252,10 +270,26 @@ final class MailCampaignService
             }
 
             $seen[$email] = true;
+
+            if ($this->isBlocked($email)) {
+                continue;
+            }
+
             $recipients[] = ['client_id' => null, 'email' => $email];
         }
 
         return $recipients;
+    }
+
+    private function isBlocked(string $email): bool
+    {
+        if ($this->suppression?->reasonFor($email) === null) {
+            return false;
+        }
+
+        $this->skippedInvalid++;
+
+        return true;
     }
 
     public function send(int $campaignId): int

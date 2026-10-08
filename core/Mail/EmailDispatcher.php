@@ -26,6 +26,14 @@ use Throwable;
  * A caller that KNOWS whose message it is (a ticket belongs to a store whatever site
  * the reply was written on) says so with onBehalfOfStore() / onBehalfOfPlatform(),
  * which skips the guessing. Everyone else calls sendTemplate() exactly as before.
+ *
+ * INVALID ADDRESSES
+ *
+ * When the Invalid Email Blocker addon is on, an address the Email Validation scan
+ * marked Invalid is skipped here — the one place every client email passes through,
+ * so it covers every email type at once. The skipped message is still logged (status
+ * 'suppressed', with the reason) and still mirrored into the client's in-app
+ * notifications, where they will see it the next time they sign in.
  */
 final class EmailDispatcher
 {
@@ -44,7 +52,10 @@ final class EmailDispatcher
         private readonly ?ClientNotificationRepository $notifications = null,
         // Optional so the unit tests that build a dispatcher by hand keep working;
         // without it every message is the platform's, which is what they assert.
-        private readonly ?StoreMailBranding $branding = null
+        private readonly ?StoreMailBranding $branding = null,
+        // Invalid Email Blocker (addon). Optional for the same reason as above;
+        // without it nothing is ever suppressed.
+        private readonly ?EmailSuppression $suppression = null
     ) {
     }
 
@@ -98,6 +109,13 @@ final class EmailDispatcher
             $contentHtml = StoreMailBranding::rebrand($contentHtml, $brand, true);
         }
 
+        if (($reason = $this->suppressedBecause($toEmail, $templateKey)) !== null) {
+            $logId = $this->log->createSuppressed($toEmail, $subject, $templateKey, $clientId, $reason);
+            $this->mirrorToNotifications($subject, $contentHtml, $clientId, $logId);
+
+            return $logId;
+        }
+
         $html = $this->wrapInModernLayout($subject, $contentHtml, $brand);
 
         $logId = $this->log->create($toEmail, $subject, $templateKey, $clientId);
@@ -135,6 +153,13 @@ final class EmailDispatcher
             $html = StoreMailBranding::rebrand($html, $brand, true);
         }
 
+        if (($reason = $this->suppressedBecause($toEmail, null)) !== null) {
+            $logId = $this->log->createSuppressed($toEmail, $subject, null, $clientId, $reason);
+            $this->mirrorToNotifications($subject, $html, $clientId, $logId);
+
+            return $logId;
+        }
+
         $wrappedHtml = $this->wrapInModernLayout($subject, $html, $brand);
 
         $logId = $this->log->create($toEmail, $subject, null, $clientId);
@@ -143,6 +168,20 @@ final class EmailDispatcher
         $this->queue->push(new SendEmailJob($logId, $toEmail, $subject, $wrappedHtml, $this->senderFor($from, $brand)));
 
         return $logId;
+    }
+
+    /** Why this email must not be sent (Invalid Email Blocker), or null to send it. */
+    private function suppressedBecause(string $toEmail, ?string $templateKey): ?string
+    {
+        if ($this->suppression === null) {
+            return null;
+        }
+
+        try {
+            return $this->suppression->reasonFor($toEmail, $templateKey);
+        } catch (Throwable) {
+            return null; // fail open: a broken check must never stop real mail
+        }
     }
 
     /**

@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0214_cpanel_username_changer.php',
-    'migration_count' => 213,
+    'last_migration' => '0215_email_log_suppressed_status.php',
+    'migration_count' => 214,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -1717,7 +1717,7 @@ return [
                 'subject' => 'VARCHAR(255) NOT NULL',
                 'template_key' => 'VARCHAR(100) NULL',
                 'client_id' => 'INT UNSIGNED NULL',
-                'status' => 'ENUM(\'queued\', \'sent\', \'failed\') NOT NULL DEFAULT \'queued\'',
+                'status' => 'ENUM(\'queued\', \'sent\', \'failed\', \'suppressed\') NOT NULL DEFAULT \'queued\'',
                 'error' => 'TEXT NULL',
                 'created_at' => 'DATETIME NOT NULL',
                 'sent_at' => 'DATETIME NULL',

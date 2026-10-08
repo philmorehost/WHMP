@@ -705,6 +705,9 @@ class Kernel
                 // Decides, per message, whether it is written as the platform or as
                 // the reseller store whose customer it is for (white-label mail).
                 $c->make(\CodeVault\Reseller\StoreMailBranding::class),
+                // Invalid Email Blocker addon: skips addresses Email Validation marked
+                // invalid, for every email type. A no-op until the addon is activated.
+                $c->make(\CodeVault\Mail\EmailSuppression::class),
             );
         });
 
@@ -858,6 +861,7 @@ class Kernel
             $manager->register(AddonModule::class, 'domain-changer', $c->make(DomainChangerAddon::class));
             $manager->register(AddonModule::class, 'tawk-to', $c->make(TawkToAddon::class));
             $manager->register(AddonModule::class, 'cpanel-username-changer', $c->make(\CodeVault\UsernameChanger\UsernameChangerAddon::class));
+            $manager->register(AddonModule::class, \CodeVault\Mail\EmailSuppression::SLUG, $c->make(\CodeVault\Modules\Addons\InvalidEmailBlockerAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
             $manager->register(WidgetModule::class, 'ai-insights', $c->make(AiInsightsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));

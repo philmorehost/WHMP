@@ -29,6 +29,11 @@ use DateTimeImmutable;
  *     tool exists for, since it's evidence of an actual failed attempt
  *     to this exact address, not an inference about the domain.
  *
+ * Failures that are about OUR side (SMTP connection, TLS or login failing) are
+ * not counted against the recipient, and a scan aborts without changing
+ * anything if DNS itself is unreachable — both matter because the Invalid
+ * Email Blocker addon stops mail to whatever this scan flags.
+ *
  * Neither check sends a real email or otherwise contacts the recipient's
  * mail server (no SMTP RCPT probing) — DNS lookups are the only network
  * activity, so a scan cannot itself generate the kind of "someone is
@@ -42,6 +47,23 @@ final class ClientEmailValidationService
     /** Recent failures at or above this count flag the address even though DNS resolves fine. */
     private const FAILURE_THRESHOLD = 2;
 
+    /**
+     * Domains that always have mail servers. If none of them resolves, the
+     * resolver itself is down, and every client would wrongly be flagged.
+     */
+    private const DNS_PROBES = ['gmail.com', 'outlook.com', 'yahoo.com'];
+
+    /**
+     * Failures that say nothing about the RECIPIENT: our own SMTP connection,
+     * TLS or login failing, or a message we chose not to send. Counting these
+     * would flag every client after one SMTP outage — and with the Invalid Email
+     * Blocker on, stop their mail.
+     */
+    private const OUR_SIDE_FAILURE = '/could not connect|connection (refused|reset|timed out)|timed? ?out|starttls|tls negotiation|expected (220|334|235)|authentication|smtp is not configured|invalid from email|from address|not sent — invalid address/i';
+
+    /** @var (callable(string, string): bool)|null test seam: fn (domain, type) => has record */
+    private $resolver = null;
+
     public function __construct(
         private readonly ClientRepository $clients,
         private readonly ClientEmailValidationRepository $results,
@@ -49,11 +71,34 @@ final class ClientEmailValidationService
     ) {
     }
 
-    /** @return array{total: int, invalid: int} */
+    /**
+     * A copy that answers DNS questions with $resolver instead of the network.
+     *
+     * @param callable(string, string): bool $resolver
+     */
+    public function withResolver(callable $resolver): self
+    {
+        $copy = clone $this;
+        $copy->resolver = $resolver;
+
+        return $copy;
+    }
+
+    /**
+     * Scans every active client. When DNS itself is unreachable the scan stops
+     * without changing anything and reports `aborted`.
+     *
+     * @return array{total: int, invalid: int, aborted: bool}
+     */
     public function scanAll(): array
     {
+        if (!$this->dnsWorks()) {
+            return ['total' => 0, 'invalid' => 0, 'aborted' => true];
+        }
+
         $invalid = 0;
         $total = 0;
+        $domains = [];
 
         foreach ($this->clients->activeForGroup(null) as $client) {
             $email = trim((string) $client['email']);
@@ -63,7 +108,7 @@ final class ClientEmailValidationService
             }
 
             $total++;
-            $outcome = $this->checkOne($email);
+            $outcome = $this->checkOne($email, $domains);
             $this->results->upsert((int) $client['id'], $email, $outcome['valid'], $outcome['reason'], $outcome['recentFailures']);
 
             if (!$outcome['valid']) {
@@ -71,18 +116,30 @@ final class ClientEmailValidationService
             }
         }
 
-        return ['total' => $total, 'invalid' => $invalid];
+        return ['total' => $total, 'invalid' => $invalid, 'aborted' => false];
     }
 
-    /** @return array{valid: bool, reason: ?string, recentFailures: int} */
-    private function checkOne(string $email): array
+    /**
+     * @param array<string, bool> $domains per-scan cache: one lookup per domain,
+     *                                     however many clients share it
+     * @return array{valid: bool, reason: ?string, recentFailures: int}
+     */
+    private function checkOne(string $email, array &$domains): array
     {
         $atPos = strrpos($email, '@');
-        $domain = $atPos !== false ? substr($email, $atPos + 1) : '';
+        $domain = $atPos !== false ? strtolower(substr($email, $atPos + 1)) : '';
 
         $recentFailures = $this->recentFailureCount($email);
 
-        if ($domain === '' || (!checkdnsrr($domain, 'MX') && !checkdnsrr($domain, 'A') && !checkdnsrr($domain, 'AAAA'))) {
+        if ($domain === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return ['valid' => false, 'reason' => 'Not a valid email address', 'recentFailures' => $recentFailures];
+        }
+
+        if (!array_key_exists($domain, $domains)) {
+            $domains[$domain] = $this->canReceiveMail($domain);
+        }
+
+        if (!$domains[$domain]) {
             return ['valid' => false, 'reason' => 'No mail server found for this domain', 'recentFailures' => $recentFailures];
         }
 
@@ -97,15 +154,55 @@ final class ClientEmailValidationService
         return ['valid' => true, 'reason' => null, 'recentFailures' => $recentFailures];
     }
 
+    /** MX, or A/AAAA as SMTP's own fallback (RFC 5321 §5.1). Asked twice before giving up. */
+    private function canReceiveMail(string $domain): bool
+    {
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            if ($this->has($domain, 'MX') || $this->has($domain, 'A') || $this->has($domain, 'AAAA')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function dnsWorks(): bool
+    {
+        foreach (self::DNS_PROBES as $probe) {
+            if ($this->has($probe, 'MX')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function has(string $domain, string $type): bool
+    {
+        if ($this->resolver !== null) {
+            return (bool) ($this->resolver)($domain, $type);
+        }
+
+        return checkdnsrr($domain . '.', $type);
+    }
+
     private function recentFailureCount(string $email): int
     {
         $since = (new DateTimeImmutable('-' . self::FAILURE_LOOKBACK_DAYS . ' days'))->format('Y-m-d H:i:s');
 
-        $row = $this->db->selectOne(
-            "SELECT COUNT(*) AS c FROM email_log WHERE to_email = ? AND status = 'failed' AND created_at >= ?",
+        $rows = $this->db->select(
+            "SELECT error FROM email_log WHERE to_email = ? AND status = 'failed' AND created_at >= ?",
             [$email, $since]
         );
 
-        return (int) ($row['c'] ?? 0);
+        $count = 0;
+
+        foreach ($rows as $row) {
+            if (preg_match(self::OUR_SIDE_FAILURE, (string) ($row['error'] ?? '')) !== 1) {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 }

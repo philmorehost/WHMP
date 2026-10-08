@@ -122,6 +122,11 @@ $scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     // is inactive.
     $scheduler->register($kernel->container->make(\CodeVault\UsernameChanger\UsernameChangeCronJob::class));
 
+    // Invalid Email Blocker: re-runs the Email Validation scan every N days (addon
+    // setting) so fixed addresses are un-blocked and newly dead ones caught. A no-op
+    // while the addon is inactive or its re-scan is set to 0.
+    $scheduler->register($kernel->container->make(\CodeVault\Clients\EmailValidationRescanJob::class));
+
     // Drains queued campaign emails a few per minute so a large campaign
     // never floods the mail host in one burst.
     $scheduler->register($kernel->container->make(CampaignDispatchJob::class));

@@ -7,6 +7,7 @@ $statusBadge = static function (string $status): string {
         'sent' => '<span class="cv-badge cv-badge--success">Sent</span>',
         'queued' => '<span class="cv-badge cv-badge--neutral">Queued</span>',
         'failed' => '<span class="cv-badge cv-badge--danger">Failed</span>',
+        'suppressed' => '<span class="cv-badge cv-badge--warning">Not delivered — please check your email address</span>',
         default => '<span class="cv-badge cv-badge--neutral">' . e($status) . '</span>',
     };
 };
