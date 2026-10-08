@@ -205,6 +205,118 @@ final class CloudflareApi
         $this->call('DELETE', '/zones/' . self::id($zoneId) . '/firewall/access_rules/rules/' . self::id($ruleId));
     }
 
+    // ------------------------------------------------------------ DNSSEC
+
+    /** @return array<string, mixed> DNSSEC status and Cloudflare's DS values */
+    public function dnssec(string $zoneId): array
+    {
+        return (array) $this->call('GET', '/zones/' . self::id($zoneId) . '/dnssec');
+    }
+
+    /** @return array<string, mixed> */
+    public function setDnssec(string $zoneId, bool $active): array
+    {
+        return (array) $this->call('PATCH', '/zones/' . self::id($zoneId) . '/dnssec', ['status' => $active ? 'active' : 'disabled']);
+    }
+
+    // ------------------------------------------------------------ Rulesets (replaces retired Page Rules)
+
+    public const RULE_PHASES = [
+        'http_request_dynamic_redirect',
+        'http_request_cache_settings',
+        'http_request_firewall_custom',
+    ];
+
+    /** @return array<string, mixed>|null an entry point, or null if this phase has no rules yet */
+    public function entrypoint(string $zoneId, string $phase): ?array
+    {
+        if (!in_array($phase, self::RULE_PHASES, true)) {
+            throw new CloudflareApiException('Unsupported rules phase.');
+        }
+
+        try {
+            return (array) $this->call('GET', '/zones/' . self::id($zoneId) . '/rulesets/phases/' . $phase . '/entrypoint');
+        } catch (CloudflareApiException $e) {
+            if ($e->httpStatus === 404) {
+                return null;
+            }
+
+            throw $e;
+        }
+    }
+
+    /** Creates the entry point only when none exists; never overwrites existing zone rules. */
+    public function createEntrypoint(string $zoneId, string $phase, array $rules): array
+    {
+        if (!in_array($phase, self::RULE_PHASES, true)) {
+            throw new CloudflareApiException('Unsupported rules phase.');
+        }
+
+        return (array) $this->call('PUT', '/zones/' . self::id($zoneId) . '/rulesets/phases/' . $phase . '/entrypoint', ['rules' => array_values($rules)]);
+    }
+
+    /** @param array<string, mixed> $rule @return array<string, mixed> */
+    public function addRulesetRule(string $zoneId, string $rulesetId, array $rule): array
+    {
+        return (array) $this->call('POST', '/zones/' . self::id($zoneId) . '/rulesets/' . self::id($rulesetId) . '/rules', $rule);
+    }
+
+    public function deleteRulesetRule(string $zoneId, string $rulesetId, string $ruleId): void
+    {
+        $this->call('DELETE', '/zones/' . self::id($zoneId) . '/rulesets/' . self::id($rulesetId) . '/rules/' . self::id($ruleId));
+    }
+
+    // ------------------------------------------------------------ analytics
+
+    /**
+     * Free-plan daily traffic rollups for up to 92 days.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function dailyTraffic(string $zoneId, string $since, string $until): array
+    {
+        $query = 'query ($zoneTag: string, $since: Date!, $until: Date!) { viewer { zones(filter: {zoneTag: $zoneTag}) {'
+            . ' httpRequests1dGroups(limit: 92, filter: {date_geq: $since, date_leq: $until}, orderBy: [date_ASC]) {'
+            . ' dimensions { date } sum { requests cachedRequests bytes cachedBytes threats pageViews countryMap { clientCountryName requests } } uniq { uniques }'
+            . ' } } } }';
+        $response = $this->send('POST', '/graphql', ['query' => $query, 'variables' => ['zoneTag' => self::id($zoneId), 'since' => $since, 'until' => $until]]);
+        $decoded = json_decode($response['body'], true);
+
+        if ($response['status'] === 0 || $response['status'] >= 400 || !is_array($decoded)) {
+            throw CloudflareApiException::fromResponse($response['status'], is_array($decoded) ? $decoded : [], $response['error'] ?? null);
+        }
+
+        if (!empty($decoded['errors'])) {
+            $message = (string) ($decoded['errors'][0]['message'] ?? 'Analytics are not available.');
+
+            throw new CloudflareApiException(str_contains(strtolower($message), 'authoriz')
+                ? 'Analytics need the "Analytics Read" permission on the API token.'
+                : 'Cloudflare analytics: ' . mb_substr($message, 0, 200));
+        }
+
+        $rows = $decoded['data']['viewer']['zones'][0]['httpRequests1dGroups'] ?? [];
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    // ------------------------------------------------------------ Origin CA certificates
+
+    /** @param array<int, string> $hostnames @return array<string, mixed> */
+    public function createOriginCertificate(string $csr, array $hostnames, int $validityDays = 5475): array
+    {
+        return (array) $this->call('POST', '/certificates', [
+            'csr' => $csr,
+            'hostnames' => array_values($hostnames),
+            'request_type' => 'origin-rsa',
+            'requested_validity' => max(7, min(5475, $validityDays)),
+        ]);
+    }
+
+    public function revokeOriginCertificate(string $certificateId): void
+    {
+        $this->call('DELETE', '/certificates/' . self::id($certificateId));
+    }
+
     // ------------------------------------------------------------ transport
 
     /**

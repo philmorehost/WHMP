@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0216_cloudflare.php',
-    'migration_count' => 215,
+    'last_migration' => '0217_cloudflare_phase2.php',
+    'migration_count' => 216,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -1233,6 +1233,14 @@ return [
                 'deleted_at' => 'DATETIME NULL',
                 'created_at' => 'DATETIME NOT NULL',
                 'updated_at' => 'DATETIME NOT NULL',
+                'dnssec_status' => 'VARCHAR(20) NULL',
+                'dnssec_ds' => 'TEXT NULL',
+                'dnssec_ds_by_us' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'dnssec_ds_removed' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'ns_restore_after' => 'DATETIME NULL',
+                'dnssec_disable_after' => 'DATETIME NULL',
+                'origin_cert_id' => 'VARCHAR(64) NULL',
+                'origin_cert_expires' => 'DATETIME NULL',
             ],
             'primary' => [
                 'id',

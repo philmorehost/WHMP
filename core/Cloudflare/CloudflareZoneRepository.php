@@ -27,7 +27,8 @@ final class CloudflareZoneRepository
     private const WRITABLE = [
         'service_id', 'status', 'name_servers', 'original_name_servers', 'ns_switched_by_us', 'paused', 'paused_by_us',
         'delete_after', 'delete_reason', 'backup_bind', 'last_error', 'reminders_sent', 'activated_at', 'last_checked_at',
-        'last_synced_at', 'deleted_at',
+        'last_synced_at', 'deleted_at', 'dnssec_status', 'dnssec_ds', 'dnssec_ds_by_us', 'dnssec_ds_removed',
+        'ns_restore_after', 'dnssec_disable_after', 'origin_cert_id', 'origin_cert_expires',
     ];
 
     public function __construct(private readonly Database $db)
@@ -108,6 +109,10 @@ final class CloudflareZoneRepository
                 $value = json_encode(array_values($value));
             }
 
+            if ($column === 'dnssec_ds' && is_array($value)) {
+                $value = json_encode($value);
+            }
+
             if (is_bool($value)) {
                 $value = $value ? 1 : 0;
             }
@@ -140,6 +145,19 @@ final class CloudflareZoneRepository
     {
         return array_map([self::class, 'decode'], $this->db->select(
             'SELECT * FROM cloudflare_zones WHERE delete_after IS NOT NULL AND delete_after <= ? AND ' . self::LIVE . ' ORDER BY delete_after ASC LIMIT ' . max(1, $limit),
+            [$now]
+        ));
+    }
+
+    /** Deferred DNSSEC safety action, limited to two internal date columns. */
+    public function dueFor(string $column, string $now, int $limit = 50): array
+    {
+        if (!in_array($column, ['ns_restore_after', 'dnssec_disable_after'], true)) {
+            return [];
+        }
+
+        return array_map([self::class, 'decode'], $this->db->select(
+            'SELECT * FROM cloudflare_zones WHERE ' . $column . ' IS NOT NULL AND ' . $column . ' <= ? AND ' . self::LIVE . ' ORDER BY ' . $column . ' ASC LIMIT ' . max(1, $limit),
             [$now]
         ));
     }
@@ -252,6 +270,16 @@ final class CloudflareZoneRepository
             $decoded = json_decode((string) ($row[$column] ?? ''), true);
             $row[$column] = is_array($decoded) ? array_values(array_filter($decoded, 'is_string')) : [];
         }
+
+        $ds = json_decode((string) ($row['dnssec_ds'] ?? ''), true);
+        $row['dnssec_ds'] = is_array($ds) ? $ds : null;
+        $row['dnssec_status'] = isset($row['dnssec_status']) ? (string) $row['dnssec_status'] : null;
+        $row['dnssec_ds_by_us'] = (int) ($row['dnssec_ds_by_us'] ?? 0);
+        $row['dnssec_ds_removed'] = (int) ($row['dnssec_ds_removed'] ?? 0);
+        $row['origin_cert_id'] = !empty($row['origin_cert_id']) ? (string) $row['origin_cert_id'] : null;
+        $row['origin_cert_expires'] = $row['origin_cert_expires'] ?? null;
+        $row['ns_restore_after'] = $row['ns_restore_after'] ?? null;
+        $row['dnssec_disable_after'] = $row['dnssec_disable_after'] ?? null;
 
         return $row;
     }
