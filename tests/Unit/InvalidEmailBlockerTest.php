@@ -4,13 +4,20 @@ declare(strict_types=1);
 
 namespace CodeVault\Tests\Unit;
 
+use CodeVault\Billing\VatNumberValidator;
+use CodeVault\Billing\ViesVatLookupService;
+use CodeVault\Clients\ClientAccountController;
+use CodeVault\Clients\ClientAuthGuard;
 use CodeVault\Clients\ClientEmailValidationRepository;
 use CodeVault\Clients\ClientEmailValidationService;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Clients\EmailValidationRescanJob;
+use CodeVault\Clients\InvalidEmailNoticeController;
 use CodeVault\Config;
 use CodeVault\Container;
 use CodeVault\Database;
+use CodeVault\Gdpr\GdprRequestRepository;
+use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Mail\EmailDispatcher;
 use CodeVault\Mail\EmailLogRepository;
 use CodeVault\Mail\EmailSuppression;
@@ -20,10 +27,19 @@ use CodeVault\Marketing\MailCampaignRepository;
 use CodeVault\Marketing\MailCampaignService;
 use CodeVault\Modules\AddonModuleRepository;
 use CodeVault\Modules\Addons\InvalidEmailBlockerAddon;
+use CodeVault\Modules\ClientSecurityAnswerRepository;
+use CodeVault\Modules\ModuleManager;
+use CodeVault\Modules\SecurityQuestionModuleRepository;
+use CodeVault\Modules\SecurityQuestionModuleService;
 use CodeVault\Notifications\ClientNotificationRepository;
+use CodeVault\Request;
 use CodeVault\Security\CsrfToken;
+use CodeVault\Security\PhpassHasher;
+use CodeVault\Security\RecoveryCodes;
+use CodeVault\Security\Totp;
 use CodeVault\Session\SessionManager;
 use CodeVault\Support\App;
+use CodeVault\Tests\Fixtures\FakeHttpClient;
 use CodeVault\Tests\Support\CapturingQueue;
 use CodeVault\View;
 use DateTimeImmutable;
@@ -313,6 +329,277 @@ final class InvalidEmailBlockerTest extends TestCase
         $this->assertFalse($job()->isDue($now), '0 = only manual scans');
     }
 
+    // ------------------------------------------------------------ client banner
+
+    public function test_a_flagged_client_is_asked_to_update_their_email(): void
+    {
+        $this->db->addonEnabled = true;
+        $this->db->profile = ['email' => 'Dead@Expired-Domain.ng', 'reseller_id' => null];
+
+        $notice = $this->blocker()->clientNotice(7);
+
+        $this->assertSame('Dead@Expired-Domain.ng', $notice['email']);
+        $this->assertSame("its domain can't receive email (it may have expired or have a typo)", $notice['reason']);
+        $this->assertTrue($notice['blocking']);
+    }
+
+    public function test_no_banner_when_it_does_not_apply(): void
+    {
+        $this->db->profile = ['email' => 'bounces@gmail.com', 'reseller_id' => null];
+        $this->assertNull($this->blocker()->clientNotice(7), 'addon not activated');
+
+        $this->db->addonEnabled = true;
+        $this->db->profile = ['email' => 'ada@gmail.com', 'reseller_id' => null];
+        $this->assertNull($this->blocker()->clientNotice(7), 'a valid address');
+
+        $this->db->profile = ['email' => 'new-address@gmail.com', 'reseller_id' => null];
+        $this->assertNull($this->blocker()->clientNotice(7), 'already changed to an address the scan has not flagged');
+
+        $this->db->profile = ['email' => 'bounces@gmail.com', 'reseller_id' => 4];
+        $this->assertNull($this->blocker()->clientNotice(7), 'never for a reseller-store customer');
+
+        $this->db->profile = ['email' => 'bounces@gmail.com', 'reseller_id' => null];
+        $this->blocker()->allow('bounces@gmail.com');
+        $this->assertNull($this->blocker()->clientNotice(7), 'admin chose "always send"');
+        $this->blocker()->disallow('bounces@gmail.com');
+        $this->assertNotNull($this->blocker()->clientNotice(7));
+
+        $this->blocker()->save(['block' => '1', 'allow_security' => '1', 'rescan_days' => '7']); // banner unticked
+        $this->assertNull($this->blocker()->clientNotice(7), 'banner setting OFF');
+    }
+
+    public function test_the_banner_still_shows_while_blocking_is_off_with_softer_wording(): void
+    {
+        $this->db->addonEnabled = true;
+        $this->db->profile = ['email' => 'bounces@gmail.com', 'reseller_id' => null];
+        $this->blocker()->setBlocking(false);
+
+        $notice = $this->blocker()->clientNotice(7);
+        $this->assertFalse($notice['blocking']);
+        $this->assertSame('our recent emails to it were rejected', $notice['reason']);
+
+        $html = $this->renderNotice($notice + ['onProfile' => false]);
+        $this->assertStringContainsString('You may be missing invoices', $html);
+        $this->assertStringNotContainsString('not emailed', $html);
+    }
+
+    public function test_a_broken_lookup_shows_no_banner(): void
+    {
+        $this->db->addonEnabled = true;
+        $this->db->profile = ['email' => 'bounces@gmail.com', 'reseller_id' => null];
+        $this->db->failNotice = true;
+
+        $this->assertNull($this->blocker()->clientNotice(7));
+    }
+
+    public function test_the_helper_only_shows_it_inside_the_signed_in_client_area(): void
+    {
+        $this->db->addonEnabled = true;
+        $this->db->profile = ['email' => 'bounces@gmail.com', 'reseller_id' => null];
+        $this->bootContainer();
+        $_SESSION = ['client_id' => 7];
+
+        $this->assertNotNull(invalid_email_notice('/client/invoices'));
+        $this->assertFalse(invalid_email_notice('/client')['onProfile']);
+        $this->assertTrue(invalid_email_notice('/client/account')['onProfile']);
+        $this->assertNull(invalid_email_notice('/client/login'));
+        $this->assertNull(invalid_email_notice('/client/register'));
+        $this->assertNull(invalid_email_notice('/cart'), 'public pages');
+        $this->assertNull(invalid_email_notice('/clientele'));
+
+        $_SESSION[InvalidEmailNoticeController::HIDE_KEY] = time() + 3600;
+        $this->assertNull(invalid_email_notice('/client/invoices'), '"Remind me tomorrow"');
+        $_SESSION[InvalidEmailNoticeController::HIDE_KEY] = time() - 1;
+        $this->assertNotNull(invalid_email_notice('/client/invoices'), 'back after 24 hours');
+
+        $_SESSION = [];
+        $this->assertNull(invalid_email_notice('/client/invoices'), 'signed out');
+    }
+
+    public function test_the_banner_explains_and_links_to_the_profile(): void
+    {
+        $html = $this->renderNotice(['email' => 'dead@expired-domain.ng', 'reason' => "its domain can't receive email", 'blocking' => true, 'onProfile' => false]);
+
+        $this->assertStringContainsString('Please update your email address', $html);
+        $this->assertStringContainsString("We can't deliver email to <strong>dead@expired-domain.ng</strong>", $html);
+        $this->assertStringContainsString('<a href="/client/notifications">notifications</a>', $html);
+        $this->assertStringContainsString('href="/client/account#ieb-email">Update email address</a>', $html);
+        $this->assertStringContainsString('action="/client/email-notice/hide"', $html);
+        $this->assertStringContainsString('name="_token"', $html);
+
+        $onProfile = $this->renderNotice(['email' => 'x@y.ng', 'reason' => 'r', 'blocking' => true, 'onProfile' => true]);
+        $this->assertStringNotContainsString('Update email address</a>', $onProfile, 'already on the profile');
+        $this->assertStringContainsString('href="#ieb-email"', $onProfile);
+
+        $this->assertSame('', trim($this->renderNotice(null)));
+    }
+
+    public function test_remind_me_tomorrow_only_returns_to_client_area_pages(): void
+    {
+        $this->assertSame('/client/invoices/12', InvalidEmailNoticeController::safeReturn('/client/invoices/12'));
+        $this->assertSame('/client', InvalidEmailNoticeController::safeReturn('/client'));
+        $this->assertSame('/client', InvalidEmailNoticeController::safeReturn('https://evil.example/client'));
+        $this->assertSame('/client', InvalidEmailNoticeController::safeReturn('//evil.example'));
+        $this->assertSame('/client', InvalidEmailNoticeController::safeReturn('/client/../admin'));
+        $this->assertSame('/client', InvalidEmailNoticeController::safeReturn('/admin'));
+    }
+
+    public function test_a_changed_address_is_rechecked_at_once(): void
+    {
+        $up = static fn (array $w): array => ['valid' => (int) $w['bindings'][2], 'reason' => $w['bindings'][3]];
+
+        $ok = $this->scanner(static fn (string $d): bool => $d !== 'typo-domain.ng')->recheckClient(7, 'ada@gmail.com');
+        $this->assertSame(['valid' => true, 'reason' => null], $ok);
+        $this->assertSame(['valid' => 1, 'reason' => null], $up($this->db->writes('/INSERT INTO client_email_validations/')[0]));
+
+        $bad = $this->scanner(static fn (string $d): bool => $d !== 'typo-domain.ng')->recheckClient(7, 'ada@typo-domain.ng');
+        $this->assertSame(['valid' => false, 'reason' => 'No mail server found for this domain'], $bad);
+        $this->assertSame(0, $up($this->db->writes('/INSERT INTO client_email_validations/')[1])['valid']);
+    }
+
+    public function test_a_recheck_during_a_dns_outage_or_for_a_store_customer_changes_nothing(): void
+    {
+        $this->assertNull($this->scanner(static fn (): bool => false)->recheckClient(7, 'ada@gmail.com'));
+        $this->assertNull($this->scanner(static fn (): bool => true)->recheckClient(7, 'ada@gmail.com', 4));
+        $this->assertSame([], $this->db->writes('/client_email_validations/'));
+
+        // A malformed address needs no DNS at all.
+        $this->assertSame('Not a valid email address', $this->scanner(static fn (): bool => false)->recheckClient(7, 'ada@')['reason']);
+    }
+
+    public function test_addon_page_has_the_banner_setting(): void
+    {
+        $this->db->addonEnabled = true;
+        $addon = new InvalidEmailBlockerAddon($this->blocker());
+
+        $this->assertStringContainsString('name="banner" value="1" checked', $addon->render([]));
+        $addon->render(['save' => '1', 'block' => '1', 'rescan_days' => '7']);
+        $this->assertFalse($this->blocker()->settings()['banner']);
+        $this->assertStringContainsString('name="banner" value="1" style', $addon->render([]));
+    }
+
+    private function bootContainer(): void
+    {
+        $config = new Config(sys_get_temp_dir() . '/cv-ieb-' . uniqid());
+        $container = new Container();
+        $container->instance(Config::class, $config);
+        $container->instance(SessionManager::class, new SessionManager($config));
+        $container->instance(EmailSuppression::class, $this->blocker());
+        $container->bind(CsrfToken::class);
+        App::setContainer($container);
+    }
+
+    /** @param array<string, mixed>|null $notice */
+    private function renderNotice(?array $notice): string
+    {
+        $this->bootContainer();
+        $_SESSION ??= [];
+        $_SERVER['REQUEST_URI'] = '/client/invoices';
+
+        return (new View(dirname(__DIR__, 2) . '/resources/views'))->render('partials.invalid-email-notice', ['notice' => $notice]);
+    }
+
+    // ------------------------------------------------------------ client profile
+
+    private function profileController(callable $resolver): ClientAccountController
+    {
+        $this->db->clientRow = ['id' => 7, 'email' => 'dead@expired-domain.ng', 'first_name' => 'Tolu', 'last_name' => 'Ade', 'company_name' => null,
+            'address1' => '1 Marina', 'address2' => null, 'city' => 'Lagos', 'state' => 'Lagos', 'postcode' => '100001', 'country' => 'NG',
+            'vat_number' => null, 'phone' => '+2348000000000', 'reseller_id' => null, 'status' => 'active'];
+        $config = new Config(sys_get_temp_dir() . '/cv-ieb-' . uniqid());
+        $session = new SessionManager($config);
+        $container = new Container();
+        $container->instance(Config::class, $config);
+        $container->instance(SessionManager::class, $session);
+        $container->instance(Database::class, $this->db);
+        $container->bind(CsrfToken::class);
+        App::setContainer($container);
+        $_SESSION = ['client_id' => 7];
+        $_SERVER['REQUEST_URI'] = '/client/account';
+        $clients = new ClientRepository($this->db);
+
+        return new ClientAccountController(
+            new ClientAuthGuard($session, $clients),
+            new View(dirname(__DIR__, 2) . '/resources/views'),
+            $clients,
+            new Totp(),
+            new RecoveryCodes(),
+            $config,
+            new GdprRequestRepository($this->db),
+            new SecurityQuestionModuleService(new ModuleManager(new HookDispatcher()), new SecurityQuestionModuleRepository($this->db), new ClientSecurityAnswerRepository($this->db)),
+            new VatNumberValidator(),
+            new ViesVatLookupService(new FakeHttpClient()),
+            new PhpassHasher(),
+            $this->scanner($resolver)
+        );
+    }
+
+    /** @return array<string, string> */
+    private function profileForm(string $email): array
+    {
+        return ['email' => $email, 'first_name' => 'Tolu', 'last_name' => 'Ade', 'address1' => '1 Marina', 'city' => 'Lagos', 'postcode' => '100001', 'phone' => '+2348000000000', 'country' => 'NG'];
+    }
+
+    public function test_profile_rejects_an_incomplete_email_address(): void
+    {
+        $response = $this->profileController(static fn (): bool => true)->updateProfile(new Request([], $this->profileForm('tolu@gmail'), ['REQUEST_METHOD' => 'POST'], []));
+
+        $this->assertStringContainsString('Please enter a complete email address', $response->body());
+        $this->assertSame([], $this->db->writes('/UPDATE clients SET/'), 'nothing saved');
+    }
+
+    public function test_fixing_the_address_on_the_profile_clears_it_at_once(): void
+    {
+        $this->db->addonEnabled = true;
+        $controller = $this->profileController(static fn (): bool => true);
+
+        $html = $controller->updateProfile(new Request([], $this->profileForm('tolu@gmail.com'), ['REQUEST_METHOD' => 'POST'], []))->body();
+
+        $this->assertStringContainsString('Your details have been updated.', $html);
+        $check = $this->db->write('/INSERT INTO client_email_validations/');
+        $this->assertSame([7, 'tolu@gmail.com', true], [$check['bindings'][0], $check['bindings'][1], (bool) $check['bindings'][2]]);
+        $this->assertNull($this->blocker()->reasonFor('tolu@gmail.com'), 'the new address is mailed');
+    }
+
+    public function test_saving_another_bad_address_warns_the_client(): void
+    {
+        $controller = $this->profileController(static fn (string $d): bool => $d !== 'gmial.com');
+
+        $html = $controller->updateProfile(new Request([], $this->profileForm('tolu@gmial.com'), ['REQUEST_METHOD' => 'POST'], []))->body();
+
+        $this->assertStringContainsString('Your details were saved, but tolu@gmial.com does not look like it can receive email', $html);
+        $this->assertStringContainsString('may have expired or have a typo', $html);
+        $this->assertSame(0, (int) $this->db->write('/INSERT INTO client_email_validations/')['bindings'][2]);
+    }
+
+    public function test_saving_the_profile_without_changing_the_email_does_no_lookup(): void
+    {
+        $asked = 0;
+        $controller = $this->profileController(static function () use (&$asked): bool {
+            $asked++;
+
+            return true;
+        });
+
+        $controller->updateProfile(new Request([], $this->profileForm('DEAD@expired-domain.ng'), ['REQUEST_METHOD' => 'POST'], []));
+
+        $this->assertSame(0, $asked);
+        $this->assertSame([], $this->db->writes('/client_email_validations/'));
+    }
+
+    public function test_the_profile_page_shows_the_banner_to_a_flagged_client(): void
+    {
+        $this->db->addonEnabled = true;
+        $controller = $this->profileController(static fn (): bool => true);
+        $this->db->profile = ['email' => 'dead@expired-domain.ng', 'reseller_id' => null];
+
+        $html = $controller->profile(new Request([], [], ['REQUEST_METHOD' => 'GET'], []))->body();
+
+        $this->assertStringContainsString('Please update your email address', $html);
+        $this->assertStringContainsString('id="ieb-email"', $html);
+        $this->assertStringContainsString('Enter a working address in the', $html);
+    }
+
     // ------------------------------------------------------------ screens
 
     public function test_addon_page_saves_and_shows_the_switch(): void
@@ -387,6 +674,8 @@ final class BlockerDb extends Database
 
     public bool $failValidations = false;
 
+    public bool $failNotice = false;
+
     public bool $rejectSuppressedStatus = false;
 
     /** @var array<int, array<string, mixed>> */
@@ -399,6 +688,12 @@ final class BlockerDb extends Database
     public ?array $campaign = null;
 
     public ?string $lastScanAt = '2026-10-08 09:00:00';
+
+    /** @var array<string, mixed>|null the client the profile tests edit */
+    public ?array $clientRow = null;
+
+    /** @var array{email: string, reseller_id: ?int}|null the signed-in client (clientNotice) */
+    public ?array $profile = null;
 
     private int $nextId = 100;
 
@@ -425,6 +720,25 @@ final class BlockerDb extends Database
             return ($this->addonRow || $this->addonEnabled)
                 ? [['slug' => $bindings[0] ?? '', 'enabled' => $this->addonEnabled ? 1 : 0, 'config' => $this->addonConfig === [] ? null : json_encode($this->addonConfig)]]
                 : [];
+        }
+
+        if (str_contains($sql, 'JOIN client_email_validations v ON v.client_id = c.id')) {
+            if ($this->failNotice) {
+                throw new RuntimeException('database went away');
+            }
+
+            // Emulates the SQL: only a platform client, only their CURRENT address.
+            if ($this->profile === null || $this->profile['reseller_id'] !== null) {
+                return [];
+            }
+
+            foreach ($this->validations as $v) {
+                if ((int) $v['is_valid'] === 0 && strcasecmp((string) $v['email'], $this->profile['email']) === 0) {
+                    return [['email' => $this->profile['email'], 'reason' => $v['reason']]];
+                }
+            }
+
+            return [];
         }
 
         if (str_contains($sql, 'FROM client_email_validations') && str_contains($sql, 'MAX(checked_at)')) {
@@ -467,6 +781,14 @@ final class BlockerDb extends Database
             return [$this->campaign];
         }
 
+        if ($this->clientRow !== null && str_contains($sql, 'FROM clients c') && str_contains($sql, 'WHERE c.id = ?')) {
+            return [$this->clientRow];
+        }
+
+        if ($this->clientRow !== null && str_contains($sql, 'SELECT * FROM clients WHERE email = ?')) {
+            return strcasecmp((string) $bindings[0], (string) $this->clientRow['email']) === 0 ? [$this->clientRow] : [];
+        }
+
         if (str_contains($sql, 'FROM clients c WHERE c.status')) {
             return $this->clients;
         }
@@ -494,6 +816,10 @@ final class BlockerDb extends Database
     public function update(string $sql, array $bindings = []): int
     {
         $this->writes[] = ['sql' => $sql, 'bindings' => $bindings];
+
+        if ($this->clientRow !== null && str_contains($sql, 'UPDATE clients SET') && str_contains($sql, 'email = ?')) {
+            $this->clientRow['email'] = $bindings[0];
+        }
         $this->track($sql, $bindings);
 
         return 1;
