@@ -245,14 +245,21 @@ final class CloudflareApi
         }
     }
 
-    /** Creates the entry point only when none exists; never overwrites existing zone rules. */
+    /** Creates a missing phase entry point; never overwrites an existing ruleset. */
     public function createEntrypoint(string $zoneId, string $phase, array $rules): array
     {
         if (!in_array($phase, self::RULE_PHASES, true)) {
             throw new CloudflareApiException('Unsupported rules phase.');
         }
 
-        return (array) $this->call('PUT', '/zones/' . self::id($zoneId) . '/rulesets/phases/' . $phase . '/entrypoint', ['rules' => array_values($rules)]);
+        $labels = [
+            'http_request_dynamic_redirect' => 'WHMP Free Redirect Rules',
+            'http_request_cache_settings' => 'WHMP Free Cache Rules',
+            'http_request_firewall_custom' => 'WHMP Free Firewall Rules',
+        ];
+        return (array) $this->call('POST', '/zones/' . self::id($zoneId) . '/rulesets', [
+            'kind' => 'zone', 'name' => $labels[$phase], 'phase' => $phase, 'rules' => array_values($rules),
+        ]);
     }
 
     /** @param array<string, mixed> $rule @return array<string, mixed> */

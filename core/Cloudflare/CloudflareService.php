@@ -11,7 +11,7 @@ use CodeVault\Provisioning\ServerRepository;
 use Throwable;
 
 /**
- * Cloudflare add-on business logic (docs/CLOUDFLARE_ADDON_PLAN.md, Phase 1).
+ * Cloudflare add-on business logic (docs/CLOUDFLARE_ADDON_PLAN.md, Phases 1–2).
  *
  * Free plan only, every zone in the platform's own Cloudflare account. The rules
  * the owner set:
@@ -46,7 +46,14 @@ final class CloudflareService
         'browser_cache_ttl' => [0, 1800, 3600, 7200, 14400, 28800, 57600, 86400, 172800, 604800, 2592000, 31536000],
         'security_level' => ['essentially_off', 'low', 'medium', 'high', 'under_attack'],
         'browser_check' => ['on', 'off'],
+        'early_hints' => ['on', 'off'], 'http3' => ['on', 'off'], '0rtt' => ['on', 'off'],
+        'rocket_loader' => ['on', 'off'], 'always_online' => ['on', 'off'], 'ipv6' => ['on', 'off'],
+        'websockets' => ['on', 'off'], 'opportunistic_encryption' => ['on', 'off'],
+        'tls_1_3' => ['on', 'off'], 'email_obfuscation' => ['on', 'off'], 'hotlink_protection' => ['on', 'off'],
     ];
+
+    /** Resolver cache safety interval after a registrar DS record is removed. */
+    public const DS_SETTLE_HOURS = 48;
 
     public const RULE_MODES = ['block', 'managed_challenge', 'js_challenge', 'challenge', 'whitelist'];
     public const RULE_TARGETS = ['ip', 'ip_range', 'country', 'asn'];
@@ -381,18 +388,56 @@ final class CloudflareService
             return ['ok' => true, 'message' => 'Removal is already scheduled for ' . $zone['delete_after'] . '.'];
         }
 
-        $restored = $this->restoreNameservers($zone, $actor);
+        $dnssecState = $this->refreshDnssecState($zone);
+        $zone['dnssec_status'] = $dnssecState['status'];
+        $freshZone = $this->zones->find($zoneRowId);
+        if ($freshZone !== null) { $zone = array_merge($zone, $freshZone); }
+        $dsResult = $this->removeRegistrarDs($zone, $actor);
+        $restored = false;
+        $restoreAfter = null;
         $deleteAfter = date('Y-m-d H:i:s', time() + $this->settings->graceDays() * 86400);
-        $this->zones->update($zoneRowId, ['delete_after' => $deleteAfter, 'delete_reason' => mb_substr($reason, 0, 40)]);
-        $this->zones->log($zoneRowId, $actor['type'], $actor['id'], 'removal_scheduled', 'Removal scheduled for ' . $deleteAfter . ' (' . $reason . ').' . ($restored ? ' Previous nameservers restored.' : ''));
+        $dnssec = (string) ($zone['dnssec_status'] ?? '');
+        $dsAlreadyRemoved=(int)($zone['dnssec_ds_removed']??0)===1;
+        $ownedDsAvailable=(int)($zone['dnssec_ds_by_us']??0)===1 && is_array($zone['dnssec_ds']??null);
+        $externalDs=(!$dnssecState['verified'] && !$dsAlreadyRemoved && !$ownedDsAvailable)
+            || ((int)($zone['dnssec_ds_by_us']??0)===1 && !$dsAlreadyRemoved && !$ownedDsAvailable)
+            || (in_array($dnssec,['active','pending','pending-disabled','unknown'],true) && !$dsAlreadyRemoved && $dsResult==='none');
+
+        if ($dsResult === 'removed' && (int) $zone['ns_switched_by_us'] === 1) {
+            $restoreAfter = date('Y-m-d H:i:s', time() + self::DS_SETTLE_HOURS * 3600);
+        } elseif ((int) ($zone['dnssec_ds_removed'] ?? 0) === 1
+            && !empty($zone['dnssec_disable_after']) && (int) $zone['ns_switched_by_us'] === 1) {
+            $restoreAfter = (string) $zone['dnssec_disable_after'];
+        } elseif (!$externalDs && $dsResult !== 'failed') {
+            $restored = $this->restoreNameservers($zone, $actor);
+        }
+
+        if ($restoreAfter !== null && $restoreAfter >= $deleteAfter) {
+            $deleteAfter = date('Y-m-d H:i:s', strtotime($restoreAfter) + 86400);
+        }
+        $this->zones->update($zoneRowId, ['delete_after' => $deleteAfter, 'delete_reason' => mb_substr($reason, 0, 40), 'ns_restore_after' => $restoreAfter]);
+        $summary = 'Removal scheduled for ' . $deleteAfter . ' (' . $reason . ').';
+        if ($restored) { $summary .= ' Previous nameservers restored.'; }
+        if ($restoreAfter !== null) { $summary .= ' Previous nameservers will be restored after the DS cache settles on ' . $restoreAfter . '.'; }
+        if ($externalDs && !$dnssecState['verified']) { $summary .= ' DNSSEC could not be verified; nameservers were left on Cloudflare.'; }
+        elseif ($externalDs) { $summary .= ' Nameservers left on Cloudflare until the external DS record is removed.'; }
+        if ($dsResult === 'failed') { $summary .= ' Could not remove the DS record at the registrar; zone remains serving.'; }
+        $this->zones->log($zoneRowId, $actor['type'], $actor['id'], 'removal_scheduled', $summary);
 
         $service = $zone['service_id'] !== null ? $this->services->find((int) $zone['service_id']) : null;
 
         if ($service !== null) {
-            $this->notifier?->removalScheduled($zone, $service, self::reasonLabel($reason), $deleteAfter, $restored);
+            $this->notifier?->removalScheduled($zone, $service, self::reasonLabel($reason), $deleteAfter, $restored, $restoreAfter,
+                $externalDs || $dsResult === 'failed' || !$dnssecState['verified']);
         }
 
-        return ['ok' => true, 'message' => 'Cloudflare will be removed from ' . $zone['name'] . ' on ' . date('j M Y', strtotime($deleteAfter) ?: time()) . '. You can undo this until then.' . ($restored ? ' Your previous nameservers have been restored.' : '')];
+        $message = 'Cloudflare will be removed from ' . $zone['name'] . ' on ' . date('j M Y', strtotime($deleteAfter) ?: time()) . '. You can undo this until then.';
+        if ($restored) { $message .= ' Your previous nameservers have been restored.'; }
+        if ($restoreAfter !== null) { $message .= ' We removed the DS record; your previous nameservers go back automatically after ' . self::DS_SETTLE_HOURS . ' hours.'; }
+        if ($externalDs && !$dnssecState['verified']) { $message .= ' We could not verify DNSSEC, so your nameservers are unchanged. Check the API token permissions and try again.'; }
+        elseif ($externalDs) { $message .= ' DNSSEC may have an external DS record. Your nameservers are unchanged. Remove the DS record at your registrar and confirm the DNSSEC change from the DNS tab before removal.'; }
+        if ($dsResult === 'failed') { $message .= ' The DNSSEC record could not be removed at the registrar, so nameservers were left on Cloudflare; we will retry.'; }
+        return ['ok' => true, 'message' => $message];
     }
 
     /**
@@ -415,10 +460,13 @@ final class CloudflareService
             }
         }
 
-        $this->zones->update($zoneRowId, ['delete_after' => null, 'delete_reason' => null]);
+        $this->zones->update($zoneRowId, ['delete_after' => null, 'delete_reason' => null, 'ns_restore_after' => null]);
         $this->zones->log($zoneRowId, $actor['type'], $actor['id'], 'removal_cancelled', 'Scheduled removal cancelled.');
 
         $message = 'Cloudflare will stay on for ' . $zone['name'] . '.';
+        if ((int) ($zone['dnssec_ds_removed'] ?? 0) === 1 && (string) ($zone['dnssec_status'] ?? '') === 'active') {
+            $message .= ' The registrar DS record was removed; turn DNSSEC back on from the DNS tab to publish it again.';
+        }
 
         if ((int) $zone['ns_switched_by_us'] === 0 && $zone['status'] === 'active') {
             $message .= ' If the nameservers were put back, switch them to Cloudflare again to keep it active.';
@@ -441,6 +489,51 @@ final class CloudflareService
             return self::fail('Zone not found.');
         }
 
+        $dnssecState = $this->refreshDnssecState($zone);
+        $zone['dnssec_status'] = $dnssecState['status'];
+        $freshZone = $this->zones->find($zoneRowId);
+        if ($freshZone !== null) { $zone = array_merge($zone, $freshZone); }
+        $dnssec = (string) ($zone['dnssec_status'] ?? '');
+        $dsAlreadyRemoved=(int)($zone['dnssec_ds_removed']??0)===1;
+        $ownedDsAvailable=(int)($zone['dnssec_ds_by_us']??0)===1 && is_array($zone['dnssec_ds']??null);
+        $cannotVerify=!$dnssecState['verified'] && !$dsAlreadyRemoved && !$ownedDsAvailable;
+        $ownedDsMissing=(int)($zone['dnssec_ds_by_us']??0)===1 && !$dsAlreadyRemoved && !$ownedDsAvailable;
+        $possibleExternalDs=in_array($dnssec,['active','pending','pending-disabled','unknown'],true)
+            && !$dsAlreadyRemoved && (int)($zone['dnssec_ds_by_us']??0)!==1;
+        if ($cannotVerify || $ownedDsMissing || $possibleExternalDs) {
+            if ($zone['delete_after'] !== null) {
+                $this->zones->update($zoneRowId, ['delete_after' => date('Y-m-d H:i:s', time() + 86400), 'last_error' => 'DNSSEC could not be confirmed safe; zone retained.']);
+            }
+            $this->zones->log($zoneRowId, 'system', null, 'dnssec_delete_blocked', $cannotVerify
+                ? 'Zone kept serving because Cloudflare DNSSEC could not be verified.'
+                : 'Zone kept serving because the registrar DS record is not managed by WHMP.');
+            return self::fail($cannotVerify
+                ? 'Could not verify Cloudflare DNSSEC, so the zone was kept to prevent an outage. Check API token permissions and try again.'
+                : ($ownedDsMissing
+                    ? 'The stored registrar DS details are incomplete, so the zone was kept to prevent an outage. Re-check DNSSEC and try again.'
+                    : 'DNSSEC may still have an external DS record at the registrar. Remove it and confirm the DNSSEC change from the DNS tab; the zone was kept to prevent an outage.'));
+        }
+        if ($zone['dnssec_disable_after'] !== null && strtotime((string) $zone['dnssec_disable_after']) > time()) {
+            return self::fail('DNSSEC is being turned off. The zone must keep serving until ' . $zone['dnssec_disable_after'] . '.');
+        }
+        if ($zone['ns_restore_after'] !== null && strtotime((string) $zone['ns_restore_after']) > time()) {
+            return self::fail('The DS record was removed at the registrar. Wait until ' . $zone['ns_restore_after'] . ' before switching nameservers or deleting the zone.');
+        }
+        $dsResult = $this->removeRegistrarDs($zone, $actor);
+        if ($dsResult === 'failed') {
+            if ($zone['delete_after'] !== null) { $this->zones->update($zoneRowId, ['delete_after' => date('Y-m-d H:i:s', time() + 86400)]); }
+            return self::fail('The DNSSEC DS record could not be removed at the registrar, so the zone was kept. Please try again later.');
+        }
+        if ($dsResult === 'removed') {
+            $waitUntil = date('Y-m-d H:i:s', time() + self::DS_SETTLE_HOURS * 3600);
+            $fields = ['delete_after' => $waitUntil];
+            if ((int) $zone['ns_switched_by_us'] === 1) {
+                $fields['ns_restore_after'] = $waitUntil;
+                $fields['delete_after'] = date('Y-m-d H:i:s', strtotime($waitUntil) + 86400);
+            }
+            $this->zones->update($zoneRowId, $fields);
+            return self::fail('We removed the DS record. Cloudflare is still serving the domain while DNS caches clear; try again after ' . $waitUntil . '.');
+        }
         $this->restoreNameservers($zone, $actor);
         $cfId = (string) $zone['cf_zone_id'];
         $backup = null;
@@ -460,7 +553,11 @@ final class CloudflareService
             }
         }
 
-        $fields = ['status' => 'deleted', 'deleted_at' => date('Y-m-d H:i:s'), 'delete_after' => null, 'paused' => false, 'paused_by_us' => false, 'last_error' => null];
+        if (!empty($zone['origin_cert_id'])) {
+            try { $this->api()->revokeOriginCertificate((string) $zone['origin_cert_id']); } catch (Throwable) { /* best effort */ }
+        }
+        $fields = ['status' => 'deleted', 'deleted_at' => date('Y-m-d H:i:s'), 'delete_after' => null, 'paused' => false, 'paused_by_us' => false, 'last_error' => null,
+            'dnssec_disable_after' => null, 'ns_restore_after' => null, 'origin_cert_id' => null];
 
         if ($backup !== null && $backup !== '') {
             $fields['backup_bind'] = $backup;
@@ -958,6 +1055,10 @@ final class CloudflareService
             'browser_cache_ttl' => 'Browser cache TTL',
             'security_level' => 'Security level',
             'browser_check' => 'Browser integrity check',
+            'early_hints' => 'Early Hints', 'http3' => 'HTTP/3 (QUIC)', '0rtt' => '0-RTT connection resumption',
+            'rocket_loader' => 'Rocket Loader', 'always_online' => 'Always Online', 'ipv6' => 'IPv6 compatibility',
+            'websockets' => 'WebSockets', 'opportunistic_encryption' => 'Opportunistic encryption',
+            'tls_1_3' => 'TLS 1.3', 'email_obfuscation' => 'Email address obfuscation', 'hotlink_protection' => 'Hotlink protection',
             default => $setting,
         };
     }
@@ -966,6 +1067,77 @@ final class CloudflareService
     public function useApi(CloudflareApi $api): void
     {
         $this->api = $api;
+    }
+
+    /**
+     * Refresh Cloudflare's DNSSEC state immediately before restoring nameservers
+     * or deleting a zone. This catches DNSSEC enabled outside WHMP. If an older
+     * active state now reads disabled but the DS was unmanaged, keep it in a
+     * pending-disabled state until removal is explicitly confirmed.
+     *
+     * @param array<string,mixed> $zone
+     * @return array{verified:bool,status:string}
+     */
+    private function refreshDnssecState(array $zone): array
+    {
+        $previous=(string)($zone['dnssec_status']??'');
+        try { $remote=$this->api()->dnssec((string)$zone['cf_zone_id']); }
+        catch (Throwable) { return ['verified'=>false,'status'=>$previous!==''?$previous:'unknown']; }
+        $status=(string)($remote['status']??'unknown');
+        $removed=(int)($zone['dnssec_ds_removed']??0)===1;
+        if ($removed && !empty($zone['dnssec_disable_after'])) {
+            $status='pending-disabled';
+        } elseif ($status==='disabled' && in_array($previous,['active','pending','pending-disabled'],true) && !$removed) {
+            $status='pending-disabled';
+        }
+        $fields=['dnssec_status'=>mb_substr($status,0,20)];
+        $digest=strtoupper(preg_replace('/\s+/','',(string)($remote['digest']??''))??'');
+        if (isset($remote['key_tag']) && preg_match('/^[A-F0-9]{40,128}$/',$digest)===1) {
+            $fields['dnssec_ds']=['key_tag'=>(int)$remote['key_tag'],'algorithm'=>(int)($remote['algorithm']??13),
+                'digest_type'=>(int)($remote['digest_type']??2),'digest'=>$digest,'ds'=>mb_substr((string)($remote['ds']??''),0,300)];
+        }
+        $this->zones->update((int)$zone['id'],$fields);
+        return ['verified'=>true,'status'=>$status];
+    }
+
+    /** API client for Phase 2 feature services. */
+    public function apiClient(): CloudflareApi
+    {
+        return $this->api();
+    }
+
+    /** Remove only a registrar DS record that WHMP itself added. */
+    public function removeRegistrarDs(array $zone, array $actor): string
+    {
+        if ((int) ($zone['dnssec_ds_by_us'] ?? 0) !== 1 || !is_array($zone['dnssec_ds'] ?? null)) { return 'none'; }
+        $domain = $this->registeredDomain((string) $zone['name'], (int) $zone['client_id']);
+        if ($domain === null || $this->nameservers === null) { return 'failed'; }
+        try { $result = $this->nameservers->changeDs((int) $domain['id'], $zone['dnssec_ds'], false); }
+        catch (Throwable $e) { $result = ['success' => false, 'message' => $e->getMessage()]; }
+        if (!($result['success'] ?? false)) {
+            $this->zones->update((int) $zone['id'], ['last_error' => mb_substr('DS removal: ' . (string) ($result['message'] ?? 'registrar error'), 0, 255)]);
+            $this->zones->log((int) $zone['id'], 'system', null, 'ds_remove_failed', 'Removing the DS record at the registrar failed: ' . mb_substr((string) ($result['message'] ?? ''), 0, 150));
+            return 'failed';
+        }
+        $this->zones->update((int) $zone['id'], ['dnssec_ds_by_us' => false, 'dnssec_ds_removed' => true]);
+        $this->zones->log((int) $zone['id'], $actor['type'], $actor['id'], 'ds_removed', 'DS record removed at the registrar.');
+        return 'removed';
+    }
+
+    /** @return array{ok:bool,message:string} */
+    public function restoreDeferredNameservers(int $zoneRowId, ?int $now = null): array
+    {
+        $now ??= time();
+        $zone = $this->zones->find($zoneRowId);
+        if ($zone === null || $zone['status'] === 'deleted' || $zone['ns_restore_after'] === null) { return self::fail('Nothing to restore.'); }
+        if (strtotime((string) $zone['ns_restore_after']) > $now) { return self::fail('The DNSSEC wait period has not finished yet.'); }
+        if ((int) $zone['ns_switched_by_us'] !== 1) {
+            $this->zones->update($zoneRowId, ['ns_restore_after' => null]);
+            return ['ok' => true, 'message' => 'Nameservers do not need restoring.'];
+        }
+        $restored = $this->restoreNameservers($zone, ['type' => 'system', 'id' => null]);
+        if ($restored) { $this->zones->update($zoneRowId, ['ns_restore_after' => null]); }
+        return ['ok' => $restored, 'message' => $restored ? 'Nameservers restored.' : 'Nameserver restore failed; cron will retry.'];
     }
 
     private function api(): CloudflareApi

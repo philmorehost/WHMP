@@ -12,7 +12,8 @@ use Throwable;
 /**
  * Cloudflare add-on housekeeping (every 15 minutes, a no-op while the add-on is
  * inactive or not connected):
- *   1. deletes zones whose grace period has run out (BIND backup kept);
+ *   1. completes DNSSEC DS-cache waits before disabling signing or restoring
+ *      nameservers, then deletes zones whose grace period has run out;
  *   2. checks pending zones for activation — each at most once an hour — and
  *      sends the nameserver reminders on day 3 and day 7;
  *   3. reconciles every live zone with Cloudflare and with its service once a
@@ -35,7 +36,8 @@ final class CloudflareCronJob implements CronJob
         private readonly CloudflareZoneRepository $zones,
         private readonly CloudflareService $service,
         private readonly ServiceRepository $services,
-        private readonly ?CloudflareNotifier $notifier = null
+        private readonly ?CloudflareNotifier $notifier = null,
+        private readonly ?CloudflareFeatures $features = null
     ) {
     }
 
@@ -62,11 +64,21 @@ final class CloudflareCronJob implements CronJob
         $this->run(time());
     }
 
-    /** @return array{deleted: int, checked: int, reminded: int, reconciled: int} */
+    /** @return array{deleted:int,checked:int,reminded:int,reconciled:int,restored:int,dnssec_off:int} */
     public function run(int $now): array
     {
-        $stats = ['deleted' => 0, 'checked' => 0, 'reminded' => 0, 'reconciled' => 0];
+        $stats = ['deleted' => 0, 'checked' => 0, 'reminded' => 0, 'reconciled' => 0, 'restored' => 0, 'dnssec_off' => 0];
         $system = ['type' => 'system', 'id' => null];
+        $stamp = date('Y-m-d H:i:s', $now);
+
+        foreach ($this->zones->dueFor('ns_restore_after', $stamp, self::DELETE_BATCH) as $zone) {
+            if ($this->service->restoreDeferredNameservers((int) $zone['id'], $now)['ok']) { $stats['restored']++; }
+        }
+        if ($this->features !== null) {
+            foreach ($this->zones->dueFor('dnssec_disable_after', $stamp, self::DELETE_BATCH) as $zone) {
+                if ($this->features->finishDnssecDisable((int) $zone['id'], $now)['ok']) { $stats['dnssec_off']++; }
+            }
+        }
 
         foreach ($this->zones->dueForDeletion(date('Y-m-d H:i:s', $now), self::DELETE_BATCH) as $zone) {
             if ($this->service->deleteNow((int) $zone['id'], $system)['ok']) {

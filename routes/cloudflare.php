@@ -25,6 +25,11 @@ $router->post('/client/services/{id}/cloudflare/setting', [CloudflareClientContr
 $router->post('/client/services/{id}/cloudflare/purge', [CloudflareClientController::class, 'purge']);
 $router->post('/client/services/{id}/cloudflare/rules', [CloudflareClientController::class, 'addRule']);
 $router->post('/client/services/{id}/cloudflare/rules/{rule}/delete', [CloudflareClientController::class, 'deleteRule']);
+$router->post('/client/services/{id}/cloudflare/rulesets/{kind}', [CloudflareClientController::class, 'addRuleset']);
+$router->post('/client/services/{id}/cloudflare/rulesets/{kind}/{rule}/delete', [CloudflareClientController::class, 'deleteRuleset']);
+$router->post('/client/services/{id}/cloudflare/presets/{preset}', [CloudflareClientController::class, 'preset']);
+$router->post('/client/services/{id}/cloudflare/dnssec/{action}', [CloudflareClientController::class, 'dnssec']);
+$router->post('/client/services/{id}/cloudflare/origin-certificate', [CloudflareClientController::class, 'originCertificate']);
 
 // Admin (addons.manage).
 $router->get('/admin/cloudflare', [CloudflareAdminController::class, 'index']);

@@ -1,6 +1,6 @@
 # Cloudflare Add-on for WHMP — Plan & status
 
-Status: **Phase 1 BUILT** (see "Implementation status" below). The decisions in
+Status: **Phases 1 and 2 BUILT** (see "Implementation status" below). The decisions in
 §12 were answered as follows, and they override anything else in this plan:
 
 | Decision | Answer |
@@ -34,8 +34,9 @@ Status: **Phase 1 BUILT** (see "Implementation status" below). The decisions in
   cache level, browser TTL), Security (level incl. "I'm under attack", browser check,
   IP access rules), Activity. Card on the service page.
 * Lifecycle: suspend → pause (only zones WHMP paused are resumed); terminate/cancel or
-  client turn-off → nameservers WHMP switched are restored at once, zone deleted after
-  the grace period with a BIND backup kept; re-activation inside the grace keeps it.
+  client turn-off → restore nameservers WHMP switched once DNSSEC DS safety waits have
+  cleared, then delete after the grace period with a BIND backup kept; re-activation
+  inside the grace keeps the zone.
 * Cron `cloudflare` (15 min): due deletions, activation checks (≤1/h per zone) with
   reminders on day 3 and 7, daily reconcile with Cloudflare and the service status.
 * Emails: `cloudflare_zone_pending`, `_active`, `_reminder`, `_removal_scheduled`
@@ -43,9 +44,31 @@ Status: **Phase 1 BUILT** (see "Implementation status" below). The decisions in
 * Tables `cloudflare_zones`, `cloudflare_activity` (migration 0216).
 * Tests: `tests/Unit/CloudflareAddonTest.php` (SQLite + a stateful fake Cloudflare).
 
-**Phase 2 — next:** Rulesets (redirect/cache/config rules), analytics (GraphQL),
-DNSSEC (needs a registrar DS-record capability), origin certificate installed on
-cPanel, speed settings. **Phase 3:** Email Routing.
+**Phase 2 — implemented**
+
+* **Rules:** modern Rulesets API (not deprecated Page Rules): Single Redirects,
+  Cache Rules and WAF custom rules; Free-plan quotas (10 / 10 / 5); validated
+  form conditions, loop checks, safe presets and rule deletion. Config/Origin
+  Rules are not included in this phase.
+* **Analytics:** Cloudflare GraphQL daily traffic, cache ratio, bandwidth,
+  threats, page views and top countries (7 or 30 days).
+* **DNSSEC:** turn signing on at Cloudflare and publish the DS record automatically
+  through the ResellerClub registrar API where supported; otherwise show the DS
+  values to copy. On disable/removal, remove only records WHMP added, wait 48 hours
+  for resolver caches before nameserver changes, and block deletion while an
+  unmanaged registrar DS record may still be present.
+* **Origin certificate:** generate a private key/CSR, issue a 15-year Cloudflare
+  Origin CA certificate and install it on supported cPanel services, with an
+  optional one-click Full (strict) mode. The private key is sent to cPanel in a
+  POST body (never a URL) and is not stored in WHMP. The certificate is revoked
+  during zone deletion.
+* **Speed & network:** Free-plan settings surfaced when available: Early Hints,
+  HTTP/3, 0-RTT, Rocket Loader, Always Online, IPv6, WebSockets, opportunistic
+  encryption, TLS 1.3, email obfuscation and hotlink protection.
+* Token instructions list the extra feature permissions. The feature tabs fail
+  independently when a scoped token lacks one.
+
+**Phase 3 — deferred:** Cloudflare Email Routing (forwarding addresses and DNS).
 
 Benchmarks studied:
 
@@ -88,12 +111,13 @@ encrypted with `SecretBox`). Each product picks a connection and a mode.
 The client dashboard (§5) is identical in all three modes. Only the
 connection behind it differs.
 
-Required token permissions (shown as a checklist with a **Verify token**
-button that calls `/user/tokens/verify` and probes each permission): Zone: Read,
-Zone: Edit (create/pause/delete), DNS: Edit, Zone Settings: Edit, Cache Purge,
-SSL and Certificates: Edit, Firewall Services: Edit, Zone WAF / Rulesets: Edit,
-Analytics: Read, Email Routing: Edit (optional), DNSSEC (part of Zone/DNS), and
-Account: Read (to list zones for import).
+Required token permissions (the admin screen lists the exact custom-token scopes):
+zone-scoped Zone: Edit, Zone Settings: Edit, DNS: Edit, Cache Purge: Purge,
+Firewall Services: Edit, Single Redirect: Edit, Cache Rules: Edit, Zone WAF: Edit,
+Analytics: Read, and SSL and Certificates: Edit; account-scoped Account Settings:
+Read, Account Rulesets: Edit, and Account Filter Lists: Edit (Cloudflare's Cache
+Rules API requires the latter two). The token must cover the connected account and
+all of its zones. Email Routing permissions remain deferred with Phase 3.
 
 ---
 

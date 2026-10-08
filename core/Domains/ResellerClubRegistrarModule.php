@@ -204,6 +204,52 @@ final class ResellerClubRegistrarModule implements RegistrarModule
         return $this->toResult($response, 'Private nameserver registered.');
     }
 
+    /** DNSSEC DS support is limited to the TLDs ResellerClub exposes in this API. */
+    public function supportsDsRecord(array $params): bool
+    {
+        $domain=strtolower(rtrim((string)($params['domain']??''),'.'));
+        $tld=strtolower((string)pathinfo($domain,PATHINFO_EXTENSION));
+        return in_array($tld,['com','in','me','net','org'],true);
+    }
+
+    public function addDsRecord(array $params): array
+    {
+        return $this->dsCall($params, '/domains/add-dnssec.json', 'DS record added.');
+    }
+
+    public function deleteDsRecord(array $params): array
+    {
+        return $this->dsCall($params, '/domains/del-dnssec.json', 'DS record removed.');
+    }
+
+    private function dsCall(array $params, string $path, string $successMessage): array
+    {
+        if (!$this->supportsDsRecord($params)) { return ['success'=>false,'message'=>'ResellerClub DNSSEC is available only for .com, .in, .me, .net and .org domains.']; }
+        $ds = (array) ($params['ds'] ?? []);
+        $keyTag = (string) ($ds['key_tag'] ?? '');
+        $algorithm = (string) ($ds['algorithm'] ?? '');
+        $digestType = (string) ($ds['digest_type'] ?? '');
+        $digest = strtoupper((string) ($ds['digest'] ?? ''));
+        $length = $digestType === '1' ? 40 : 64;
+        if (!ctype_digit($keyTag) || (int) $keyTag > 65535 || !ctype_digit($algorithm) || (int) $algorithm > 255
+            || !in_array($digestType, ['1', '2', '3'], true) || strlen($digest) !== $length || preg_match('/^[A-F0-9]+$/', $digest) !== 1) {
+            return ['success' => false, 'message' => 'The DS record values are not valid.'];
+        }
+        $registrar = $params['registrar'];
+        [$orderId, $error] = $this->resolveOrderId($registrar, $params['domain']);
+        if ($error !== null) {
+            return ['success' => false, 'message' => $error];
+        }
+        $response = $this->call($registrar, 'POST', $path, [
+            'order-id' => $orderId,
+            'attr-name1' => 'keytag', 'attr-value1' => $keyTag,
+            'attr-name2' => 'algorithm', 'attr-value2' => $algorithm,
+            'attr-name3' => 'digesttype', 'attr-value3' => $digestType,
+            'attr-name4' => 'digest', 'attr-value4' => $digest,
+        ]);
+        return $this->toResult($response, $successMessage);
+    }
+
     public function deleteChildNs(array $params): array
     {
         $registrar = $params['registrar'];

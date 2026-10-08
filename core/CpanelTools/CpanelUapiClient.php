@@ -87,6 +87,28 @@ final class CpanelUapiClient
     }
 
     /**
+     * Secure POST variant for UAPI functions which carry private material. In
+     * particular SSL::install_ssl must never put a private key in a URL/query
+     * string (which can be retained by proxy and access logs).
+     *
+     * @param array<string,mixed> $server
+     * @param array<string,mixed> $params
+     * @return array{success:bool,message:string,data:mixed,api_version:string}
+     */
+    public function callPost(array $server, string $cpanelUser, string $module, string $func, array $params = []): array
+    {
+        $query=array_merge($params,[
+            'cpanel_jsonapi_user'=>$cpanelUser,
+            'cpanel_jsonapi_apiversion'=>self::API_VERSION,
+            'cpanel_jsonapi_module'=>$module,
+            'cpanel_jsonapi_func'=>$func,
+        ]);
+        $decoded=$this->decodeUapi($this->request($server,'cpanel',$query,'POST'));
+        $decoded['api_version']=self::API_VERSION;
+        return $decoded;
+    }
+
+    /**
      * One attempt at one API version. Split out so the fallback above cannot
      * drift from the primary path — they differ in exactly one parameter.
      *
@@ -152,12 +174,19 @@ final class CpanelUapiClient
      * @param array<string, mixed> $query
      * @return array{status: int, body: string}
      */
-    private function request(array $server, string $function, array $query): array
+    private function request(array $server, string $function, array $query, string $method = 'GET'): array
     {
         $port = $server['api_port'] ?? self::DEFAULT_PORT;
         $scheme = ($server['use_ssl'] ?? true) ? 'https' : 'http';
-
-        $url = "{$scheme}://{$server['hostname']}:{$port}/json-api/{$function}?" . http_build_query($query);
+        $url = "{$scheme}://{$server['hostname']}:{$port}/json-api/{$function}";
+        $body = null;
+        $headers = [];
+        if ($method === 'POST') {
+            $headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            $body = http_build_query($query);
+        } else {
+            $url .= '?' . http_build_query($query);
+        }
 
         $token = $server['api_token'] ?? '';
         $username = $server['api_username'] ?? '';
@@ -166,9 +195,8 @@ final class CpanelUapiClient
             ? "whm {$username}:{$token}" 
             : "Basic " . base64_encode("{$username}:{$token}");
 
-        return $this->http->request('GET', $url, [
-            'Authorization' => $authHeader,
-        ]);
+        $headers['Authorization'] = $authHeader;
+        return $this->http->request($method, $url, $headers, $body);
     }
 
     /** @param array{status: int, body: string} $response */

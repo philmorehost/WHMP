@@ -302,6 +302,8 @@ class Kernel
         ));
 
         $this->container->bind(\CodeVault\Cloudflare\NameserverGateway::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\DomainServiceNameservers::class));
+        $this->container->bind(\CodeVault\Cloudflare\OriginCertificateInstaller::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\CpanelOriginInstaller::class));
+        $this->container->bind(\CodeVault\Cloudflare\OriginCertificateKeyGenerator::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\OpenSslOriginCertificateKeyGenerator::class));
 
         // What a storefront sells, for its SERVICES menu, footer and home page.
         // A singleton so the header, the page and the footer of one request

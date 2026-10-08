@@ -582,6 +582,22 @@ final class CpanelToolsService
         });
     }
 
+    /** Whether this is a provisioned account on a cPanel server. */
+    public function isCpanelService(int $serviceId): bool
+    {
+        return $this->context($serviceId)[1] === null;
+    }
+
+    /** Installs an SSL certificate and matching private key with cPanel UAPI. */
+    public function installSslCertificate(int $serviceId, string $domain, string $certificate, string $privateKey, string $caBundle = ''): array
+    {
+        return $this->withContext($serviceId, function (array $ctx) use ($domain, $certificate, $privateKey, $caBundle) {
+            $params = ['domain' => $domain, 'cert' => $certificate, 'key' => $privateKey];
+            if ($caBundle !== '') { $params['cabundle'] = $caBundle; }
+            return $this->uapi->callPost($ctx['server'], $ctx['username'], 'SSL', 'install_ssl', $params);
+        });
+    }
+
     /** Read-only: disk/quota usage for the account. */
     public function diskUsage(int $serviceId): array
     {

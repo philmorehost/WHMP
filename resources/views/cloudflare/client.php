@@ -15,10 +15,17 @@
 /** @var string $editId */
 
 use CodeVault\Cloudflare\CloudflareService;
+use CodeVault\Cloudflare\CloudflareRules;
+
+$dnssec ??= null;
+$origin ??= null;
+$rulesets ??= [];
+$analytics ??= null;
+$range ??= 7;
 
 $id = (int) $service['id'];
 $base = '/client/services/' . $id . '/cloudflare';
-$tabs = ['overview' => 'Overview', 'dns' => 'DNS', 'ssl' => 'SSL/TLS', 'caching' => 'Caching', 'security' => 'Security', 'activity' => 'Activity'];
+$tabs = ['overview' => 'Overview', 'dns' => 'DNS', 'ssl' => 'SSL/TLS', 'speed' => 'Speed', 'caching' => 'Caching', 'rules' => 'Rules', 'security' => 'Security', 'analytics' => 'Analytics', 'activity' => 'Activity'];
 $domainLabel = (string) ($zone['name'] ?? CloudflareService::zoneName((string) ($service['domain'] ?? '')) ?? ($service['domain'] ?? ''));
 
 $statusBadge = static function (?array $zone): string {
@@ -109,6 +116,11 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
     .cf-card .cf-table-wrap .cv-table{white-space:nowrap}
     .cf-check{display:flex;align-items:center;gap:.45rem;white-space:nowrap;min-height:2.5rem;cursor:pointer}
     .cf-head .cv-btn,.cf-card a.cv-btn{text-decoration:none}
+    .cv-tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin}.cv-tabs .cv-tab{white-space:nowrap}
+    .cf-ds{display:grid;grid-template-columns:max-content 1fr;gap:.35rem 1rem;margin:.75rem 0}.cf-ds dt{font-weight:600}.cf-ds dd{margin:0;font-family:var(--cv-font-mono,monospace);font-size:.85rem;word-break:break-all}
+    .cf-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.75rem;margin-bottom:1rem}.cf-stat{padding:.85rem 1rem;border-radius:.75rem;background:#fff;border:1px solid var(--cv-color-border,#e2e8f0)}.cf-stat span{display:block;font-size:.8rem;color:var(--cv-color-text-muted,#64748b)}.cf-stat strong{display:block;font-size:1.25rem;margin-top:.15rem}
+    .cf-bars{list-style:none;margin:0;padding:0;display:grid;gap:.55rem}.cf-bars li{display:grid;grid-template-columns:minmax(5rem,9rem) 1fr auto;gap:.7rem;align-items:center;font-size:.9rem}.cf-bar{height:.6rem;border-radius:1rem;background:#f1f5f9;overflow:hidden}.cf-bar b{display:block;height:100%;background:#f6821f;border-radius:1rem}
+    .cf-presets{display:flex;flex-wrap:wrap;gap:.5rem}.cf-presets form{margin:0}.cf-details{margin-top:1rem;border-top:1px solid var(--cv-color-border,#e2e8f0);padding-top:.75rem}.cf-details summary{cursor:pointer;font-weight:600;margin-bottom:.75rem}.cf-expr{font-family:var(--cv-font-mono,monospace);font-size:.8rem;word-break:break-word;max-width:24rem}
 </style>
 
 <div class="cv-card cf-card">
@@ -148,6 +160,11 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
     <?php if ($zone['delete_after'] !== null): ?>
         <div class="cv-alert cv-alert--error cf-flash">
             <strong>Cloudflare will be removed from <?= e((string) $zone['name']) ?> on <?= e(date('j M Y, H:i', strtotime((string) $zone['delete_after']) ?: time())) ?>.</strong>
+            <?php if (!empty($zone['ns_restore_after'])): ?>
+                <p class="cf-muted">We removed the registrar DS record. Your previous nameservers will be restored automatically after the DNSSEC cache wait, on <?= e(date('j M Y, H:i', strtotime((string)$zone['ns_restore_after']) ?: time())) ?>.</p>
+            <?php elseif (in_array((string)($zone['dnssec_status']??''),['active','pending','pending-disabled','unknown'],true) && (int)($zone['dnssec_ds_removed']??0)!==1): ?>
+                <p class="cf-muted">DNSSEC may still have an external DS record or could not be verified. Do not change nameservers away from Cloudflare yet; zone removal will wait until it is safe.</p>
+            <?php endif; ?>
             <?php if ((string) $service['status'] === 'active'): ?>
                 <form method="post" action="<?= e($base . '/keep') ?>" class="cf-actions">
                     <?= csrf_field() ?>
@@ -346,6 +363,68 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
             </div>
         </div>
 
+        <?php if ($dnssec !== null): ?>
+            <?php
+            $dsStatus = (string) ($dnssec['status'] ?? 'disabled');
+            $ds = $dnssec['ds'] ?? null;
+            $dsBadge = match ($dsStatus) {
+                'active' => '<span class="cv-badge cv-badge--success">On</span>',
+                'pending' => '<span class="cv-badge cv-badge--warning">Waiting for DS</span>',
+                'pending-disabled' => '<span class="cv-badge cv-badge--warning">Turning off</span>',
+                'error' => '<span class="cv-badge cv-badge--danger">Error</span>',
+                default => '<span class="cv-badge cv-badge--neutral">Off</span>',
+            };
+            ?>
+            <div class="cv-card cf-card">
+                <h2 class="cv-card__title">DNSSEC <?= !empty($dnssec['ok']) ? $dsBadge : '' ?></h2>
+                <p class="cf-muted">DNSSEC signs your DNS records to help prevent forged DNS answers.</p>
+                <?php if (empty($dnssec['ok'])): ?>
+                    <div class="cv-alert cv-alert--neutral"><?= e((string) ($dnssec['message'] ?? 'DNSSEC could not be read.')) ?></div>
+                <?php elseif (in_array($dsStatus, ['disabled', ''], true)): ?>
+                    <?php if ((string) $zone['status'] !== 'active'): ?>
+                        <p class="cf-muted">Activate Cloudflare for this domain first.</p>
+                    <?php elseif ($manageable): ?>
+                        <p class="cf-muted"><?= !empty($dnssec['canPublish']) ? 'Your domain is registered with us; we can add the DS record at the registrar for you.' : 'After switching it on, add the displayed DS record at your registrar.' ?></p>
+                        <form method="post" action="<?= e($base . '/dnssec/enable') ?>"><?= csrf_field() ?><button class="cv-btn" type="submit">Turn on DNSSEC</button></form>
+                    <?php endif; ?>
+                <?php else: ?>
+                    <?php if (is_array($ds)): ?>
+                        <dl class="cf-ds"><dt>Key tag</dt><dd><?= e((string) $ds['key_tag']) ?></dd><dt>Algorithm</dt><dd><?= e((string) $ds['algorithm']) ?></dd><dt>Digest type</dt><dd><?= e((string) $ds['digest_type']) ?></dd><dt>Digest</dt><dd><?= e((string) $ds['digest']) ?></dd></dl>
+                    <?php endif; ?>
+                    <?php if ($dsStatus === 'pending-disabled' && (int)($zone['dnssec_ds_removed']??0)!==1 && !empty($dnssec['publishedByUs'])): ?>
+                        <p class="cf-muted"><strong>Cloudflare reports signing is off, but our registrar DS record may still be published.</strong> Turn DNSSEC off below; we remove the DS record and keep the zone serving through the <?= CloudflareService::DS_SETTLE_HOURS ?>-hour cache wait.</p>
+                    <?php elseif ($dsStatus === 'pending-disabled' && (int)($zone['dnssec_ds_removed']??0)!==1): ?>
+                        <p class="cf-muted"><strong>Cloudflare reports signing is off, but an unmanaged registrar DS record may still be published.</strong> Remove it at your registrar and confirm below; we keep the zone serving through a <?= CloudflareService::DS_SETTLE_HOURS ?>-hour DNS cache wait before nameserver changes or deletion.</p>
+                    <?php elseif ($dsStatus === 'pending-disabled'): ?>
+                        <p class="cf-muted">The DS record has been removed. Cloudflare signing stops<?= !empty($zone['dnssec_disable_after']) ? ' on ' . e(date('j M Y H:i', strtotime((string) $zone['dnssec_disable_after']) ?: time())) : ' after the DNS cache wait period' ?>.</p>
+                    <?php elseif (!empty($dnssec['publishedByUs'])): ?>
+                        <p class="cf-muted">We published this DS record at the registrar.<?= $dsStatus === 'pending' ? ' Cloudflare will confirm it shortly.' : '' ?></p>
+                    <?php elseif (!empty($dnssec['canPublish']) && $manageable && is_array($ds)): ?>
+                        <form method="post" action="<?= e($base . '/dnssec/enable') ?>" class="cf-actions"><?= csrf_field() ?><button class="cv-btn" type="submit">Add DS record at registrar</button></form>
+                    <?php elseif (is_array($ds)): ?>
+                        <p class="cf-muted">Add the DS values above at your registrar. Cloudflare detects the record automatically.</p>
+                    <?php endif; ?>
+                    <?php if ((string) $service['status'] === 'active' && ($dsStatus !== 'pending-disabled' || (int)($zone['dnssec_ds_removed']??0)!==1)): ?>
+                        <details class="cf-details"><summary>Turn off DNSSEC</summary>
+                            <form method="post" action="<?= e($base . '/dnssec/disable') ?>" data-cf-confirm="Turn off DNSSEC?">
+                                <?= csrf_field() ?>
+                                <?php if (!empty($dnssec['publishedByUs'])): ?>
+                                    <p class="cf-muted">We remove our registrar DS record first. Cloudflare stops signing after <?= CloudflareService::DS_SETTLE_HOURS ?> hours, once DNS caches clear.</p>
+                                <?php elseif (in_array($dsStatus, ['active', 'pending', 'pending-disabled'], true) && is_array($ds)): ?>
+                                    <p class="cf-muted"><strong>Remove this DS record at your registrar, then confirm to start a <?= CloudflareService::DS_SETTLE_HOURS ?>-hour DNS cache wait.</strong> Disabling DNSSEC before the wait ends can make the domain stop resolving.</p>
+                                    <label class="cf-check"><input type="checkbox" name="confirm" value="1" required> I removed the DS record; keep the zone serving through the <?= CloudflareService::DS_SETTLE_HOURS ?>-hour DNS cache wait</label>
+                                <?php elseif (in_array($dsStatus, ['active', 'pending', 'pending-disabled'], true) && (int)($zone['dnssec_ds_removed']??0)!==1): ?>
+                                    <p class="cf-muted">Cloudflare has not returned the DS details yet. To protect your domain, DNSSEC cannot be turned off until those values are available.</p>
+                                <?php endif; ?>
+                                <?php $dsMissing=in_array($dsStatus,['active','pending','pending-disabled'],true) && !is_array($ds) && (int)($zone['dnssec_ds_removed']??0)!==1; ?>
+                                <button class="cv-btn cv-btn--secondary" type="submit"<?= $dsMissing ? ' disabled' : '' ?>>Turn off DNSSEC</button>
+                            </form>
+                        </details>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
     <?php elseif ($tab === 'ssl'): ?>
         <div class="cv-card cf-card">
             <h2 class="cv-card__title">SSL/TLS</h2>
@@ -366,6 +445,20 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
                 <?= $settingForm('min_tls_version', ['1.0' => 'TLS 1.0', '1.1' => 'TLS 1.1', '1.2' => 'TLS 1.2', '1.3' => 'TLS 1.3'], $val('min_tls_version'), $manageable) ?>
             </div>
         </div>
+
+        <?php if ($origin !== null && !empty($origin['supported'])): ?>
+            <div class="cv-card cf-card">
+                <h2 class="cv-card__title">Origin certificate <?= !empty($origin['certId']) ? '<span class="cv-badge cv-badge--success">Installed</span>' : '' ?></h2>
+                <p class="cf-muted">A free, 15-year Cloudflare certificate installed on your cPanel hosting. It is trusted by Cloudflare only, so keep your website records proxied through Cloudflare.</p>
+                <?php if (!empty($origin['expires'])): ?><p class="cf-muted">Valid until <?= e(date('j M Y', strtotime((string) $origin['expires']) ?: time())) ?>.</p><?php endif; ?>
+                <?php if ($manageable): ?>
+                    <form method="post" action="<?= e($base . '/origin-certificate') ?>" class="cf-actions" data-cf-confirm="Install a Cloudflare Origin CA certificate on your hosting?">
+                        <?= csrf_field() ?><label class="cf-check"><input type="checkbox" name="strict" value="1" checked> Switch to Full (strict)</label>
+                        <button class="cv-btn" type="submit"><?= !empty($origin['certId']) ? 'Reinstall certificate' : 'Install origin certificate' ?></button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
     <?php elseif ($tab === 'caching'): ?>
         <div class="cf-grid">
@@ -454,6 +547,87 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
             </table>
             </div>
         </div>
+
+    <?php elseif ($tab === 'speed'): ?>
+        <?php $speedOptions = [
+            'early_hints'=>['Early Hints','Hints browsers to start loading key files early.'],
+            'http3'=>['HTTP/3 (QUIC)','Modern transport, especially helpful on mobile networks.'],
+            '0rtt'=>['0-RTT resumption','Faster reconnects for returning visitors.'],
+            'rocket_loader'=>['Rocket Loader','Loads JavaScript later; test your scripts after enabling.'],
+            'always_online'=>['Always Online','Serves cached pages when your origin is unavailable.'],
+            'ipv6'=>['IPv6 compatibility','Allows visitors on IPv6-only networks to reach your site.'],
+            'websockets'=>['WebSockets','Allows realtime apps and chat to connect through Cloudflare.'],
+            'opportunistic_encryption'=>['Opportunistic encryption','Enables encryption for compatible browsers.'],
+            'tls_1_3'=>['TLS 1.3','Fast, modern transport security.'],
+            'email_obfuscation'=>['Email address obfuscation','Hides page email addresses from basic spam bots.'],
+            'hotlink_protection'=>['Hotlink protection','Stops other sites embedding your images.'],
+        ]; ?>
+        <div class="cv-card cf-card"><h2 class="cv-card__title">Speed &amp; network</h2>
+            <?php foreach ($speedOptions as $key => [$label,$help]): if (!array_key_exists($key,$settings)) { continue; } ?>
+                <div class="cf-row"><div><h3><?= e($label) ?></h3><p class="cf-muted"><?= e($help) ?></p></div><?= $toggle($key,$val($key),$manageable) ?></div>
+            <?php endforeach; ?>
+        </div>
+
+    <?php elseif ($tab === 'rules'): ?>
+        <?php
+        $presets=CloudflareRules::presets((string)$zone['name']);
+        $kindLabels=['redirect'=>'Redirect rules','cache'=>'Cache rules','firewall'=>'Firewall rules'];
+        ?>
+        <?php if ($manageable): ?><div class="cv-card cf-card"><h2 class="cv-card__title">Quick rules</h2><p class="cf-muted">Add a common rule in one click. Rules can be removed below.</p><div class="cf-presets">
+            <?php foreach ($presets as $key=>$preset): ?><form method="post" action="<?= e($base.'/presets/'.$key) ?>"><?= csrf_field() ?><button class="cv-btn cv-btn--secondary" type="submit"><?= e($preset['label']) ?></button></form><?php endforeach; ?>
+        </div></div><?php endif; ?>
+        <?php foreach (CloudflareRules::KINDS as $kind=>$meta): $set=$rulesets[$kind]??['rules'=>[],'limit'=>$meta['limit'],'error'=>null]; ?>
+            <div class="cv-card cf-card"><h2 class="cv-card__title"><?= e($kindLabels[$kind]) ?> <span class="cv-badge cv-badge--neutral"><?= count($set['rules']) ?> / <?= (int)$set['limit'] ?></span></h2>
+                <?php if ($set['error']): ?><div class="cv-alert cv-alert--neutral"><?= e($set['error']) ?></div><?php else: ?>
+                    <div class="cf-table-wrap"><table class="cv-table"><thead><tr><th>Rule</th><th>When</th><th>Then</th><th></th></tr></thead><tbody>
+                    <?php foreach ($set['rules'] as $rule): ?><tr><td><?= e((string)($rule['description']??'')) ?></td><td><code class="cf-expr"><?= e((string)($rule['expression']??'')) ?></code></td><td><?= e(CloudflareRules::actionSummary($kind,$rule)) ?></td><td>
+                        <?php if ($manageable && !empty($rule['id'])): ?><form method="post" action="<?= e($base.'/rulesets/'.$kind.'/'.(string)$rule['id'].'/delete') ?>" data-cf-confirm="Remove this rule?"><?= csrf_field() ?><button class="cv-btn cv-btn--secondary" type="submit">Remove</button></form><?php endif; ?>
+                    </td></tr><?php endforeach; ?>
+                    <?php if (!$set['rules']): ?><tr><td colspan="4" class="cf-muted">No rules yet.</td></tr><?php endif; ?>
+                    </tbody></table></div>
+                    <?php if ($manageable && count($set['rules'])<(int)$set['limit']): ?>
+                        <details class="cf-details"><summary>Add a <?= e($kind) ?> rule</summary>
+                            <form method="post" action="<?= e($base.'/rulesets/'.$kind) ?>" class="cf-form-grid">
+                                <?= csrf_field() ?>
+                                <div class="cv-field"><label class="cv-label">Name</label><input class="cv-input" name="description" maxlength="100" placeholder="Optional"></div>
+                                <div class="cv-field"><label class="cv-label">When</label><select class="cv-input" name="match"><?php foreach(CloudflareRules::KIND_MATCHES[$kind] as $m): ?><option value="<?= e($m) ?>"><?= e(CloudflareRules::MATCHES[$m]) ?></option><?php endforeach; ?></select></div>
+                                <div class="cv-field"><label class="cv-label">Value</label><input class="cv-input" name="value" placeholder="<?= $kind==='firewall'?'NG, 203.0.113.5, /wp-login.php':'/old-page, jpg, png' ?>"></div>
+                                <?php if($kind==='redirect'): ?>
+                                    <div class="cv-field"><label class="cv-label">Redirect to</label><input class="cv-input" name="target_url" type="url" required placeholder="https://example.com/new-page"></div>
+                                    <div class="cv-field"><label class="cv-label">Status code</label><select class="cv-input" name="status_code"><option value="301">301 Permanent</option><option value="302">302 Temporary</option><option value="307">307 Temporary</option><option value="308">308 Permanent</option></select></div>
+                                    <label class="cf-check"><input type="checkbox" name="keep_path" value="1"> Keep visitor path</label><label class="cf-check"><input type="checkbox" name="preserve_query" value="1" checked> Keep query string</label>
+                                <?php elseif($kind==='cache'): ?>
+                                    <div class="cv-field"><label class="cv-label">Then</label><select class="cv-input" name="cache_mode"><option value="cache">Cache it</option><option value="bypass">Never cache it</option></select></div>
+                                    <div class="cv-field"><label class="cv-label">Edge TTL</label><select class="cv-input" name="edge_ttl"><?php foreach(CloudflareRules::EDGE_TTLS as $ttl=>$label): ?><option value="<?= (int)$ttl ?>"<?= $ttl===86400?' selected':'' ?>><?= e($label) ?></option><?php endforeach; ?></select></div>
+                                <?php else: ?>
+                                    <div class="cv-field"><label class="cv-label">Then</label><select class="cv-input" name="action"><?php foreach(CloudflareRules::FIREWALL_ACTIONS as $a=>$label): ?><option value="<?= e($a) ?>"><?= e($label) ?></option><?php endforeach; ?></select></div>
+                                <?php endif; ?>
+                                <div class="cv-field"><button class="cv-btn" type="submit">Add rule</button></div>
+                            </form><p class="cf-muted">Rule values are validated; quotes and backslashes aren't accepted.</p>
+                        </details>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        <?php endforeach; ?>
+
+    <?php elseif ($tab === 'analytics'): ?>
+        <div class="cf-actions" style="margin:0 0 1rem"><a class="cv-btn<?= $range===7?'':' cv-btn--secondary' ?>" href="<?= e($base.'?tab=analytics&range=7') ?>">7 days</a><a class="cv-btn<?= $range===30?'':' cv-btn--secondary' ?>" href="<?= e($base.'?tab=analytics&range=30') ?>">30 days</a></div>
+        <?php if ($analytics!==null): $t=$analytics['totals']; $pct=$t['requests']?round($t['cached']/$t['requests']*100):0; $saved=$t['bytes']?round($t['cachedBytes']/$t['bytes']*100):0; ?>
+            <div class="cf-stats">
+                <div class="cf-stat"><span>Requests</span><strong><?= number_format((int)$t['requests']) ?></strong></div>
+                <div class="cf-stat"><span>Served from cache</span><strong><?= (int)$pct ?>%</strong></div>
+                <div class="cf-stat"><span>Bandwidth</span><strong><?= number_format((int)round($t['bytes']/1048576),1) ?> MB</strong></div>
+                <div class="cf-stat"><span>Bandwidth saved</span><strong><?= (int)$saved ?>%</strong></div>
+                <div class="cf-stat"><span>Threats stopped</span><strong><?= number_format((int)$t['threats']) ?></strong></div>
+                <div class="cf-stat"><span>Page views</span><strong><?= number_format((int)$t['pageViews']) ?></strong></div>
+            </div>
+            <div class="cv-card cf-card"><h2 class="cv-card__title">Top countries</h2>
+                <?php if (!$analytics['countries']): ?><p class="cf-muted">Cloudflare has no country data yet.</p><?php else: $top=max(1,...array_values($analytics['countries'])); ?>
+                    <ul class="cf-bars"><?php foreach($analytics['countries'] as $country=>$requests): ?><li><span><?= e((string)$country) ?></span><span class="cf-bar"><b style="width:<?= max(2,round($requests/$top*100)) ?>%"></b></span><span class="cf-muted"><?= number_format((int)$requests) ?></span></li><?php endforeach; ?></ul>
+                <?php endif; ?>
+                <p class="cf-muted">Daily analytics can take several hours to update.</p>
+            </div>
+        <?php endif; ?>
 
     <?php elseif ($tab === 'activity'): ?>
         <div class="cv-card cf-card">

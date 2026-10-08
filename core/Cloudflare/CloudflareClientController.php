@@ -22,7 +22,9 @@ use Throwable;
  */
 final class CloudflareClientController
 {
-    public const TABS = ['overview', 'dns', 'ssl', 'caching', 'security', 'activity'];
+    public const TABS = ['overview', 'dns', 'ssl', 'speed', 'caching', 'rules', 'security', 'analytics', 'activity'];
+
+    public const SPEED_SETTINGS = ['early_hints','http3','0rtt','rocket_loader','always_online','ipv6','websockets','opportunistic_encryption','tls_1_3','email_obfuscation','hotlink_protection'];
 
     private const FLASH_OK = 'cf_notice';
     private const FLASH_ERR = 'cf_error';
@@ -34,7 +36,8 @@ final class CloudflareClientController
         private readonly AddonModuleRepository $addons,
         private readonly SessionManager $session,
         private readonly CloudflareService $cloudflare,
-        private readonly CloudflareZoneRepository $zones
+        private readonly CloudflareZoneRepository $zones,
+        private readonly ?CloudflareFeatures $features = null
     ) {
     }
 
@@ -70,15 +73,31 @@ final class CloudflareClientController
             'activity' => [],
             'loadError' => null,
             'editId' => (string) $request->query('edit', ''),
+            'dnssec' => null,
+            'origin' => null,
+            'rulesets' => [],
+            'analytics' => null,
+            'range' => (int) $request->query('range', 7) === 30 ? 30 : 7,
         ];
 
         if ($zone !== null) {
+            $missing = ['ok' => false, 'message' => 'This feature is not available yet.'];
             $load = match ($tab) {
                 'dns' => $this->cloudflare->dnsRecords($zone),
-                'ssl', 'caching' => $this->cloudflare->zoneSettings($zone),
+                'ssl', 'speed', 'caching' => $this->cloudflare->zoneSettings($zone),
                 'security' => $this->securityData($zone),
+                'rules' => $this->features !== null ? ['ok'=>true,'message'=>'OK','rulesets'=>$this->features->rules($zone)] : $missing,
+                'analytics' => $this->features !== null ? $this->features->analytics($zone, $data['range']) : $missing,
                 default => ['ok' => true, 'message' => 'OK'],
             };
+            $data['rulesets'] = $load['rulesets'] ?? [];
+            $data['analytics'] = $tab === 'analytics' && $load['ok'] ? $load : null;
+            if ($tab === 'dns' && $this->features !== null) {
+                $data['dnssec'] = $this->features->dnssec($zone);
+                $zone = $this->zones->find((int) $zone['id']) ?? $zone;
+                $data['zone'] = $zone;
+            }
+            if ($tab === 'ssl' && $this->features !== null) { $data['origin'] = $this->features->originCertificate($zone); }
 
             $data['records'] = $load['records'] ?? [];
             $data['settings'] = $load['settings'] ?? [];
@@ -168,7 +187,8 @@ final class CloudflareClientController
     {
         $setting = (string) $request->input('setting', '');
         $tab = in_array($setting, ['security_level', 'browser_check'], true) ? 'security'
-            : (in_array($setting, ['development_mode', 'cache_level', 'browser_cache_ttl'], true) ? 'caching' : 'ssl');
+            : (in_array($setting, ['development_mode', 'cache_level', 'browser_cache_ttl'], true) ? 'caching'
+            : (in_array($setting, self::SPEED_SETTINGS, true) ? 'speed' : 'ssl'));
 
         return $this->withZone($params, true, fn (array $zone): array => $this->cloudflare->changeSetting($zone, $setting, (string) $request->input('value', ''), $this->actor()), $tab);
     }
@@ -196,6 +216,49 @@ final class CloudflareClientController
     public function deleteRule(Request $request, array $params): Response
     {
         return $this->withZone($params, true, fn (array $zone): array => $this->cloudflare->deleteAccessRule($zone, (string) $params['rule'], $this->actor()), 'security');
+    }
+
+    public function addRuleset(Request $request, array $params): Response
+    {
+        $input=[];
+        foreach (['description','match','value','target_url','status_code','keep_path','preserve_query','cache_mode','edge_ttl','action'] as $field) { $input[$field]=(string)$request->input($field,''); }
+        return $this->withFeatures($params, fn(array $zone,CloudflareFeatures $f):array=>$f->addRule($zone,(string)$params['kind'],$input,$this->actor()), 'rules');
+    }
+
+    public function preset(Request $request, array $params): Response
+    {
+        return $this->withFeatures($params, fn(array $zone,CloudflareFeatures $f):array=>$f->addPreset($zone,(string)$params['preset'],$this->actor()), 'rules');
+    }
+
+    public function deleteRuleset(Request $request, array $params): Response
+    {
+        return $this->withFeatures($params, fn(array $zone,CloudflareFeatures $f):array=>$f->deleteRule($zone,(string)$params['kind'],(string)$params['rule'],$this->actor()), 'rules');
+    }
+
+    public function dnssec(Request $request, array $params): Response
+    {
+        if (!in_array((string)$params['action'], ['enable','disable'], true)) { return Response::html('404 Not Found',404); }
+        $features=$this->features;
+        if ((string)$params['action']==='enable') {
+            return $this->withFeatures($params, fn(array $zone,CloudflareFeatures $f):array=>$f->enableDnssec($zone,$this->actor()), 'dns');
+        }
+        // Let a client remove an external DS record even during the seven-day cleanup window.
+        return $this->withZone($params,false,fn(array $zone):array=>$features!==null
+            ? $features->disableDnssec($zone,(string)$request->input('confirm','')==='1',$this->actor())
+            : ['ok'=>false,'message'=>'This feature is not available yet.'],'dns');
+    }
+
+    public function originCertificate(Request $request, array $params): Response
+    {
+        return $this->withFeatures($params,fn(array $zone,CloudflareFeatures $f):array=>$f->installOriginCertificate($zone,(string)$request->input('strict','')==='1',$this->actor()),'ssl');
+    }
+
+    /** @param array<string,string> $params @param callable(array<string,mixed>,CloudflareFeatures):array{ok:bool,message:string} $action */
+    private function withFeatures(array $params, callable $action, string $tab): Response
+    {
+        $features=$this->features;
+        return $this->withZone($params,true,static fn(array $zone):array=>$features!==null
+            ? $action($zone,$features) : ['ok'=>false,'message'=>'This feature is not available yet.'],$tab);
     }
 
     /**

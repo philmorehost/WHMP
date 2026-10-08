@@ -69,14 +69,26 @@ final class CloudflareNotifier
     }
 
     /** @param array<string, mixed> $zone @param array<string, mixed> $service */
-    public function removalScheduled(array $zone, array $service, string $reason, string $deleteAfter, bool $nsRestored): void
-    {
+    public function removalScheduled(
+        array $zone,
+        array $service,
+        string $reason,
+        string $deleteAfter,
+        bool $nsRestored,
+        ?string $nsRestoreAfter = null,
+        bool $dnssecHold = false
+    ): void {
+        $note = $nsRestored
+            ? 'We have already put your domain\'s previous nameservers back, so your site keeps working without Cloudflare.'
+            : ($nsRestoreAfter !== null
+                ? 'We removed the registrar DS record. Your previous nameservers will be restored automatically after the DNSSEC cache wait, on ' . date('j M Y H:i', strtotime($nsRestoreAfter) ?: time()) . '.'
+                : ($dnssecHold
+                    ? 'DNSSEC needs extra care. Do not change nameservers away from Cloudflare yet; we will keep the zone serving until the registrar DS record and signing state are safe.'
+                    : 'If your domain uses Cloudflare\'s nameservers, change them back to your hosting nameservers before that date so your site keeps working.'));
         $this->send(CloudflareTemplates::REMOVED, $zone, $service, [
             'reason' => $reason,
             'delete_date' => date('j M Y', strtotime($deleteAfter) ?: time()),
-            'ns_note' => $nsRestored
-                ? 'We have already put your domain\'s previous nameservers back, so your site keeps working without Cloudflare.'
-                : 'If your domain uses Cloudflare\'s nameservers, change them back to your hosting nameservers before that date so your site keeps working.',
+            'ns_note' => $note,
         ]);
     }
 

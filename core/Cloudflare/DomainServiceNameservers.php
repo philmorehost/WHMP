@@ -22,4 +22,14 @@ final class DomainServiceNameservers implements NameserverGateway
     {
         return $this->domains->saveNameservers($domainId, $nameservers);
     }
+
+    public function supportsDs(int $domainId): bool
+    {
+        return $this->domains->supportsDsRecords($domainId);
+    }
+
+    public function changeDs(int $domainId, array $ds, bool $add): array
+    {
+        return $this->domains->changeDsRecord($domainId, $ds, $add);
+    }
 }

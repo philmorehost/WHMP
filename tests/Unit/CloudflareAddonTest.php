@@ -9,6 +9,10 @@ use CodeVault\Cloudflare\CloudflareAddon;
 use CodeVault\Cloudflare\CloudflareApi;
 use CodeVault\Cloudflare\CloudflareApiException;
 use CodeVault\Cloudflare\CloudflareCronJob;
+use CodeVault\Cloudflare\CloudflareFeatures;
+use CodeVault\Cloudflare\CloudflareRules;
+use CodeVault\Cloudflare\OriginCertificateInstaller;
+use CodeVault\Cloudflare\OriginCertificateKeyGenerator;
 use CodeVault\Cloudflare\CloudflareProductOption;
 use CodeVault\Cloudflare\CloudflareService;
 use CodeVault\Cloudflare\CloudflareSettings;
@@ -567,10 +571,19 @@ final class CloudflareAddonTest extends TestCase
         $this->assertStringContainsString('Proxied', $html);
 
         $settings = $this->service->zoneSettings($zone)['settings'];
-        foreach (['ssl', 'caching', 'security', 'activity'] as $tab) {
+        foreach (['ssl', 'speed', 'caching', 'rules', 'security', 'analytics', 'activity'] as $tab) {
             $html = $view->render('cloudflare.client', ['zone' => $zone, 'tab' => $tab, 'settings' => $settings, 'activity' => $this->zones->activity((int) $zone['id'])] + $base);
             $this->assertStringContainsString('cv-tab', $html);
         }
+        $html=$view->render('cloudflare.client',['zone'=>$zone,'tab'=>'speed','settings'=>$settings]+$base);
+        $this->assertStringContainsString('Early Hints',$html);
+        $features=$this->features();
+        $html=$view->render('cloudflare.client',['zone'=>$zone,'tab'=>'dns','dnssec'=>$features->dnssec($zone)]+$base);
+        $this->assertStringContainsString('DNSSEC',$html);
+        $html=$view->render('cloudflare.client',['zone'=>$zone,'tab'=>'rules','rulesets'=>$features->rules($zone)]+$base);
+        $this->assertStringContainsString('Redirect rules',$html);
+        $html=$view->render('cloudflare.client',['zone'=>$zone,'tab'=>'analytics','analytics'=>$features->analytics($zone,7),'range'=>7]+$base);
+        $this->assertStringContainsString('Top countries',$html);
 
         $html = $view->render('cloudflare.client', ['zone' => null, 'tab' => 'overview', 'state' => ['show' => true, 'canEnable' => true, 'zone' => null, 'reason' => '']] + $base);
         $this->assertStringContainsString('Enable free Cloudflare', $html);
@@ -591,6 +604,7 @@ final class CloudflareAddonTest extends TestCase
         $option = new CloudflareProductOption($this->db, $this->settings);
         $html = $view->render('cloudflare.admin-settings', ['settings' => $this->settings, 'hasToken' => true, 'accounts' => [], 'products' => $option->products(), 'attached' => $option->attachedProductIds()]);
         $this->assertStringContainsString('Verify &amp; save', $html);
+        $this->assertStringContainsString('Account Filter Lists', $html, 'the extra Cache Rules permission is documented');
         $this->assertStringNotContainsString('tok_test', $html, 'the token is never rendered');
     }
 
@@ -621,6 +635,222 @@ final class CloudflareAddonTest extends TestCase
         $this->assertSame('', trim($view->render('cloudflare.service-card', ['service' => $service])));
     }
 
+    public function testRulesetsUseSafeConditionsAndFreePlanLimits(): void
+    {
+        $zone=$this->enabledZone(); $features=$this->features(); $actor=['type'=>'client','id'=>7];
+        $added=$features->addPreset($zone,'www_to_apex',$actor);
+        $this->assertTrue($added['ok'],$added['message']);
+        $set=$features->rules($zone);
+        $this->assertCount(1,$set['redirect']['rules']);
+        $rule=$set['redirect']['rules'][0];
+        $this->assertSame('redirect',$rule['action']);
+        $found=false;
+        foreach($this->cf->requests as $request){
+            if($request['method']==='POST' && str_ends_with($request['url'],'/rulesets')) {
+                $body=(array)json_decode((string)$request['body'],true);
+                if(($body['phase']??'')==='http_request_dynamic_redirect'){$found=true;break;}
+            }
+        }
+        $this->assertTrue($found,'new redirect entry points are created as zone Rulesets with the correct phase');
+        $cache=$features->addRule($zone,'cache',['match'=>'extension','value'=>'jpg,png','cache_mode'=>'cache','edge_ttl'=>'86400'],$actor);
+        $this->assertTrue($cache['ok'],$cache['message']);
+        $fw=$features->addRule($zone,'firewall',['match'=>'country','value'=>'NG','action'=>'managed_challenge'],$actor);
+        $this->assertTrue($fw['ok'],$fw['message']);
+        $this->assertTrue($features->deleteRule($zone,'redirect',(string)$rule['id'],$actor)['ok']);
+        for($i=0;$i<10;$i++) {
+            $r=$features->addRule($zone,'redirect',['match'=>'path','value'=>'/old'.$i,'target_url'=>'https://example.com/new'.$i],$actor);
+            $this->assertTrue($r['ok'],$r['message']);
+        }
+        $over=$features->addRule($zone,'redirect',['match'=>'path','value'=>'/extra','target_url'=>'https://example.com/new-extra'],$actor);
+        $this->assertFalse($over['ok']);
+        $this->assertStringContainsString('Free plan allows 10',$over['message']);
+        $this->assertNull(CloudflareRules::build('firewall',['match'=>'path','value'=>'/ok" or true','action'=>'block'],'example.com',$error));
+        $this->assertStringContainsString('not allowed',$error);
+        $loop=CloudflareRules::build('redirect',['match'=>'all','target_url'=>'https://example.com','keep_path'=>'1'],'example.com',$error);
+        $this->assertNull($loop);
+        $this->assertStringContainsString('loop',$error);
+        $credentialUrl=CloudflareRules::build('redirect',['match'=>'path','value'=>'/old','target_url'=>'https://user:pass@outside.example/new'],'example.com',$error);
+        $this->assertNull($credentialUrl,'redirect URLs must not carry embedded credentials');
+    }
+
+    public function testDnssecAutomationAndDeferredDisable(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $this->registerDomain(7);
+        $features=$this->features(); $actor=['type'=>'client','id'=>7];
+        $on=$features->enableDnssec($this->zones->find((int)$zone['id']),$actor);
+        $this->assertTrue($on['ok'],$on['message']);
+        $fresh=$this->zones->find((int)$zone['id']);
+        $this->assertSame(1,(int)$fresh['dnssec_ds_by_us']);
+        $this->assertSame('add',$this->ns->dsCalls[0][0]);
+        $off=$features->disableDnssec($fresh,false,$actor);
+        $this->assertTrue($off['ok'],$off['message']);
+        $this->assertSame('pending-disabled',$this->zones->find((int)$zone['id'])['dnssec_status']);
+        $this->assertSame('remove',$this->ns->dsCalls[1][0]);
+        $this->assertSame('pending-disabled',$features->dnssec($this->zones->find((int)$zone['id']))['status'],'a page refresh must not erase the scheduled safe-disable state');
+        $this->assertFalse($features->disableDnssec($this->zones->find((int)$zone['id']),true,$actor)['ok'],'clients cannot bypass the DS cache wait');
+        $this->assertFalse($features->finishDnssecDisable((int)$zone['id'])['ok'],'DNSSEC stays enabled during DS cache expiry');
+        $this->db->exec("UPDATE cloudflare_zones SET dnssec_disable_after=datetime('now','-1 second') WHERE id=".(int)$zone['id']);
+        $finished=$features->finishDnssecDisable((int)$zone['id']);
+        $this->assertTrue($finished['ok'],$finished['message']);
+        $this->assertSame('disabled',$this->zones->find((int)$zone['id'])['dnssec_status']);
+    }
+
+    public function testExternalDsBlocksUnsafeNameserverRestoreAndZoneDelete(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $this->registerDomain(7); $this->ns->dsSupported=false;
+        $features=$this->features(); $actor=['type'=>'client','id'=>7];
+        $on=$features->enableDnssec($this->zones->find((int)$zone['id']),$actor);
+        $this->assertTrue($on['ok'],$on['message']);
+        $scheduled=$this->service->scheduleDeletion((int)$zone['id'],'client',$actor);
+        $this->assertTrue($scheduled['ok'],$scheduled['message']);
+        $this->assertStringContainsString('nameservers are unchanged',$scheduled['message']);
+        $del=$this->service->deleteNow((int)$zone['id'],['type'=>'admin','id'=>1]);
+        $this->assertFalse($del['ok']);
+        $this->assertArrayHasKey($zone['cf_zone_id'],$this->cf->zones);
+        $manual=$features->disableDnssec($this->zones->find((int)$zone['id']),true,$actor);
+        $this->assertTrue($manual['ok'],$manual['message']);
+        $this->assertSame('pending-disabled',$this->zones->find((int)$zone['id'])['dnssec_status']);
+        $this->assertFalse($this->service->deleteNow((int)$zone['id'],['type'=>'admin','id'=>1])['ok']);
+        $this->assertArrayHasKey($zone['cf_zone_id'],$this->cf->zones);
+    }
+
+    public function testOutOfBandDnssecDisableKeepsExternalDsCleanupPending(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $this->registerDomain(7); $this->ns->dsSupported=false;
+        $features=$this->features(); $actor=['type'=>'client','id'=>7];
+        $this->assertTrue($features->enableDnssec($this->zones->find((int)$zone['id']),$actor)['ok']);
+        $this->cf->dnssec[(string)$zone['cf_zone_id']]=['status'=>'disabled'];
+        $dnssec=$features->dnssec($this->zones->find((int)$zone['id']));
+        $this->assertSame('pending-disabled',$dnssec['status']);
+        $this->assertIsArray($dnssec['ds']);
+
+        $scheduled=$this->service->scheduleDeletion((int)$zone['id'],'client',$actor);
+        $this->assertTrue($scheduled['ok'],$scheduled['message']);
+        $this->assertStringContainsString('nameservers are unchanged',$scheduled['message']);
+        $blocked=$this->service->deleteNow((int)$zone['id'],['type'=>'admin','id'=>1]);
+        $this->assertFalse($blocked['ok']);
+        $confirmed=$features->disableDnssec($this->zones->find((int)$zone['id']),true,$actor);
+        $this->assertTrue($confirmed['ok'],$confirmed['message']);
+        $this->assertSame(1,(int)$this->zones->find((int)$zone['id'])['dnssec_ds_removed']);
+    }
+
+    public function testRemovalRefreshesOutOfBandDnssecAndFailsClosedOnApiErrors(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $this->registerDomain(7); $actor=['type'=>'client','id'=>7];
+        $this->assertTrue($this->service->switchNameservers((int)$zone['id'],$actor)['ok']); $this->ns->saved=[];
+        $this->cf->dnssec[(string)$zone['cf_zone_id']]=['status'=>'active','key_tag'=>2371,'algorithm'=>13,'digest_type'=>2,'digest'=>str_repeat('A1B2C3D4',8),'ds'=>'2371 13 2 '.str_repeat('A1B2C3D4',8)];
+        $scheduled=$this->service->scheduleDeletion((int)$zone['id'],'client',$actor);
+        $this->assertTrue($scheduled['ok'],$scheduled['message']);
+        $this->assertSame([],$this->ns->saved,'DNSSEC enabled outside WHMP keeps nameservers on Cloudflare');
+        $this->assertSame('active',$this->zones->find((int)$zone['id'])['dnssec_status']);
+        $this->assertFalse($this->service->deleteNow((int)$zone['id'],['type'=>'admin','id'=>1])['ok']);
+
+        $this->assertTrue($this->service->cancelDeletion((int)$zone['id'],$actor)['ok']);
+        $this->cf->failDnssecGet=true;
+        $scheduled=$this->service->scheduleDeletion((int)$zone['id'],'client',$actor);
+        $this->assertTrue($scheduled['ok'],$scheduled['message']);
+        $this->assertSame([],$this->ns->saved,'an API permission/network failure must fail closed');
+        $this->assertFalse($this->service->deleteNow((int)$zone['id'],['type'=>'admin','id'=>1])['ok']);
+    }
+
+    public function testExistingDnssecWaitStillDefersRestoreWithStaleStatusAndApiFailure(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $this->registerDomain(7); $actor=['type'=>'client','id'=>7];
+        $this->assertTrue($this->service->switchNameservers((int)$zone['id'],$actor)['ok']); $this->ns->saved=[];
+        $features=$this->features();
+        $this->assertTrue($features->enableDnssec($this->zones->find((int)$zone['id']),$actor)['ok']);
+        $this->assertTrue($features->disableDnssec($this->zones->find((int)$zone['id']),false,$actor)['ok']);
+        $waiting=$this->zones->find((int)$zone['id']);
+        $this->assertSame(1,(int)$waiting['dnssec_ds_removed']);
+        $this->zones->update((int)$zone['id'],['dnssec_status'=>'active']); // stale status from a prior sync
+        $this->cf->failDnssecGet=true;
+
+        $scheduled=$this->service->scheduleDeletion((int)$zone['id'],'client',$actor);
+        $this->assertTrue($scheduled['ok'],$scheduled['message']);
+        $fresh=$this->zones->find((int)$zone['id']);
+        $this->assertSame($waiting['dnssec_disable_after'],$fresh['ns_restore_after']);
+        $this->assertSame([],$this->ns->saved,'stale status/API failure cannot bypass an existing DNSSEC wait');
+    }
+
+    public function testDnssecDefersNameserverRestoreForFortyEightHours(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $this->registerDomain(7); $actor=['type'=>'client','id'=>7];
+        $this->assertTrue($this->service->switchNameservers((int)$zone['id'],$actor)['ok']); $this->ns->saved=[];
+        $features=$this->features();
+        $this->assertTrue($features->enableDnssec($this->zones->find((int)$zone['id']),$actor)['ok']);
+        $off=$this->service->scheduleDeletion((int)$zone['id'],'client',$actor);
+        $this->assertTrue($off['ok'],$off['message']);
+        $this->assertNotNull($this->zones->find((int)$zone['id'])['ns_restore_after']);
+        $this->assertSame([],$this->ns->saved,'old nameservers are not restored while a DS record may be cached');
+        $this->db->exec("UPDATE cloudflare_zones SET ns_restore_after=datetime('now','-1 second') WHERE id=".(int)$zone['id']);
+        $stats=$this->cron($features)->run(time());
+        $this->assertSame(1,$stats['restored']);
+        $this->assertSame([[1,['ns1.oldhost.net','ns2.oldhost.net']]],$this->ns->saved);
+    }
+
+    public function testAnalyticsReadsDailyCloudflareGroups(): void
+    {
+        $zone=$this->enabledZone(); $today=gmdate('Y-m-d'); $yesterday=gmdate('Y-m-d',time()-86400);
+        $this->cf->trafficGroups=[
+            ['dimensions'=>['date'=>$yesterday],'sum'=>['requests'=>100,'cachedRequests'=>60,'bytes'=>10000,'cachedBytes'=>6000,'threats'=>2,'pageViews'=>40,'countryMap'=>[['clientCountryName'=>'NG','requests'=>70],['clientCountryName'=>'US','requests'=>30]]],'uniq'=>['uniques'=>20]],
+            ['dimensions'=>['date'=>$today],'sum'=>['requests'=>50,'cachedRequests'=>20,'bytes'=>5000,'cachedBytes'=>2000,'threats'=>1,'pageViews'=>15,'countryMap'=>[['clientCountryName'=>'NG','requests'=>50]]],'uniq'=>['uniques'=>10]],
+        ];
+        $result=$this->features()->analytics($zone,7);
+        $this->assertTrue($result['ok'],$result['message']);
+        $this->assertSame(150,$result['totals']['requests']);
+        $this->assertSame(80,$result['totals']['cached']);
+        $this->assertSame(['NG'=>120,'US'=>30],$result['countries']);
+        $this->assertStringContainsString('/graphql',end($this->cf->requests)['url']);
+    }
+
+    public function testOriginCertificateUsesInstallerAndIsRevokedWithZone(): void
+    {
+        $zone=$this->enabledZone(); $this->activateZone($zone); $installer=new FakeOriginInstaller(); $features=$this->features($installer,new FakeOriginKeyGenerator());
+        $result=$features->installOriginCertificate($this->zones->find((int)$zone['id']),true,['type'=>'client','id'=>7]);
+        $this->assertTrue($result['ok'],$result['message']);
+        $this->assertCount(1,$installer->installed);
+        $this->assertSame('example.com',$installer->installed[0]['domain']);
+        $originRequest=$this->cf->find('POST','/certificates');
+        $originBody=(array)json_decode((string)$originRequest['body'],true);
+        $this->assertSame(5475,$originBody['requested_validity'],'Cloudflare accepts the documented 15-year Origin CA validity');
+        $this->assertSame(['example.com','*.example.com'],$originBody['hostnames']);
+        $this->assertStringContainsString('PRIVATE KEY',$installer->installed[0]['privateKey']);
+        $fresh=$this->zones->find((int)$zone['id']); $this->assertNotNull($fresh['origin_cert_id']);
+        $this->assertSame('strict',$this->cf->settings[$zone['cf_zone_id']]['ssl']);
+        $this->assertArrayNotHasKey('private_key',$fresh);
+        $this->assertTrue($this->service->deleteNow((int)$zone['id'],['type'=>'admin','id'=>1])['ok']);
+        $this->assertArrayNotHasKey($fresh['origin_cert_id'],$this->cf->certificates);
+    }
+
+    public function testPhaseTwoZoneFieldsPersistDecodeAndMatchBaseSchema(): void
+    {
+        $zone=$this->enabledZone();
+        $ds=['key_tag'=>2371,'algorithm'=>13,'digest_type'=>2,'digest'=>str_repeat('A1B2C3D4',8),'ds'=>'2371 13 2 '.str_repeat('A1B2C3D4',8)];
+        $this->zones->update((int)$zone['id'],[
+            'dnssec_status'=>'active','dnssec_ds'=>$ds,'dnssec_ds_by_us'=>true,'dnssec_ds_removed'=>false,
+            'ns_restore_after'=>'2026-10-10 12:00:00','dnssec_disable_after'=>'2026-10-10 12:00:00',
+            'origin_cert_id'=>'cert123','origin_cert_expires'=>'2041-10-08 12:00:00',
+        ]);
+        $fresh=$this->zones->find((int)$zone['id']);
+        $this->assertSame('active',$fresh['dnssec_status']);
+        $this->assertSame($ds,$fresh['dnssec_ds']);
+        $this->assertSame(1,(int)$fresh['dnssec_ds_by_us']);
+        $this->assertSame(0,(int)$fresh['dnssec_ds_removed']);
+        $this->assertSame('2026-10-10 12:00:00',$fresh['ns_restore_after']);
+        $this->assertSame('cert123',$fresh['origin_cert_id']);
+        $this->assertSame('2041-10-08 12:00:00',$fresh['origin_cert_expires']);
+
+        $root=dirname(__DIR__,2);
+        $schema=require $root.'/database/schema.php';
+        $columns=$schema['tables']['cloudflare_zones']['columns'];
+        $required=['dnssec_status','dnssec_ds','dnssec_ds_by_us','dnssec_ds_removed','ns_restore_after','dnssec_disable_after','origin_cert_id','origin_cert_expires'];
+        $migration=(string)file_get_contents($root.'/database/migrations/0217_cloudflare_phase2.php');
+        foreach($required as $column) {
+            $this->assertArrayHasKey($column,$columns);
+            $this->assertStringContainsString("'".$column."' => '".$column." ",$migration,'migration includes '.$column);
+        }
+    }
+
     public function testTemplatesSeedWithoutOverwriting(): void
     {
         CloudflareTemplates::ensure($this->db);
@@ -635,6 +865,17 @@ final class CloudflareAddonTest extends TestCase
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private function features(?FakeOriginInstaller $installer=null, ?FakeOriginKeyGenerator $keygen=null): CloudflareFeatures
+    {
+        return new CloudflareFeatures($this->service,$this->zones,$this->ns,$installer,$keygen);
+    }
+
+    private function activateZone(array $zone): void
+    {
+        $this->zones->update((int)$zone['id'],['status'=>'active']);
+        $this->cf->zones[(string)$zone['cf_zone_id']]['status']='active';
+    }
 
     /** @return array<string, mixed> */
     private function enabledZone(): array
@@ -655,9 +896,9 @@ final class CloudflareAddonTest extends TestCase
         $this->db->exec("UPDATE services SET status = '{$status}' WHERE id = {$id}");
     }
 
-    private function cron(): CloudflareCronJob
+    private function cron(?CloudflareFeatures $features=null): CloudflareCronJob
     {
-        return new CloudflareCronJob(new AddonModuleRepository($this->db), $this->settings, $this->zones, $this->service, new ServiceRepository($this->db));
+        return new CloudflareCronJob(new AddonModuleRepository($this->db),$this->settings,$this->zones,$this->service,new ServiceRepository($this->db),null,$features);
     }
 
     private function bootContainer(): void
@@ -710,7 +951,9 @@ final class CfSqliteDatabase extends Database
                 name_servers TEXT NULL, original_name_servers TEXT NULL, ns_switched_by_us INT NOT NULL DEFAULT 0,
                 paused INT NOT NULL DEFAULT 0, paused_by_us INT NOT NULL DEFAULT 0, delete_after TEXT NULL, delete_reason TEXT NULL,
                 backup_bind TEXT NULL, last_error TEXT NULL, reminders_sent INT NOT NULL DEFAULT 0, activated_at TEXT NULL,
-                last_checked_at TEXT NULL, last_synced_at TEXT NULL, deleted_at TEXT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                last_checked_at TEXT NULL, last_synced_at TEXT NULL, deleted_at TEXT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                dnssec_status TEXT NULL, dnssec_ds TEXT NULL, dnssec_ds_by_us INT NOT NULL DEFAULT 0, dnssec_ds_removed INT NOT NULL DEFAULT 0,
+                ns_restore_after TEXT NULL, dnssec_disable_after TEXT NULL, origin_cert_id TEXT NULL, origin_cert_expires TEXT NULL
             );
             CREATE TABLE cloudflare_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id INT NOT NULL, actor_type TEXT NOT NULL, actor_id INT NULL, action TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL);
             INSERT INTO products (id, name, type, status) VALUES (20, 'Starter', 'shared', 'active'), (21, 'VPS', 'vps', 'active');
@@ -746,6 +989,10 @@ final class FakeNameserverGateway implements NameserverGateway
     public array $current = [];
 
     public ?string $fail = null;
+    public bool $dsSupported = true;
+    public ?string $dsFail = null;
+    /** @var array<int,array{0:string,1:array<string,mixed>}> */
+    public array $dsCalls = [];
 
     public function get(int $domainId): array
     {
@@ -759,8 +1006,40 @@ final class FakeNameserverGateway implements NameserverGateway
         }
 
         $this->saved[] = [$domainId, $nameservers];
-
+        $this->current = $nameservers;
         return ['success' => true];
+    }
+
+    public function supportsDs(int $domainId): bool { return $this->dsSupported; }
+
+    public function changeDs(int $domainId, array $ds, bool $add): array
+    {
+        if ($this->dsFail !== null) { return ['success'=>false,'message'=>$this->dsFail]; }
+        $this->dsCalls[] = [$add?'add':'remove',$ds];
+        return ['success'=>true];
+    }
+}
+
+final class FakeOriginKeyGenerator implements OriginCertificateKeyGenerator
+{
+    public function generate(string $commonName): array
+    {
+        return ['success'=>true,'csr'=>"-----BEGIN CERTIFICATE REQUEST-----\nFAKE {$commonName}\n-----END CERTIFICATE REQUEST-----\n",'privateKey'=>"-----BEGIN PRIVATE KEY-----\nFAKE KEY\n-----END PRIVATE KEY-----\n"];
+    }
+}
+
+final class FakeOriginInstaller implements OriginCertificateInstaller
+{
+    public bool $supported=true;
+    public ?string $fail=null;
+    /** @var array<int,array{service:int,domain:string,certificate:string,privateKey:string}> */
+    public array $installed=[];
+    public function supports(int $serviceId): bool { return $this->supported; }
+    public function install(int $serviceId,string $domain,string $certificate,string $privateKey): array
+    {
+        if ($this->fail!==null) { return ['success'=>false,'message'=>$this->fail]; }
+        $this->installed[]=['service'=>$serviceId,'domain'=>$domain,'certificate'=>$certificate,'privateKey'=>$privateKey];
+        return ['success'=>true,'message'=>'Installed.'];
     }
 }
 
@@ -787,6 +1066,11 @@ final class FakeCloudflare implements HttpClient
 
     /** @var array<int, array<string, mixed>> what a DNS scan finds */
     public array $scanRecords = [];
+    /** @var array<string,array<string,mixed>> */ public array $dnssec=[];
+    public bool $failDnssecGet=false;
+    /** @var array<string,array<string,array<string,mixed>>> */ public array $rulesets=[];
+    /** @var array<int,array<string,mixed>> */ public array $trafficGroups=[];
+    /** @var array<string,array<string,mixed>> */ public array $certificates=[];
 
     private int $seq = 0;
 
@@ -796,6 +1080,20 @@ final class FakeCloudflare implements HttpClient
         $path = (string) parse_url(substr($url, strlen(CloudflareApi::BASE)), PHP_URL_PATH);
         $data = $body !== null ? (array) json_decode($body, true) : [];
         $parts = array_values(array_filter(explode('/', $path), 'strlen'));
+
+        if ($path === '/graphql' && $method === 'POST') {
+            $vars=(array)($data['variables']??[]);
+            $rows=array_values(array_filter($this->trafficGroups,static function(array $g) use($vars):bool {
+                $d=(string)($g['dimensions']['date']??''); return $d>=(string)($vars['since']??'') && $d<=(string)($vars['until']??'');
+            }));
+            return ['status'=>200,'body'=>json_encode(['data'=>['viewer'=>['zones'=>[['httpRequests1dGroups'=>$rows]]]],'errors'=>null])];
+        }
+        if ($path === '/certificates' && $method === 'POST') {
+            $id=md5('origin'.++$this->seq); $cert="-----BEGIN CERTIFICATE-----\nFAKE".$id."\n-----END CERTIFICATE-----\n";
+            $this->certificates[$id]=['id'=>$id,'certificate'=>$cert,'csr'=>$data['csr']??'','hostnames'=>$data['hostnames']??[],'expires_on'=>'2041-01-01T00:00:00Z'];
+            return self::ok($this->certificates[$id]);
+        }
+        if (preg_match('#^/certificates/([A-Za-z0-9]{1,64})$#',$path,$m) && $method==='DELETE') { unset($this->certificates[$m[1]]); return self::ok(['id'=>$m[1]]); }
 
         if ($path === '/user/tokens/verify') {
             return self::ok(['id' => 't1', 'status' => 'active']);
@@ -818,6 +1116,9 @@ final class FakeCloudflare implements HttpClient
             $this->records[$id] = [];
             $this->settings[$id] = ['ssl' => 'flexible', 'always_use_https' => 'off', 'security_level' => 'medium', 'development_mode' => 'off', 'browser_check' => 'on', 'cache_level' => 'aggressive', 'browser_cache_ttl' => 14400, 'min_tls_version' => '1.0', 'automatic_https_rewrites' => 'on'];
             $this->rules[$id] = [];
+            $this->dnssec[$id] = ['status'=>'disabled'];
+            $this->rulesets[$id] = [];
+            $this->settings[$id] += ['early_hints'=>'off','http3'=>'on','0rtt'=>'off','rocket_loader'=>'off','always_online'=>'on','ipv6'=>'on','websockets'=>'on','opportunistic_encryption'=>'on','tls_1_3'=>'on','email_obfuscation'=>'on','hotlink_protection'=>'off'];
 
             return self::ok($this->zones[$id]);
         }
@@ -829,6 +1130,34 @@ final class FakeCloudflare implements HttpClient
         }
 
         $rest = implode('/', array_slice($parts, 2));
+        if ($rest==='rulesets' && $method==='POST') {
+            $phase=(string)($data['phase']??''); $rows=[];
+            foreach((array)($data['rules']??[]) as $rule){$rule['id']=md5('rule'.++$this->seq);$rows[]=$rule;}
+            $set=['id'=>md5($zoneId.$phase),'kind'=>'zone','phase'=>$phase,'name'=>(string)($data['name']??''),'rules'=>$rows];
+            $this->rulesets[$zoneId][$phase]=$set; return self::ok($set);
+        }
+        if ($rest==='dnssec' && $method==='GET') { return $this->failDnssecGet ? self::error(403,10000,'DNSSEC read permission denied') : self::ok($this->dnssec[$zoneId]??['status'=>'disabled']); }
+        if ($rest==='dnssec' && $method==='PATCH') {
+            if (($data['status']??'')==='active') { $this->dnssec[$zoneId]=['status'=>'active','key_tag'=>2371,'algorithm'=>13,'digest_type'=>2,'digest'=>str_repeat('A1B2C3D4',8),'ds'=>'2371 13 2 '.str_repeat('A1B2C3D4',8)]; }
+            else { $this->dnssec[$zoneId]=['status'=>'disabled']; }
+            return self::ok($this->dnssec[$zoneId]);
+        }
+        if (str_starts_with($rest,'rulesets/')) {
+            $phase=(string)($parts[4]??'');
+            if (($parts[3]??'')==='phases' && ($parts[5]??'')==='entrypoint') {
+                if ($method==='GET') { return isset($this->rulesets[$zoneId][$phase])?self::ok($this->rulesets[$zoneId][$phase]):self::error(404,7003,'Ruleset does not exist.'); }
+                if ($method==='PUT') {
+                    $rows=[]; foreach((array)($data['rules']??[]) as $rule){$rule['id']=md5('rule'.++$this->seq);$rows[]=$rule;}
+                    $this->rulesets[$zoneId][$phase]=['id'=>md5($zoneId.$phase),'phase'=>$phase,'rules'=>$rows]; return self::ok($this->rulesets[$zoneId][$phase]);
+                }
+            }
+            if (count($parts)===5 && ($parts[4]??'')==='rules' && $method==='POST') {
+                $setId=$parts[3]; foreach($this->rulesets[$zoneId] as &$set){ if($set['id']===$setId){$r=$data;$r['id']=md5('rule'.++$this->seq);$set['rules'][]=$r;$copy=$set;unset($set);return self::ok($copy);} } unset($set);
+            }
+            if (count($parts)===6 && ($parts[4]??'')==='rules' && $method==='DELETE') {
+                $setId=$parts[3];$rid=$parts[5];foreach($this->rulesets[$zoneId] as &$set){if($set['id']===$setId){$set['rules']=array_values(array_filter($set['rules'],static fn($r)=>$r['id']!==$rid));unset($set);return self::ok(['id'=>$rid]);}}unset($set);
+            }
+        }
 
         switch (true) {
             case $rest === '' && $method === 'GET':

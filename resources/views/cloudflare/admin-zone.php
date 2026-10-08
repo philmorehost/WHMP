@@ -46,6 +46,9 @@ $action = static fn (string $name, string $label, bool $primary = false): string
                 <dt>Nameservers</dt><dd class="cfa-mono"><?= e(implode(', ', (array) $zone['name_servers'])) ?: '—' ?></dd>
                 <dt>Previous NS</dt><dd class="cfa-mono"><?= e(implode(', ', (array) $zone['original_name_servers'])) ?: '—' ?></dd>
                 <dt>NS switched by us</dt><dd><?= (int) $zone['ns_switched_by_us'] === 1 ? 'Yes (restored automatically on removal)' : 'No' ?></dd>
+                <?php if (!empty($zone['ns_restore_after'])): ?><dt>NS restore</dt><dd><?= e((string)$zone['ns_restore_after']) ?> (waiting for DNSSEC DS caches)</dd><?php endif; ?>
+                <dt>DNSSEC</dt><dd><?= e(ucfirst((string)($zone['dnssec_status']??'')) ?: 'Not checked') ?><?php if (is_array($zone['dnssec_ds']??null)): ?> · key tag <?= e((string)($zone['dnssec_ds']['key_tag']??'')) ?><?php endif; ?><?php if ((int)($zone['dnssec_ds_by_us']??0)===1): ?> · DS added by WHMP<?php endif; ?><?php if (!empty($zone['dnssec_disable_after'])): ?> · signing off after <?= e((string)$zone['dnssec_disable_after']) ?><?php endif; ?></dd>
+                <dt>Origin CA</dt><dd><?= !empty($zone['origin_cert_id']) ? 'Installed'.(!empty($zone['origin_cert_expires'])?', expires '.e((string)$zone['origin_cert_expires']):'').' (revoked on deletion)' : '—' ?></dd>
                 <dt>Created</dt><dd><?= e((string) $zone['created_at']) ?></dd>
                 <dt>Activated</dt><dd><?= e((string) ($zone['activated_at'] ?? '—')) ?></dd>
                 <dt>Last synced</dt><dd><?= e((string) ($zone['last_synced_at'] ?? '—')) ?></dd>
@@ -74,7 +77,7 @@ $action = static fn (string $name, string $label, bool $primary = false): string
                     <input class="cv-input" name="confirm" placeholder="Type DELETE" style="width:140px" aria-label="Type DELETE to confirm" required>
                     <button class="cv-btn cv-btn--secondary" type="submit" style="color:#b91c1c">Delete now</button>
                 </form>
-                <p class="cfa-muted">Deletes the zone immediately (a DNS backup is kept). Nameservers WHMP switched are put back first.</p>
+                <p class="cfa-muted">Deletes the zone immediately (a DNS backup is kept). A DS record WHMP added is removed; nameservers WHMP switched are restored only after DNSSEC caches clear; Origin CA is revoked.</p>
             <?php endif; ?>
         </div>
     </div>

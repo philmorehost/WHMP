@@ -49,6 +49,21 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertSame('whm root:a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0', $request['headers']['Authorization']);
     }
 
+    public function test_private_key_parameters_are_sent_in_post_body_not_url(): void
+    {
+        $this->http->respondWith(200, json_encode(['result'=>['status'=>1,'data'=>[]]]));
+        $secret="-----BEGIN PRIVATE KEY-----\nsecret-private-material\n-----END PRIVATE KEY-----";
+        $result=$this->client->callPost($this->server,'cvuser1','SSL','install_ssl',['domain'=>'example.com','key'=>$secret,'cert'=>'cert']);
+        $this->assertTrue($result['success']);
+        $request=$this->http->lastRequest();
+        $this->assertSame('POST',$request['method']);
+        parse_str((string)parse_url($request['url'],PHP_URL_QUERY),$query);
+        parse_str((string)$request['body'],$body);
+        $this->assertArrayNotHasKey('key',$query,'the private key must not become a query parameter');
+        $this->assertSame($secret,$body['key']??null,'the private key is form-encoded in the request body');
+        $this->assertSame('application/x-www-form-urlencoded',$request['headers']['Content-Type']);
+    }
+
     public function test_a_password_shaped_secret_is_sent_as_basic_auth(): void
     {
         $this->http->respondWith(200, json_encode(['result' => ['status' => 1, 'data' => []]]));

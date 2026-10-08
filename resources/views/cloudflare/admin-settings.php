@@ -65,18 +65,24 @@ $levelLabels = ['essentially_off' => 'Essentially off', 'low' => 'Low', 'medium'
             <h2>Creating the API token</h2>
             <ol class="cfa-steps">
                 <li>In Cloudflare open <strong>My Profile → API Tokens → Create Token → Custom token</strong>.</li>
-                <li>Permissions:
+                <li>Zone permissions (scope them to all zones in your Cloudflare account):
                     <ul class="cfa-muted">
-                        <li>Account · Account Settings · Read</li>
                         <li>Zone · Zone · Edit</li>
                         <li>Zone · Zone Settings · Edit</li>
                         <li>Zone · DNS · Edit</li>
                         <li>Zone · Cache Purge · Purge</li>
                         <li>Zone · Firewall Services · Edit</li>
+                        <li>Zone · Single Redirect · Edit</li>
+                        <li>Zone · Cache Rules · Edit</li>
+                        <li>Zone · Zone WAF · Edit</li>
+                        <li>Zone · Analytics · Read</li>
+                        <li>Zone · SSL and Certificates · Edit</li>
                     </ul>
                 </li>
+                <li>Account permissions (scope them to your Cloudflare account): <strong>Account · Account Settings · Read</strong>, <strong>Account · Account Rulesets · Edit</strong> and <strong>Account · Account Filter Lists · Edit</strong>. The last two are required for Cache Rules.</li>
                 <li>Account resources: <strong>Include → your account</strong>. Zone resources: <strong>Include → All zones from an account → your account</strong>.</li>
                 <li>Create the token, paste it here and click <strong>Verify &amp; save</strong>.</li>
+                <li>If this is an older token, edit it in Cloudflare and add the Phase 2 permissions above. A missing permission only disables its own tab/action.</li>
             </ol>
             <p class="cfa-muted">A normal Cloudflare account is enough — no partner programme needed. Each customer domain becomes a Free-plan zone in this account.</p>
         </div>
