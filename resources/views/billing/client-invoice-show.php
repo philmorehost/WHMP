@@ -178,58 +178,95 @@ $companyDept ??= 'Payments Dept.';
             </div>
         <?php elseif ($invoice['status'] === 'unpaid'): ?>
             <h3 style="font-family:'Hanken Grotesk',sans-serif; font-size:var(--cv-text-md); margin-top:var(--cv-space-6); border-bottom:1px solid #e5e7eb; padding-bottom:8px; color:#111827;">Choose Payment Method</h3>
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:var(--cv-space-4); margin-top:var(--cv-space-4);">
-                <?php foreach ($gateways as $gateway): ?>
-                    <?php if ($gateway['slug'] === 'manual'): ?>
-                        <div style="border:1px solid #e5e7eb; border-radius:8px; padding:var(--cv-space-4); background:#f9fafb;">
-                            <strong style="color:#111827; display:block; margin-bottom:6px;"><?= e($gateway['name']) ?></strong>
-                            <?php $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: []; ?>
-                            <p style="color:#4b5563; font-size:var(--cv-text-xs); white-space:pre-line; margin:0 0 var(--cv-space-3) 0; line-height:1.4;"><?= e($config['bank_details'] ?? 'Contact us for bank transfer details, then we will confirm your payment.') ?></p>
-                            <p style="color:#6b7280; font-size:var(--cv-text-2xs); margin:0;">After transferring, contact <strong><?= e($companyDept) ?></strong> with your payment reference so an admin can mark this invoice paid. A renewal only takes effect once that confirmation is recorded.</p>
-                        </div>
-                    <?php else: ?>
-                        <div style="border:1px solid #e5e7eb; border-radius:8px; padding:var(--cv-space-4); background:#f9fafb; display:flex; flex-direction:column; justify-content:space-between;">
-                            <div>
-                                <strong style="color:#111827; display:block; margin-bottom:4px;"><?= e($gateway['name']) ?></strong>
+            <?php
+            // Online gateways first, in one even row; bank transfer / manual payment
+            // gets its own full-width card underneath. Its long bank details used to
+            // share the row and stretch every online card to the same height.
+            $onlineGateways = array_values(array_filter($gateways, static fn (array $g): bool => $g['slug'] !== 'manual'));
+            $manualGateways = array_values(array_filter($gateways, static fn (array $g): bool => $g['slug'] === 'manual'));
+            ?>
+            <style>
+                .inv-pay { margin-top: var(--cv-space-4); display: flex; flex-direction: column; gap: var(--cv-space-4); }
+                .inv-pay__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: var(--cv-space-4); }
+                .inv-pay__card,
+                .inv-pay__manual { border: 1px solid #e5e7eb; border-radius: 8px; padding: var(--cv-space-4); background: #f9fafb; min-width: 0; }
+                .inv-pay__card { display: flex; flex-direction: column; justify-content: space-between; gap: var(--cv-space-3); }
+                .inv-pay__manual-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: var(--cv-space-3); }
+                .inv-pay__manual-head strong { color: #111827; font-size: var(--cv-text-sm); }
+                .inv-pay__tag { font-size: 0.7rem; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 2px 8px; }
+                .inv-pay__manual-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--cv-space-4); }
+                .inv-pay__bank { margin: 0; padding: var(--cv-space-3) var(--cv-space-4); background: #fff; border: 1px dashed #d1d5db; border-radius: 6px; color: #374151; font-size: var(--cv-text-xs); line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+                .inv-pay__steps { margin: 0; color: #4b5563; font-size: var(--cv-text-xs); line-height: 1.55; }
+                .inv-pay__steps p { margin: 0 0 6px; }
+                .inv-pay__steps p:last-child { margin-bottom: 0; }
+                @media (min-width: 720px) {
+                    .inv-pay__manual-body { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
+                }
+            </style>
+            <div class="inv-pay">
+                <?php if ($onlineGateways !== []): ?>
+                    <div class="inv-pay__grid">
+                        <?php foreach ($onlineGateways as $gateway): ?>
+                            <div class="inv-pay__card">
+                                <div>
+                                    <strong style="color:#111827; display:block; margin-bottom:4px;"><?= e($gateway['name']) ?></strong>
+                                    <?php
+                                    $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: [];
+                                    $hasKeys = !empty($config['secret_key']) || !empty($config['api_key']) || !empty($config['client_id']);
+                                    ?>
+                                    <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Secure instant online payment processing.</p>
+                                    <?php if (!$hasKeys): ?>
+                                        <div style="font-size:0.75rem; color:#b91c1c; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); padding:4px 8px; border-radius:4px; margin-bottom:8px;">
+                                            ⚠️ API Keys Unconfigured in Admin
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
                                 <?php
-                                $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: [];
-                                $hasKeys = !empty($config['secret_key']) || !empty($config['api_key']) || !empty($config['client_id']);
+                                // PayHub MUST use the inline iframe popup — the redirect flow does NOT
+                                // support a callback_url. PayHub's checkout.php always redirects to
+                                // its own verify.php (never back to WHMP) regardless of what we POST.
+                                // The inline.js SDK embeds checkout.php in an iframe and uses
+                                // postMessage to deliver the result back to this page, which then
+                                // sends the browser to /pay/payhub/callback for server-side verify.
+                                // The app.js bridge script assigns window.PayhubPop = PayhubPop after
+                                // inline.js loads, fixing the 'const' scoping issue that caused
+                                // the previous "took too long to load" timeouts.
+                                $useInline = $gateway['slug'] === 'payhub' && $hasKeys && !empty($config['public_key']);
                                 ?>
-                                <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Secure instant online payment processing.</p>
-                                <?php if (!$hasKeys): ?>
-                                    <div style="font-size:0.75rem; color:#b91c1c; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); padding:4px 8px; border-radius:4px; margin-bottom:8px;">
-                                        ⚠️ API Keys Unconfigured in Admin
-                                    </div>
+                                <?php if ($useInline): ?>
+                                    <button class="cv-btn" type="button"
+                                            data-payhub-pay
+                                            data-invoice-id="<?= (int) $invoice['id'] ?>"
+                                            data-gateway-slug="<?= e($gateway['slug']) ?>"
+                                            data-gateway-name="<?= e($gateway['name']) ?>"
+                                            data-token="<?= e(csrf_token()) ?>"
+                                            style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                                <?php else: ?>
+                                    <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
+                                        <?= csrf_field() ?>
+                                        <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
+                                    </form>
                                 <?php endif; ?>
                             </div>
-                            <?php
-                            // PayHub MUST use the inline iframe popup — the redirect flow does NOT
-                            // support a callback_url. PayHub's checkout.php always redirects to
-                            // its own verify.php (never back to WHMP) regardless of what we POST.
-                            // The inline.js SDK embeds checkout.php in an iframe and uses
-                            // postMessage to deliver the result back to this page, which then
-                            // sends the browser to /pay/payhub/callback for server-side verify.
-                            // The app.js bridge script assigns window.PayhubPop = PayhubPop after
-                            // inline.js loads, fixing the 'const' scoping issue that caused
-                            // the previous "took too long to load" timeouts.
-                            $useInline = $gateway['slug'] === 'payhub' && $hasKeys && !empty($config['public_key']);
-                            ?>
-                            <?php if ($useInline): ?>
-                                <button class="cv-btn" type="button"
-                                        data-payhub-pay
-                                        data-invoice-id="<?= (int) $invoice['id'] ?>"
-                                        data-gateway-slug="<?= e($gateway['slug']) ?>"
-                                        data-gateway-name="<?= e($gateway['name']) ?>"
-                                        data-token="<?= e(csrf_token()) ?>"
-                                        style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                            <?php else: ?>
-                                <form method="post" action="/client/invoices/<?= (int) $invoice['id'] ?>/pay/<?= e($gateway['slug']) ?>" style="margin:0;">
-                                    <?= csrf_field() ?>
-                                    <button class="cv-btn" type="submit" style="width:100%; border-radius:6px; padding:8px; font-size:var(--cv-text-xs); font-weight:700; background:var(--cv-color-brand-500); color:#fff;">Pay with <?= e($gateway['name']) ?></button>
-                                </form>
-                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php foreach ($manualGateways as $gateway): ?>
+                    <?php $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: []; ?>
+                    <div class="inv-pay__manual">
+                        <div class="inv-pay__manual-head">
+                            <strong>🏦 <?= e($gateway['name']) ?></strong>
+                            <span class="inv-pay__tag">Confirmed manually</span>
                         </div>
-                    <?php endif; ?>
+                        <div class="inv-pay__manual-body">
+                            <p class="inv-pay__bank"><?= e($config['bank_details'] ?? 'Contact us for bank transfer details, then we will confirm your payment.') ?></p>
+                            <div class="inv-pay__steps">
+                                <p>Use <strong>Invoice #<?= (int) $invoice['id'] ?></strong> as your payment reference.</p>
+                                <p>After transferring, contact <strong><?= e($companyDept) ?></strong> with your payment reference so an admin can mark this invoice paid. A renewal only takes effect once that confirmation is recorded.</p>
+                            </div>
+                        </div>
+                    </div>
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
