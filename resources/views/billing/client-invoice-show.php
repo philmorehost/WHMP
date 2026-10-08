@@ -187,7 +187,7 @@ $companyDept ??= 'Payments Dept.';
             ?>
             <style>
                 .inv-pay { margin-top: var(--cv-space-4); display: flex; flex-direction: column; gap: var(--cv-space-4); }
-                .inv-pay__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: var(--cv-space-4); }
+                .inv-pay__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: var(--cv-space-4); }
                 .inv-pay__card,
                 .inv-pay__manual { border: 1px solid #e5e7eb; border-radius: 8px; padding: var(--cv-space-4); background: #f9fafb; min-width: 0; }
                 .inv-pay__card { display: flex; flex-direction: column; justify-content: space-between; gap: var(--cv-space-3); }
