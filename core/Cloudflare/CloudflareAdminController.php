@@ -15,8 +15,8 @@ use CodeVault\View;
 use Throwable;
 
 /**
- * /admin/cloudflare — dashboard (zones), zone detail, settings. Needs the
- * addons.manage permission; redirects to the add-on page while inactive.
+ * /admin/cloudflare — dashboard (zones), explicit zone import, zone detail and
+ * settings. Requires addons.manage; redirects to the add-on page while inactive.
  */
 final class CloudflareAdminController
 {
@@ -55,6 +55,96 @@ final class CloudflareAdminController
             'accountName' => $this->settings->accountName(),
             'productCount' => count((new CloudflareProductOption($this->db, $this->settings))->attachedProductIds()),
         ]);
+    }
+
+    /** Browse Cloudflare zones that are not yet linked to an opted-in WHMP service. */
+    public function importPage(Request $request): Response
+    {
+        if ($deny = $this->gate()) {
+            return $deny;
+        }
+
+        $q = mb_substr(trim((string) $request->query('q', '')), 0, 253);
+        $page = max(1, min(100000, (int) $request->query('page', 1)));
+        $remoteZones = [];
+        $totalPages = 1;
+        $totalCount = 0;
+        $loadError = null;
+
+        if (!$this->settings->connected()) {
+            $loadError = 'Connect a Cloudflare account in Settings before importing zones.';
+        } else {
+            try {
+                $pageData = $this->cloudflare->apiClient()->zonePage($this->settings->accountId(), $q, $page, 50);
+                $totalPages = (int) $pageData['total_pages'];
+                $totalCount = (int) $pageData['total_count'];
+
+                foreach ($pageData['zones'] as $remote) {
+                    $cloudflareId = (string) ($remote['id'] ?? '');
+                    $name = strtolower(rtrim(trim((string) ($remote['name'] ?? '')), '.'));
+
+                    if ($cloudflareId === '' || $name === '') {
+                        continue;
+                    }
+
+                    $linked = $this->zones->byCloudflareId($cloudflareId);
+                    $nameOwner = $this->zones->liveByName($name);
+                    $freePlan = CloudflareService::isFreePlanZone($remote);
+                    $candidates = $linked === null && $nameOwner === null && $freePlan
+                        ? $this->cloudflare->importCandidates($name)
+                        : [];
+
+                    $remoteZones[] = [
+                        'zone' => $remote,
+                        'linked' => $linked,
+                        'name_owner' => $nameOwner,
+                        'free_plan' => $freePlan,
+                        'candidates' => $candidates,
+                    ];
+                }
+            } catch (CloudflareApiException $e) {
+                $loadError = $e->getMessage();
+            } catch (Throwable) {
+                $loadError = 'Could not load zones from Cloudflare. Check the API token permissions and try again.';
+            }
+        }
+
+        return $this->page('Import existing Cloudflare zones', 'cloudflare.admin-import', [
+            'connected' => $this->settings->connected(),
+            'accountName' => $this->settings->accountName(),
+            'remoteZones' => $remoteZones,
+            'q' => $q,
+            'pageNo' => $page,
+            'totalPages' => $totalPages,
+            'totalCount' => $totalCount,
+            'loadError' => $loadError,
+        ]);
+    }
+
+    /** Explicitly link one verified Cloudflare zone to the service selected by admin. */
+    public function importZone(Request $request): Response
+    {
+        if ($deny = $this->gate()) {
+            return $deny;
+        }
+
+        try {
+            $result = $this->cloudflare->importExistingZone(
+                trim((string) $request->input('cf_zone_id', '')),
+                (int) $request->input('service_id', 0),
+                $this->actor()
+            );
+        } catch (Throwable) {
+            $result = ['ok' => false, 'message' => 'Could not import the zone. No Cloudflare or registrar settings were changed.'];
+        }
+
+        $this->flash($result);
+
+        if ($result['ok'] && !empty($result['zone']['id'])) {
+            return Response::redirect('/admin/cloudflare/zones/' . (int) $result['zone']['id']);
+        }
+
+        return Response::redirect('/admin/cloudflare/import');
     }
 
     public function zone(Request $request, array $params): Response

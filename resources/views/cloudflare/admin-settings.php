@@ -67,9 +67,14 @@ $levelLabels = ['essentially_off' => 'Essentially off', 'low' => 'Low', 'medium'
                 <li>In Cloudflare open <strong>My Profile → API Tokens → Create Token → Custom token</strong>.</li>
                 <li>Zone permissions (scope them to all zones in your Cloudflare account):
                     <ul class="cfa-muted">
+                        <li>Zone · Zone · Read (zone discovery and import)</li>
                         <li>Zone · Zone · Edit</li>
-                        <li>Zone · Zone Settings · Edit</li>
+                        <li>Zone · Zone Settings · Read (Email Routing preflight)</li>
+                        <li>Zone · Zone Settings · Write</li>
+                        <li>Zone · DNS · Read (existing DNS import and mandatory Email Routing MX/SPF/DKIM preflight)</li>
                         <li>Zone · DNS · Edit</li>
+                        <li>Zone · Email Routing Rules · Read</li>
+                        <li>Zone · Email Routing Rules · Write (these are zone-level forwarding rules)</li>
                         <li>Zone · Cache Purge · Purge</li>
                         <li>Zone · Firewall Services · Edit</li>
                         <li>Zone · Single Redirect · Edit</li>
@@ -79,10 +84,10 @@ $levelLabels = ['essentially_off' => 'Essentially off', 'low' => 'Low', 'medium'
                         <li>Zone · SSL and Certificates · Edit</li>
                     </ul>
                 </li>
-                <li>Account permissions (scope them to your Cloudflare account): <strong>Account · Account Settings · Read</strong>, <strong>Account · Account Rulesets · Edit</strong> and <strong>Account · Account Filter Lists · Edit</strong>. The last two are required for Cache Rules.</li>
+                <li>Account permissions (scope them to your Cloudflare account): <strong>Account · Account Settings · Read</strong>, <strong>Account · Account Rulesets · Edit</strong>, <strong>Account · Account Filter Lists · Edit</strong>, <strong>Account · Email Routing Addresses · Read</strong> and <strong>Account · Email Routing Addresses · Write</strong>. Email Routing Addresses are account-level destinations shared across zones; WHMP keeps each destination private to its owner.</li>
                 <li>Account resources: <strong>Include → your account</strong>. Zone resources: <strong>Include → All zones from an account → your account</strong>.</li>
                 <li>Create the token, paste it here and click <strong>Verify &amp; save</strong>.</li>
-                <li>If this is an older token, edit it in Cloudflare and add the Phase 2 permissions above. A missing permission only disables its own tab/action.</li>
+                <li>If this is an older token, add the Phase 2 and Email Routing scopes above. Each Email Routing action fails closed when its required permission is missing; DNS Read is required for the mail-record preflight. WHMP never falls back to editing DNS records directly.</li>
             </ol>
             <p class="cfa-muted">A normal Cloudflare account is enough — no partner programme needed. Each customer domain becomes a Free-plan zone in this account.</p>
         </div>

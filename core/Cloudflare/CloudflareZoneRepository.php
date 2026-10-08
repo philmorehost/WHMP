@@ -41,6 +41,12 @@ final class CloudflareZoneRepository
         return self::decode($this->db->selectOne('SELECT * FROM cloudflare_zones WHERE id = ?', [$id]));
     }
 
+    /** @return array<string, mixed>|null any WHMP history row for this Cloudflare zone id */
+    public function byCloudflareId(string $cloudflareId): ?array
+    {
+        return self::decode($this->db->selectOne('SELECT * FROM cloudflare_zones WHERE cf_zone_id = ? LIMIT 1', [$cloudflareId]));
+    }
+
     /** @return array<string, mixed>|null the zone with its owner, store and service (admin) */
     public function detailed(int $id): ?array
     {
@@ -88,6 +94,42 @@ final class CloudflareZoneRepository
                 (string) ($row['status'] ?? 'pending'),
                 json_encode(array_values((array) ($row['name_servers'] ?? []))),
                 json_encode(array_values((array) ($row['original_name_servers'] ?? []))),
+                $now,
+                $now,
+            ]
+        );
+    }
+
+    /**
+     * Persists a zone explicitly imported from the connected Cloudflare account.
+     * It is linked to an existing, opted-in service and remains externally
+     * nameserver-managed until the client chooses otherwise.
+     *
+     * @param array<string, mixed> $row
+     */
+    public function createImported(array $row): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $dnssecDs = is_array($row['dnssec_ds'] ?? null) ? json_encode($row['dnssec_ds']) : null;
+
+        return (int) $this->db->insert(
+            'INSERT INTO cloudflare_zones (service_id, client_id, reseller_id, cf_zone_id, name, status, name_servers, original_name_servers, ns_switched_by_us, paused, paused_by_us, last_checked_at, last_synced_at, dnssec_status, dnssec_ds, dnssec_ds_by_us, dnssec_ds_removed, last_error, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, 0, 0, ?, ?, ?)',
+            [
+                (int) $row['service_id'],
+                (int) $row['client_id'],
+                $row['reseller_id'] ?? null,
+                (string) $row['cf_zone_id'],
+                strtolower((string) $row['name']),
+                (string) ($row['status'] ?? 'pending'),
+                json_encode(array_values((array) ($row['name_servers'] ?? []))),
+                json_encode(array_values((array) ($row['original_name_servers'] ?? []))),
+                !empty($row['paused']) ? 1 : 0,
+                $now,
+                $now,
+                isset($row['dnssec_status']) ? mb_substr((string) $row['dnssec_status'], 0, 20) : null,
+                $dnssecDs,
+                isset($row['last_error']) ? mb_substr((string) $row['last_error'], 0, 255) : null,
                 $now,
                 $now,
             ]

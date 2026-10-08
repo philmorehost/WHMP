@@ -21,8 +21,9 @@ use Throwable;
  *     registered with us; everyone else gets instructions;
  *   - suspension pauses the zone; termination (or the client turning Cloudflare
  *     off) schedules deletion after a grace period (7 days), undoable until then;
- *   - an existing zone is never adopted — a domain already in the account is
- *     refused, so one customer can never take over another's zone.
+ *   - automatic setup refuses an existing zone; linking one is an explicit
+ *     admin action restricted to a matching active service with a recorded
+ *     Free-plan opt-in at checkout, so it cannot be silently taken over.
  *
  * Every public method returns {ok, message} instead of throwing, so callers
  * (hooks, cron, controllers) can never break provisioning or a page.
@@ -261,6 +262,215 @@ final class CloudflareService
     }
 
     /**
+     * Finds active services for which the client selected the Free Cloudflare
+     * product option. Used by the explicit admin import screen; no implicit
+     * service/domain association is made.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function importCandidates(string $zoneName): array
+    {
+        $name = strtolower(trim($zoneName, " \t\n\r\0\x0B."));
+
+        if ($name === '' || self::zoneName($name) !== $name || $this->zones->liveByName($name) !== null) {
+            return [];
+        }
+
+        $variants = array_values(array_unique([$name, 'www.' . $name, $name . '.', 'www.' . $name . '.']));
+        $marks = implode(', ', array_fill(0, count($variants), '?'));
+        $rows = $this->db->select(
+            'SELECT s.id AS service_id, s.client_id, s.order_id, s.product_id, s.product_name, s.domain, s.status,
+                    c.first_name, c.last_name, c.email AS client_email, c.reseller_id AS client_reseller_id,
+                    r.brand_name AS store_name, r.slug AS store_slug, r.client_id AS store_owner_client_id
+             FROM services s
+             JOIN clients c ON c.id = s.client_id
+             LEFT JOIN resellers r ON r.id = c.reseller_id
+             WHERE s.status = ? AND LOWER(TRIM(s.domain)) IN (' . $marks . ')
+             ORDER BY s.id DESC',
+            array_merge(['active'], $variants)
+        );
+
+        $matches = [];
+
+        foreach ($rows as $service) {
+            $serviceId = (int) ($service['service_id'] ?? 0);
+
+            if ($serviceId <= 0
+                || self::zoneName((string) ($service['domain'] ?? '')) !== $name
+                || !$this->productEligible((int) ($service['product_id'] ?? 0))
+                || !$this->choseAtOrder($service)
+                || $this->zones->liveForService($serviceId) !== null
+                || $this->zones->serviceEverHadZone($serviceId)) {
+                continue;
+            }
+
+            $matches[] = $service;
+        }
+
+        return $matches;
+    }
+
+    /**
+     * Links an existing Free-plan zone from the selected Cloudflare account to
+     * the exact active service whose client opted in at order. Only GET requests
+     * are made to Cloudflare: records, zone settings and registrar nameservers
+     * are not modified.
+     *
+     * @param array{type: string, id: ?int} $actor
+     * @return array{ok: bool, message: string, zone?: array<string, mixed>}
+     */
+    public function importExistingZone(string $cloudflareZoneId, int $serviceId, array $actor): array
+    {
+        if (!$this->settings->connected()) {
+            return self::fail('Cloudflare is not connected yet.');
+        }
+
+        $service = $this->services->find($serviceId);
+
+        if ($service === null) {
+            return self::fail('Service not found.');
+        }
+
+        if ((string) ($service['status'] ?? '') !== 'active') {
+            return self::fail('Only an active service can be linked to Cloudflare.');
+        }
+
+        if (!$this->productEligible((int) ($service['product_id'] ?? 0)) || !$this->choseAtOrder($service)) {
+            return self::fail('This service has no recorded Free Cloudflare opt-in at checkout.');
+        }
+
+        $name = self::zoneName((string) ($service['domain'] ?? ''));
+
+        if ($name === null) {
+            return self::fail('This service has no valid domain name to match to Cloudflare.');
+        }
+
+        if ($this->zones->liveForService($serviceId) !== null || $this->zones->serviceEverHadZone($serviceId)) {
+            return self::fail('This service already has Cloudflare zone history and cannot be imported again.');
+        }
+
+        if ($this->zones->liveByName($name) !== null) {
+            return self::fail('This domain is already linked to a WHMP Cloudflare service.');
+        }
+
+        if ($this->zones->byCloudflareId($cloudflareZoneId) !== null) {
+            return self::fail('This Cloudflare zone is already linked in WHMP.');
+        }
+
+        $candidates = $this->importCandidates($name);
+
+        if (count($candidates) !== 1 || (int) ($candidates[0]['service_id'] ?? 0) !== $serviceId) {
+            return self::fail(count($candidates) > 1
+                ? 'Several opted-in active services use this domain. Resolve the duplicate service assignment before importing.'
+                : 'This service is not the unique eligible service for this Cloudflare domain.');
+        }
+
+        $accountId = $this->settings->accountId();
+
+        try {
+            // Re-resolve the posted id from the connected account and exact
+            // service domain. A browser-supplied id is never trusted on its own.
+            $listed = $this->api()->findZone($name, $accountId);
+        } catch (CloudflareApiException $e) {
+            return self::fail($e->getMessage());
+        } catch (Throwable) {
+            return self::fail('Could not verify the zone in the connected Cloudflare account.');
+        }
+
+        if ($listed === null || (string) ($listed['id'] ?? '') !== $cloudflareZoneId) {
+            return self::fail('That zone is not available in the connected Cloudflare account for this service domain.');
+        }
+
+        try {
+            $remote = $this->api()->zone($cloudflareZoneId);
+        } catch (CloudflareApiException $e) {
+            return self::fail($e->getMessage());
+        } catch (Throwable) {
+            return self::fail('Could not read the existing Cloudflare zone.');
+        }
+
+        $remoteName = strtolower(rtrim(trim((string) ($remote['name'] ?? '')), '.'));
+        $remoteAccountId = (string) ($remote['account']['id'] ?? '');
+
+        if ($remoteName !== $name || ($remoteAccountId !== '' && $remoteAccountId !== $accountId)) {
+            return self::fail('The Cloudflare zone does not match the selected account and service domain.');
+        }
+
+        if (!self::isFreePlanZone($remote)) {
+            return self::fail('Only Cloudflare Free-plan zones can be imported.');
+        }
+
+        $status = strtolower((string) ($remote['status'] ?? ''));
+
+        if (!in_array($status, ['initializing', 'pending', 'active', 'moved'], true)) {
+            return self::fail('Cloudflare returned an unsupported zone status. Refresh the import list and try again.');
+        }
+
+        try {
+            // Read all available DNS records now, so a missing DNS Read scope is
+            // caught before WHMP takes responsibility for the service.
+            $records = $this->api()->dnsRecords($cloudflareZoneId);
+        } catch (CloudflareApiException $e) {
+            return self::fail('Could not read this zone\'s DNS records: ' . $e->getMessage());
+        } catch (Throwable) {
+            return self::fail('Could not read this zone\'s DNS records. No changes were made.');
+        }
+
+        $dnssec = null;
+        $warnings = [];
+
+        try {
+            $dnssec = $this->api()->dnssec($cloudflareZoneId);
+        } catch (Throwable) {
+            $warnings[] = 'DNSSEC state was not readable during import and will be checked before any removal.';
+        }
+
+        // Re-check local ownership immediately before insert. No Cloudflare or
+        // registrar writes have occurred, so a rejected race is safe to retry.
+        if ($this->zones->liveByName($name) !== null || $this->zones->byCloudflareId($cloudflareZoneId) !== null) {
+            return self::fail('This zone or domain was linked in WHMP while the import was in progress. Refresh and try again.');
+        }
+
+        $ds = is_array($dnssec) ? self::dnssecDs($dnssec) : null;
+        $dnssecStatus = is_array($dnssec) ? mb_substr((string) ($dnssec['status'] ?? ''), 0, 20) : null;
+
+        try {
+            $zoneId = $this->zones->createImported([
+                'service_id' => $serviceId,
+                'client_id' => (int) $service['client_id'],
+                'reseller_id' => ($service['client_reseller_id'] ?? null) === null ? null : (int) $service['client_reseller_id'],
+                'cf_zone_id' => $cloudflareZoneId,
+                'name' => $name,
+                'status' => $status,
+                'name_servers' => array_values(array_filter((array) ($remote['name_servers'] ?? []), 'is_string')),
+                'original_name_servers' => array_values(array_filter((array) ($remote['original_name_servers'] ?? []), 'is_string')),
+                'paused' => (bool) ($remote['paused'] ?? false),
+                'dnssec_status' => $dnssecStatus,
+                'dnssec_ds' => $ds,
+                'last_error' => $warnings === [] ? null : implode(' ', $warnings),
+            ]);
+        } catch (Throwable) {
+            return self::fail('Could not link the Cloudflare zone in WHMP. The Cloudflare zone and registrar were not changed.');
+        }
+
+        $this->zones->log(
+            $zoneId,
+            $actor['type'],
+            $actor['id'],
+            'imported',
+            'Imported existing Free-plan zone for service #' . $serviceId . '; read ' . count($records) . ' DNS record(s). No Cloudflare or registrar settings were changed.'
+        );
+
+        $zone = $this->zones->find($zoneId) ?? [];
+
+        return [
+            'ok' => true,
+            'message' => 'Existing Cloudflare zone linked. WHMP read ' . count($records) . ' DNS record(s) and did not change Cloudflare DNS, settings, or registrar nameservers.',
+            'zone' => $zone,
+        ];
+    }
+
+    /**
      * Checks with Cloudflare whether the nameservers are in place yet.
      *
      * @param array{type: string, id: ?int} $actor
@@ -337,7 +547,15 @@ final class CloudflareService
         }
 
         if (self::sameNs($current, $target)) {
-            $this->zones->update($zoneRowId, ['ns_switched_by_us' => true]);
+            if ((int) ($zone['ns_switched_by_us'] ?? 0) !== 1) {
+                $this->zones->log($zoneRowId, $actor['type'], $actor['id'], 'ns_already_pointing', 'The registrar already used Cloudflare nameservers; WHMP did not change them.');
+                $check = $this->checkActivation($zoneRowId, $actor);
+
+                return [
+                    'ok' => $check['ok'],
+                    'message' => 'The registrar already uses Cloudflare nameservers. No registrar change was made, and WHMP will not automatically restore nameservers it did not change. ' . $check['message'],
+                ];
+            }
 
             return $this->checkActivation($zoneRowId, $actor);
         }
@@ -1031,6 +1249,46 @@ final class CloudflareService
         }
 
         return $name;
+    }
+
+    /** Cloudflare zone plan identity, used to enforce the Free-only add-on scope. */
+    public static function isFreePlanZone(array $remote): bool
+    {
+        $plan = is_array($remote['plan'] ?? null) ? $remote['plan'] : [];
+        $id = strtolower(trim((string) ($plan['id'] ?? '')));
+        $name = strtolower(trim((string) ($plan['name'] ?? '')));
+
+        return $id === 'free' || in_array($name, ['free', 'free website'], true);
+    }
+
+    /** @param array<string, mixed> $remote @return array<string, mixed>|null */
+    private static function dnssecDs(array $remote): ?array
+    {
+        $keyTag = filter_var($remote['key_tag'] ?? null, FILTER_VALIDATE_INT);
+        $algorithm = filter_var($remote['algorithm'] ?? null, FILTER_VALIDATE_INT);
+        $digestType = filter_var($remote['digest_type'] ?? null, FILTER_VALIDATE_INT);
+        $digest = strtoupper(preg_replace('/\s+/', '', (string) ($remote['digest'] ?? '')) ?? '');
+
+        if ($keyTag === false || $keyTag < 0 || $keyTag > 65535
+            || $algorithm === false || $algorithm < 0 || $algorithm > 255
+            || $digestType === false || $digestType < 0 || $digestType > 255
+            || preg_match('/^[A-F0-9]{40,128}$/', $digest) !== 1) {
+            return null;
+        }
+
+        $ds = trim((string) ($remote['ds'] ?? ''));
+
+        if ($ds === '') {
+            $ds = $keyTag . ' ' . $algorithm . ' ' . $digestType . ' ' . $digest;
+        }
+
+        return [
+            'key_tag' => $keyTag,
+            'algorithm' => $algorithm,
+            'digest_type' => $digestType,
+            'digest' => $digest,
+            'ds' => mb_substr($ds, 0, 300),
+        ];
     }
 
     public static function reasonLabel(string $reason): string

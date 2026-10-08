@@ -38,7 +38,10 @@ $pill = static function (array $z): string {
             <p>Free-plan zones for your customers and every reseller store's customers, all in
                 <?= $connected ? '<strong>' . e($accountName) . '</strong>' : 'your Cloudflare account' ?>.</p>
         </div>
-        <a class="cv-btn cv-btn--secondary" href="/admin/cloudflare/settings">Settings</a>
+        <div class="cfa-actions">
+            <a class="cv-btn cv-btn--secondary" href="/admin/cloudflare/import">Import existing zone</a>
+            <a class="cv-btn cv-btn--secondary" href="/admin/cloudflare/settings">Settings</a>
+        </div>
     </div>
     <?= $view->render('cloudflare.admin-tabs', ['active' => 'zones', 'notice' => $notice ?? null, 'error' => $error ?? null]) ?>
 

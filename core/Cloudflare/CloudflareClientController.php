@@ -22,7 +22,7 @@ use Throwable;
  */
 final class CloudflareClientController
 {
-    public const TABS = ['overview', 'dns', 'ssl', 'speed', 'caching', 'rules', 'security', 'analytics', 'activity'];
+    public const TABS = ['overview', 'dns', 'ssl', 'speed', 'caching', 'rules', 'security', 'email', 'analytics', 'activity'];
 
     public const SPEED_SETTINGS = ['early_hints','http3','0rtt','rocket_loader','always_online','ipv6','websockets','opportunistic_encryption','tls_1_3','email_obfuscation','hotlink_protection'];
 
@@ -37,7 +37,8 @@ final class CloudflareClientController
         private readonly SessionManager $session,
         private readonly CloudflareService $cloudflare,
         private readonly CloudflareZoneRepository $zones,
-        private readonly ?CloudflareFeatures $features = null
+        private readonly ?CloudflareFeatures $features = null,
+        private readonly ?CloudflareEmailRouting $emailRouting = null
     ) {
     }
 
@@ -67,6 +68,8 @@ final class CloudflareClientController
             'error' => $this->session->pullFlash(self::FLASH_ERR),
             'registered' => $zone !== null && $this->cloudflare->registeredDomain((string) $zone['name'], (int) $service['client_id']) !== null,
             'manageable' => $zone !== null && $zone['delete_after'] === null && (string) $service['status'] === 'active',
+            'emailManageable' => $zone !== null && $zone['delete_after'] === null && (string) $zone['status'] === 'active' && (int) $zone['paused'] === 0 && (string) $service['status'] === 'active',
+            'emailRouting' => null,
             'records' => [],
             'settings' => [],
             'rules' => [],
@@ -87,10 +90,12 @@ final class CloudflareClientController
                 'ssl', 'speed', 'caching' => $this->cloudflare->zoneSettings($zone),
                 'security' => $this->securityData($zone),
                 'rules' => $this->features !== null ? ['ok'=>true,'message'=>'OK','rulesets'=>$this->features->rules($zone)] : $missing,
+                'email' => $this->emailRouting !== null ? $this->emailRouting->overview($zone, $this->actor()) : $missing,
                 'analytics' => $this->features !== null ? $this->features->analytics($zone, $data['range']) : $missing,
                 default => ['ok' => true, 'message' => 'OK'],
             };
             $data['rulesets'] = $load['rulesets'] ?? [];
+            $data['emailRouting'] = $tab === 'email' ? $load : null;
             $data['analytics'] = $tab === 'analytics' && $load['ok'] ? $load : null;
             if ($tab === 'dns' && $this->features !== null) {
                 $data['dnssec'] = $this->features->dnssec($zone);
@@ -253,6 +258,74 @@ final class CloudflareClientController
         return $this->withFeatures($params,fn(array $zone,CloudflareFeatures $f):array=>$f->installOriginCertificate($zone,(string)$request->input('strict','')==='1',$this->actor()),'ssl');
     }
 
+    public function enableEmailRouting(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+
+        return $this->withZone($params, true, fn (array $zone): array => $routing !== null
+            ? $routing->enable($zone, (string) $request->input('confirm', '') === '1', $this->actor())
+            : ['ok' => false, 'message' => 'Email Routing is not available yet.'], 'email');
+    }
+
+    public function disableEmailRouting(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+
+        return $this->withZone($params, true, fn (array $zone): array => $routing !== null
+            ? $routing->disable($zone, (string) $request->input('confirm', '') === '1', $this->actor())
+            : ['ok' => false, 'message' => 'Email Routing is not available yet.'], 'email');
+    }
+
+    public function addEmailDestination(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+
+        return $this->withZone($params, true, fn (array $zone): array => $routing !== null
+            ? $routing->addDestination($zone, (string) $request->input('email', ''), $this->actor())
+            : ['ok' => false, 'message' => 'Email Routing is not available yet.'], 'email');
+    }
+
+    public function addEmailRoute(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+
+        return $this->withZone($params, true, fn (array $zone): array => $routing !== null
+            ? $routing->addRoute($zone, (string) $request->input('local_part', ''), (int) $request->input('destination_id', 0), $this->actor())
+            : ['ok' => false, 'message' => 'Email Routing is not available yet.'], 'email');
+    }
+
+    public function toggleEmailRoute(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+
+        return $this->withZone($params, true, fn (array $zone): array => $routing !== null
+            ? $routing->setRouteEnabled($zone, (int) $params['rule'], (string) $request->input('enabled', '') === '1', $this->actor())
+            : ['ok' => false, 'message' => 'Email Routing is not available yet.'], 'email');
+    }
+
+    public function deleteEmailRoute(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+
+        return $this->withZone($params, true, fn (array $zone): array => $routing !== null
+            ? $routing->deleteRoute($zone, (int) $params['rule'], $this->actor())
+            : ['ok' => false, 'message' => 'Email Routing is not available yet.'], 'email');
+    }
+
+    public function setEmailCatchAll(Request $request, array $params): Response
+    {
+        $routing = $this->emailRouting;
+        $enabled = (string) $request->input('enabled', '') === '1';
+        $destinationId = (int) $request->input('destination_id', 0);
+        $confirmed = (string) $request->input('confirm', '') === '1';
+
+        return $this->withZone($params, true, fn (array $zone): array => !$enabled && !$confirmed
+            ? ['ok' => false, 'message' => 'Confirm that disabling the catch-all stops forwarding for unmatched addresses.']
+            : ($routing !== null
+                ? $routing->setCatchAll($zone, $enabled, $destinationId > 0 ? $destinationId : null, $this->actor(), $confirmed)
+                : ['ok' => false, 'message' => 'Email Routing is not available yet.']), 'email');
+    }
+
     /** @param array<string,string> $params @param callable(array<string,mixed>,CloudflareFeatures):array{ok:bool,message:string} $action */
     private function withFeatures(array $params, callable $action, string $tab): Response
     {
@@ -324,12 +397,16 @@ final class CloudflareClientController
         return ['ok' => $rules['ok'], 'message' => $rules['message'], 'settings' => $settings['settings'] ?? [], 'rules' => $rules['rules'] ?? []];
     }
 
-    /** @return array{type: string, id: ?int} */
+    /** @return array{type: string, id: ?int, reseller_id: ?int} */
     private function actor(): array
     {
         $client = $this->guard->currentClient();
 
-        return ['type' => 'client', 'id' => $client !== null ? (int) $client['id'] : null];
+        return [
+            'type' => 'client',
+            'id' => $client !== null ? (int) $client['id'] : null,
+            'reseller_id' => $client === null || ($client['reseller_id'] ?? null) === null ? null : (int) $client['reseller_id'],
+        ];
     }
 
     /** @return array{0: array<string, mixed>|null, 1: Response|null} */

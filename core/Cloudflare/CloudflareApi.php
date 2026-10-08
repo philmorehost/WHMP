@@ -54,6 +54,43 @@ final class CloudflareApi
         return $this->call('GET', '/zones/' . self::id($zoneId));
     }
 
+    /**
+     * Lists one page of zones visible in the selected account. `name` is an
+     * optional exact-domain filter; Cloudflare caps this endpoint at 50 rows.
+     *
+     * @return array{zones: array<int, array<string, mixed>>, page: int, total_pages: int, total_count: int}
+     */
+    public function zonePage(string $accountId, string $name = '', int $page = 1, int $perPage = 50): array
+    {
+        $page = max(1, $page);
+        $perPage = max(5, min(50, $perPage));
+        $query = [
+            'account.id' => self::id($accountId),
+            'page' => $page,
+            'per_page' => $perPage,
+            'order' => 'name',
+            'direction' => 'asc',
+        ];
+        $name = trim($name);
+
+        if ($name !== '') {
+            if (mb_strlen($name) > 253) {
+                throw new CloudflareApiException('Enter a domain name up to 253 characters.');
+            }
+            $query['name'] = $name;
+        }
+
+        [$rows, $info] = $this->callWithInfo('GET', '/zones', null, $query);
+        $zones = is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [];
+
+        return [
+            'zones' => $zones,
+            'page' => max(1, (int) ($info['page'] ?? $page)),
+            'total_pages' => max(1, (int) ($info['total_pages'] ?? 1)),
+            'total_count' => max(0, (int) ($info['total_count'] ?? count($zones))),
+        ];
+    }
+
     /** @return array<string, mixed>|null the zone with this exact name in the account, if any */
     public function findZone(string $name, string $accountId): ?array
     {
@@ -144,6 +181,126 @@ final class CloudflareApi
         }
 
         return $response['body'];
+    }
+
+    // ------------------------------------------------------------ Email Routing
+
+    /** @return array<string, mixed> Email Routing settings for a zone */
+    public function emailRoutingSettings(string $zoneId): array
+    {
+        return (array) $this->call('GET', '/zones/' . self::id($zoneId) . '/email/routing');
+    }
+
+    /** @return array<int, array<string, mixed>> DNS records Cloudflare requires for Email Routing */
+    public function emailRoutingDns(string $zoneId): array
+    {
+        $rows = $this->call('GET', '/zones/' . self::id($zoneId) . '/email/routing/dns');
+
+        return is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [];
+    }
+
+    /** Enable Email Routing and let Cloudflare add/lock its required DNS records. */
+    public function enableEmailRouting(string $zoneId, string $zoneName): array
+    {
+        return (array) $this->call('POST', '/zones/' . self::id($zoneId) . '/email/routing/dns', ['name' => $zoneName]);
+    }
+
+    /** Disable Email Routing; Cloudflare removes only the records it manages for the feature. */
+    public function disableEmailRouting(string $zoneId): array
+    {
+        return (array) $this->call('DELETE', '/zones/' . self::id($zoneId) . '/email/routing/dns');
+    }
+
+    /** @return array<int, array<string, mixed>> every account destination (never expose this list directly to a client) */
+    public function emailRoutingAddresses(string $accountId): array
+    {
+        $path = '/accounts/' . self::id($accountId) . '/email/routing/addresses';
+        $all = [];
+
+        for ($page = 1; $page <= 4; $page++) {
+            [$rows, $info] = $this->callWithInfo('GET', $path, null, ['page' => $page, 'per_page' => 50]);
+            if (is_array($rows)) {
+                $all = array_merge($all, array_values(array_filter($rows, 'is_array')));
+            }
+
+            if ($page >= (int) ($info['total_pages'] ?? 1)) {
+                break;
+            }
+        }
+
+        return $all;
+    }
+
+    /** @return array<string, mixed> a new destination address (Cloudflare emails it for verification) */
+    public function createEmailRoutingAddress(string $accountId, string $email): array
+    {
+        return (array) $this->call('POST', '/accounts/' . self::id($accountId) . '/email/routing/addresses', ['email' => $email]);
+    }
+
+    /** @return array<string, mixed> */
+    public function emailRoutingAddress(string $accountId, string $addressId): array
+    {
+        return (array) $this->call('GET', '/accounts/' . self::id($accountId) . '/email/routing/addresses/' . self::id($addressId));
+    }
+
+    public function deleteEmailRoutingAddress(string $accountId, string $addressId): void
+    {
+        $this->call('DELETE', '/accounts/' . self::id($accountId) . '/email/routing/addresses/' . self::id($addressId));
+    }
+
+    /** @return array<int, array<string, mixed>> routing rules for this zone, across every API page */
+    public function emailRoutingRules(string $zoneId): array
+    {
+        $path = '/zones/' . self::id($zoneId) . '/email/routing/rules';
+        $all = [];
+
+        for ($page = 1; $page <= 4; $page++) {
+            [$rows, $info] = $this->callWithInfo('GET', $path, null, ['page' => $page, 'per_page' => 50]);
+            if (is_array($rows)) {
+                $all = array_merge($all, array_values(array_filter($rows, 'is_array')));
+            }
+
+            if ($page >= (int) ($info['total_pages'] ?? 1)) {
+                break;
+            }
+        }
+
+        return $all;
+    }
+
+    /** @return array<string, mixed> */
+    public function emailRoutingRule(string $zoneId, string $ruleId): array
+    {
+        return (array) $this->call('GET', '/zones/' . self::id($zoneId) . '/email/routing/rules/' . self::id($ruleId));
+    }
+
+    /** @param array<string, mixed> $rule @return array<string, mixed> */
+    public function createEmailRoutingRule(string $zoneId, array $rule): array
+    {
+        return (array) $this->call('POST', '/zones/' . self::id($zoneId) . '/email/routing/rules', $rule);
+    }
+
+    /** @param array<string, mixed> $rule @return array<string, mixed> */
+    public function updateEmailRoutingRule(string $zoneId, string $ruleId, array $rule): array
+    {
+        return (array) $this->call('PUT', '/zones/' . self::id($zoneId) . '/email/routing/rules/' . self::id($ruleId), $rule);
+    }
+
+    public function deleteEmailRoutingRule(string $zoneId, string $ruleId): void
+    {
+        $this->call('DELETE', '/zones/' . self::id($zoneId) . '/email/routing/rules/' . self::id($ruleId));
+    }
+
+    /** @return array<string, mixed> the zone's separate catch-all rule */
+    public function emailRoutingCatchAll(string $zoneId): array
+    {
+        return (array) $this->call('GET', '/zones/' . self::id($zoneId) . '/email/routing/rules/catch_all');
+    }
+
+    /** @param array<string, mixed> $rule @return array<string, mixed> */
+    public function updateEmailRoutingCatchAll(string $zoneId, array $rule): array
+    {
+        return (array) $this->call('PUT', '/zones/' . self::id($zoneId) . '/email/routing/rules/catch_all', $rule);
     }
 
     // ------------------------------------------------------------ settings & cache

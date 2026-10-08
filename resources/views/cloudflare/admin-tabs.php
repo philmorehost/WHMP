@@ -6,7 +6,7 @@
  * @var string|null $notice
  * @var string|null $error
  */
-$links = ['zones' => ['/admin/cloudflare', 'Zones'], 'settings' => ['/admin/cloudflare/settings', 'Settings'], 'addon' => ['/admin/addons/cloudflare', 'Add-on']];
+$links = ['zones' => ['/admin/cloudflare', 'Zones'], 'import' => ['/admin/cloudflare/import', 'Import zones'], 'settings' => ['/admin/cloudflare/settings', 'Settings'], 'addon' => ['/admin/addons/cloudflare', 'Add-on']];
 ?>
 <style>
     .cfa{display:grid;gap:18px}

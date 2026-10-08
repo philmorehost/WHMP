@@ -12,8 +12,8 @@ declare(strict_types=1);
 // ends up with every table and column the code expects.
 
 return [
-    'last_migration' => '0217_cloudflare_phase2.php',
-    'migration_count' => 216,
+    'last_migration' => '0218_cloudflare_email_routing.php',
+    'migration_count' => 217,
     'tables' => [
         'abandoned_carts' => [
             'columns' => [
@@ -1206,6 +1206,107 @@ return [
                 ],
             ],
             'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'cloudflare_email_destinations' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'client_id' => 'INT UNSIGNED NOT NULL',
+                'reseller_id' => 'INT UNSIGNED NULL',
+                'cf_destination_id' => 'VARCHAR(64) NULL',
+                'email' => 'VARCHAR(191) NOT NULL',
+                'verified_at' => 'DATETIME NULL',
+                'created_at' => 'DATETIME NOT NULL',
+                'updated_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'uniq_cf_email_destination_email' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'email',
+                    ],
+                ],
+                'uniq_cf_email_destination_remote' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'cf_destination_id',
+                    ],
+                ],
+                'idx_cf_email_destination_owner' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'client_id',
+                        'reseller_id',
+                    ],
+                ],
+            ],
+            'foreign' => [],
+            'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        ],
+        'cloudflare_email_routes' => [
+            'columns' => [
+                'id' => 'INT UNSIGNED AUTO_INCREMENT',
+                'zone_id' => 'INT UNSIGNED NOT NULL',
+                'client_id' => 'INT UNSIGNED NOT NULL',
+                'reseller_id' => 'INT UNSIGNED NULL',
+                'cf_rule_id' => 'VARCHAR(64) NOT NULL',
+                'local_part' => 'VARCHAR(64) NOT NULL',
+                'destination_id' => 'INT UNSIGNED NOT NULL',
+                'enabled' => 'TINYINT(1) NOT NULL DEFAULT 1',
+                'created_at' => 'DATETIME NOT NULL',
+                'updated_at' => 'DATETIME NOT NULL',
+            ],
+            'primary' => [
+                'id',
+            ],
+            'indexes' => [
+                'uniq_cf_email_route_remote' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'zone_id',
+                        'cf_rule_id',
+                    ],
+                ],
+                'uniq_cf_email_route_alias' => [
+                    'unique' => true,
+                    'fulltext' => false,
+                    'columns' => [
+                        'zone_id',
+                        'local_part',
+                    ],
+                ],
+                'idx_cf_email_route_owner' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'client_id',
+                        'reseller_id',
+                    ],
+                ],
+                'idx_cf_email_route_destination' => [
+                    'unique' => false,
+                    'fulltext' => false,
+                    'columns' => [
+                        'destination_id',
+                    ],
+                ],
+            ],
+            'foreign' => [
+                'fk_cf_email_route_destination' => [
+                    'column' => 'destination_id',
+                    'references' => 'cloudflare_email_destinations',
+                    'referenced_column' => 'id',
+                    'on_delete' => 'RESTRICT',
+                    'on_update' => NULL,
+                ],
+            ],
             'options' => 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         ],
         'cloudflare_zones' => [

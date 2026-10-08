@@ -30,10 +30,19 @@ $router->post('/client/services/{id}/cloudflare/rulesets/{kind}/{rule}/delete', 
 $router->post('/client/services/{id}/cloudflare/presets/{preset}', [CloudflareClientController::class, 'preset']);
 $router->post('/client/services/{id}/cloudflare/dnssec/{action}', [CloudflareClientController::class, 'dnssec']);
 $router->post('/client/services/{id}/cloudflare/origin-certificate', [CloudflareClientController::class, 'originCertificate']);
+$router->post('/client/services/{id}/cloudflare/email-routing/enable', [CloudflareClientController::class, 'enableEmailRouting']);
+$router->post('/client/services/{id}/cloudflare/email-routing/disable', [CloudflareClientController::class, 'disableEmailRouting']);
+$router->post('/client/services/{id}/cloudflare/email-routing/destinations', [CloudflareClientController::class, 'addEmailDestination']);
+$router->post('/client/services/{id}/cloudflare/email-routing/routes', [CloudflareClientController::class, 'addEmailRoute']);
+$router->post('/client/services/{id}/cloudflare/email-routing/routes/{rule}/toggle', [CloudflareClientController::class, 'toggleEmailRoute']);
+$router->post('/client/services/{id}/cloudflare/email-routing/routes/{rule}/delete', [CloudflareClientController::class, 'deleteEmailRoute']);
+$router->post('/client/services/{id}/cloudflare/email-routing/catch-all', [CloudflareClientController::class, 'setEmailCatchAll']);
 
 // Admin (addons.manage).
 $router->get('/admin/cloudflare', [CloudflareAdminController::class, 'index']);
 $router->get('/admin/cloudflare/settings', [CloudflareAdminController::class, 'settingsPage']);
+$router->get('/admin/cloudflare/import', [CloudflareAdminController::class, 'importPage']);
+$router->post('/admin/cloudflare/import', [CloudflareAdminController::class, 'importZone']);
 $router->post('/admin/cloudflare/settings', [CloudflareAdminController::class, 'saveSettings']);
 $router->post('/admin/cloudflare/connect', [CloudflareAdminController::class, 'connect']);
 $router->post('/admin/cloudflare/disconnect', [CloudflareAdminController::class, 'disconnect']);

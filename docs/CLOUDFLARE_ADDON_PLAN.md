@@ -1,7 +1,7 @@
 # Cloudflare Add-on for WHMP — Plan & status
 
-Status: **Phases 1 and 2 BUILT** (see "Implementation status" below). The decisions in
-§12 were answered as follows, and they override anything else in this plan:
+Status: **Phases 1, 2 and 3 BUILT** (see "Implementation status" below). The decisions
+in §12 are settled as follows, and they override any remaining historical notes in this plan:
 
 | Decision | Answer |
 |---|---|
@@ -26,7 +26,13 @@ Status: **Phases 1 and 2 BUILT** (see "Implementation status" below). The decisi
   (`SERVICE_STATUS_CHANGED`), once per service.
 * Zone creation: `POST /zones` → DNS scan → apex A + www CNAME to the hosting IP if
   missing → mail/ftp/cpanel/webmail/whm/autodiscover and MX targets forced to DNS-only
-  → default settings. An existing zone for the domain is refused, never adopted.
+  → default settings. Automatic setup refuses an existing zone. The admin can explicitly
+  import a matching Free zone only for an active service with a recorded checkout opt-in;
+  it reads zone details and DNS records but changes neither Cloudflare nor registrar data.
+* Existing-zone import: `/admin/cloudflare/import` lists zones in the selected account,
+  blocks paid-plan zones and existing WHMP ownership, and only offers matching opted-in
+  services. Imported zones keep `ns_switched_by_us = 0`, so WHMP never restores nameservers
+  that it did not change.
 * Client page `/client/services/{id}/cloudflare` (main site and stores, white-label):
   Overview (status, nameservers, one-click switch for our registrations, registrar
   steps otherwise, Check now, Turn off / Keep), DNS (A/AAAA/CNAME/MX/TXT/NS CRUD with
@@ -68,7 +74,16 @@ Status: **Phases 1 and 2 BUILT** (see "Implementation status" below). The decisi
 * Token instructions list the extra feature permissions. The feature tabs fail
   independently when a scoped token lacks one.
 
-**Phase 3 — deferred:** Cloudflare Email Routing (forwarding addresses and DNS).
+**Phase 3 — Email Routing — implemented**
+
+* Optional Free-plan Email Routing on an active, opted-in zone. Enabling and disabling are separate, explicit client actions; neither changes nameservers.
+* Before enabling, WHMP fails closed unless Cloudflare returns the complete required checklist: all three Email Routing MX targets at the apex, an apex SPF record including `_spf.mx.cloudflare.net`, and a non-empty DKIM TXT key. It also reads the zone's apex MX, SPF and domain DKIM records, and blocks on any existing root MX, apex SPF or domain DKIM record or other non-clean Cloudflare state. It never deletes, replaces, merges, duplicates or unlocks external mail records. Clients review the required Cloudflare DNS records before they confirm; Cloudflare's supported DNS endpoint then adds/locks only its managed Email Routing DNS records.
+* Cloudflare's destination addresses are account-wide, so WHMP keeps a private mapping to the exact client **and** reseller ID. An address already owned by another WHMP tenant cannot be claimed or displayed. A route can target only one of that owner's Cloudflare-verified destinations. Routes are zone-scoped and WHMP changes/deletes only routes whose saved owner and remote rule still match.
+* A catch-all is separate and off by default; enabling it requires an explicit destination selection. External/unmapped rules are read-only and their destinations are never shown.
+* Disabling requires a second confirmation, stops forwarding and asks Cloudflare to remove its Email Routing-managed DNS. Clients are told to preserve replacement mail and outbound SPF/DKIM first. Nameservers and unrelated DNS are never changed.
+* Cloudflare Free limits are enforced (200 destination addresses per account; 200 routing rules per zone). No charge, markup, paid-plan upgrade or reseller monetization is involved.
+* API methods live in `CloudflareApi`; owner-scoped logic and audit events in `CloudflareEmailRouting`; tables are created by migration `0218_cloudflare_email_routing.php`. Tests use the stateful fake in `tests/Unit/CloudflareAddonTest.php`.
+* Required scopes: Zone Settings Read and Write; DNS Read (mandatory fail-closed preflight); account-level `Email Routing Addresses` Read and Write (destination addresses are account-wide); and zone-level `Email Routing Rules` Read and Write (forwarding rules belong to a zone). The existing Cloudflare add-on permissions are still required for their own features.
 
 Benchmarks studied:
 
@@ -88,53 +103,54 @@ that no longer exist. The design must be built on what still works.
 | Fact | Consequence for WHMP |
 |---|---|
 | Cloudflare **shut down the Host API and Reseller API on 1 Nov 2022**. These were what "automatically create a Cloudflare account for the customer" used. ([source](https://noise.getoto.net/2022/06/27/new-partner-program-for-smb-agencies-hosting-partners-now-in-closed-beta/), [source](https://www.webhostingtalk.com/showthread.php?t=1864833)) | We cannot create Cloudflare accounts for clients with a normal account. One reviewer of module 2146 was told by Cloudflare that it is "a legacy integration that is no longer supported by their partner program". |
-| Creating a Cloudflare account per customer now requires the **Tenant API**, and that needs a signed partner agreement (MSP/Agency). ([source](https://developers.cloudflare.com/tenant/get-started/)) | Offered as an optional **Partner mode** (§2-B), not the default. |
-| A normal account with a **scoped API token** can add any number of client domains (zones) to *your* account. | This becomes the default **Provider mode** (§2-A) and works for every WHMP owner on day one. |
-| An account cannot hold unlimited **pending** (not yet activated) zones. The limit grows as zones activate. ([source](https://community.cloudflare.com/t/limit-of-pending-zones-increaseability/258507)) | WHMP tracks pending zones and warns the admin. It also chases clients to switch nameservers (emails plus automatic switching when we are the registrar), and offers cleanup of abandoned zones. |
-| **Page Rules are deprecated.** Creating new ones stopped for all accounts in Jan 2025, and they are being migrated to Redirect, Cache, Configuration and Origin Rules. ([source](https://ppc.land/cloudflare-retires-page-rules/), [source](https://community.cloudflare.com/t/important-page-rules-migration/656021)) | WHMP builds on the **modern Rules** (rulesets API). Module 9045 still advertises "Page Rules". Existing Page Rules are shown read-only. |
-| **Cloudflare for SaaS**: 100 custom hostnames included, then $0.10/hostname/month. Apex domains need Enterprise. ([source](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/plans/)) | This is an optional later phase: CDN/SSL for a `www.` hostname without changing nameservers. |
-| Paid plans (Pro/Business) for a zone in *your* account are billed to **your** Cloudflare card. | WHMP invoices the client first. The zone is only upgraded **after the invoice is paid**, and downgrades happen at the end of the term (§4). |
+| Creating a Cloudflare account per customer now requires the **Tenant API**, which requires a signed partner agreement (MSP/Agency). ([source](https://developers.cloudflare.com/tenant/get-started/)) | Partner/Tenant mode is out of scope; WHMP uses the owner's normal Cloudflare account only. |
+| A normal account with a **scoped API token** can add client domains (zones) to the owner's account. | This is the only supported connection mode. Every service is separately mapped to its WHMP client and reseller owner. |
+| An account cannot hold unlimited **pending** (not yet activated) zones. The limit grows as zones activate. ([source](https://community.cloudflare.com/t/limit-of-pending-zones-increaseability/258507)) | WHMP tracks pending zones and warns the admin. Nameservers change only after the client explicitly clicks; abandoned-zone cleanup follows the 7-day grace period. |
+| **Page Rules are deprecated.** Creating new ones stopped for all accounts in Jan 2025, and they are being migrated to Redirect, Cache, Configuration and Origin Rules. ([source](https://ppc.land/cloudflare-retires-page-rules/), [source](https://community.cloudflare.com/t/important-page-rules-migration/656021)) | WHMP builds on the **modern Rules** (rulesets API). Existing Page Rules are not created by WHMP. |
+| **Cloudflare for SaaS** can incur per-hostname or Enterprise charges. ([source](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/plans/)) | It is out of scope unless a complete Free-only implementation is available; WHMP never enables a paid feature or upgrades a zone. |
+| Paid plans (Pro/Business) for a zone in *your* account are billed to **your** Cloudflare card. | Paid plans are not offered or upgraded by WHMP. Every zone remains Cloudflare Free. |
 
 ---
 
-## 2. Connection modes
+## 2. Connection and token permissions
 
-The admin adds one or more "Cloudflare connections" (stored like a server, token
-encrypted with `SecretBox`). Each product picks a connection and a mode.
+WHMP uses one mode only: the platform owner's **normal Cloudflare account** with a
+scoped API token. The add-on is Free-plan only. Partner/Tenant connections and
+client-owned Cloudflare accounts are not supported. One zone is mapped to the exact
+WHMP client and reseller owner; the Cloudflare zone ID is never accepted from the
+browser.
 
-| Mode | Who owns the zone | Needs | Use for |
-|---|---|---|---|
-| **A. Provider account** (default) | Your Cloudflare account; one zone per client domain | A scoped API token | Free CDN for hosting clients, and resale of Pro/Business |
-| **B. Partner / Tenant** | A Cloudflare account created per client under your tenant; client can optionally be invited to log in to Cloudflare | Cloudflare partner agreement plus Tenant API access | Partners who want full account separation |
-| **C. Client's own account** ("Connect Cloudflare") | The client's own Cloudflare account; WHMP is only a control panel | The client pastes their own API token | A free value-add for every client; no provisioning or billing |
+The token must cover the connected account and the zones WHMP manages. The admin
+screen lists the exact custom-token scopes:
 
-The client dashboard (§5) is identical in all three modes. Only the
-connection behind it differs.
+* Zone: Read; Zone: Edit; Zone Settings: Read and Write; DNS: Read and Edit;
+  Cache Purge: Purge; Firewall Services: Edit; Single Redirect: Edit; Cache Rules:
+  Edit; Zone WAF: Edit; Analytics: Read; SSL and Certificates: Edit.
+* Account: Account Settings Read, Account Rulesets Edit and Account Filter Lists
+  Edit (the last two are required by Cloudflare's Cache Rules API).
+* For Email Routing: Zone Settings Read and Write; **DNS Read is mandatory** for
+  the non-destructive MX/SPF/DKIM preflight; account-level **Email Routing Addresses**
+  Read and Write (destinations are account-wide); zone-level **Email Routing Rules**
+  Read and Write (forwarding rules belong to a zone).
 
-Required token permissions (the admin screen lists the exact custom-token scopes):
-zone-scoped Zone: Edit, Zone Settings: Edit, DNS: Edit, Cache Purge: Purge,
-Firewall Services: Edit, Single Redirect: Edit, Cache Rules: Edit, Zone WAF: Edit,
-Analytics: Read, and SSL and Certificates: Edit; account-scoped Account Settings:
-Read, Account Rulesets: Edit, and Account Filter Lists: Edit (Cloudflare's Cache
-Rules API requires the latter two). The token must cover the connected account and
-all of its zones. Email Routing permissions remain deferred with Phase 3.
+If a scoped token lacks a permission, the affected page/action fails closed and
+shows a permission error; no automatic fallback or DNS mutation is attempted.
 
 ---
 
 ## 3. How it is sold
 
-1. **Stand-alone product** (product type "Cloudflare"): the client enters a domain at
-   order. Typical tiers: *Free CDN & Security*, *Pro*, *Business*.
-2. **Add-on to a hosting plan**, using the existing product add-ons, which are child
-   services (`services.parent_id`). It inherits the hosting service's domain, so the client is not asked
-   again.
-3. **Auto-include Free Cloudflare with hosting** (admin option, default OFF): every new
-   hosting order gets a free Cloudflare child service automatically.
-4. **Resellers** can sell any Cloudflare product with their own markup, using the existing
-   reseller pricing and tier-2 = upline retail. It is fully white-labelled: no main-host
-   name in the UI or emails (StoreMailBranding), and zones are tagged with
-   `reseller_id`. Store customers are visible only through the reseller's manage page,
-   as with every other service.
+1. Cloudflare is an optional free add-on to eligible hosting products. Admins select
+   the products and attach the configurable opt-in (No / Yes); it is never silently
+   included. If the admin allows it, the client may also explicitly enable it later
+   from an eligible service page.
+2. The domain comes from the hosting service; the client is not asked to substitute
+   another domain or choose a Cloudflare connection.
+3. Reseller stores may offer the same add-on **free only**, without setup fees,
+   markup or tier-2 monetization. It is fully white-labelled: no main-host name in
+   UI or email, and every zone/address/rule is scoped by the exact client and
+   `reseller_id`. Store customers are managed only through the reseller's manage page
+   or their reseller account.
 
 ---
 
@@ -143,23 +159,22 @@ all of its zones. Email Routing permissions remain deferred with Phase 3.
 | Event | What WHMP does |
 |---|---|
 | **Create** | Find or create the zone (`POST /zones`, `type: full`). Store zone id, assigned nameservers and the domain's **original nameservers** (for rollback). Optionally **import existing DNS** first (§9.2) so the site keeps working when nameservers switch. Apply product defaults (SSL mode, Always HTTPS, security level…). |
-| **Nameservers** | If the domain is registered **through WHMP**, offer one-click (or automatic, admin option) **switch to Cloudflare nameservers** through the registrar module's `saveNameservers()`, keeping the old ones for rollback. Otherwise, email the client clear instructions and show them on the service page with copy buttons. |
+| **Nameservers** | Never switch automatically. If the domain is registered through WHMP, offer the client an explicit one-click switch through the registrar; otherwise show clear instructions. Retain the prior nameservers for a client-requested rollback. Email Routing setup never changes nameservers. |
 | **Activation** | A cron runs `activation_check` for pending zones every 15 min (backing off over time). The client is emailed when the zone becomes **Active**, with a reminder at day 3 and day 7 if still pending. |
 | **Suspend** | Pause the zone (`paused: true`). DNS keeps resolving, but Cloudflare proxying and features stop. The client dashboard becomes read-only. |
 | **Unsuspend** | Unpause and restore editing. |
-| **Upgrade / downgrade** | Uses the existing upgrade flow plus `changePackage()`. Upgrades are applied to the zone **only after payment**; downgrades at the end of the paid term. Before offering paid plans, WHMP lists the plans the connection is actually allowed to buy (`available_plans`). |
-| **Terminate** (safe by default) | 1) Export the zone as a BIND file and attach it to the service. 2) If we are the registrar, **restore the original nameservers**. 3) Mark the zone "pending deletion" for N days (default 7). 4) Delete it afterwards; the admin can undo during the grace period. Immediate deletion is only possible if the admin explicitly chooses it per product. |
+| **Plan** | WHMP accepts only Cloudflare Free zones. It never upgrades, sells or monetizes Cloudflare plans or paid features. |
+| **Terminate** (safe by default) | Export a BIND backup, notify the client, and schedule zone deletion after the 7-day grace period. Do not change or restore nameservers automatically. The client chooses any nameserver change themselves; the grace period is undoable until deletion. |
 | **Sync** (daily) | Refresh status, plan, nameservers and paused state. Detect **nameserver drift** (domain moved away from Cloudflare) and notify the admin and client. Detect zones deleted directly in Cloudflare. |
 
 ---
 
 ## 5. Client dashboard (client area → service → "Cloudflare")
 
-Built in the client area's existing visual style (cards, tabs), mobile-first. Each tab can be
-switched off per product by the admin, and features the zone's plan does not include
-are hidden or shown as "Available on Pro". Every request is checked against
-the signed-in client, the service they own, and the zone id **stored in WHMP**.
-A zone id is never taken from the browser.
+Built in the client area's existing visual style (cards, tabs), mobile-first. The
+add-on is Free-plan only; paid-plan upsells and upgrades are absent. Every request
+is checked against the signed-in client, the exact reseller owner and the zone ID
+stored in WHMP. A zone ID is never taken from the browser.
 
 | Tab | Features |
 |---|---|
@@ -172,26 +187,29 @@ A zone id is never taken from the browser.
 | **Rules** (modern) | **Redirect Rules** (replacing Page Rule forwarding: "redirect www → apex", "old URL → new URL"), **Cache Rules** ("cache everything on /images", "bypass cache on /wp-admin"), **Configuration Rules**. Templates for WordPress, WooCommerce and static sites. Legacy Page Rules are listed read-only. |
 | **Analytics** | 24 h / 7 d / 30 d: requests, bandwidth, % cached, unique visitors, threats blocked, top countries, status codes. Uses the GraphQL Analytics API. |
 | **DNSSEC** | Enable/disable. **If the domain is registered through WHMP, the DS record is sent to the registrar automatically** (§9.4); otherwise the DS values are shown to copy. |
-| **Email Routing** (optional) | Free forwarding addresses (`sales@domain` → Gmail), catch-all, and setup of the required MX/TXT records. |
+| **Email Routing** (optional) | Explicit Free-plan opt-in. Before activation, show Cloudflare's required DNS records and inspect apex MX/SPF plus domain DKIM records. Fail closed on any existing mail records; never overwrite/merge mail DNS automatically. The client explicitly enables or disables Cloudflare-managed records. Account-wide destinations and zone rules are strictly mapped to the exact client + reseller owner; only verified destinations can receive one-to-one forwarding rules. Catch-all is separate and off by default. No nameserver changes, mailboxes, outbound sending, fees or reseller markup. |
 | **Activity** | Who changed what and when (client, admin or reseller staff), for this zone. |
 
 ---
 
 ## 6. Admin area
 
-* **Add-on page** (`/admin/addons/cloudflare`): connections, a **Verify token** checklist,
-  default settings for new zones, feature toggles, safe-termination grace days,
-  auto-include-with-hosting switch, and email template links.
+* **Add-on page** (`/admin/addons/cloudflare`): the normal-account API token and
+  account picker, a **Verify token** checklist, default Free-plan settings, product
+  opt-in checklist, 7-day safe-termination grace period, and email template links.
 * **Zones list**: every zone with client, service, plan, status and last sync. Filters:
   pending, paused, moved away, **orphans** (zones in Cloudflare that are linked to no
   service), and pending deletion. Bulk sync.
-* **Import existing zones**: link zones already in the Cloudflare account to
-  clients/services, so a host that already uses Cloudflare can migrate in minutes.
-* **Per-zone view**: the same dashboard as the client, plus admin-only actions (force
-  pause, change plan without invoice, delete now, restore from BIND backup).
+* **Import existing zones** (`/admin/cloudflare/import`): list zones in the selected
+  Cloudflare account and link a Free-plan zone only to its exact active, checkout-opted-in
+  service. WHMP reads the zone and DNS records; it does not alter DNS, settings, DNSSEC,
+  or registrar nameservers during import.
+* **Per-zone view**: the same dashboard as the client, plus admin-only lifecycle
+  actions (pause, inspect, delete according to the grace policy, restore a BIND backup).
+  No paid-plan changes are available.
 * **Health card**: token valid, permissions OK, pending-zone count against the limit,
   last cron run, and API errors in the last 24 h.
-* **Cost report**: paid zones per plan, revenue, and what Cloudflare will charge you.
+* No Cloudflare cost report or monetization: all supported zones and this add-on stay Free.
 * **API log**: request/response log with tokens redacted, kept for 30 days (reusing the
   existing provider `HttpExchangeLog`).
 * Staff permissions: `cloudflare.view`, `cloudflare.manage`, `cloudflare.delete`.
@@ -210,15 +228,16 @@ respect the Invalid Email Blocker, store branding and in-app notification copies
 
 ## 8. Data model (new tables)
 
-* `cloudflare_zones`: id, service_id (nullable for imported/BYO), client_id,
-  reseller_id, connection_id, mode (provider/tenant/byo), cf_account_id, cf_zone_id,
-  name, status, plan, name_servers (JSON), original_name_servers (JSON), paused,
-  activated_at, last_synced_at, delete_after, backup_path, timestamps.
-* `cloudflare_client_tokens` (mode C): client_id, encrypted token, cf_account_id,
-  verified_at.
+* `cloudflare_zones`: service_id, exact client/reseller owner, Cloudflare zone ID,
+  name/status, nameservers, pause/deletion state, BIND backup, DNSSEC and certificate
+  metadata. The single normal-account connection is stored in encrypted add-on settings.
 * `cloudflare_activity`: zone_id, actor_type, actor_id, action, summary, created_at.
-* Connections reuse the `servers` table (`module_slug = 'cloudflare'`, token encrypted).
-  Add-on settings live in `addon_modules.config`.
+* `cloudflare_email_destinations`: unique account-level Cloudflare destination ID and
+  normalised email, privately mapped to one client and reseller ID, with verification
+  state. A unique email claim prevents cross-tenant reuse of Cloudflare's global list.
+* `cloudflare_email_routes`: zone/client/reseller owner, Cloudflare rule ID, local alias,
+  destination mapping and enabled state; composite uniqueness prevents duplicate aliases
+  or remote IDs in one zone.
 
 Code layout: `core/Cloudflare/` with
 * `CloudflareClient` (HTTP, pagination, rate-limit and retry, typed errors)
@@ -235,8 +254,7 @@ unit-tested with recorded Cloudflare responses and no live calls.
 
 ## 9. Enhancements over both WHMCS modules
 
-1. **Automatic nameserver switch and rollback** for domains registered through WHMP
-   (neither module can do this reliably; 2146 claims it, 9045 doesn't).
+1. **Client-controlled nameservers**: WHMP offers a clear one-click switch only after the client submits it; nameservers are never changed automatically.
 2. **DNS import before switching**: copy the records from the client's hosting account
    (cPanel zone through the existing cPanel tools), or a DNS scan of common records, so
    email and subdomains don't break on activation. This is the #1 cause of "Cloudflare
@@ -250,12 +268,12 @@ unit-tested with recorded Cloudflare responses and no live calls.
 6. **I'm Under Attack with an auto-revert timer** and an attack banner on the client dashboard.
 7. **Modern Rules** (Redirect/Cache/Configuration) with ready-made templates, instead of
    the deprecated Page Rules.
-8. **Three connection modes**, including free "Connect your own Cloudflare" for every client.
-9. **Reseller white-label** with tier pricing, which no WHMCS module offers.
+8. **One normal-account connection mode**, never a partner or client-owned account.
+9. **Strict reseller white-label and isolation**; Cloudflare remains a free value-add with no resale markup.
 10. **Pending-zone limit protection**: warnings, reminders and abandoned-zone cleanup.
-11. **Paid-plan safety**: Cloudflare is charged only after the client has paid, and there is a cost report.
+11. **Free-plan guardrails**: no paid-plan changes, upgrade billing or monetization.
 12. **Nameserver drift detection** with alerts, plus a full activity/audit trail.
-13. **Email Routing** management (free forwarding mailboxes).
+13. **Email Routing** with verified forwarding destinations, explicit catch-all opt-in and a fail-closed MX/SPF/DKIM safety check.
 14. **Plain-English guidance** on risky settings (Flexible SSL redirect loops, HSTS lock-in).
 15. **No licence server** and no phoning home. It's part of WHMP.
 
@@ -265,9 +283,9 @@ unit-tested with recorded Cloudflare responses and no live calls.
 
 | Phase | Scope | Rough size |
 |---|---|---|
-| **1 — Core (MVP)** | Provider mode; connection plus token verify; provisioning lifecycle (create/suspend/unsuspend/safe terminate/sync); auto nameserver switch for our domains; activation cron plus emails; client Overview, DNS, SSL basics, Caching (purge/dev mode), Security level and Under Attack; admin zones list, import and health; reseller white-label | Largest |
-| **2 — Power features** | Paid plan upgrade/downgrade with billing; Rules (Redirect/Cache/Config); IP Access and WAF custom rules; rate-limit rule; Analytics; DNSSEC plus DS push; Origin cert plus cPanel install; DNS import from cPanel; Speed tab | Large |
-| **3 — Extras** | Client's own account mode; Partner/Tenant mode; Email Routing; Cloudflare for SaaS (CDN on `www` without nameserver change); cost report | Medium |
+| **1 — Core (MVP)** | Normal-account connection and token verify; opt-in provisioning lifecycle; client-click nameserver switch only; activation cron and emails; client Overview, DNS, SSL, Caching, Security and Activity; admin zones and import; strict reseller white-label | Built |
+| **2 — Power features** | Rules (Redirect/Cache/Firewall); Analytics; DNSSEC plus DS safety; Origin certificate and cPanel install; Free-plan Speed settings | Built |
+| **3 — Email Routing** | Optional Free-plan forwarding addresses, verified destinations, zone rules, catch-all off by default, ownership-scoped persistence, safe DNS preflight, explicit setup/disable and tests | Built |
 
 Each phase ships with unit tests (recorded API responses), screenshots and a docs page.
 
@@ -283,17 +301,12 @@ Each phase ships with unit tests (recorded API responses), screenshots and a doc
 
 ---
 
-## 12. Decisions needed from you
+## 12. Settled decisions
 
-1. **Your Cloudflare account type:** a normal account (Provider mode) or a Cloudflare
-   partner with Tenant API access?
-2. **Plans to sell:** Free only at first, or Pro/Business too? (Paid plans are charged
-   to your Cloudflare card; WHMP bills the client first.)
-3. **Auto-include free Cloudflare with every hosting order?** (Default OFF.)
-4. **Automatic nameserver switch** for domains registered with you: automatic, or
-   only when the client clicks "Switch now"?
-5. **Termination:** safe delete after a 7-day grace period (recommended), or keep the zone
-   detached and never delete?
-6. **Resellers:** allowed to sell Cloudflare products (white-label)? (Recommended: yes.)
-7. **Scope of Phase 1:** happy with the split in §10, or move something earlier
-   (for example Analytics or paid plans)?
+1. Use a normal Cloudflare account and API token; no Partner/Tenant or client-owned mode.
+2. Free plan only; the add-on is free, with no monetization or paid-plan upgrade.
+3. The client opts in through the configurable product option; never auto-include.
+4. Nameservers change only when the client explicitly clicks. Email Routing never changes them.
+5. On service termination, delete the zone after the 7-day grace period; do not switch or restore nameservers automatically.
+6. Resellers may offer Cloudflare free, with strict per-client and reseller-ID ownership isolation.
+7. Email Routing is optional, explicit and fail-closed around existing email DNS. Pre-existing MX, root SPF or domain DKIM records block automatic setup until manually reviewed; WHMP never overwrites them.

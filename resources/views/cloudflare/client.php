@@ -21,11 +21,13 @@ $dnssec ??= null;
 $origin ??= null;
 $rulesets ??= [];
 $analytics ??= null;
+$emailRouting ??= null;
+$emailManageable ??= false;
 $range ??= 7;
 
 $id = (int) $service['id'];
 $base = '/client/services/' . $id . '/cloudflare';
-$tabs = ['overview' => 'Overview', 'dns' => 'DNS', 'ssl' => 'SSL/TLS', 'speed' => 'Speed', 'caching' => 'Caching', 'rules' => 'Rules', 'security' => 'Security', 'analytics' => 'Analytics', 'activity' => 'Activity'];
+$tabs = ['overview' => 'Overview', 'dns' => 'DNS', 'ssl' => 'SSL/TLS', 'speed' => 'Speed', 'caching' => 'Caching', 'rules' => 'Rules', 'security' => 'Security', 'email' => 'Email Routing', 'analytics' => 'Analytics', 'activity' => 'Activity'];
 $domainLabel = (string) ($zone['name'] ?? CloudflareService::zoneName((string) ($service['domain'] ?? '')) ?? ($service['domain'] ?? ''));
 
 $statusBadge = static function (?array $zone): string {
@@ -609,6 +611,187 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
                 <?php endif; ?>
             </div>
         <?php endforeach; ?>
+
+    <?php elseif ($tab === 'email'): ?>
+        <?php
+        $emailData = is_array($emailRouting) ? $emailRouting : ['ok' => false, 'message' => 'Email Routing could not be checked safely.'];
+        $verifiedDestinations = array_values(array_filter((array) ($emailData['destinations'] ?? []), static fn (array $destination): bool => ($destination['status'] ?? '') === 'verified'));
+        $emailCanManage = $emailManageable && !empty($emailData['can_manage']);
+        $catchAll = (array) ($emailData['catch_all'] ?? []);
+        ?>
+        <div class="cv-card cf-card">
+            <h2 class="cv-card__title">Email Routing</h2>
+            <p class="cf-muted">Free forwarding for inbound email on this domain. It forwards to an existing, verified destination; it does not create mailboxes or send outgoing mail. This setup never changes nameservers.</p>
+            <p><span class="cv-badge cv-badge--neutral">Cloudflare Free</span>
+                <?php if (!empty($emailData['enabled']) && !empty($emailData['ready'])): ?> <span class="cv-badge cv-badge--success">Ready</span>
+                <?php elseif (!empty($emailData['enabled'])): ?> <span class="cv-badge cv-badge--warning">DNS needs attention</span>
+                <?php else: ?> <span class="cv-badge cv-badge--neutral">Not enabled</span><?php endif; ?>
+            </p>
+        </div>
+
+        <?php if (empty($emailData['ok'])): ?>
+            <div class="cv-alert cv-alert--error cf-flash">Email Routing could not be checked safely. No Email Routing or DNS changes were made. If this continues, ask support to verify the Cloudflare API-token permissions.</div>
+        <?php else: ?>
+            <?php if (empty($emailData['enabled'])): ?>
+                <div class="cv-card cf-card">
+                    <h2 class="cv-card__title">Review email DNS before enabling</h2>
+                    <p>Cloudflare Email Routing takes over inbound mail for <strong><?= e((string) $zone['name']) ?></strong>. If you use another mail host or have existing mailboxes, do not enable it until you have migrated them and intentionally changed your mail DNS. WHMP fails closed around existing root MX, SPF and DKIM records; it does not overwrite them.</p>
+                    <?php if (!empty($emailData['mx_records'])): ?>
+                        <h3>Current root-domain MX records</h3>
+                        <ul><?php foreach ((array) $emailData['mx_records'] as $record): ?><li><code><?= e((string) ($record['content'] ?? '')) ?></code> (priority <?= (int) ($record['priority'] ?? 0) ?>)</li><?php endforeach; ?></ul>
+                    <?php else: ?>
+                        <p class="cf-muted">No root-domain MX records were found.</p>
+                    <?php endif; ?>
+                    <?php if (!empty($emailData['spf_records'])): ?>
+                        <h3>Current root-domain SPF records</h3>
+                        <ul><?php foreach ((array) $emailData['spf_records'] as $record): ?><li><code><?= e((string) ($record['content'] ?? '')) ?></code></li><?php endforeach; ?></ul>
+                        <div class="cv-alert cv-alert--error">An SPF record already exists. WHMP will not replace, merge, or duplicate it. Keep a single SPF record that preserves all existing senders and includes Cloudflare's requirement before enabling Email Routing.</div>
+                    <?php else: ?>
+                        <p class="cf-muted">No root-domain SPF record was found. Review your outbound-mail provider's SPF requirements before proceeding.</p>
+                    <?php endif; ?>
+                    <?php if (!empty($emailData['dkim_records'])): ?>
+                        <h3>Existing DKIM records for this domain</h3>
+                        <ul><?php foreach ((array) $emailData['dkim_records'] as $record): ?><li><code><?= e((string) ($record['name'] ?? '')) ?></code> (<?= e((string) ($record['type'] ?? '')) ?>): <code><?= e((string) ($record['content'] ?? '')) ?></code></li><?php endforeach; ?></ul>
+                        <div class="cv-alert cv-alert--error">Existing DKIM records may be used by your outgoing-mail provider. WHMP will not alter them or proceed automatically; review the mail DNS migration with your provider first.</div>
+                    <?php endif; ?>
+                    <?php if (!empty($emailData['mx_conflicts'])): ?>
+                        <div class="cv-alert cv-alert--error">Existing MX records point outside Cloudflare Email Routing. WHMP left them untouched. Migrate any mailboxes and change those records yourself before trying again.</div>
+                    <?php elseif (!empty($emailData['mx_records'])): ?>
+                        <div class="cv-alert cv-alert--error">Root-domain MX records are already present. Even if they appear to match Cloudflare, WHMP will not replace or duplicate them; review Email Routing's DNS state in Cloudflare first.</div>
+                    <?php endif; ?>
+                    <h3>DNS records Cloudflare says it requires</h3>
+                    <?php if (!empty($emailData['required_records'])): ?>
+                        <div class="cf-table-wrap"><table class="cv-table"><thead><tr><th>Type</th><th>Name</th><th>Content / target</th><th>Priority</th></tr></thead><tbody>
+                        <?php foreach ((array) $emailData['required_records'] as $record): ?>
+                            <tr><td><?= e((string) ($record['type'] ?? '')) ?></td><td><code><?= e((string) ($record['name'] ?? $zone['name'])) ?></code></td><td><code><?= e((string) ($record['content'] ?? '')) ?></code></td><td><?= isset($record['priority']) ? (int) $record['priority'] : '&mdash;' ?></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table></div>
+                    <?php else: ?>
+                        <p class="cf-muted">Cloudflare did not return a DNS checklist, so setup is unavailable.</p>
+                    <?php endif; ?>
+
+                    <?php if (!empty($emailData['can_enable']) && $emailManageable): ?>
+                        <form method="post" action="<?= e($base . '/email-routing/enable') ?>" class="cf-actions" data-cf-confirm="Email Routing takes over inbound mail. Proceed only if you have reviewed the MX, SPF and DKIM records above.">
+                            <?= csrf_field() ?>
+                            <label class="cf-check"><input type="checkbox" name="confirm" value="1" required> I confirm this domain has no existing mail provider or mailbox that must keep receiving mail, and I have reviewed the DNS checklist.</label>
+                            <button class="cv-btn" type="submit">Enable free Email Routing</button>
+                        </form>
+                    <?php elseif (!empty($emailData['mx_conflicts'])): ?>
+                        <p class="cf-muted">Setup is blocked until the existing MX records are intentionally migrated or removed. No records have been changed.</p>
+                    <?php elseif (!empty($emailData['mx_records'])): ?>
+                        <p class="cf-muted">Setup is blocked because root-domain MX records are already present. Review the current DNS configuration in Cloudflare first.</p>
+                    <?php elseif (!empty($emailData['spf_records'])): ?>
+                        <p class="cf-muted">Setup is blocked while an existing SPF record needs a safe manual merge. No records have been changed.</p>
+                    <?php elseif (!empty($emailData['dkim_records'])): ?>
+                        <p class="cf-muted">Setup is blocked while existing DKIM records require a safe manual mail-DNS review. No records have been changed.</p>
+                    <?php elseif (empty($emailData['required_dns_complete'])): ?>
+                        <p class="cf-muted">Cloudflare did not return a complete MX, SPF and DKIM checklist. Setup is unavailable until Cloudflare returns all required records.</p>
+                    <?php elseif (!$emailManageable): ?>
+                        <p class="cf-muted">Email Routing can be enabled only when this Cloudflare zone and hosting service are active and not paused or scheduled for removal.</p>
+                    <?php else: ?>
+                        <p class="cf-muted">Cloudflare's DNS state is not a clean, unconfigured state. WHMP will not overwrite it; check Email Routing in Cloudflare first.</p>
+                    <?php endif; ?>
+                </div>
+            <?php elseif (empty($emailData['ready'])): ?>
+                <div class="cv-alert cv-alert--error cf-flash">Cloudflare reports Email Routing is enabled but its DNS is not ready. WHMP has disabled forwarding controls to avoid changing a misconfigured setup. Review the DNS status in Cloudflare.</div>
+            <?php else: ?>
+                <?php if ((int) ($emailData['unmanaged_rule_count'] ?? 0) > 0): ?>
+                    <div class="cv-alert cv-alert--neutral">There are <?= (int) $emailData['unmanaged_rule_count'] ?> routing rule(s) that were not created by this service. WHMP leaves them untouched and does not show their destinations.</div>
+                <?php endif; ?>
+
+                <div class="cv-card cf-card">
+                    <h2 class="cv-card__title">Verified destination addresses</h2>
+                    <p class="cf-muted">Cloudflare emails each new destination a verification link. Only destinations added by this exact client/reseller account are shown here.</p>
+                    <?php if ($emailData['destinations'] === []): ?><p class="cf-muted">No destinations yet.</p><?php else: ?>
+                        <div class="cf-table-wrap"><table class="cv-table"><thead><tr><th>Destination</th><th>Status</th></tr></thead><tbody>
+                        <?php foreach ((array) $emailData['destinations'] as $destination): ?>
+                            <tr><td><?= e((string) $destination['email']) ?></td><td><?= e(ucfirst((string) $destination['status'])) ?><?= !empty($destination['verified_at']) ? ' · ' . e((string) $destination['verified_at']) : '' ?></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table></div>
+                    <?php endif; ?>
+                    <?php if ($emailCanManage): ?>
+                        <form method="post" action="<?= e($base . '/email-routing/destinations') ?>" class="cf-inline" style="margin-top:1rem">
+                            <?= csrf_field() ?>
+                            <label class="cv-field"><span class="cv-label">Add a destination</span><input class="cv-input" type="email" name="email" maxlength="90" autocomplete="email" required placeholder="you@example.net"></label>
+                            <button class="cv-btn" type="submit">Send verification email</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+
+                <div class="cv-card cf-card">
+                    <h2 class="cv-card__title">Forwarding addresses</h2>
+                    <p class="cf-muted">Each alias forwards to exactly one verified destination. Cloudflare Free allows up to 200 destination addresses and 200 rules per domain.</p>
+                    <?php if ($emailData['routes'] === []): ?><p class="cf-muted">No forwarding rules yet.</p><?php else: ?>
+                        <div class="cf-table-wrap"><table class="cv-table"><thead><tr><th>Address</th><th>Forwards to</th><th>Status</th><th></th></tr></thead><tbody>
+                        <?php foreach ((array) $emailData['routes'] as $route): ?>
+                            <tr><td><code><?= e((string) $route['address']) ?></code></td><td><?= e((string) $route['destination_email']) ?></td><td>
+                                <?php if (!empty($route['missing'])): ?>Missing in Cloudflare
+                                <?php elseif (!empty($route['changed'])): ?>Changed outside WHMP
+                                <?php else: ?><?= !empty($route['enabled']) ? 'Active' : 'Paused' ?><?php endif; ?>
+                            </td><td><div class="cf-actions">
+                                <?php if ($emailCanManage && !empty($route['manageable'])): ?>
+                                    <form method="post" action="<?= e($base . '/email-routing/routes/' . (int) $route['id'] . '/toggle') ?>">
+                                        <?= csrf_field() ?><input type="hidden" name="enabled" value="<?= !empty($route['enabled']) ? '0' : '1' ?>">
+                                        <button class="cv-btn cv-btn--secondary" type="submit"><?= !empty($route['enabled']) ? 'Pause' : 'Enable' ?></button>
+                                    </form>
+                                    <form method="post" action="<?= e($base . '/email-routing/routes/' . (int) $route['id'] . '/delete') ?>" data-cf-confirm="Remove this forwarding rule?">
+                                        <?= csrf_field() ?><button class="cv-btn cv-btn--secondary" type="submit">Remove</button>
+                                    </form>
+                                <?php endif; ?>
+                            </div></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table></div>
+                    <?php endif; ?>
+                    <?php if ($emailCanManage): ?>
+                        <form method="post" action="<?= e($base . '/email-routing/routes') ?>" class="cf-form-grid" style="margin-top:1rem">
+                            <?= csrf_field() ?>
+                            <div class="cv-field"><label class="cv-label" for="cf-email-local-part">Alias</label><div class="cf-inline"><input class="cv-input" id="cf-email-local-part" name="local_part" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._+-]*[A-Za-z0-9]|[A-Za-z0-9]" required placeholder="sales"><span>@<?= e((string) $zone['name']) ?></span></div></div>
+                            <div class="cv-field"><label class="cv-label" for="cf-email-destination">Verified destination</label><select class="cv-input" id="cf-email-destination" name="destination_id" required <?= $verifiedDestinations === [] ? 'disabled' : '' ?>><option value="">Choose a destination</option><?php foreach ($verifiedDestinations as $destination): ?><option value="<?= (int) $destination['id'] ?>"><?= e((string) $destination['email']) ?></option><?php endforeach; ?></select></div>
+                            <div class="cv-field"><button class="cv-btn" type="submit" <?= $verifiedDestinations === [] ? 'disabled' : '' ?>>Add forwarding address</button></div>
+                        </form>
+                        <?php if ($verifiedDestinations === []): ?><p class="cf-muted">Add and verify a destination before creating forwarding addresses.</p><?php endif; ?>
+                    <?php endif; ?>
+                </div>
+
+                <div class="cv-card cf-card">
+                    <h2 class="cv-card__title">Catch-all forwarding</h2>
+                    <p class="cf-muted">Optional and off by default. When enabled, every otherwise-unmatched address at <?= e((string) $zone['name']) ?> is forwarded to the selected destination.</p>
+                    <?php if (!empty($catchAll['external'])): ?>
+                        <div class="cv-alert cv-alert--neutral">A catch-all rule is configured outside this service. WHMP leaves it untouched and does not reveal its destination.</div>
+                    <?php elseif (!empty($catchAll['changed'])): ?>
+                        <div class="cv-alert cv-alert--error">The catch-all rule changed outside WHMP. It is read-only here until reviewed in Cloudflare.</div>
+                    <?php else: ?>
+                        <p>Status: <strong><?= !empty($catchAll['enabled']) ? 'On' : 'Off' ?></strong><?= !empty($catchAll['managed']) && !empty($catchAll['destination_email']) ? ' · forwards to ' . e((string) $catchAll['destination_email']) : '' ?></p>
+                        <?php if ($emailCanManage && !empty($catchAll['manageable'])): ?>
+                            <form method="post" action="<?= e($base . '/email-routing/catch-all') ?>" class="cf-form-grid">
+                                <?= csrf_field() ?><input type="hidden" name="enabled" value="1">
+                                <div class="cv-field"><label class="cv-label" for="cf-catch-destination">Verified destination</label><select class="cv-input" id="cf-catch-destination" name="destination_id" required <?= $verifiedDestinations === [] ? 'disabled' : '' ?>><option value="">Choose a destination</option><?php foreach ($verifiedDestinations as $destination): ?><option value="<?= (int) $destination['id'] ?>"<?= (int) ($catchAll['destination_id'] ?? 0) === (int) $destination['id'] ? ' selected' : '' ?>><?= e((string) $destination['email']) ?></option><?php endforeach; ?></select></div>
+                                <div class="cv-field"><button class="cv-btn" type="submit" <?= $verifiedDestinations === [] ? 'disabled' : '' ?>><?= !empty($catchAll['enabled']) ? 'Save catch-all' : 'Enable catch-all' ?></button></div>
+                            </form>
+                            <?php if (!empty($catchAll['enabled']) && !empty($catchAll['managed'])): ?>
+                                <form method="post" action="<?= e($base . '/email-routing/catch-all') ?>" class="cf-actions" data-cf-confirm="Disabling catch-all stops forwarding for every address without a specific rule.">
+                                    <?= csrf_field() ?><input type="hidden" name="enabled" value="0">
+                                    <label class="cf-check"><input type="checkbox" name="confirm" value="1" required> I understand unmatched addresses will no longer be forwarded.</label>
+                                    <button class="cv-btn cv-btn--secondary" type="submit">Turn off catch-all</button>
+                                </form>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+
+                <?php if ($emailCanManage && !empty($emailData['can_disable'])): ?>
+                    <div class="cv-card cf-card">
+                        <h2 class="cv-card__title">Turn off Email Routing</h2>
+                        <p>Disabling stops forwarding and asks Cloudflare to remove the DNS records it manages for Email Routing. Preserve any SPF requirements for your outgoing mail and configure a replacement mail provider first. Cloudflare nameservers will not be changed.</p>
+                        <form method="post" action="<?= e($base . '/email-routing/disable') ?>" class="cf-actions" data-cf-confirm="Disabling Email Routing can stop inbound delivery. Confirm that replacement mail DNS and outbound SPF are ready.">
+                            <?= csrf_field() ?>
+                            <label class="cf-check"><input type="checkbox" name="confirm" value="1" required> I understand this turns off forwarding and removes Cloudflare-managed Email Routing DNS records.</label>
+                            <button class="cv-btn cv-btn--secondary" type="submit">Disable Email Routing</button>
+                        </form>
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+        <?php endif; ?>
 
     <?php elseif ($tab === 'analytics'): ?>
         <div class="cf-actions" style="margin:0 0 1rem"><a class="cv-btn<?= $range===7?'':' cv-btn--secondary' ?>" href="<?= e($base.'?tab=analytics&range=7') ?>">7 days</a><a class="cv-btn<?= $range===30?'':' cv-btn--secondary' ?>" href="<?= e($base.'?tab=analytics&range=30') ?>">30 days</a></div>

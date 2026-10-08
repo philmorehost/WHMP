@@ -5,7 +5,8 @@ declare(strict_types=1);
 // Cloudflare add-on (docs/CLOUDFLARE_ADDON_PLAN.md) — Free plan only, Provider mode:
 // every zone lives in the platform's own Cloudflare account, one per client domain.
 //
-// cloudflare_zones      one row per zone WHMP created for a service. Rows are kept
+// cloudflare_zones      one row per zone WHMP created or explicitly imported
+//                       for a service. Rows are kept
 //                       after deletion (status 'deleted') so a domain's history and
 //                       its BIND backup survive, and so a service that already had a
 //                       zone is never re-enrolled automatically.

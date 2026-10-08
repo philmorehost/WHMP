@@ -10,6 +10,7 @@ use CodeVault\Cloudflare\CloudflareApi;
 use CodeVault\Cloudflare\CloudflareApiException;
 use CodeVault\Cloudflare\CloudflareCronJob;
 use CodeVault\Cloudflare\CloudflareFeatures;
+use CodeVault\Cloudflare\CloudflareEmailRouting;
 use CodeVault\Cloudflare\CloudflareRules;
 use CodeVault\Cloudflare\OriginCertificateInstaller;
 use CodeVault\Cloudflare\OriginCertificateKeyGenerator;
@@ -134,6 +135,24 @@ final class CloudflareAddonTest extends TestCase
         }
     }
 
+    public function testZonePageIsFilteredToTheSelectedAccountAndDomain(): void
+    {
+        $id = str_repeat('a', 32);
+        $otherId = str_repeat('b', 32);
+        $this->cf->zones[$id] = ['id' => $id, 'name' => 'example.com', 'account' => ['id' => 'acc123'], 'plan' => ['id' => 'free', 'name' => 'Free Website']];
+        $this->cf->zones[$otherId] = ['id' => $otherId, 'name' => 'example.com', 'account' => ['id' => 'other-account'], 'plan' => ['id' => 'free', 'name' => 'Free Website']];
+
+        $result = $this->service->apiClient()->zonePage('acc123', 'example.com', 1);
+
+        $this->assertCount(1, $result['zones']);
+        $this->assertSame($id, $result['zones'][0]['id']);
+        $this->assertSame(1, $result['total_pages']);
+        $query = [];
+        parse_str((string) parse_url($this->cf->requests[0]['url'], PHP_URL_QUERY), $query);
+        $this->assertSame('acc123', (string) ($query['account.id'] ?? $query['account_id'] ?? ''));
+        $this->assertSame('example.com', (string) ($query['name'] ?? ''));
+    }
+
     // ------------------------------------------------------------------ eligibility & order
 
     public function testEligibilityAndOrderChoiceFromConfigurableOption(): void
@@ -227,6 +246,116 @@ final class CloudflareAddonTest extends TestCase
         $this->assertSame('This domain is already set up in our Cloudflare account.', $result['message']);
         $this->assertNull($this->zones->liveForService(100));
         $this->assertNull($this->cf->find('POST', '/dns_records/scan'));
+    }
+
+    public function testExplicitImportLinksFreeZoneAndReadsDnsWithoutChangingCloudflareOrRegistrar(): void
+    {
+        $this->chooseCloudflareAtCheckout(500, 20);
+        $cfZoneId = str_repeat('c', 32);
+        $this->cf->zones[$cfZoneId] = [
+            'id' => $cfZoneId,
+            'name' => 'example.com',
+            'account' => ['id' => 'acc123', 'name' => 'Hosting Co'],
+            'status' => 'active',
+            'paused' => true,
+            'plan' => ['id' => 'free', 'name' => 'Free Website'],
+            'name_servers' => ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com'],
+            'original_name_servers' => ['ns1.oldhost.net', 'ns2.oldhost.net'],
+        ];
+        $this->cf->records[$cfZoneId] = [
+            'dnsrecord01' => ['id' => 'dnsrecord01', 'type' => 'A', 'name' => 'example.com', 'content' => '203.0.113.10', 'ttl' => 1, 'proxied' => true],
+            'dnsrecord02' => ['id' => 'dnsrecord02', 'type' => 'MX', 'name' => 'example.com', 'content' => 'mail.example.com', 'ttl' => 3600, 'priority' => 10],
+        ];
+        $this->cf->dnssec[$cfZoneId] = [
+            'status' => 'active', 'key_tag' => 2371, 'algorithm' => 13, 'digest_type' => 2,
+            'digest' => str_repeat('A1B2C3D4', 8), 'ds' => '2371 13 2 ' . str_repeat('A1B2C3D4', 8),
+        ];
+
+        $candidates = $this->service->importCandidates('example.com');
+        $this->assertCount(1, $candidates);
+        $this->assertSame(100, (int) $candidates[0]['service_id']);
+
+        $result = $this->service->importExistingZone($cfZoneId, 100, ['type' => 'admin', 'id' => 1]);
+
+        $this->assertTrue($result['ok'], $result['message']);
+        $this->assertStringContainsString('read 2 DNS record(s)', $result['message']);
+        $zone = $this->zones->liveForService(100);
+        $this->assertSame($cfZoneId, $zone['cf_zone_id']);
+        $this->assertSame('example.com', $zone['name']);
+        $this->assertSame('active', $zone['status']);
+        $this->assertSame(1, (int) $zone['paused']);
+        $this->assertSame(0, (int) $zone['paused_by_us']);
+        $this->assertSame(0, (int) $zone['ns_switched_by_us']);
+        $this->assertSame(['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com'], $zone['name_servers']);
+        $this->assertSame(['ns1.oldhost.net', 'ns2.oldhost.net'], $zone['original_name_servers']);
+        $this->assertSame('active', $zone['dnssec_status']);
+        $this->assertSame(0, (int) $zone['dnssec_ds_by_us'], 'imported DS data is never marked as WHMP-managed');
+        $this->assertNotNull($zone['last_synced_at']);
+        $this->assertSame([], $this->ns->saved, 'import never calls the registrar');
+        $this->assertContains('imported', array_column($this->zones->activity((int) $zone['id']), 'action'));
+        foreach ($this->cf->requests as $request) {
+            $this->assertSame('GET', $request['method'], 'import is read-only against Cloudflare');
+        }
+    }
+
+    public function testImportedResellerCustomerRetainsUniqueStoreOwnership(): void
+    {
+        $this->db->exec("INSERT INTO services (id, client_id, order_id, product_id, dedicated_ip, product_name, domain, status) VALUES (102, 9, 502, 20, '203.0.113.30', 'Starter', 'storeclient.io', 'active')");
+        $this->chooseCloudflareAtCheckout(502, 20);
+        $cfZoneId = str_repeat('f', 32);
+        $this->cf->zones[$cfZoneId] = [
+            'id' => $cfZoneId, 'name' => 'storeclient.io', 'account' => ['id' => 'acc123'], 'status' => 'active',
+            'plan' => ['id' => 'free', 'name' => 'Free Website'], 'name_servers' => ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com'],
+        ];
+        $this->cf->records[$cfZoneId] = [];
+
+        $result = $this->service->importExistingZone($cfZoneId, 102, ['type' => 'admin', 'id' => 1]);
+
+        $this->assertTrue($result['ok'], $result['message']);
+        $zone = $this->zones->liveForService(102);
+        $this->assertSame(9, (int) $zone['client_id']);
+        $this->assertSame(3, (int) $zone['reseller_id']);
+        $this->assertSame('Acme Hosting', $this->zones->search('live', 'storeclient')[0]['store_name']);
+    }
+
+    public function testImportBlocksAmbiguousServicesForTheSameDomain(): void
+    {
+        $this->db->exec("INSERT INTO services (id, client_id, order_id, product_id, dedicated_ip, product_name, domain, status) VALUES (101, 8, 501, 20, '203.0.113.20', 'Starter', 'example.com', 'active')");
+        $this->chooseCloudflareAtCheckout(500, 20);
+        $this->chooseCloudflareAtCheckout(501, 20);
+        $cfZoneId = str_repeat('9', 32);
+
+        $this->assertCount(2, $this->service->importCandidates('example.com'));
+        $result = $this->service->importExistingZone($cfZoneId, 100, ['type' => 'admin', 'id' => 1]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('Resolve the duplicate service assignment', $result['message']);
+        $this->assertSame([], $this->cf->requests);
+        $this->assertNull($this->zones->liveForService(100));
+    }
+
+    public function testImportRequiresRecordedCheckoutOptInAndFreePlan(): void
+    {
+        $cfZoneId = str_repeat('d', 32);
+        $this->cf->zones[$cfZoneId] = [
+            'id' => $cfZoneId, 'name' => 'example.com', 'account' => ['id' => 'acc123'], 'status' => 'active',
+            'plan' => ['id' => 'free', 'name' => 'Free Website'], 'name_servers' => [],
+        ];
+
+        $notOptedIn = $this->service->importExistingZone($cfZoneId, 100, ['type' => 'admin', 'id' => 1]);
+        $this->assertFalse($notOptedIn['ok']);
+        $this->assertStringContainsString('recorded Free Cloudflare opt-in', $notOptedIn['message']);
+        $this->assertSame([], $this->cf->requests, 'a service without an opt-in is rejected before remote lookup');
+
+        $this->chooseCloudflareAtCheckout(500, 20);
+        $this->cf->zones[$cfZoneId]['plan'] = ['id' => 'pro', 'name' => 'Pro Website'];
+        $paid = $this->service->importExistingZone($cfZoneId, 100, ['type' => 'admin', 'id' => 1]);
+        $this->assertFalse($paid['ok']);
+        $this->assertStringContainsString('Free-plan', $paid['message']);
+        $this->assertNull($this->zones->liveForService(100));
+        foreach ($this->cf->requests as $request) {
+            $this->assertSame('GET', $request['method'], 'a rejected paid-plan import is also read-only');
+        }
     }
 
     public function testDomainAlreadyOnAnotherServiceIsRefusedLocally(): void
@@ -394,6 +523,22 @@ final class CloudflareAddonTest extends TestCase
         $this->assertNotNull($this->cf->find('PUT', '/activation_check'));
     }
 
+    public function testAlreadyPointedNameserversAreNotClaimedAsChangedByWhmp(): void
+    {
+        $zone = $this->enabledZone();
+        $this->registerDomain(7);
+        $this->ns->current = $zone['name_servers'];
+
+        $result = $this->service->switchNameservers((int) $zone['id'], ['type' => 'client', 'id' => 7]);
+
+        $this->assertTrue($result['ok'], $result['message']);
+        $this->assertStringContainsString('No registrar change was made', $result['message']);
+        $this->assertSame([], $this->ns->saved);
+        $fresh = $this->zones->find((int) $zone['id']);
+        $this->assertSame(0, (int) $fresh['ns_switched_by_us']);
+        $this->assertSame(['ns1.oldhost.net', 'ns2.oldhost.net'], $fresh['original_name_servers']);
+    }
+
     public function testRegistrarFailureIsReportedAndNothingIsMarked(): void
     {
         $zone = $this->enabledZone();
@@ -553,7 +698,7 @@ final class CloudflareAddonTest extends TestCase
         $zone = $this->enabledZone();
         $service = $services->find(100);
         $base = ['service' => $service, 'state' => $this->service->stateFor($service), 'notice' => 'Saved.', 'error' => null, 'registered' => true,
-            'manageable' => true, 'records' => [], 'settings' => [], 'rules' => [], 'activity' => [], 'loadError' => null, 'editId' => ''];
+            'manageable' => true, 'emailManageable' => true, 'records' => [], 'settings' => [], 'rules' => [], 'activity' => [], 'loadError' => null, 'editId' => ''];
 
         $html = $view->render('cloudflare.client', ['zone' => $zone, 'tab' => 'overview'] + $base);
         $this->assertStringContainsString('ada.ns.cloudflare.com', $html);
@@ -585,6 +730,15 @@ final class CloudflareAddonTest extends TestCase
         $html=$view->render('cloudflare.client',['zone'=>$zone,'tab'=>'analytics','analytics'=>$features->analytics($zone,7),'range'=>7]+$base);
         $this->assertStringContainsString('Top countries',$html);
 
+        $this->activateZone($zone);
+        $activeZone = $this->zones->find((int) $zone['id']);
+        $emailData = $this->emailRouting()->overview($activeZone, $this->emailActor($activeZone));
+        $emailHtml = $view->render('cloudflare.client', ['zone' => $activeZone, 'tab' => 'email', 'emailRouting' => $emailData] + $base);
+        $this->assertStringContainsString('Review email DNS before enabling', $emailHtml);
+        $this->assertStringContainsString('route1.mx.cloudflare.net', $emailHtml);
+        $this->assertStringContainsString('I confirm this domain has no existing mail provider', $emailHtml);
+        $this->assertStringNotContainsString('Hosting Co', $emailHtml);
+
         $html = $view->render('cloudflare.client', ['zone' => null, 'tab' => 'overview', 'state' => ['show' => true, 'canEnable' => true, 'zone' => null, 'reason' => '']] + $base);
         $this->assertStringContainsString('Enable free Cloudflare', $html);
 
@@ -596,6 +750,26 @@ final class CloudflareAddonTest extends TestCase
         $html = $view->render('cloudflare.admin-index', ['counts' => $this->zones->counts(), 'rows' => $this->zones->search('live', ''), 'status' => 'live', 'q' => '', 'pageNo' => 1, 'connected' => true, 'accountName' => 'Hosting Co', 'productCount' => 1]);
         $this->assertStringContainsString('example.com', $html);
         $this->assertStringContainsString('/admin/cloudflare/zones/' . $zone['id'], $html);
+        $importId = str_repeat('e', 32);
+        $importHtml = $view->render('cloudflare.admin-import', [
+            'connected' => true,
+            'accountName' => 'Hosting Co',
+            'remoteZones' => [[
+                'zone' => ['id' => $importId, 'name' => 'example.net', 'status' => 'active', 'plan' => ['id' => 'free', 'name' => 'Free Website'], 'name_servers' => ['ada.ns.cloudflare.com']],
+                'linked' => null,
+                'name_owner' => null,
+                'free_plan' => true,
+                'candidates' => [[
+                    'service_id' => 101, 'client_id' => 8, 'product_name' => 'Starter', 'first_name' => 'Bob',
+                    'last_name' => 'B', 'client_email' => 'bob@example.com', 'client_reseller_id' => null,
+                ]],
+            ]],
+            'q' => '', 'pageNo' => 1, 'totalPages' => 1, 'totalCount' => 1, 'loadError' => null,
+            'notice' => null, 'error' => null,
+        ]);
+        $this->assertStringContainsString('Import and link', $importHtml);
+        $this->assertStringContainsString('No nameserver switch happens automatically', $importHtml);
+        $this->assertStringContainsString('name="cf_zone_id"', $importHtml);
 
         $html = $view->render('cloudflare.admin-zone', ['zone' => $this->zones->detailed((int) $zone['id']), 'activity' => $this->zones->activity((int) $zone['id']), 'graceDays' => 7]);
         $this->assertStringContainsString('Schedule removal (7 days)', $html);
@@ -605,6 +779,16 @@ final class CloudflareAddonTest extends TestCase
         $html = $view->render('cloudflare.admin-settings', ['settings' => $this->settings, 'hasToken' => true, 'accounts' => [], 'products' => $option->products(), 'attached' => $option->attachedProductIds()]);
         $this->assertStringContainsString('Verify &amp; save', $html);
         $this->assertStringContainsString('Account Filter Lists', $html, 'the extra Cache Rules permission is documented');
+        $this->assertStringContainsString('Zone · Zone · Read', $html, 'zone discovery read scope is documented');
+        $this->assertStringContainsString('Zone · DNS · Read', $html, 'import DNS read scope is documented');
+        $this->assertStringContainsString('Zone · Zone Settings · Read', $html, 'Email Routing preflight requires Zone Settings Read');
+        $this->assertStringContainsString('Zone · Zone Settings · Write', $html, 'Email Routing activation requires Zone Settings Write');
+        $this->assertStringContainsString('Zone · Email Routing Rules · Read', $html, 'routing rules are a zone-level scope');
+        $this->assertStringContainsString('Zone · Email Routing Rules · Write', $html);
+        $this->assertStringContainsString('Account · Email Routing Addresses · Read', $html, 'destination addresses are account-level');
+        $this->assertStringContainsString('Account · Email Routing Addresses · Write', $html);
+        $this->assertStringContainsString('account-level destinations shared across zones', $html);
+        $this->assertStringContainsString('these are zone-level forwarding rules', $html);
         $this->assertStringNotContainsString('tok_test', $html, 'the token is never rendered');
     }
 
@@ -851,6 +1035,302 @@ final class CloudflareAddonTest extends TestCase
         }
     }
 
+    public function testEmailRoutingPreflightFailsClosedForExistingMxSpfAndDkim(): void
+    {
+        $zone = $this->activeEmailRoutingZone();
+        $zoneId = (string) $zone['cf_zone_id'];
+        $routing = $this->emailRouting();
+        $actor = $this->emailActor($zone);
+
+        $this->cf->records[$zoneId]['external-mx'] = [
+            'id' => 'external-mx', 'type' => 'MX', 'name' => 'example.com', 'content' => 'mx.mail-provider.test', 'priority' => 10,
+        ];
+        $mxState = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertTrue($mxState['ok'], $mxState['message']);
+        $this->assertCount(1, $mxState['mx_conflicts']);
+        $this->assertFalse($mxState['can_enable']);
+        $this->assertFalse($routing->enable($zone, true, $actor)['ok']);
+
+        unset($this->cf->records[$zoneId]['external-mx']);
+        $this->cf->records[$zoneId]['existing-spf'] = [
+            'id' => 'existing-spf', 'type' => 'TXT', 'name' => 'example.com', 'content' => 'v=spf1 include:_spf.mail-provider.test ~all',
+        ];
+        $spfState = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertCount(1, $spfState['spf_records']);
+        $this->assertFalse($spfState['can_enable']);
+        $spfAttempt = $routing->enable($zone, true, $actor);
+        $this->assertFalse($spfAttempt['ok']);
+        $this->assertStringContainsString('SPF record already exists', $spfAttempt['message']);
+
+        unset($this->cf->records[$zoneId]['existing-spf']);
+        $this->cf->records[$zoneId]['existing-dkim'] = [
+            'id' => 'existing-dkim', 'type' => 'TXT', 'name' => 'selector._domainkey.example.com', 'content' => 'v=DKIM1; k=rsa; p=EXISTING_KEY',
+        ];
+        $dkimState = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertCount(1, $dkimState['dkim_records']);
+        $this->assertFalse($dkimState['can_enable']);
+        $dkimAttempt = $routing->enable($zone, true, $actor);
+        $this->assertFalse($dkimAttempt['ok']);
+        $this->assertStringContainsString('DKIM records were found', $dkimAttempt['message']);
+
+        $this->assertNull($this->cf->find('POST', '/email/routing/dns'), 'The preflight never calls Cloudflare when existing mail records are present');
+        $this->assertSame([], $this->ns->saved, 'Email Routing never touches nameservers');
+        $this->assertArrayHasKey('existing-dkim', $this->cf->records[$zoneId], 'All external records remain untouched');
+    }
+
+    public function testEmailRoutingActivationRequiresCompleteMxSpfAndDkimChecklist(): void
+    {
+        $zone = $this->activeEmailRoutingZone();
+        $zoneId = (string) $zone['cf_zone_id'];
+        $routing = $this->emailRouting();
+        $actor = $this->emailActor($zone);
+        $complete = $this->cf->requiredEmailRoutingDns[$zoneId];
+        $nonApexSpf = array_map(static function (array $record): array {
+            if (strtoupper((string) ($record['type'] ?? '')) === 'TXT'
+                && str_starts_with(strtolower((string) ($record['content'] ?? '')), 'v=spf1')) {
+                $record['name'] = 'mail.example.com';
+            }
+
+            return $record;
+        }, $complete);
+        $wrongSpfInclude = array_map(static function (array $record): array {
+            if (strtoupper((string) ($record['type'] ?? '')) === 'TXT'
+                && str_starts_with(strtolower((string) ($record['content'] ?? '')), 'v=spf1')) {
+                $record['content'] = 'v=spf1 include:_spf.other.test ~all';
+            }
+
+            return $record;
+        }, $complete);
+        $emptyDkimKey = array_map(static function (array $record): array {
+            if (strtoupper((string) ($record['type'] ?? '')) === 'TXT'
+                && str_contains(strtolower((string) ($record['name'] ?? '')), '._domainkey')) {
+                $record['content'] = 'v=DKIM1; h=sha256; k=rsa; p=';
+            }
+
+            return $record;
+        }, $complete);
+        $incompleteCases = [
+            'MX' => array_values(array_filter($complete, static fn (array $record): bool => !(
+                strtoupper((string) ($record['type'] ?? '')) === 'MX'
+                && (string) ($record['content'] ?? '') === 'route3.mx.cloudflare.net'
+            ))),
+            'apex SPF' => $nonApexSpf,
+            'Cloudflare SPF include' => $wrongSpfInclude,
+            'DKIM' => array_values(array_filter($complete, static fn (array $record): bool => !(
+                strtoupper((string) ($record['type'] ?? '')) === 'TXT'
+                && str_contains(strtolower((string) ($record['name'] ?? '')), '._domainkey')
+            ))),
+            'DKIM public key' => $emptyDkimKey,
+        ];
+
+        foreach ($incompleteCases as $missing => $checklist) {
+            $this->cf->requiredEmailRoutingDns[$zoneId] = $checklist;
+            $view = $routing->overview($zone, $actor);
+            $this->assertTrue($view['ok'], $view['message']);
+            $this->assertFalse($view['required_dns_complete'], 'A checklist missing ' . $missing . ' must fail closed');
+            $this->assertFalse($view['can_enable']);
+
+            $enabled = $routing->enable($zone, true, $actor);
+            $this->assertFalse($enabled['ok']);
+            $this->assertStringContainsString('complete Email Routing MX, SPF and DKIM DNS checklist', $enabled['message']);
+            $this->assertNull($this->cf->find('POST', '/email/routing/dns'), 'Incomplete ' . $missing . ' checklist must not call the activation endpoint');
+        }
+
+        $this->cf->requiredEmailRoutingDns[$zoneId] = $complete;
+        $view = $routing->overview($zone, $actor);
+        $this->assertTrue($view['required_dns_complete']);
+        $this->assertTrue($view['can_enable']);
+    }
+
+    public function testEmailRoutingEnableIsExplicitAndUsesCloudflareManagedDnsEndpoint(): void
+    {
+        $zone = $this->activeEmailRoutingZone();
+        $zoneId = (string) $zone['cf_zone_id'];
+        $this->cf->records[$zoneId]['external-a'] = [
+            'id' => 'external-a', 'type' => 'A', 'name' => 'mail.example.com', 'content' => '203.0.113.55', 'ttl' => 1, 'proxied' => false,
+        ];
+        $routing = $this->emailRouting();
+        $before = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertTrue($before['ok'], $before['message']);
+        $this->assertTrue($before['required_dns_complete']);
+        $this->assertTrue($before['can_enable']);
+        $this->assertSame([], $before['mx_records']);
+        $this->assertSame([], $before['spf_records']);
+        $this->assertSame([], $before['dkim_records']);
+        $this->assertNull($this->cf->find('POST', '/email/routing/dns'), 'Opening the tab is read-only');
+
+        $notConfirmed = $routing->enable($zone, false, $this->emailActor($zone));
+        $this->assertFalse($notConfirmed['ok']);
+        $this->assertNull($this->cf->find('POST', '/email/routing/dns'), 'Activation requires an explicit confirmation');
+
+        $enabled = $routing->enable($zone, true, $this->emailActor($zone));
+        $this->assertTrue($enabled['ok'], $enabled['message']);
+        $enableRequest = $this->cf->find('POST', '/email/routing/dns');
+        $this->assertNotNull($enableRequest);
+        $this->assertStringContainsString('/zones/' . $zoneId . '/email/routing/dns', $enableRequest['url']);
+        $this->assertSame('example.com', json_decode((string) $enableRequest['body'], true)['name']);
+        $this->assertArrayHasKey('external-a', $this->cf->records[$zoneId]);
+
+        $after = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertTrue($after['enabled']);
+        $this->assertTrue($after['ready']);
+        $this->assertTrue($after['can_manage']);
+        $this->assertCount(3, $after['mx_records']);
+        $this->assertCount(1, $after['spf_records']);
+        $this->assertCount(1, $after['dkim_records']);
+
+        $deleteCount = count(array_filter($this->cf->requests, static fn (array $r): bool => $r['method'] === 'DELETE' && str_contains($r['url'], '/email/routing/dns')));
+        $notConfirmedDisable = $routing->disable($zone, false, $this->emailActor($zone));
+        $this->assertFalse($notConfirmedDisable['ok']);
+        $this->assertSame($deleteCount, count(array_filter($this->cf->requests, static fn (array $r): bool => $r['method'] === 'DELETE' && str_contains($r['url'], '/email/routing/dns'))));
+
+        $disabled = $routing->disable($zone, true, $this->emailActor($zone));
+        $this->assertTrue($disabled['ok'], $disabled['message']);
+        $this->assertFalse($this->cf->emailRoutingSettings[$zoneId]['enabled']);
+        $this->assertArrayHasKey('external-a', $this->cf->records[$zoneId], 'Disabling removes only Email Routing-managed DNS');
+        $this->assertSame([], $this->ns->saved, 'Neither activation nor disable switches nameservers');
+    }
+
+    public function testEmailRoutingDestinationsAndRulesAreStrictlyClientAndResellerScoped(): void
+    {
+        $zone = $this->activeEmailRoutingZone();
+        $this->enableTestEmailRouting($zone);
+        $routing = $this->emailRouting();
+        $owner = $this->emailActor($zone);
+        $wrongReseller = $owner;
+        $wrongReseller['reseller_id'] = ($owner['reseller_id'] ?? 0) + 1000;
+        $deniedView = $routing->overview($zone, $wrongReseller);
+        $this->assertFalse($deniedView['ok'], 'The same client ID with a different reseller ID is not the owner');
+        $this->assertSame([], $deniedView['destinations']);
+        $this->assertFalse($routing->addDestination($zone, 'intruder@example.net', $wrongReseller)['ok']);
+        $this->assertCount(0, $this->cf->emailDestinations, 'A mismatched reseller cannot create a shared-account destination');
+
+        $added = $routing->addDestination($zone, 'Ada@Example.net', $owner);
+        $this->assertTrue($added['ok'], $added['message']);
+        $destination = $this->db->selectOne('SELECT * FROM cloudflare_email_destinations WHERE email = ?', ['ada@example.net']);
+        $destinationId = (int) $destination['id'];
+        $remoteDestinationId = (string) $destination['cf_destination_id'];
+
+        $pendingView = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertCount(1, $pendingView['destinations']);
+        $this->assertSame('pending', $pendingView['destinations'][0]['status']);
+        $pendingRoute = $routing->addRoute($zone, 'sales', $destinationId, $owner);
+        $this->assertFalse($pendingRoute['ok'], 'An unverified destination cannot receive a route');
+        $this->assertSame([], $this->cf->emailRoutingRules[(string) $zone['cf_zone_id']]);
+
+        $this->cf->emailDestinations[$remoteDestinationId]['verified'] = '2026-10-08T12:00:00Z';
+        $verifiedView = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertSame('verified', $verifiedView['destinations'][0]['status']);
+        $routeAdded = $routing->addRoute($zone, 'Sales', $destinationId, $owner);
+        $this->assertTrue($routeAdded['ok'], $routeAdded['message']);
+        $route = $this->db->selectOne('SELECT * FROM cloudflare_email_routes WHERE zone_id = ? AND local_part = ?', [(int) $zone['id'], 'sales']);
+        $routeId = (int) $route['id'];
+        $remoteRuleId = (string) $route['cf_rule_id'];
+        $remoteRule = $this->cf->emailRoutingRules[(string) $zone['cf_zone_id']][$remoteRuleId];
+        $this->assertSame('sales@example.com', $remoteRule['matchers'][0]['value']);
+        $this->assertSame(['ada@example.net'], $remoteRule['actions'][0]['value']);
+        $this->assertFalse($routing->addRoute($zone, 'sales@attacker.test', $destinationId, $owner)['ok'], 'Aliases cannot choose a different domain');
+        $this->assertTrue($routing->setRouteEnabled($zone, $routeId, false, $owner)['ok']);
+        $this->assertFalse($this->cf->emailRoutingRules[(string) $zone['cf_zone_id']][$remoteRuleId]['enabled']);
+
+        $secondRule = $routing->addRoute($zone, 'help', $destinationId, $owner);
+        $this->assertTrue($secondRule['ok'], $secondRule['message']);
+        $helpRow = $this->db->selectOne('SELECT * FROM cloudflare_email_routes WHERE zone_id = ? AND local_part = ?', [(int) $zone['id'], 'help']);
+        $this->assertTrue($routing->deleteRoute($zone, (int) $helpRow['id'], $owner)['ok']);
+        $this->assertArrayNotHasKey((string) $helpRow['cf_rule_id'], $this->cf->emailRoutingRules[(string) $zone['cf_zone_id']]);
+
+        // An out-of-band edit makes the saved mapping read-only; a toggle cannot
+        // redirect or overwrite a rule whose remote target no longer matches.
+        $this->cf->emailRoutingRules[(string) $zone['cf_zone_id']][$remoteRuleId]['actions'][0]['value'] = ['other@private.test'];
+        $putCount = count(array_filter($this->cf->requests, static fn (array $r): bool => $r['method'] === 'PUT' && str_contains($r['url'], '/email/routing/rules/')));
+        $tampered = $routing->setRouteEnabled($zone, $routeId, true, $owner);
+        $this->assertFalse($tampered['ok']);
+        $this->assertSame($putCount, count(array_filter($this->cf->requests, static fn (array $r): bool => $r['method'] === 'PUT' && str_contains($r['url'], '/email/routing/rules/'))));
+
+        // A reseller customer owns a different service and cannot see, claim, or
+        // route through this account-wide Cloudflare destination.
+        $this->db->exec("INSERT INTO services (id, client_id, order_id, product_id, server_id, dedicated_ip, product_name, domain, status) VALUES (102, 9, 502, 20, NULL, '203.0.113.20', 'Starter', 'shop.example.net', 'active')");
+        $otherEnable = $this->service->enable(102, ['type' => 'client', 'id' => 9]);
+        $this->assertTrue($otherEnable['ok'], $otherEnable['message']);
+        $otherZone = $this->zones->liveForService(102);
+        $this->activateZone($otherZone);
+        $otherZone = $this->zones->find((int) $otherZone['id']);
+        $otherActor = $this->emailActor($otherZone);
+        $otherView = $routing->overview($otherZone, $otherActor);
+        $this->assertSame([], $otherView['destinations']);
+        $this->assertSame([], $otherView['routes']);
+        $this->assertFalse($routing->overview($zone, $otherActor)['ok'], 'A reseller user cannot even read another tenant zone through this service');
+        $this->assertFalse($routing->addRoute($otherZone, 'stolen', $destinationId, $otherActor)['ok']);
+        $foreignClaim = $routing->addDestination($otherZone, 'ada@example.net', $this->emailActor($otherZone));
+        $this->assertFalse($foreignClaim['ok']);
+        $this->assertStringNotContainsString('ada@example.net', $foreignClaim['message']);
+        $this->assertCount(1, $this->cf->emailDestinations, 'The foreign tenant did not create or attach a Cloudflare destination');
+    }
+
+    public function testEmailRoutingCatchAllIsOffByDefaultAndRequiresExplicitOwnerScopedSetup(): void
+    {
+        $zone = $this->activeEmailRoutingZone();
+        $this->enableTestEmailRouting($zone);
+        $routing = $this->emailRouting();
+        $actor = $this->emailActor($zone);
+        $initial = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertFalse($initial['catch_all']['enabled']);
+        $this->assertFalse($initial['catch_all']['external']);
+
+        $added = $routing->addDestination($zone, 'owner@example.net', $actor);
+        $this->assertTrue($added['ok'], $added['message']);
+        $destination = $this->db->selectOne('SELECT * FROM cloudflare_email_destinations WHERE email = ?', ['owner@example.net']);
+        $remoteId = (string) $destination['cf_destination_id'];
+        $this->cf->emailDestinations[$remoteId]['verified'] = '2026-10-08T12:00:00Z';
+
+        $enabled = $routing->setCatchAll($zone, true, (int) $destination['id'], $actor);
+        $this->assertTrue($enabled['ok'], $enabled['message']);
+        $catchRow = $this->db->selectOne('SELECT * FROM cloudflare_email_routes WHERE zone_id = ? AND local_part = ?', [(int) $zone['id'], '*']);
+        $this->assertNotNull($catchRow);
+        $catchView = $routing->overview($zone, $this->emailActor($zone))['catch_all'];
+        $this->assertTrue($catchView['enabled']);
+        $this->assertTrue($catchView['managed']);
+        $this->assertSame('owner@example.net', $catchView['destination_email']);
+
+        $putCount = count(array_filter($this->cf->requests, static fn (array $r): bool => $r['method'] === 'PUT' && str_contains($r['url'], '/email/routing/rules/catch_all')));
+        $unconfirmed = $routing->setCatchAll($zone, false, null, $actor);
+        $this->assertFalse($unconfirmed['ok']);
+        $this->assertSame($putCount, count(array_filter($this->cf->requests, static fn (array $r): bool => $r['method'] === 'PUT' && str_contains($r['url'], '/email/routing/rules/catch_all'))));
+        $disabled = $routing->setCatchAll($zone, false, null, $actor, true);
+        $this->assertTrue($disabled['ok'], $disabled['message']);
+        $this->assertFalse($this->cf->emailCatchAlls[(string) $zone['cf_zone_id']]['enabled']);
+
+        // A subsequent out-of-band edit blocks further changes and does not
+        // expose the new destination to this client's page.
+        $this->cf->emailCatchAlls[(string) $zone['cf_zone_id']]['enabled'] = true;
+        $this->cf->emailCatchAlls[(string) $zone['cf_zone_id']]['actions'] = [['type' => 'forward', 'value' => ['private@outside.test']]];
+        $external = $routing->overview($zone, $this->emailActor($zone))['catch_all'];
+        $this->assertTrue($external['changed']);
+        $this->assertStringNotContainsString('private@outside.test', json_encode($external));
+        $changed = $routing->setCatchAll($zone, false, null, $actor, true);
+        $this->assertFalse($changed['ok']);
+    }
+
+    public function testEmailRoutingRejectsPaidZonesAndAddressValidationIsStrict(): void
+    {
+        $zone = $this->activeEmailRoutingZone();
+        $this->cf->zones[(string) $zone['cf_zone_id']]['plan'] = ['id' => 'pro', 'name' => 'Pro'];
+        $routing = $this->emailRouting();
+        $view = $routing->overview($zone, $this->emailActor($zone));
+        $this->assertFalse($view['ok']);
+        $this->assertStringContainsString('Free-plan', $view['message']);
+        $result = $routing->enable($zone, true, $this->emailActor($zone));
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('Free-plan', $result['message']);
+        $this->assertNull($this->cf->find('POST', '/email/routing/dns'));
+
+        $this->assertSame('valid@example.net', CloudflareEmailRouting::validateDestination(' Valid@Example.net '));
+        $this->assertNull(CloudflareEmailRouting::validateDestination('not-an-email'));
+        $this->assertSame('sales+tag@example.com', CloudflareEmailRouting::validateLocalPart('Sales+Tag', 'example.com'));
+        $this->assertNull(CloudflareEmailRouting::validateLocalPart('sales@elsewhere.test', 'example.com'));
+        $this->assertNull(CloudflareEmailRouting::validateLocalPart('-admin', 'example.com'));
+    }
+
     public function testTemplatesSeedWithoutOverwriting(): void
     {
         CloudflareTemplates::ensure($this->db);
@@ -865,6 +1345,39 @@ final class CloudflareAddonTest extends TestCase
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private function emailRouting(): CloudflareEmailRouting
+    {
+        return new CloudflareEmailRouting($this->service, $this->zones, $this->settings, $this->db);
+    }
+
+    /** @param array<string,mixed> $zone @return array{type:string,id:int,reseller_id:int|null} */
+    private function emailActor(array $zone): array
+    {
+        return [
+            'type' => 'client',
+            'id' => (int) $zone['client_id'],
+            'reseller_id' => ($zone['reseller_id'] ?? null) === null ? null : (int) $zone['reseller_id'],
+        ];
+    }
+
+    /** @return array<string,mixed> active service-owned zone with no pre-existing mail DNS */
+    private function activeEmailRoutingZone(): array
+    {
+        $zone = $this->enabledZone();
+        $this->activateZone($zone);
+
+        return $this->zones->find((int) $zone['id']);
+    }
+
+    /** @param array<string,mixed> $zone */
+    private function enableTestEmailRouting(array $zone): array
+    {
+        $result = $this->emailRouting()->enable($zone, true, $this->emailActor($zone));
+        $this->assertTrue($result['ok'], $result['message']);
+
+        return $result;
+    }
 
     private function features(?FakeOriginInstaller $installer=null, ?FakeOriginKeyGenerator $keygen=null): CloudflareFeatures
     {
@@ -889,6 +1402,15 @@ final class CloudflareAddonTest extends TestCase
     private function registerDomain(int $clientId): void
     {
         $this->db->exec("INSERT INTO domains (id, client_id, domain_name, status, nameservers) VALUES (1, {$clientId}, 'example.com', 'active', '[\"ns1.oldhost.net\",\"ns2.oldhost.net\"]')");
+    }
+
+    private function chooseCloudflareAtCheckout(int $orderId, int $productId): void
+    {
+        $options = json_encode([(string) $this->settings->optionGroupId() => $this->settings->optionYesId()]);
+        $this->db->statement(
+            'INSERT INTO order_items (order_id, product_id, configurable_options) VALUES (?, ?, ?)',
+            [$orderId, $productId, $options]
+        );
     }
 
     private function setServiceStatus(int $id, string $status): void
@@ -956,6 +1478,17 @@ final class CfSqliteDatabase extends Database
                 ns_restore_after TEXT NULL, dnssec_disable_after TEXT NULL, origin_cert_id TEXT NULL, origin_cert_expires TEXT NULL
             );
             CREATE TABLE cloudflare_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id INT NOT NULL, actor_type TEXT NOT NULL, actor_id INT NULL, action TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE cloudflare_email_destinations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INT NOT NULL, reseller_id INT NULL,
+                cf_destination_id TEXT NULL UNIQUE, email TEXT NOT NULL UNIQUE, verified_at TEXT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE cloudflare_email_routes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, zone_id INT NOT NULL, client_id INT NOT NULL, reseller_id INT NULL,
+                cf_rule_id TEXT NOT NULL, local_part TEXT NOT NULL, destination_id INT NOT NULL, enabled INT NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(zone_id, cf_rule_id), UNIQUE(zone_id, local_part),
+                FOREIGN KEY(destination_id) REFERENCES cloudflare_email_destinations(id) ON DELETE RESTRICT
+            );
             INSERT INTO products (id, name, type, status) VALUES (20, 'Starter', 'shared', 'active'), (21, 'VPS', 'vps', 'active');
             SQL);
     }
@@ -1071,6 +1604,18 @@ final class FakeCloudflare implements HttpClient
     /** @var array<string,array<string,array<string,mixed>>> */ public array $rulesets=[];
     /** @var array<int,array<string,mixed>> */ public array $trafficGroups=[];
     /** @var array<string,array<string,mixed>> */ public array $certificates=[];
+    /** @var array<string,array<string,mixed>> account-scoped Email Routing destination address ID => address */
+    public array $emailDestinations = [];
+    /** @var array<string,array<string,mixed>> zone => Email Routing settings */
+    public array $emailRoutingSettings = [];
+    /** @var array<string,array<int,array<string,mixed>>> zone => required Email Routing DNS records */
+    public array $requiredEmailRoutingDns = [];
+    /** @var array<string,array<string,array<string,mixed>>> zone => routing rule ID => rule */
+    public array $emailRoutingRules = [];
+    /** @var array<string,array<string,mixed>> zone => separate catch-all */
+    public array $emailCatchAlls = [];
+    /** @var array<string,array<int,string>> zone => fake-DNS IDs managed by Email Routing */
+    public array $emailRoutingManagedDns = [];
 
     private int $seq = 0;
 
@@ -1078,6 +1623,8 @@ final class FakeCloudflare implements HttpClient
     {
         $this->requests[] = compact('method', 'url', 'headers', 'body');
         $path = (string) parse_url(substr($url, strlen(CloudflareApi::BASE)), PHP_URL_PATH);
+        $query = [];
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
         $data = $body !== null ? (array) json_decode($body, true) : [];
         $parts = array_values(array_filter(explode('/', $path), 'strlen'));
 
@@ -1103,6 +1650,29 @@ final class FakeCloudflare implements HttpClient
             return self::ok([['id' => 'acc123', 'name' => 'Hosting Co']]);
         }
 
+        if ($path === '/zones' && $method === 'GET') {
+            $rows = array_values(array_filter($this->zones, static function (array $zone) use ($query): bool {
+                $accountId = (string) ($query['account.id'] ?? $query['account_id'] ?? '');
+                $zoneAccountId = (string) ($zone['account']['id'] ?? 'acc123');
+                $name = (string) ($query['name'] ?? '');
+
+                return ($accountId === '' || $zoneAccountId === $accountId)
+                    && ($name === '' || strcasecmp((string) ($zone['name'] ?? ''), $name) === 0);
+            }));
+            usort($rows, static fn (array $a, array $b): int => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
+            $perPage = max(1, (int) ($query['per_page'] ?? 50));
+            $page = max(1, (int) ($query['page'] ?? 1));
+            $total = count($rows);
+            $paged = array_slice($rows, ($page - 1) * $perPage, $perPage);
+
+            return ['status' => 200, 'body' => json_encode([
+                'success' => true,
+                'errors' => [],
+                'result' => $paged,
+                'result_info' => ['page' => $page, 'per_page' => $perPage, 'total_pages' => max(1, (int) ceil($total / $perPage)), 'total_count' => $total],
+            ])];
+        }
+
         if ($path === '/zones' && $method === 'POST') {
             foreach ($this->zones as $zone) {
                 if ($zone['name'] === $data['name']) {
@@ -1111,16 +1681,61 @@ final class FakeCloudflare implements HttpClient
             }
 
             $id = md5('zone' . ++$this->seq);
-            $this->zones[$id] = ['id' => $id, 'name' => $data['name'], 'status' => 'pending', 'paused' => false, 'plan' => ['name' => 'Free Website'],
+            $this->zones[$id] = ['id' => $id, 'name' => $data['name'], 'account' => ['id' => 'acc123', 'name' => 'Hosting Co'], 'status' => 'pending', 'paused' => false, 'plan' => ['id' => 'free', 'name' => 'Free Website'],
                 'name_servers' => ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com'], 'original_name_servers' => ['ns1.oldhost.net', 'ns2.oldhost.net']];
             $this->records[$id] = [];
             $this->settings[$id] = ['ssl' => 'flexible', 'always_use_https' => 'off', 'security_level' => 'medium', 'development_mode' => 'off', 'browser_check' => 'on', 'cache_level' => 'aggressive', 'browser_cache_ttl' => 14400, 'min_tls_version' => '1.0', 'automatic_https_rewrites' => 'on'];
             $this->rules[$id] = [];
             $this->dnssec[$id] = ['status'=>'disabled'];
             $this->rulesets[$id] = [];
+            $this->ensureEmailRoutingState($id);
             $this->settings[$id] += ['early_hints'=>'off','http3'=>'on','0rtt'=>'off','rocket_loader'=>'off','always_online'=>'on','ipv6'=>'on','websockets'=>'on','opportunistic_encryption'=>'on','tls_1_3'=>'on','email_obfuscation'=>'on','hotlink_protection'=>'off'];
 
             return self::ok($this->zones[$id]);
+        }
+
+        $accountAddressesPath = '/accounts/' . (string) ($parts[1] ?? '') . '/email/routing/addresses';
+        if ((string) ($parts[0] ?? '') === 'accounts' && (string) ($parts[1] ?? '') === 'acc123'
+            && $path === $accountAddressesPath) {
+            if ($method === 'GET') {
+                $rows = array_values($this->emailDestinations);
+                $perPage = max(5, min(50, (int) ($query['per_page'] ?? 50)));
+                $page = max(1, (int) ($query['page'] ?? 1));
+                $total = count($rows);
+                $paged = array_slice($rows, ($page - 1) * $perPage, $perPage);
+
+                return ['status' => 200, 'body' => json_encode([
+                    'success' => true, 'errors' => [], 'result' => $paged,
+                    'result_info' => ['page' => $page, 'per_page' => $perPage, 'total_pages' => max(1, (int) ceil($total / $perPage)), 'total_count' => $total],
+                ])];
+            }
+
+            if ($method === 'POST') {
+                $email = strtolower(trim((string) ($data['email'] ?? '')));
+                foreach ($this->emailDestinations as $existing) {
+                    if (strcasecmp((string) ($existing['email'] ?? ''), $email) === 0) {
+                        return self::error(400, 81058, 'Destination already exists.');
+                    }
+                }
+
+                $id = md5('email-destination' . ++$this->seq);
+                $this->emailDestinations[$id] = ['id' => $id, 'email' => $email, 'verified' => null, 'created' => gmdate('c'), 'modified' => gmdate('c')];
+
+                return self::ok($this->emailDestinations[$id]);
+            }
+        }
+        if (preg_match('#^/accounts/([A-Za-z0-9]{1,64})/email/routing/addresses/([A-Za-z0-9]{1,64})$#', $path, $addressMatch)
+            && $addressMatch[1] === 'acc123') {
+            $addressId = $addressMatch[2];
+            if ($method === 'GET' && isset($this->emailDestinations[$addressId])) {
+                return self::ok($this->emailDestinations[$addressId]);
+            }
+            if ($method === 'DELETE' && isset($this->emailDestinations[$addressId])) {
+                unset($this->emailDestinations[$addressId]);
+
+                return self::ok(['id' => $addressId]);
+            }
+            return self::error(404, 1001, 'Destination address does not exist.');
         }
 
         $zoneId = $parts[1] ?? '';
@@ -1130,6 +1745,86 @@ final class FakeCloudflare implements HttpClient
         }
 
         $rest = implode('/', array_slice($parts, 2));
+        if (str_starts_with($rest, 'email/routing')) {
+            $this->ensureEmailRoutingState($zoneId);
+
+            if ($rest === 'email/routing' && $method === 'GET') {
+                return self::ok($this->emailRoutingSettings[$zoneId]);
+            }
+            if ($rest === 'email/routing/dns' && $method === 'GET') {
+                return self::ok($this->requiredEmailRoutingDns[$zoneId]);
+            }
+            if ($rest === 'email/routing/dns' && $method === 'POST') {
+                $required = $this->requiredEmailRoutingDns[$zoneId];
+                foreach ($required as $requiredRecord) {
+                    foreach ($this->records[$zoneId] ?? [] as $existingRecord) {
+                        if (strcasecmp((string) ($existingRecord['name'] ?? ''), (string) $requiredRecord['name']) === 0
+                            && strtoupper((string) ($existingRecord['type'] ?? '')) === strtoupper((string) $requiredRecord['type'])) {
+                            return self::error(400, 81058, 'An Email Routing DNS record conflicts with an existing record.');
+                        }
+                    }
+                }
+                foreach ($required as $record) {
+                    $this->emailRoutingManagedDns[$zoneId][] = (string) $this->addRecord($zoneId, $record)['id'];
+                }
+                $this->emailRoutingSettings[$zoneId]['enabled'] = true;
+                $this->emailRoutingSettings[$zoneId]['status'] = 'ready';
+
+                return self::ok($this->emailRoutingSettings[$zoneId]);
+            }
+            if ($rest === 'email/routing/dns' && $method === 'DELETE') {
+                foreach ($this->emailRoutingManagedDns[$zoneId] ?? [] as $recordId) {
+                    unset($this->records[$zoneId][$recordId]);
+                }
+                $this->emailRoutingManagedDns[$zoneId] = [];
+                $this->emailRoutingSettings[$zoneId]['enabled'] = false;
+                $this->emailRoutingSettings[$zoneId]['status'] = 'unconfigured';
+
+                return self::ok($this->emailRoutingSettings[$zoneId]);
+            }
+            if ($rest === 'email/routing/rules' && $method === 'GET') {
+                $rows = array_values($this->emailRoutingRules[$zoneId]);
+
+                return ['status' => 200, 'body' => json_encode([
+                    'success' => true, 'errors' => [], 'result' => $rows,
+                    'result_info' => ['page' => 1, 'per_page' => 50, 'total_pages' => 1, 'total_count' => count($rows)],
+                ])];
+            }
+            if ($rest === 'email/routing/rules' && $method === 'POST') {
+                $id = md5('email-rule' . ++$this->seq);
+                $this->emailRoutingRules[$zoneId][$id] = $data + ['id' => $id, 'source' => 'api'];
+                $this->emailRoutingRules[$zoneId][$id]['id'] = $id;
+
+                return self::ok($this->emailRoutingRules[$zoneId][$id]);
+            }
+            if ($rest === 'email/routing/rules/catch_all' && $method === 'GET') {
+                return self::ok($this->emailCatchAlls[$zoneId]);
+            }
+            if ($rest === 'email/routing/rules/catch_all' && $method === 'PUT') {
+                $this->emailCatchAlls[$zoneId] = array_merge($this->emailCatchAlls[$zoneId], $data, ['id' => $this->emailCatchAlls[$zoneId]['id'], 'source' => 'api']);
+
+                return self::ok($this->emailCatchAlls[$zoneId]);
+            }
+            if (preg_match('#^email/routing/rules/([A-Za-z0-9]{1,64})$#', $rest, $ruleMatch)) {
+                $ruleId = $ruleMatch[1];
+                if (!isset($this->emailRoutingRules[$zoneId][$ruleId])) {
+                    return self::error(404, 81044, 'Routing rule does not exist.');
+                }
+                if ($method === 'GET') {
+                    return self::ok($this->emailRoutingRules[$zoneId][$ruleId]);
+                }
+                if ($method === 'PUT') {
+                    $this->emailRoutingRules[$zoneId][$ruleId] = array_merge($this->emailRoutingRules[$zoneId][$ruleId], $data, ['id' => $ruleId, 'source' => 'api']);
+
+                    return self::ok($this->emailRoutingRules[$zoneId][$ruleId]);
+                }
+                if ($method === 'DELETE') {
+                    unset($this->emailRoutingRules[$zoneId][$ruleId]);
+
+                    return self::ok(['id' => $ruleId]);
+                }
+            }
+        }
         if ($rest==='rulesets' && $method==='POST') {
             $phase=(string)($data['phase']??''); $rows=[];
             foreach((array)($data['rules']??[]) as $rule){$rule['id']=md5('rule'.++$this->seq);$rows[]=$rule;}
@@ -1241,6 +1936,38 @@ final class FakeCloudflare implements HttpClient
         }
 
         return null;
+    }
+
+    private function ensureEmailRoutingState(string $zoneId): void
+    {
+        if (isset($this->emailRoutingSettings[$zoneId])) {
+            return;
+        }
+
+        $name = strtolower(rtrim((string) ($this->zones[$zoneId]['name'] ?? 'example.com'), '.'));
+        $this->emailRoutingSettings[$zoneId] = [
+            'id' => md5('email-settings' . $zoneId),
+            'enabled' => false,
+            'name' => $name,
+            'status' => 'unconfigured',
+        ];
+        $this->requiredEmailRoutingDns[$zoneId] = [
+            ['type' => 'MX', 'name' => $name, 'content' => 'route1.mx.cloudflare.net', 'priority' => 10, 'ttl' => 1, 'proxied' => false],
+            ['type' => 'MX', 'name' => $name, 'content' => 'route2.mx.cloudflare.net', 'priority' => 20, 'ttl' => 1, 'proxied' => false],
+            ['type' => 'MX', 'name' => $name, 'content' => 'route3.mx.cloudflare.net', 'priority' => 30, 'ttl' => 1, 'proxied' => false],
+            ['type' => 'TXT', 'name' => $name, 'content' => 'v=spf1 include:_spf.mx.cloudflare.net ~all', 'ttl' => 1, 'proxied' => false],
+            ['type' => 'TXT', 'name' => 'cf2024-1._domainkey.' . $name, 'content' => 'v=DKIM1; h=sha256; k=rsa; p=FAKE_PUBLIC_KEY', 'ttl' => 1, 'proxied' => false],
+        ];
+        $this->emailRoutingRules[$zoneId] = [];
+        $this->emailCatchAlls[$zoneId] = [
+            'id' => md5('catch-all' . $zoneId),
+            'actions' => [['type' => 'drop', 'value' => []]],
+            'matchers' => [['type' => 'all']],
+            'enabled' => false,
+            'name' => 'Catch-All Rule',
+            'source' => 'api',
+        ];
+        $this->emailRoutingManagedDns[$zoneId] = [];
     }
 
     /** @param array<string, mixed> $record */
