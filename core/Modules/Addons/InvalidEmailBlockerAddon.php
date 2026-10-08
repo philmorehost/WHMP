@@ -88,6 +88,7 @@ final class InvalidEmailBlockerAddon implements AddonModule
 
         $blockChecked = $s['block'] ? ' checked' : '';
         $securityChecked = $s['allow_security'] ? ' checked' : '';
+        $bannerChecked = $s['banner'] ? ' checked' : '';
         $rescan = (int) $s['rescan_days'];
         $allow = e(implode("\n", $s['allow']));
         $blocked = (int) $stats['blocked'];
@@ -138,6 +139,11 @@ final class InvalidEmailBlockerAddon implements AddonModule
                 <input type="checkbox" name="allow_security" value="1"{$securityChecked} style="margin-top:4px;">
                 <span><strong>Still send account-security emails</strong><br>
                 <span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Password resets, sign-up codes and Security PIN codes go out even to an invalid address, so a wrongly flagged client can never be locked out. Recommended.</span></span>
+            </label>
+            <label style="display:flex;gap:var(--cv-space-2);align-items:flex-start;margin-bottom:var(--cv-space-3);cursor:pointer;">
+                <input type="checkbox" name="banner" value="1"{$bannerChecked} style="margin-top:4px;">
+                <span><strong>Ask flagged clients to update their email</strong><br>
+                <span style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Shows a banner across the client area to any client whose address is marked invalid, with a button to their profile. When they save a new address it is checked straight away, and a working one clears the banner and the block immediately. Recommended.</span></span>
             </label>
             <div class="cv-field" style="margin-bottom:var(--cv-space-3);">
                 <label class="cv-label" for="ieb-rescan">Re-scan all client emails automatically every</label>

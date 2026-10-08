@@ -147,6 +147,8 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
         <?= $view->partial('partials.storefront-page-banner', ['title' => $title ?? null, 'breadcrumbs' => $breadcrumbs ?? null]) ?>
     <?php endif; ?>
     <main class="cv-shell__main sf-main<?= $storefrontHome ? ' sf-main--home' : '' ?><?= $resellerPanel ? ' rs-panel' : '' ?>">
+        <?php // "We can't email you" — main website's client area only, never on a store. ?>
+        <?= $isStorefront ? '' : $view->partial('partials.invalid-email-notice') ?>
         <?= $content ?>
     </main>
     <?= $view->partial('partials.storefront-footer', ['store' => $storefrontStore, 't' => $t, 'theme' => $theme, 'platform' => $platformPremium]) ?>
@@ -162,6 +164,7 @@ $cvImpersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
     'theme' => $theme,
 ]) ?>
 <main class="cv-shell__main<?= $resellerPanel ? ' rs-panel' : '' ?>">
+    <?= $view->partial('partials.invalid-email-notice') ?>
     <?= $content ?>
 </main>
 <?= $view->partial('partials.footer', ['t' => $t, 'theme' => $theme]) ?>

@@ -27,6 +27,8 @@ use Throwable;
  *                         sign-up codes, PIN codes) to them — default ON, so a
  *                         false positive can never lock a client out
  *   rescan_days     int   re-run the scan automatically every N days (0 = never)
+ *   banner          bool  show flagged clients a banner in the client area asking
+ *                         them to update their email (default ON) — see clientNotice()
  *   allow           list  addresses that must always receive email, whatever the
  *                         scan says (lower-cased)
  *
@@ -55,7 +57,7 @@ final class EmailSuppression
     /** How long settings and lookups are trusted inside one long-running process. */
     private const CACHE_SECONDS = 60;
 
-    /** @var array{active: bool, block: bool, allow_security: bool, rescan_days: int, allow: array<int, string>}|null */
+    /** @var array{active: bool, block: bool, allow_security: bool, rescan_days: int, banner: bool, allow: array<int, string>}|null */
     private ?array $state = null;
 
     /** @var array<string, ?string> lower-cased address => reason it is blocked (null = not blocked) */
@@ -127,7 +129,7 @@ final class EmailSuppression
         }
     }
 
-    /** @return array{active: bool, block: bool, allow_security: bool, rescan_days: int, allow: array<int, string>} */
+    /** @return array{active: bool, block: bool, allow_security: bool, rescan_days: int, banner: bool, allow: array<int, string>} */
     public function settings(): array
     {
         return $this->state();
@@ -153,7 +155,7 @@ final class EmailSuppression
     /** @param array<string, mixed> $input raw form input */
     public function save(array $input): void
     {
-        $config = self::normalize($input + ['block' => false, 'allow_security' => false]);
+        $config = self::normalize($input + ['block' => false, 'allow_security' => false, 'banner' => false]);
         unset($config['active']);
         $this->addons->setConfig(self::SLUG, $config);
         $this->forget();
@@ -191,6 +193,67 @@ final class EmailSuppression
     }
 
     /**
+     * What the signed-in client should be told about their own address, or null
+     * for nothing: the addon is active with its banner setting on, the client's
+     * CURRENT email is the one the scan marked invalid (a client who has since
+     * changed it is not nagged about the old one), and it is not on the
+     * always-send list. Platform clients only — store customers are never
+     * scanned, and nothing platform-side appears on a reseller's store.
+     *
+     * Fails quiet: any error means no banner.
+     *
+     * @return array{email: string, reason: string, blocking: bool}|null
+     */
+    public function clientNotice(int $clientId): ?array
+    {
+        if ($clientId <= 0) {
+            return null;
+        }
+
+        try {
+            $state = $this->state();
+
+            if (!$state['active'] || !$state['banner']) {
+                return null;
+            }
+
+            $row = $this->db->selectOne(
+                <<<'SQL'
+                SELECT c.email, v.reason
+                FROM clients c
+                JOIN client_email_validations v ON v.client_id = c.id
+                WHERE c.id = ? AND c.reseller_id IS NULL AND v.is_valid = 0 AND LOWER(v.email) = LOWER(c.email)
+                LIMIT 1
+                SQL,
+                [$clientId]
+            );
+
+            if ($row === null || in_array(self::normalizeEmail((string) $row['email']), $state['allow'], true)) {
+                return null;
+            }
+
+            return [
+                'email' => (string) $row['email'],
+                'reason' => self::friendlyReason((string) ($row['reason'] ?? '')),
+                'blocking' => $state['block'],
+            ];
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** The scan's reason, worded for the client rather than the admin. */
+    public static function friendlyReason(string $reason): string
+    {
+        return match (true) {
+            str_starts_with($reason, 'Not a valid') => "it isn't a complete email address",
+            str_starts_with($reason, 'No mail server') => "its domain can't receive email (it may have expired or have a typo)",
+            str_contains($reason, 'delivery failure') => 'our recent emails to it were rejected',
+            default => "our emails to it can't be delivered",
+        };
+    }
+
+    /**
      * @return array{blocked: int, skipped30: int, allowed: int}
      */
     public function stats(): array
@@ -225,7 +288,7 @@ final class EmailSuppression
      * the addon is the admin saying "start blocking".
      *
      * @param array<string, mixed> $config
-     * @return array{block: bool, allow_security: bool, rescan_days: int, allow: array<int, string>}
+     * @return array{block: bool, allow_security: bool, rescan_days: int, banner: bool, allow: array<int, string>}
      */
     public static function normalize(array $config): array
     {
@@ -239,6 +302,7 @@ final class EmailSuppression
             'block' => self::bool($config['block'] ?? true),
             'allow_security' => self::bool($config['allow_security'] ?? true),
             'rescan_days' => max(0, min(90, (int) ($config['rescan_days'] ?? 7))),
+            'banner' => self::bool($config['banner'] ?? true),
             'allow' => self::normalizeList((array) $allow),
         ];
     }
@@ -278,7 +342,7 @@ final class EmailSuppression
         return $this->addons->getConfig(self::SLUG);
     }
 
-    /** @return array{active: bool, block: bool, allow_security: bool, rescan_days: int, allow: array<int, string>} */
+    /** @return array{active: bool, block: bool, allow_security: bool, rescan_days: int, banner: bool, allow: array<int, string>} */
     private function state(): array
     {
         if ($this->state === null || time() - $this->loadedAt > self::CACHE_SECONDS) {

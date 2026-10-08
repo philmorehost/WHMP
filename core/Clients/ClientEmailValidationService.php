@@ -120,6 +120,42 @@ final class ClientEmailValidationService
     }
 
     /**
+     * Checks ONE client's address right now — used when a client (or an admin)
+     * changes it, so a fixed address stops being blocked and loses its banner
+     * immediately instead of waiting for the next scan, and a new typo is
+     * caught at once.
+     *
+     * Returns null — and changes nothing — when the check can't be trusted
+     * (DNS unreachable) or doesn't apply (a reseller-store customer: the scan
+     * and its report cover platform clients only). The stale row left behind
+     * is harmless: it holds the OLD address, and both the blocker and the
+     * banner match on the address.
+     *
+     * @return array{valid: bool, reason: ?string}|null
+     */
+    public function recheckClient(int $clientId, string $email, ?int $resellerId = null): ?array
+    {
+        $email = trim($email);
+
+        if ($clientId <= 0 || $email === '' || $resellerId !== null) {
+            return null;
+        }
+
+        $domains = [];
+        $outcome = $this->checkOne($email, $domains);
+
+        // "No mail server" might really be "no DNS": confirm the resolver works
+        // before writing a verdict that would stop this client's mail.
+        if (!$outcome['valid'] && $outcome['reason'] === 'No mail server found for this domain' && !$this->dnsWorks()) {
+            return null;
+        }
+
+        $this->results->upsert($clientId, $email, $outcome['valid'], $outcome['reason'], $outcome['recentFailures']);
+
+        return ['valid' => $outcome['valid'], 'reason' => $outcome['reason']];
+    }
+
+    /**
      * @param array<string, bool> $domains per-scan cache: one lookup per domain,
      *                                     however many clients share it
      * @return array{valid: bool, reason: ?string, recentFailures: int}

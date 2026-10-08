@@ -37,7 +37,9 @@ final class ClientAccountController
         private readonly SecurityQuestionModuleService $securityQuestions,
         private readonly VatNumberValidator $vatValidator,
         private readonly VatLookupService $vatLookup,
-        private readonly PhpassHasher $phpass
+        private readonly PhpassHasher $phpass,
+        // Re-checks a changed email at once (Invalid Email Blocker banner).
+        private readonly ?ClientEmailValidationService $emailCheck = null
     ) {
     }
 
@@ -87,6 +89,14 @@ final class ClientAccountController
             ]);
         }
 
+        if (filter_var($fields['email'], FILTER_VALIDATE_EMAIL) === false) {
+            return $this->page('client-account.profile', [
+                'client' => $client,
+                'error' => 'Please enter a complete email address, like name@example.com.',
+                'success' => null,
+            ]);
+        }
+
         $existing = $this->clients->findByEmail($fields['email']);
 
         if ($existing !== null && (int) $existing['id'] !== (int) $client['id']) {
@@ -103,11 +113,42 @@ final class ClientAccountController
 
         $this->clients->updateContactDetails((int) $client['id'], $fields);
 
+        $success = 'Your details have been updated.';
+        $error = null;
+
+        if (strcasecmp($fields['email'], (string) $client['email']) !== 0) {
+            $check = $this->recheckEmail($client, $fields['email']);
+
+            if ($check !== null && !$check['valid']) {
+                $error = 'Your details were saved, but ' . $fields['email'] . ' does not look like it can receive email ('
+                    . \CodeVault\Mail\EmailSuppression::friendlyReason((string) $check['reason'])
+                    . '). Please double-check it for typos so you keep receiving invoices and notices.';
+                $success = null;
+            }
+        }
+
         return $this->page('client-account.profile', [
             'client' => $this->clients->find((int) $client['id']),
-            'error' => null,
-            'success' => 'Your details have been updated.',
+            'error' => $error,
+            'success' => $success,
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $client
+     * @return array{valid: bool, reason: ?string}|null
+     */
+    private function recheckEmail(array $client, string $email): ?array
+    {
+        try {
+            return $this->emailCheck?->recheckClient(
+                (int) $client['id'],
+                $email,
+                isset($client['reseller_id']) && $client['reseller_id'] !== null ? (int) $client['reseller_id'] : null
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

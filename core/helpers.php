@@ -293,3 +293,44 @@ if (!function_exists('csp_nonce')) {
         return \CodeVault\Security\SecurityHeaders::nonce();
     }
 }
+
+if (!function_exists('invalid_email_notice')) {
+    /**
+     * What to tell the signed-in client about their own email address, or null
+     * (Invalid Email Blocker addon — EmailSuppression::clientNotice()).
+     *
+     * Only inside the main website's client area: never on a reseller's store
+     * (store customers are not scanned, and nothing platform-side shows there),
+     * never on the sign-in / sign-up pages, and not while the client has chosen
+     * "Remind me tomorrow". Fails quiet — no container, no banner.
+     *
+     * @return array{email: string, reason: string, blocking: bool, onProfile: bool}|null
+     */
+    function invalid_email_notice(?string $path = null): ?array
+    {
+        $path = rtrim($path ?? (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH), '/');
+
+        if (!str_starts_with($path . '/', '/client/')
+            || in_array($path, ['/client/login', '/client/register', '/client/forgot-password', '/client/reset-password', '/client/logout'], true)) {
+            return null;
+        }
+
+        $clientId = (int) ($_SESSION['client_id'] ?? 0);
+
+        if ($clientId <= 0 || (int) ($_SESSION[\CodeVault\Clients\InvalidEmailNoticeController::HIDE_KEY] ?? 0) > time()) {
+            return null;
+        }
+
+        try {
+            if (current_storefront() !== null) {
+                return null;
+            }
+
+            $notice = \CodeVault\Support\App::container()->make(\CodeVault\Mail\EmailSuppression::class)->clientNotice($clientId);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $notice === null ? null : $notice + ['onProfile' => $path === '/client/account'];
+    }
+}
