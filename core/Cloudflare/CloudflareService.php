@@ -125,7 +125,8 @@ final class CloudflareService
             return ['show' => true, 'canEnable' => false, 'zone' => $zone, 'reason' => ''];
         }
 
-        if (!$this->settings->connected() || !$this->productEligible((int) $service['product_id'])) {
+        if (!$this->settings->connected() || in_array((string) $service['status'], self::ENDED_STATUSES, true)
+            || !$this->productEligible((int) $service['product_id'])) {
             return ['show' => false, 'canEnable' => false, 'zone' => null, 'reason' => ''];
         }
 

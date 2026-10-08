@@ -525,6 +525,9 @@ final class CloudflareAddonTest extends TestCase
         $this->assertFalse($this->service->stateFor($services->find(100))['show'], 'order-time only');
         $this->settings->save(['allow_later' => '1']);
 
+        $this->setServiceStatus(100, 'terminated');
+        $this->assertFalse($this->service->stateFor($services->find(100))['show'], 'nothing to offer on an ended service');
+
         $this->setServiceStatus(100, 'pending');
         $state = $this->service->stateFor($services->find(100));
         $this->assertFalse($state['canEnable']);
