@@ -32,7 +32,6 @@ final class CloudflareSettings
         'option_group_id' => '0',
         'option_yes_id' => '0',
         'allow_later' => '1',
-        'staff_alert_email' => '',
     ];
 
     public function __construct(
@@ -136,11 +135,6 @@ final class CloudflareSettings
     public function allowLater(): bool
     {
         return $this->raw('allow_later') === '1';
-    }
-
-    public function staffAlertEmail(): string
-    {
-        return trim($this->raw('staff_alert_email'));
     }
 
     public function api(?string $token = null): CloudflareApi

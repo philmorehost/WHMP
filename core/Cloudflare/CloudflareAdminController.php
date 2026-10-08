@@ -155,21 +155,12 @@ final class CloudflareAdminController
 
         $ssl = (string) $request->input('default_ssl', 'full');
         $level = (string) $request->input('default_security_level', 'medium');
-        $alert = trim((string) $request->input('staff_alert_email', ''));
-
-        if ($alert !== '' && filter_var($alert, FILTER_VALIDATE_EMAIL) === false) {
-            $this->flash(['ok' => false, 'message' => 'The staff alert email is not a valid address.']);
-
-            return Response::redirect('/admin/cloudflare/settings');
-        }
-
         $this->settings->save([
             'default_ssl' => in_array($ssl, CloudflareSettings::SSL_MODES, true) ? $ssl : 'full',
             'default_always_https' => $request->input('default_always_https') ? '1' : '0',
             'default_security_level' => in_array($level, CloudflareSettings::SECURITY_LEVELS, true) ? $level : 'medium',
             'grace_days' => (string) max(1, min(90, (int) $request->input('grace_days', 7))),
             'allow_later' => $request->input('allow_later') ? '1' : '0',
-            'staff_alert_email' => $alert,
         ]);
 
         $this->flash(['ok' => true, 'message' => 'Settings saved.']);

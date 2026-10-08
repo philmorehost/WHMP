@@ -113,11 +113,6 @@ $levelLabels = ['essentially_off' => 'Essentially off', 'low' => 'Low', 'medium'
                         <span class="cfa-muted">After a service ends or a client turns Cloudflare off, the zone is deleted after this many days. It can be undone until then.</span>
                     </div>
                     <label class="cfa-check"><input type="checkbox" name="allow_later" value="1"<?= $settings->allowLater() ? ' checked' : '' ?>> <span>Let clients on an eligible product turn Cloudflare on later from their service page (not only at order)</span></label>
-                    <div class="cfa-field">
-                        <label for="cf-alert">Staff alert email (optional)</label>
-                        <input class="cv-input" id="cf-alert" name="staff_alert_email" type="email" value="<?= e($settings->staffAlertEmail()) ?>" placeholder="ops@example.com">
-                    </div>
-                </div>
             </div>
             <button class="cv-btn" type="submit">Save settings</button>
         </form>

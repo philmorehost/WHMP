@@ -1,7 +1,51 @@
-# Cloudflare Add-on for WHMP — Plan for review
+# Cloudflare Add-on for WHMP — Plan & status
 
-Status: **PLAN — nothing built yet.** Please review the decisions in §12 before
-implementation starts.
+Status: **Phase 1 BUILT** (see "Implementation status" below). The decisions in
+§12 were answered as follows, and they override anything else in this plan:
+
+| Decision | Answer |
+|---|---|
+| Plans | **Free plan only** for everyone — no paid plans, no upgrades. |
+| Connection | The owner's **normal Cloudflare account** + API token (Provider mode). Partner/Tenant and client-owned accounts are dropped. |
+| Selling | Clients **opt in** through a free configurable option on chosen products (or later from the service page). |
+| Nameservers | Switched **only when the client clicks**, and only for domains registered with us. |
+| Termination | Zone deleted **automatically after a 7-day grace period** (configurable), undoable until then. |
+| Resellers | Stores may offer it **free**; no monetisation anywhere. |
+
+## Implementation status
+
+**Phase 1 — done**
+
+* Add-on `cloudflare` (Addons → Cloudflare), off until activated; admin screens at
+  `/admin/cloudflare` (zones, zone detail, settings) behind `addons.manage`.
+* Settings: API token (SecretBox-encrypted, verified with `/user/tokens/verify`),
+  account picker, default SSL / Always HTTPS / security level, grace days, "allow
+  enabling after order", product checklist (attaches the free option group).
+* Configurable option group "Cloudflare CDN & Security (Free)" — No thanks / Yes,
+  priced 0 on all seven cycles. Choosing Yes enrols the service when it goes active
+  (`SERVICE_STATUS_CHANGED`), once per service.
+* Zone creation: `POST /zones` → DNS scan → apex A + www CNAME to the hosting IP if
+  missing → mail/ftp/cpanel/webmail/whm/autodiscover and MX targets forced to DNS-only
+  → default settings. An existing zone for the domain is refused, never adopted.
+* Client page `/client/services/{id}/cloudflare` (main site and stores, white-label):
+  Overview (status, nameservers, one-click switch for our registrations, registrar
+  steps otherwise, Check now, Turn off / Keep), DNS (A/AAAA/CNAME/MX/TXT/NS CRUD with
+  proxy toggle; other types delete-only), SSL/TLS, Caching (purge all/URLs, dev mode,
+  cache level, browser TTL), Security (level incl. "I'm under attack", browser check,
+  IP access rules), Activity. Card on the service page.
+* Lifecycle: suspend → pause (only zones WHMP paused are resumed); terminate/cancel or
+  client turn-off → nameservers WHMP switched are restored at once, zone deleted after
+  the grace period with a BIND backup kept; re-activation inside the grace keeps it.
+* Cron `cloudflare` (15 min): due deletions, activation checks (≤1/h per zone) with
+  reminders on day 3 and 7, daily reconcile with Cloudflare and the service status.
+* Emails: `cloudflare_zone_pending`, `_active`, `_reminder`, `_removal_scheduled`
+  (store-branded for store customers).
+* Tables `cloudflare_zones`, `cloudflare_activity` (migration 0216).
+* Tests: `tests/Unit/CloudflareAddonTest.php` (SQLite + a stateful fake Cloudflare).
+
+**Phase 2 — next:** Rulesets (redirect/cache/config rules), analytics (GraphQL),
+DNSSEC (needs a registrar DS-record capability), origin certificate installed on
+cPanel, speed settings. **Phase 3:** Email Routing.
 
 Benchmarks studied:
 

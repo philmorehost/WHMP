@@ -991,7 +991,9 @@ final class CloudflareService
                 return ['ok' => true, 'message' => 'The zone no longer exists in Cloudflare.'];
             }
 
-            $this->zones->update((int) $zone['id'], ['last_checked_at' => $now, 'last_error' => mb_substr($e->getMessage(), 0, 255)]);
+            // Stamped as synced too, so a revoked token or an outage is retried
+            // on the next daily pass instead of every cron run.
+            $this->zones->update((int) $zone['id'], ['last_checked_at' => $now, 'last_synced_at' => $now, 'last_error' => mb_substr($e->getMessage(), 0, 255)]);
 
             return self::fail($e->getMessage());
         }

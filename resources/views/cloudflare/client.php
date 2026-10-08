@@ -104,6 +104,11 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
     .cf-content{max-width:22rem;word-break:break-all;font-family:var(--cv-font-mono,monospace);font-size:.85rem}
     .cf-danger{border:1px solid #fecaca}
     .cf-flash{margin-bottom:var(--cv-space-4,1rem)}
+    .cf-card [hidden]{display:none!important}
+    .cf-card .cv-table{display:table;width:100%}
+    .cf-card .cf-table-wrap .cv-table{white-space:nowrap}
+    .cf-check{display:flex;align-items:center;gap:.45rem;white-space:nowrap;min-height:2.5rem;cursor:pointer}
+    .cf-head .cv-btn,.cf-card a.cv-btn{text-decoration:none}
 </style>
 
 <div class="cv-card cf-card">
@@ -273,7 +278,7 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
                         <input class="cv-input" id="cf-priority" name="priority" type="number" min="0" max="65535" value="10"></div>
                     <div class="cv-field"><label class="cv-label" for="cf-ttl">TTL</label>
                         <select class="cv-input" id="cf-ttl" name="ttl"><?php foreach ($ttlOptions as $value => $label): ?><option value="<?= $value ?>"><?= e($label) ?></option><?php endforeach; ?></select></div>
-                    <div class="cv-field" data-cf-proxy><label class="cf-inline"><input type="checkbox" name="proxied" value="1" checked> Proxied through Cloudflare</label></div>
+                    <div class="cv-field" data-cf-proxy><label class="cf-check"><input type="checkbox" name="proxied" value="1" checked> Proxied</label></div>
                     <div class="cv-field"><button class="cv-btn" type="submit">Add record</button></div>
                 </form>
                 <p class="cf-muted">Mail, FTP and control-panel names (mail, ftp, cpanel, webmail…) should stay <strong>DNS only</strong> — Cloudflare's proxy only carries web traffic.</p>
@@ -307,7 +312,7 @@ $ttlOptions = [1 => 'Auto', 300 => '5 min', 1800 => '30 min', 3600 => '1 hr', 14
                                 <?php endif; ?>
                                 <div class="cv-field"><label class="cv-label">TTL</label><select class="cv-input" name="ttl"><?php foreach ($ttlOptions + [(int) ($record['ttl'] ?? 1) => $ttlLabel((int) ($record['ttl'] ?? 1))] as $value => $label): ?><option value="<?= $value ?>"<?= (int) ($record['ttl'] ?? 1) === $value ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></div>
                                 <?php if (in_array($rtype, CloudflareService::PROXIABLE, true)): ?>
-                                    <div class="cv-field"><label class="cf-inline"><input type="checkbox" name="proxied" value="1"<?= !empty($record['proxied']) ? ' checked' : '' ?>> Proxied</label></div>
+                                    <div class="cv-field"><label class="cf-check"><input type="checkbox" name="proxied" value="1"<?= !empty($record['proxied']) ? ' checked' : '' ?>> Proxied</label></div>
                                 <?php endif; ?>
                                 <div class="cv-field cf-inline"><button class="cv-btn" type="submit">Save</button><a class="cv-btn cv-btn--secondary" href="<?= e($base . '?tab=dns') ?>">Cancel</a></div>
                             </form>
