@@ -52,7 +52,7 @@ $returnPath = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/client')
 .ieb-notice__text a { color: #92400e; font-weight: 600; text-decoration: underline; }
 .ieb-notice__actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; flex: none; }
 .ieb-notice__actions form { margin: 0; }
-.ieb-notice__cta { white-space: nowrap; text-align: center; }
+.ieb-notice__cta { white-space: nowrap; text-align: center; text-decoration: none !important; }
 .ieb-notice__later { width: 100%; background: none; border: 0; padding: 4px 6px; font: inherit; font-size: 13px;
     color: #92400e; text-decoration: underline; cursor: pointer; }
 @media (max-width: 640px) {
