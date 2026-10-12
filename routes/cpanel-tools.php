@@ -35,4 +35,5 @@ $router->post('/client/services/{id}/cpanel-tools/ssh', [CpanelToolsController::
 $router->post('/client/services/{id}/cpanel-tools/ssh/delete', [CpanelToolsController::class, 'destroySshKey']);
 $router->post('/client/services/{id}/cpanel-tools/ssh/authorize', [CpanelToolsController::class, 'authorizeSshKey']);
 
+$router->post('/client/services/{id}/cpanel-tools/ssl', [CpanelToolsController::class, 'storeSslCertificate']);
 $router->post('/client/services/{id}/cpanel-tools/sso/{app}', [CpanelToolsController::class, 'sso']);

@@ -61,10 +61,14 @@ $tabs = [
                     <td><?= e((string) $account['quota']) ?></td>
                     <td><?= e((string) $account['used']) ?></td>
                     <td>
-                        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/email/delete" data-confirm="Delete this email account?"><?= csrf_field() ?>
-                            <input type="hidden" name="local_part" value="<?= e((string) $account['login']) ?>">
-                            <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
-                        </form>
+                        <?php if (!empty($account['deletable'])): ?>
+                            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/email/delete" data-confirm="Delete this email account?"><?= csrf_field() ?>
+                                <input type="hidden" name="local_part" value="<?= e((string) $account['login']) ?>">
+                                <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
+                            </form>
+                        <?php else: ?>
+                            <span style="color:var(--cv-text-secondary);">Primary account</span>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -145,7 +149,7 @@ $tabs = [
                     <td><?= e((string) ($ar['subject'] ?? '')) ?></td>
                     <td>
                         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/email/autoresponder/delete" data-confirm="Delete this autoresponder?"><?= csrf_field() ?>
-                            <input type="hidden" name="local_part" value="<?= e(str_contains($arEmail, '@') ? strstr($arEmail, '@', true) : $arEmail) ?>">
+                            <input type="hidden" name="email" value="<?= e($arEmail) ?>">
                             <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                         </form>
                     </td>
@@ -164,6 +168,10 @@ $tabs = [
             <div class="cv-field" style="margin-bottom:0;">
                 <label class="cv-label">Subject</label>
                 <input class="cv-input" name="subject" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Stop date and time (<?= e(date_default_timezone_get()) ?>)</label>
+                <input class="cv-input" type="datetime-local" name="stop" value="<?= e(date('Y-m-d\\TH:i', strtotime('+30 days'))) ?>" required>
             </div>
             <div class="cv-field" style="grid-column: 1 / -1;margin-bottom:0;">
                 <label class="cv-label">Message</label>
@@ -187,10 +195,14 @@ $tabs = [
                     <td><?= e((string) ($account['user'] ?? '')) ?></td>
                     <td><?= e((string) ($account['homedir'] ?? '')) ?></td>
                     <td>
-                        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/ftp/delete" data-confirm="Delete this FTP account?"><?= csrf_field() ?>
-                            <input type="hidden" name="username" value="<?= e((string) ($account['user'] ?? '')) ?>">
-                            <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
-                        </form>
+                        <?php if (!empty($account['deletable'])): ?>
+                            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/ftp/delete" data-confirm="Delete this FTP account?"><?= csrf_field() ?>
+                                <input type="hidden" name="username" value="<?= e((string) ($account['user'] ?? '')) ?>">
+                                <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
+                            </form>
+                        <?php else: ?>
+                            <span style="color:var(--cv-text-secondary);">Primary account</span>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -270,16 +282,24 @@ $tabs = [
             <thead><tr><th>Name</th><th>Type</th><th>TTL</th><th>Value</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($items as $record): ?>
+                <?php $recordType = strtoupper((string) ($record['type'] ?? '')); ?>
                 <tr>
                     <td><?= e((string) $record['name']) ?></td>
                     <td><?= e((string) $record['type']) ?></td>
                     <td><?= (int) $record['ttl'] ?></td>
                     <td><?= e((string) $record['value']) ?></td>
                     <td>
-                        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns/delete" data-confirm="Delete this DNS record?"><?= csrf_field() ?>
-                            <input type="hidden" name="line" value="<?= (int) $record['line'] ?>">
-                            <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
-                        </form>
+                        <?php if ((int) ($record['line'] ?? -1) > 0 && !in_array($recordType, ['', 'SOA', ':RAW'], true) && !str_starts_with($recordType, '$')): ?>
+                            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns/delete" data-confirm="Delete this DNS record?"><?= csrf_field() ?>
+                                <input type="hidden" name="line" value="<?= (int) $record['line'] ?>">
+                                <input type="hidden" name="name" value="<?= e((string) $record['name']) ?>">
+                                <input type="hidden" name="type" value="<?= e((string) $record['type']) ?>">
+                                <input type="hidden" name="value" value="<?= e((string) $record['value']) ?>">
+                                <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
+                            </form>
+                        <?php else: ?>
+                            <span style="color:var(--cv-text-secondary);">Protected</span>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -291,7 +311,7 @@ $tabs = [
     </div>
     <div class="cv-card">
         <h3>Add DNS Record</h3>
-        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Supports A, AAAA, CNAME, and TXT records.</p>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Supports A, AAAA, CNAME, and TXT records. Enter a label such as www, a full name within this zone, or @ for the root domain.</p>
         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
             <div class="cv-field" style="margin-bottom:0;">
                 <label class="cv-label">Name</label>
@@ -333,7 +353,7 @@ $tabs = [
                     <td>
                         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/domains/addon/delete" data-confirm="Delete this addon domain?"><?= csrf_field() ?>
                             <input type="hidden" name="domain" value="<?= e((string) ($ad['domain'] ?? '')) ?>">
-                            <input type="hidden" name="subdomain" value="<?= e((string) ($ad['subdomain'] ?? '')) ?>">
+                            <input type="hidden" name="subdomain" value="<?= e((string) ($ad['domainkey'] ?? $ad['subdomain'] ?? '')) ?>">
                             <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                         </form>
                     </td>
@@ -385,12 +405,16 @@ $tabs = [
         </table>
         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/domains/subdomain" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:var(--cv-space-3);align-items:end;margin-top:var(--cv-space-3);"><?= csrf_field() ?>
             <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Subdomain Name</label>
-                <input class="cv-input" name="subdomain" required>
+                <label class="cv-label">Subdomain Label</label>
+                <input class="cv-input" name="subdomain" placeholder="shop" required>
             </div>
             <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Document Root</label>
-                <input class="cv-input" name="dir" required>
+                <label class="cv-label">Root Domain</label>
+                <input class="cv-input" name="root_domain" value="<?= e((string) ($service['domain'] ?? '')) ?>" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Document Root (optional)</label>
+                <input class="cv-input" name="dir" placeholder="public_html/shop">
             </div>
             <div style="grid-column: 1 / -1;">
                 <button class="cv-btn" type="submit">Add Subdomain</button>
@@ -404,14 +428,20 @@ $tabs = [
             <thead><tr><th>Source</th><th>Destination</th><th>Type</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($redirects as $rd): ?>
-                <?php $rdSource = (string) ($rd['domain'] ?? $rd['source'] ?? ''); ?>
+                <?php
+                    $rdDomain = (string) ($rd['domain'] ?? '');
+                    $rdPath = (string) ($rd['source'] ?? '');
+                    $rdDeletePath = $rdPath !== '' ? $rdPath : '/';
+                    $rdSource = $rdDomain . $rdDeletePath;
+                ?>
                 <tr>
                     <td><?= e($rdSource) ?></td>
                     <td><?= e((string) ($rd['dest'] ?? '')) ?></td>
                     <td><?= e((string) ($rd['type'] ?? '')) ?></td>
                     <td>
                         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/domains/redirect/delete" data-confirm="Delete this redirect?"><?= csrf_field() ?>
-                            <input type="hidden" name="source_domain" value="<?= e($rdSource) ?>">
+                            <input type="hidden" name="domain" value="<?= e($rdDomain) ?>">
+                            <input type="hidden" name="source" value="<?= e($rdDeletePath) ?>">
                             <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                         </form>
                     </td>
@@ -460,10 +490,14 @@ $tabs = [
                     <td><?= e((string) ($job['weekday'] ?? '')) ?></td>
                     <td><?= e((string) ($job['command'] ?? '')) ?></td>
                     <td>
-                        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/cron/delete" data-confirm="Delete this cron job?"><?= csrf_field() ?>
-                            <input type="hidden" name="line" value="<?= (int) ($job['line'] ?? 0) ?>">
-                            <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
-                        </form>
+                        <?php if ((int) ($job['line'] ?? 0) > 0): ?>
+                            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/cron/delete" data-confirm="Delete this cron job?"><?= csrf_field() ?>
+                                <input type="hidden" name="line" value="<?= (int) $job['line'] ?>">
+                                <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
+                            </form>
+                        <?php else: ?>
+                            <span style="color:var(--cv-text-secondary);">Unavailable</span>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -511,12 +545,11 @@ $tabs = [
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
         <h2 class="cv-card__title">SSH Keys</h2>
         <table class="cv-table">
-            <thead><tr><th>Name</th><th>Bits</th><th>Authorized</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Authorized</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($items as $key): ?>
                 <tr>
                     <td><?= e((string) ($key['name'] ?? '')) ?></td>
-                    <td><?= e((string) ($key['bits'] ?? '')) ?></td>
                     <td><?= !empty($key['authorized']) ? 'Yes' : 'No' ?></td>
                     <td style="display:flex;gap:var(--cv-space-2);">
                         <?php if (empty($key['authorized'])): ?>
@@ -533,7 +566,7 @@ $tabs = [
                 </tr>
             <?php endforeach; ?>
             <?php if ($items === []): ?>
-                <tr><td colspan="4" style="color:var(--cv-text-secondary);">No SSH keys yet.</td></tr>
+                <tr><td colspan="3" style="color:var(--cv-text-secondary);">No SSH keys yet.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>
@@ -564,36 +597,59 @@ $tabs = [
 <?php endif; ?>
 
 <?php if ($tab === 'ssl'): ?>
-    <div class="cv-card">
-        <h2 class="cv-card__title">Installed SSL Certificates</h2>
-        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Read-only — certificate installation is managed by your host.</p>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <h2 class="cv-card__title">SSL Certificates</h2>
         <table class="cv-table">
-            <thead><tr><th>Domain</th><th>Issuer</th><th>Expires</th></tr></thead>
+            <thead><tr><th>Domain</th><th>Issuer</th><th>Expires</th><th>Status</th></tr></thead>
             <tbody>
             <?php foreach ($items as $cert): ?>
                 <tr>
                     <td><?= e((string) ($cert['domain'] ?? '')) ?></td>
                     <td><?= e((string) ($cert['issuer'] ?? '')) ?></td>
                     <td><?= e((string) ($cert['expires'] ?? '')) ?></td>
+                    <td><?= !empty($cert['installed']) ? 'Installed' : 'Not installed' ?></td>
                 </tr>
             <?php endforeach; ?>
             <?php if ($items === []): ?>
-                <tr><td colspan="3" style="color:var(--cv-text-secondary);">No SSL certificates found.</td></tr>
+                <tr><td colspan="4" style="color:var(--cv-text-secondary);">No SSL certificates found.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>
+    </div>
+    <div class="cv-card">
+        <h3>Install SSL Certificate</h3>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Use a certificate and matching private key for a domain on this cPanel account. The CA bundle is optional.</p>
+        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/ssl" style="display:grid;gap:var(--cv-space-3);"><?= csrf_field() ?>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Domain</label>
+                <input class="cv-input" name="domain" value="<?= e((string) ($service['domain'] ?? '')) ?>" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Certificate (PEM)</label>
+                <textarea class="cv-input" name="certificate" rows="6" required autocomplete="off" spellcheck="false"></textarea>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">Private Key (PEM)</label>
+                <textarea class="cv-input" name="private_key" rows="6" required autocomplete="off" spellcheck="false"></textarea>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label">CA Bundle (optional)</label>
+                <textarea class="cv-input" name="ca_bundle" rows="4" autocomplete="off" spellcheck="false"></textarea>
+            </div>
+            <button class="cv-btn" type="submit" data-confirm="Install this certificate on the selected domain?">Install Certificate</button>
+        </form>
     </div>
 <?php endif; ?>
 
 <?php if ($tab === 'usage'): ?>
     <div class="cv-card">
         <h2 class="cv-card__title">Disk Usage</h2>
-        <?php if ($usage === null): ?>
+        <?php if (!is_array($usage) || !isset($usage['usedMb'], $usage['limitMb'])): ?>
             <p style="color:var(--cv-text-secondary);">Usage data is unavailable.</p>
         <?php else: ?>
             <?php
-                $used = $usage['usedMb'];
-                $limit = $usage['limitMb'];
+                $used = (float) $usage['usedMb'];
+                $limit = (float) $usage['limitMb'];
                 $pct = $limit > 0 ? min(100, round(($used / $limit) * 100)) : 0;
             ?>
             <p><?= number_format($used, 1) ?> MB used of <?= $limit > 0 ? number_format($limit, 1) . ' MB' : 'unlimited' ?></p>

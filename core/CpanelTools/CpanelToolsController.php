@@ -119,11 +119,22 @@ final class CpanelToolsController
             return $denied;
         }
 
+        $stopInput = trim((string) $request->input('stop', ''));
+        $stop = \DateTimeImmutable::createFromFormat('!Y-m-d\\TH:i', $stopInput);
+        $dateErrors = \DateTimeImmutable::getLastErrors();
+
+        if ($stop === false
+            || $stop->format('Y-m-d\\TH:i') !== $stopInput
+            || (is_array($dateErrors) && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
+            return $this->render($id, $service, 'email', ['success' => false, 'message' => 'Choose a valid autoresponder end date and time.', 'data' => []]);
+        }
+
         $result = $this->tools->createAutoresponder(
             $id,
             trim((string) $request->input('local_part', '')),
             trim((string) $request->input('subject', '')),
-            (string) $request->input('body', '')
+            (string) $request->input('body', ''),
+            $stop->getTimestamp()
         );
 
         return $this->render($id, $service, 'email', $result);
@@ -138,7 +149,7 @@ final class CpanelToolsController
             return $denied;
         }
 
-        $result = $this->tools->deleteAutoresponder($id, (string) $request->input('local_part', ''));
+        $result = $this->tools->deleteAutoresponder($id, (string) $request->input('email', ''));
 
         return $this->render($id, $service, 'email', $result);
     }
@@ -234,7 +245,13 @@ final class CpanelToolsController
             return $denied;
         }
 
-        $result = $this->tools->deleteDnsRecord($id, (int) $request->input('line', 0));
+        $result = $this->tools->deleteDnsRecord(
+            $id,
+            (int) $request->input('line', -1),
+            (string) $request->input('name', ''),
+            (string) $request->input('type', ''),
+            (string) $request->input('value', '')
+        );
 
         return $this->render($id, $service, 'dns', $result);
     }
@@ -320,9 +337,8 @@ final class CpanelToolsController
 
         $result = $this->tools->createRedirect(
             $id,
-            trim((string) $request->input('domain', '')),
-            trim((string) $request->input('path', '')),
-            trim((string) $request->input('destination', '')),
+            trim((string) $request->input('source', '')),
+            trim((string) $request->input('target', '')),
             (string) $request->input('type', 'permanent')
         );
 
@@ -338,7 +354,11 @@ final class CpanelToolsController
             return $denied;
         }
 
-        $result = $this->tools->deleteRedirect($id, (string) $request->input('source_domain', ''));
+        $result = $this->tools->deleteRedirect(
+            $id,
+            (string) $request->input('domain', ''),
+            (string) $request->input('source', '')
+        );
 
         return $this->render($id, $service, 'domains', $result);
     }
@@ -426,6 +446,26 @@ final class CpanelToolsController
         return $this->render($id, $service, 'ssh', $result);
     }
 
+    public function storeSslCertificate(Request $request, array $params): Response
+    {
+        $id = (int) $params['id'];
+        [$service, $denied] = $this->requireOwnedService($id);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $result = $this->tools->installSslCertificate(
+            $id,
+            trim((string) $request->input('domain', '')),
+            (string) $request->input('certificate', ''),
+            (string) $request->input('private_key', ''),
+            (string) $request->input('ca_bundle', '')
+        );
+
+        return $this->render($id, $service, 'ssl', $result);
+    }
+
     public function sso(Request $request, array $params): Response
     {
         $id = (int) $params['id'];
@@ -485,11 +525,51 @@ final class CpanelToolsController
         $redirects = $tab === 'domains' ? $this->tools->listRedirects($serviceId) : ['data' => []];
         $usage = $tab === 'usage' ? $this->tools->diskUsage($serviceId) : ['data' => null];
 
+        $additionalResults = match ($tab) {
+            'email' => [
+                'Email forwarders' => $forwarders,
+                'Autoresponders' => $autoresponders,
+            ],
+            'domains' => [
+                'Addon domains' => $addonDomains,
+                'Subdomains' => $subdomains,
+                'Redirects' => $redirects,
+            ],
+            'usage' => ['Disk usage' => $usage],
+            default => [],
+        };
+        $errors = [];
+
+        if (!($listing['success'] ?? false)) {
+            $errors[] = (string) ($listing['message'] ?? 'The cPanel listing request failed.');
+        }
+
+        foreach ($additionalResults as $label => $result) {
+            if (array_key_exists('success', $result) && !$result['success']) {
+                $errors[] = $label . ': ' . (string) ($result['message'] ?? 'The cPanel request failed.');
+            }
+        }
+
+        $usageData = null;
+
+        if (($usage['success'] ?? false) && is_array($usage['data'] ?? null)) {
+            $rawUsage = $usage['data'];
+
+            if (isset($rawUsage['usedMb'], $rawUsage['limitMb'])
+                && is_numeric($rawUsage['usedMb'])
+                && is_numeric($rawUsage['limitMb'])) {
+                $usageData = [
+                    'usedMb' => (float) $rawUsage['usedMb'],
+                    'limitMb' => (float) $rawUsage['limitMb'],
+                ];
+            }
+        }
+
         $content = $this->view->render('cpanel-tools.index', [
             'service' => $service,
             'tab' => $tab,
             'items' => is_array($listing['data'] ?? null) ? $listing['data'] : [],
-            'listError' => ($listing['success'] ?? false) ? null : ($listing['message'] ?? 'Request failed.'),
+            'listError' => $errors !== [] ? implode(' ', $errors) : null,
             'notice' => $notice,
             'dnsRecordTypes' => $this->tools->supportedDnsRecordTypes(),
             'forwarders' => is_array($forwarders['data'] ?? null) ? $forwarders['data'] : [],
@@ -497,9 +577,8 @@ final class CpanelToolsController
             'addonDomains' => is_array($addonDomains['data'] ?? null) ? $addonDomains['data'] : [],
             'subdomains' => is_array($subdomains['data'] ?? null) ? $subdomains['data'] : [],
             'redirects' => is_array($redirects['data'] ?? null) ? $redirects['data'] : [],
-            'usage' => is_array($usage['data'] ?? null) ? $usage['data'] : null,
+            'usage' => $usageData,
         ]);
-
         return Response::html($this->view->render('layouts.client', [
             'title' => 'cPanel Tools — ' . (string) $service['product_name'],
             'content' => $content,
