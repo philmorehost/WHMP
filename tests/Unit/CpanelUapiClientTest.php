@@ -200,6 +200,103 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertStringContainsString('cpanel_jsonapi_apiversion=2', $this->http->requests[1]['url']);
     }
 
+    public function test_uapi_cron_list_uses_the_real_api2_function_name_when_falling_back(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['Failed to load module "Cron": Can\'t locate Cpanel/API/Cron.pm'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, [
+                'cpanelresult' => [
+                    'apiversion' => 2,
+                    'data' => [['count' => 1, 'command' => '/usr/bin/php cron.php']],
+                    'event' => ['result' => 1],
+                    'module' => 'Cron',
+                ],
+            ]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'Cron', 'list_cronjobs');
+        parse_str((string) parse_url($this->http->requests[1]['url'], PHP_URL_QUERY), $legacyQuery);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('2', $result['api_version']);
+        $this->assertSame('Cron', $legacyQuery['cpanel_jsonapi_module']);
+        $this->assertSame('listcron', $legacyQuery['cpanel_jsonapi_func']);
+    }
+
+    public function test_legacy_ssl_installed_name_is_normalized_to_list_certs(): void
+    {
+        $this->http->respondWith(200, json_encode(['result' => ['status' => 1, 'data' => []]], JSON_THROW_ON_ERROR));
+
+        $result = $this->client->call($this->server, 'cvuser1', 'SSL', 'installed');
+        parse_str((string) parse_url($this->http->lastRequest()['url'], PHP_URL_QUERY), $query);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('list_certs', $query['cpanel_jsonapi_func']);
+        $this->assertCount(1, $this->http->requests);
+    }
+
+    public function test_ssl_list_certs_uses_api2_listcrts_if_the_uapi_function_is_missing(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['The system could not find function "list_certs" in module "SSL".'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, [
+                'cpanelresult' => [
+                    'apiversion' => 2,
+                    'data' => [['host' => 'example.test']],
+                    'event' => ['result' => 1],
+                    'module' => 'SSL',
+                ],
+            ]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'SSL', 'list_certs');
+        parse_str((string) parse_url($this->http->requests[1]['url'], PHP_URL_QUERY), $legacyQuery);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('SSL', $legacyQuery['cpanel_jsonapi_module']);
+        $this->assertSame('listcrts', $legacyQuery['cpanel_jsonapi_func']);
+    }
+
+    public function test_mysql_database_listing_falls_back_to_mysqlfe_on_older_servers(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['Failed to load module "Mysql": Can\'t locate Cpanel/API/Mysql.pm'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, [
+                'cpanelresult' => [
+                    'apiversion' => 2,
+                    'data' => [['db' => 'cvuser_store', 'size' => 123]],
+                    'event' => ['result' => 1],
+                    'module' => 'MysqlFE',
+                ],
+            ]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'Mysql', 'list_databases');
+        parse_str((string) parse_url($this->http->requests[1]['url'], PHP_URL_QUERY), $legacyQuery);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('MysqlFE', $legacyQuery['cpanel_jsonapi_module']);
+        $this->assertSame('listdbs', $legacyQuery['cpanel_jsonapi_func']);
+    }
+
     public function test_a_module_error_outside_a_json_envelope_is_still_recognised(): void
     {
         // The same failure, but the panel answered with plain text instead of a

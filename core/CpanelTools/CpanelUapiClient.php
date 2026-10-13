@@ -30,7 +30,8 @@ final class CpanelUapiClient
     private const API_VERSION = '3';
 
     /**
-     * The legacy API 2 version, tried only when the UAPI module is missing.
+     * The legacy API 2 version, used only when a mapped UAPI list operation is
+     * missing or the UAPI module cannot be loaded.
      *
      * This exists because of a real server. Asking for
      * `AddonDomain::addaddondomain` over UAPI came back with:
@@ -45,6 +46,30 @@ final class CpanelUapiClient
      * making an administrator do it by hand.
      */
     private const LEGACY_API_VERSION = '2';
+
+    /**
+     * Old application builds used this non-existent UAPI name. Normalize it
+     * before sending the request so already-deployed callers get the supported
+     * SSL certificate listing function.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const UAPI_FUNCTION_ALIASES = [
+        'ssl' => ['installed' => 'list_certs'],
+    ];
+
+    /**
+     * Read-only API 2 replacements for UAPI list operations on older cPanel
+     * servers. The API 2 function names are not always the same as their UAPI
+     * counterparts (Cron::list_cronjobs is Cron::listcron in API 2).
+     *
+     * @var array<string, array<string, array{0: string, 1: string}>>
+     */
+    private const API2_LIST_FALLBACKS = [
+        'cron' => ['list_cronjobs' => ['Cron', 'listcron']],
+        'ssl' => ['list_certs' => ['SSL', 'listcrts']],
+        'mysql' => ['list_databases' => ['MysqlFE', 'listdbs']],
+    ];
 
     public function __construct(
         private readonly HttpClient $http
@@ -69,24 +94,36 @@ final class CpanelUapiClient
             ];
         }
 
+        $func = self::uapiFunctionAlias($module, $func);
+        $namedFallback = self::api2ListFallback($module, $func);
+        $legacyTarget = $namedFallback ?? [$module, $func];
+        $hasNamedFallback = $namedFallback !== null;
         $result = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::API_VERSION);
+        $moduleMissing = !$result['success'] && self::moduleUnavailable((string) $result['message']);
+        $functionMissing = !$result['success']
+            && $hasNamedFallback
+            && self::functionUnavailable((string) $result['message']);
 
-        if (!$result['success'] && self::moduleUnavailable((string) $result['message'])) {
-            $legacy = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::LEGACY_API_VERSION);
+        if ($moduleMissing || $functionMissing) {
+            [$legacyModule, $legacyFunc] = $legacyTarget;
+            $legacy = $this->callWithVersion($server, $cpanelUser, $legacyModule, $legacyFunc, $params, self::LEGACY_API_VERSION);
 
             if ($legacy['success']) {
                 return $legacy;
             }
 
-            // BOTH failed, and the two messages name different things: the first
-            // says which module file is missing, the second says what the legacy
-            // route made of the same request. Report both rather than only the
-            // last one, because the first is the one an administrator can act on.
+            // Both calls failed. Preserve the original UAPI error and name the
+            // exact API 2 target tried so a host administrator can diagnose the
+            // missing module/function instead of seeing a misleading generic
+            // "function not found" for a different API's name.
+            $firstFailure = $moduleMissing
+                ? 'The hosting panel does not have the ' . $module . ' module for UAPI'
+                : 'The hosting panel could not run UAPI ' . $module . '::' . $func;
+
             return [
                 'success' => false,
-                'message' => 'The hosting panel does not have the ' . $module . ' module for UAPI ('
-                    . $result['message'] . '), and the legacy API 2 equivalent failed too ('
-                    . $legacy['message'] . ').',
+                'message' => $firstFailure . ' (' . $result['message'] . '), and API 2 '
+                    . $legacyModule . '::' . $legacyFunc . ' failed too (' . $legacy['message'] . ').',
                 'data' => [],
                 'api_version' => self::LEGACY_API_VERSION,
             ];
@@ -203,6 +240,35 @@ final class CpanelUapiClient
         }
 
         return false;
+    }
+
+    private static function functionUnavailable(string $message): bool
+    {
+        foreach ([
+            'function not found',
+            'could not find function',
+            'unknown function',
+            'no such function',
+            'function is not available',
+            'function is unavailable',
+        ] as $needle) {
+            if (stripos($message, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function uapiFunctionAlias(string $module, string $func): string
+    {
+        return self::UAPI_FUNCTION_ALIASES[strtolower($module)][strtolower($func)] ?? $func;
+    }
+
+    /** @return array{0: string, 1: string}|null */
+    private static function api2ListFallback(string $module, string $func): ?array
+    {
+        return self::API2_LIST_FALLBACKS[strtolower($module)][strtolower($func)] ?? null;
     }
 
     /**

@@ -178,35 +178,122 @@ final class CpanelToolsServiceTest extends TestCase
         $this->assertSame('cvuser_old', $delete['name']);
     }
 
-    public function test_dns_listing_reads_zoneedit_api2_records(): void
+    public function test_database_and_dns_views_render_cpanel_listings_and_the_selected_zone(): void
+    {
+        $view = new View(dirname(__DIR__, 2) . '/resources/views');
+        $base = [
+            'service' => ['id' => self::SERVICE_ID, 'product_name' => 'Shared Hosting', 'domain' => 'example.test'],
+            'listError' => null,
+            'notice' => null,
+        ];
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+            throw new ErrorException($message, 0, $severity, $file, $line);
+        });
+
+        try {
+            $databaseHtml = $view->render('cpanel-tools.index', $base + [
+                'tab' => 'databases',
+                'items' => [['database' => 'cvuser1_store']],
+            ]);
+            $dnsHtml = $view->render('cpanel-tools.index', $base + [
+                'tab' => 'dns',
+                'items' => [[
+                    'line' => 5,
+                    'name' => 'www.shop.example.test.',
+                    'type' => 'A',
+                    'ttl' => 14400,
+                    'value' => '192.0.2.10',
+                ]],
+                'dnsZones' => ['example.test', 'shop.example.test'],
+                'selectedDnsZone' => 'shop.example.test',
+                'dnsRecordTypes' => ['A', 'AAAA', 'CNAME', 'TXT'],
+            ]);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertStringContainsString('cvuser1_store', $databaseHtml, 'the MySQL page displays database names returned by cPanel');
+        $this->assertStringContainsString('value="shop.example.test" selected', $dnsHtml);
+        $this->assertStringContainsString('name="zone" value="shop.example.test"', $dnsHtml, 'DNS mutations retain the selected zone');
+        $this->assertStringContainsString('www.shop.example.test.', $dnsHtml);
+    }
+
+    public function test_dns_listing_reads_all_cpanel_zones_then_fetches_the_selected_zone_records(): void
     {
         $http = new FakeHttpClient();
-        $http->respondWith(200, $this->api2Json([[
-            'statusmsg' => 'Zone Serialized',
-            'record' => $this->dnsZone(),
-        ]]));
+        $http->respondInSequence([
+            ['status' => 200, 'body' => $this->dnsZonesJson(['example.test', 'shop.example.test'])],
+            ['status' => 200, 'body' => $this->api2Json([[
+                'statusmsg' => 'Zone Serialized',
+                'record' => $this->dnsZone(),
+            ]])],
+        ]);
         $tools = $this->tools($http);
 
         $records = $tools->listDnsRecords(self::SERVICE_ID);
 
         $this->assertTrue($records['success']);
-        $query = $this->query($http->requests[0]['url']);
-        $this->assertSame('2', $query['cpanel_jsonapi_apiversion']);
-        $this->assertSame('ZoneEdit', $query['cpanel_jsonapi_module']);
-        $this->assertSame('fetchzone', $query['cpanel_jsonapi_func']);
-        $this->assertSame('example.test', $query['domain']);
+        $this->assertSame(['example.test', 'shop.example.test'], $records['zones']);
+        $this->assertSame('example.test', $records['zone']);
+        $zoneList = $this->query($http->requests[0]['url']);
+        $zoneRecords = $this->query($http->requests[1]['url']);
+        $this->assertSame('2', $zoneList['cpanel_jsonapi_apiversion']);
+        $this->assertSame('ZoneEdit', $zoneList['cpanel_jsonapi_module']);
+        $this->assertSame('fetchzones', $zoneList['cpanel_jsonapi_func']);
+        $this->assertSame('2', $zoneRecords['cpanel_jsonapi_apiversion']);
+        $this->assertSame('fetchzone', $zoneRecords['cpanel_jsonapi_func']);
+        $this->assertSame('example.test', $zoneRecords['domain']);
         $this->assertSame(5, $records['data'][1]['line']);
         $this->assertSame('A', $records['data'][1]['type']);
         $this->assertSame('192.0.2.10', $records['data'][1]['value']);
     }
 
+    public function test_dns_zone_selection_is_limited_to_domains_returned_by_cpanel(): void
+    {
+        $http = new FakeHttpClient();
+        $http->respondInSequence([
+            ['status' => 200, 'body' => $this->dnsZonesJson(['example.test', 'shop.example.test'])],
+            ['status' => 200, 'body' => $this->api2Json([[
+                'statusmsg' => 'Zone Serialized',
+                'record' => $this->dnsZone(),
+            ]])],
+            ['status' => 200, 'body' => $this->dnsZonesJson(['example.test', 'shop.example.test'])],
+        ]);
+        $tools = $this->tools($http);
+
+        $records = $tools->listDnsRecords(self::SERVICE_ID, 'shop.example.test');
+        $this->assertTrue($records['success']);
+        $this->assertSame('shop.example.test', $records['zone']);
+        $this->assertSame('shop.example.test', $this->query($http->requests[1]['url'])['domain']);
+
+        $foreignZone = $tools->listDnsRecords(self::SERVICE_ID, 'other-account.test');
+        $this->assertFalse($foreignZone['success']);
+        $this->assertCount(3, $http->requests, 'a zone not listed by cPanel is never fetched');
+    }
+
     public function test_dns_add_uses_zoneedit_api2_with_record_specific_fields(): void
     {
         $http = new FakeHttpClient();
-        $http->respondInSequence(array_fill(0, 6, [
-            'status' => 200,
-            'body' => $this->api2Json([['result' => ['status' => 1, 'statusmsg' => 'Zone updated']]]),
-        ]));
+        $responses = [];
+        $records = [
+            ['www', 'A', '192.0.2.44', 14400],
+            ['v6', 'AAAA', '2001:db8::44', 300],
+            ['mail.example.test.', 'CNAME', 'target.example.net.', 600],
+            ['_dmarc', 'TXT', 'v=DMARC1; p=none', 3600],
+            ['@', 'A', '192.0.2.1', 600],
+            ['@', 'CNAME', 'target.example.net.', 600],
+        ];
+
+        foreach ($records as $_record) {
+            $responses[] = ['status' => 200, 'body' => $this->dnsZonesJson(['example.test'])];
+            $responses[] = ['status' => 200, 'body' => $this->api2Json([['result' => ['status' => 1, 'statusmsg' => 'Zone updated']]])];
+        }
+
+        foreach (['.www.example.test.', 'www.', 'www.example.test..', 'outside.other.test.'] as $_invalidName) {
+            $responses[] = ['status' => 200, 'body' => $this->dnsZonesJson(['example.test'])];
+        }
+
+        $http->respondInSequence($responses);
         $tools = $this->tools($http);
 
         $this->assertTrue($tools->addDnsRecord(self::SERVICE_ID, 'www', 'A', '192.0.2.44', 14400)['success']);
@@ -216,12 +303,22 @@ final class CpanelToolsServiceTest extends TestCase
         $this->assertTrue($tools->addDnsRecord(self::SERVICE_ID, '@', 'A', '192.0.2.1', 600)['success']);
         $this->assertTrue($tools->addDnsRecord(self::SERVICE_ID, '@', 'CNAME', 'target.example.net.', 600)['success']);
 
-        $a = $this->query($http->requests[0]['url']);
-        $aaaa = $this->query($http->requests[1]['url']);
-        $cname = $this->query($http->requests[2]['url']);
-        $txt = $this->query($http->requests[3]['url']);
-        $apex = $this->query($http->requests[4]['url']);
-        $apexCname = $this->query($http->requests[5]['url']);
+        $mutations = [];
+
+        foreach ($http->requests as $request) {
+            $query = $this->query($request['url']);
+
+            if (($query['cpanel_jsonapi_func'] ?? '') === 'add_zone_record') {
+                $mutations[] = $query;
+            }
+        }
+
+        $a = $mutations[0];
+        $aaaa = $mutations[1];
+        $cname = $mutations[2];
+        $txt = $mutations[3];
+        $apex = $mutations[4];
+        $apexCname = $mutations[5];
         $this->assertSame('2', $a['cpanel_jsonapi_apiversion']);
         $this->assertSame('ZoneEdit', $a['cpanel_jsonapi_module']);
         $this->assertSame('add_zone_record', $a['cpanel_jsonapi_func']);
@@ -243,22 +340,26 @@ final class CpanelToolsServiceTest extends TestCase
             $invalid = $tools->addDnsRecord(self::SERVICE_ID, $invalidName, 'A', '192.0.2.99', 600);
             $this->assertFalse($invalid['success'], 'malformed or out-of-zone DNS names must be rejected');
         }
-        $this->assertCount(6, $http->requests, 'invalid DNS names must not issue a mutation request');
+
+        $this->assertCount(6, $mutations, 'invalid names must not issue a DNS mutation');
+        $this->assertCount(16, $http->requests, 'each valid operation checks cPanel zones before adding, and invalid names only check the zones');
     }
 
     public function test_dns_delete_uses_api2_line_number_and_rejects_stale_rows(): void
     {
         $http = new FakeHttpClient();
         $http->respondInSequence([
+            ['status' => 200, 'body' => $this->dnsZonesJson(['example.test'])],
             ['status' => 200, 'body' => $this->api2Json([['statusmsg' => 'Zone Serialized', 'record' => $this->dnsZone()]])],
             ['status' => 200, 'body' => $this->api2Json([['result' => ['status' => 1, 'statusmsg' => 'Zone updated']]])],
+            ['status' => 200, 'body' => $this->dnsZonesJson(['example.test'])],
             ['status' => 200, 'body' => $this->api2Json([['statusmsg' => 'Zone Serialized', 'record' => $this->dnsZone('192.0.2.99')]])],
         ]);
         $tools = $this->tools($http);
 
         $deleted = $tools->deleteDnsRecord(self::SERVICE_ID, 5, 'www.example.test.', 'A', '192.0.2.10');
         $this->assertTrue($deleted['success']);
-        $query = $this->query($http->requests[1]['url']);
+        $query = $this->query($http->requests[2]['url']);
         $this->assertSame('ZoneEdit', $query['cpanel_jsonapi_module']);
         $this->assertSame('remove_zone_record', $query['cpanel_jsonapi_func']);
         $this->assertSame('example.test', $query['domain']);
@@ -267,7 +368,7 @@ final class CpanelToolsServiceTest extends TestCase
         $stale = $tools->deleteDnsRecord(self::SERVICE_ID, 5, 'www.example.test.', 'A', '192.0.2.10');
         $this->assertFalse($stale['success']);
         $this->assertStringContainsString('changed since the page loaded', $stale['message']);
-        $this->assertCount(3, $http->requests, 'a stale row must not issue a DNS mutation');
+        $this->assertCount(5, $http->requests, 'a stale row must not issue a DNS mutation');
     }
 
     public function test_domains_use_documented_api_versions_and_addon_domain_key_for_deletion(): void
@@ -463,6 +564,26 @@ final class CpanelToolsServiceTest extends TestCase
         $this->assertArrayNotHasKey('name', $sshAuthorize);
     }
 
+    public function test_ssh_missing_api2_function_is_reported_as_a_server_capability_issue(): void
+    {
+        $http = new FakeHttpClient();
+        $http->respondWith(200, json_encode([
+            'cpanelresult' => [
+                'apiversion' => 2,
+                'data' => [],
+                'error' => 'The system could not find function "listkeys" in module "SSH".',
+                'event' => ['result' => 0],
+                'module' => 'SSH',
+            ],
+        ], JSON_THROW_ON_ERROR));
+
+        $keys = $this->tools($http)->listSshKeys(self::SERVICE_ID);
+
+        $this->assertFalse($keys['success']);
+        $this->assertStringContainsString('does not expose API 2 SSH::listkeys', $keys['message']);
+        $this->assertCount(1, $http->requests, 'there is no documented UAPI list_keys operation to blindly retry');
+    }
+
     public function test_ssl_uses_list_certs_and_post_install_and_disk_usage_reads_singular_limit_key(): void
     {
         $http = new FakeHttpClient();
@@ -598,6 +719,22 @@ final class CpanelToolsServiceTest extends TestCase
                 'module' => 'cPanel',
             ],
         ], JSON_THROW_ON_ERROR);
+    }
+
+    /** @param array<int, string> $domains */
+    private function dnsZonesJson(array $domains): string
+    {
+        $zones = [];
+
+        foreach ($domains as $domain) {
+            $zones[$domain] = [];
+        }
+
+        return $this->api2Json([[
+            'status' => 1,
+            'statusmsg' => 'Zones fetched',
+            'zones' => $zones,
+        ]]);
     }
 
     /** @return array<int, array<string, mixed>> */

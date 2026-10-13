@@ -5,6 +5,8 @@
 /** @var string|null $listError */
 /** @var array{success: bool, message: string}|null $notice */
 /** @var array<int, string> $dnsRecordTypes */
+/** @var array<int, string> $dnsZones */
+/** @var string $selectedDnsZone */
 /** @var array<int, array<string, mixed>> $forwarders */
 /** @var array<int, array<string, mixed>> $autoresponders */
 /** @var array<int, array<string, mixed>> $addonDomains */
@@ -278,6 +280,25 @@ $tabs = [
 <?php if ($tab === 'dns'): ?>
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
         <h2 class="cv-card__title">DNS Zone Editor</h2>
+        <?php if ($dnsZones !== []): ?>
+            <form method="get" action="/client/services/<?= $id ?>/cpanel-tools" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--cv-space-3);align-items:end;margin-bottom:var(--cv-space-4);">
+                <input type="hidden" name="tab" value="dns">
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label" for="dns-zone-select">DNS Zone</label>
+                    <select class="cv-select" id="dns-zone-select" name="zone" required>
+                        <?php if ($selectedDnsZone === ''): ?>
+                            <option value="" selected disabled>Select a zone</option>
+                        <?php endif; ?>
+                        <?php foreach ($dnsZones as $zone): ?>
+                            <option value="<?= e($zone) ?>" <?= strcasecmp($selectedDnsZone, $zone) === 0 ? 'selected' : '' ?>><?= e($zone) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div><button class="cv-btn" type="submit">Open Zone</button></div>
+            </form>
+        <?php else: ?>
+            <p style="color:var(--cv-text-secondary);">No DNS zones are available for this cPanel account.</p>
+        <?php endif; ?>
         <table class="cv-table">
             <thead><tr><th>Name</th><th>Type</th><th>TTL</th><th>Value</th><th></th></tr></thead>
             <tbody>
@@ -291,6 +312,7 @@ $tabs = [
                     <td>
                         <?php if ((int) ($record['line'] ?? -1) > 0 && !in_array($recordType, ['', 'SOA', ':RAW'], true) && !str_starts_with($recordType, '$')): ?>
                             <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns/delete" data-confirm="Delete this DNS record?"><?= csrf_field() ?>
+                                <input type="hidden" name="zone" value="<?= e($selectedDnsZone) ?>">
                                 <input type="hidden" name="line" value="<?= (int) $record['line'] ?>">
                                 <input type="hidden" name="name" value="<?= e((string) $record['name']) ?>">
                                 <input type="hidden" name="type" value="<?= e((string) $record['type']) ?>">
@@ -309,35 +331,38 @@ $tabs = [
             </tbody>
         </table>
     </div>
-    <div class="cv-card">
-        <h3>Add DNS Record</h3>
-        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Supports A, AAAA, CNAME, and TXT records. Enter a label such as www, a full name within this zone, or @ for the root domain.</p>
-        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Name</label>
-                <input class="cv-input" name="name" placeholder="www" required>
-            </div>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Type</label>
-                <select class="cv-select" name="type">
-                    <?php foreach ($dnsRecordTypes as $type): ?>
-                        <option value="<?= e($type) ?>"><?= e($type) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Value</label>
-                <input class="cv-input" name="value" required>
-            </div>
-            <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">TTL</label>
-                <input class="cv-input" type="number" name="ttl" value="14400" min="60">
-            </div>
-            <div style="grid-column: 1 / -1;">
-                <button class="cv-btn" type="submit">Add Record</button>
-            </div>
-        </form>
-    </div>
+    <?php if ($selectedDnsZone !== ''): ?>
+        <div class="cv-card">
+            <h3>Add DNS Record to <?= e($selectedDnsZone) ?></h3>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Supports A, AAAA, CNAME, and TXT records. Enter a label such as www, a full name within this zone, or @ for the root domain.</p>
+            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
+                <input type="hidden" name="zone" value="<?= e($selectedDnsZone) ?>">
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Name</label>
+                    <input class="cv-input" name="name" placeholder="www" required>
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Type</label>
+                    <select class="cv-select" name="type">
+                        <?php foreach ($dnsRecordTypes as $type): ?>
+                            <option value="<?= e($type) ?>"><?= e($type) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Value</label>
+                    <input class="cv-input" name="value" required>
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">TTL</label>
+                    <input class="cv-input" type="number" name="ttl" value="14400" min="60">
+                </div>
+                <div style="grid-column: 1 / -1;">
+                    <button class="cv-btn" type="submit">Add Record</button>
+                </div>
+            </form>
+        </div>
+    <?php endif; ?>
 <?php endif; ?>
 
 <?php if ($tab === 'domains'): ?>

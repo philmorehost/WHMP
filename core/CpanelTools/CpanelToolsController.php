@@ -38,7 +38,9 @@ final class CpanelToolsController
             return $denied;
         }
 
-        return $this->render($id, $service, (string) $request->query('tab', 'logins'), null);
+        $zone = trim((string) $request->query('zone', ''));
+
+        return $this->render($id, $service, (string) $request->query('tab', 'logins'), null, $zone !== '' ? $zone : null);
     }
 
     public function storeEmail(Request $request, array $params): Response
@@ -225,15 +227,17 @@ final class CpanelToolsController
             return $denied;
         }
 
+        $zone = trim((string) $request->input('zone', ''));
         $result = $this->tools->addDnsRecord(
             $id,
             trim((string) $request->input('name', '')),
             (string) $request->input('type', 'A'),
             trim((string) $request->input('value', '')),
-            (int) $request->input('ttl', 14400)
+            (int) $request->input('ttl', 14400),
+            $zone !== '' ? $zone : null
         );
 
-        return $this->render($id, $service, 'dns', $result);
+        return $this->render($id, $service, 'dns', $result, $zone !== '' ? $zone : null);
     }
 
     public function destroyDns(Request $request, array $params): Response
@@ -245,15 +249,17 @@ final class CpanelToolsController
             return $denied;
         }
 
+        $zone = trim((string) $request->input('zone', ''));
         $result = $this->tools->deleteDnsRecord(
             $id,
             (int) $request->input('line', -1),
             (string) $request->input('name', ''),
             (string) $request->input('type', ''),
-            (string) $request->input('value', '')
+            (string) $request->input('value', ''),
+            $zone !== '' ? $zone : null
         );
 
-        return $this->render($id, $service, 'dns', $result);
+        return $this->render($id, $service, 'dns', $result, $zone !== '' ? $zone : null);
     }
 
     public function storeAddonDomain(Request $request, array $params): Response
@@ -503,7 +509,7 @@ final class CpanelToolsController
     }
 
     /** @param array<string, mixed> $service */
-    private function render(int $serviceId, array $service, string $tab, ?array $notice): Response
+    private function render(int $serviceId, array $service, string $tab, ?array $notice, ?string $selectedDnsZone = null): Response
     {
         $tab = in_array($tab, self::TABS, true) ? $tab : 'email';
 
@@ -511,7 +517,7 @@ final class CpanelToolsController
             'email' => $this->tools->listEmailAccounts($serviceId),
             'ftp' => $this->tools->listFtpAccounts($serviceId),
             'databases' => $this->tools->listDatabases($serviceId),
-            'dns' => $this->tools->listDnsRecords($serviceId),
+            'dns' => $this->tools->listDnsRecords($serviceId, $selectedDnsZone),
             'cron' => $this->tools->listCronJobs($serviceId),
             'ssh' => $this->tools->listSshKeys($serviceId),
             'ssl' => $this->tools->listSslCertificates($serviceId),
@@ -565,6 +571,9 @@ final class CpanelToolsController
             }
         }
 
+        $dnsZones = is_array($listing['zones'] ?? null) ? $listing['zones'] : [];
+        $selectedDnsZoneName = trim((string) ($listing['zone'] ?? ''));
+
         $content = $this->view->render('cpanel-tools.index', [
             'service' => $service,
             'tab' => $tab,
@@ -572,6 +581,8 @@ final class CpanelToolsController
             'listError' => $errors !== [] ? implode(' ', $errors) : null,
             'notice' => $notice,
             'dnsRecordTypes' => $this->tools->supportedDnsRecordTypes(),
+            'dnsZones' => $dnsZones,
+            'selectedDnsZone' => $selectedDnsZoneName,
             'forwarders' => is_array($forwarders['data'] ?? null) ? $forwarders['data'] : [],
             'autoresponders' => is_array($autoresponders['data'] ?? null) ? $autoresponders['data'] : [],
             'addonDomains' => is_array($addonDomains['data'] ?? null) ? $addonDomains['data'] : [],

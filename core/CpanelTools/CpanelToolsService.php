@@ -211,7 +211,71 @@ final class CpanelToolsService
 
     public function listDatabases(int $serviceId): array
     {
-        return $this->withContext($serviceId, fn (array $ctx) => $this->uapi->call($ctx['server'], $ctx['username'], 'Mysql', 'list_databases'));
+        return $this->withContext($serviceId, function (array $ctx) {
+            $result = $this->uapi->call($ctx['server'], $ctx['username'], 'Mysql', 'list_databases');
+
+            if (!$result['success']) {
+                return $result;
+            }
+
+            $payload = is_array($result['data']) ? $result['data'] : [];
+            $rows = $payload['databases'] ?? $payload['database_list'] ?? $payload;
+
+            if (!is_array($rows)) {
+                $rows = [];
+            } elseif (isset($rows['database']) || isset($rows['name']) || isset($rows['db'])) {
+                $rows = [$rows];
+            } elseif (!self::isListArray($rows)) {
+                $keyedRows = [];
+
+                foreach ($rows as $databaseName => $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+
+                    if (!isset($row['database']) && !isset($row['name']) && !isset($row['db']) && is_string($databaseName)) {
+                        $row['database'] = $databaseName;
+                    }
+
+                    $keyedRows[] = $row;
+                }
+
+                $rows = $keyedRows;
+            }
+
+            $databases = [];
+
+            foreach ($rows as $row) {
+                if (is_string($row) || is_numeric($row)) {
+                    $name = trim((string) $row);
+
+                    if ($name !== '') {
+                        $databases[] = ['database' => $name];
+                    }
+
+                    continue;
+                }
+
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $name = trim((string) ($row['database'] ?? $row['name'] ?? $row['db'] ?? ''));
+
+                if ($name === '') {
+                    continue;
+                }
+
+                $row['database'] = $name;
+                $databases[] = $row;
+            }
+
+            return [
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $databases,
+            ];
+        });
     }
 
     public function createDatabase(int $serviceId, string $name): array
@@ -236,23 +300,63 @@ final class CpanelToolsService
         ));
     }
 
-    public function listDnsRecords(int $serviceId): array
+    /** @return array{success: bool, message: string, data: array<int, string>} */
+    public function listDnsZones(int $serviceId): array
     {
-        return $this->withContext($serviceId, function (array $ctx) {
-            if (trim((string) ($ctx['domain'] ?? '')) === '') {
-                return ['success' => false, 'message' => 'This service has no domain to look up a DNS zone for.', 'data' => []];
+        return $this->withContext($serviceId, fn (array $ctx) => $this->loadDnsZones($ctx));
+    }
+
+    /**
+     * Lists records from any zone belonging to the service's cPanel account.
+     * The selected zone is always resolved against ZoneEdit::fetchzones before
+     * it is read, so a crafted query parameter cannot request another account's
+     * zone.
+     *
+     * @return array{success: bool, message: string, data: array<int, array<string, mixed>>, zones?: array<int, string>, zone?: string}
+     */
+    public function listDnsRecords(int $serviceId, ?string $requestedZone = null): array
+    {
+        return $this->withContext($serviceId, function (array $ctx) use ($requestedZone) {
+            $zones = $this->loadDnsZones($ctx);
+
+            if (!$zones['success']) {
+                return [
+                    'success' => false,
+                    'message' => $zones['message'],
+                    'data' => [],
+                    'zones' => [],
+                    'zone' => '',
+                ];
             }
 
-            $result = $this->loadDnsZone($ctx);
+            $domain = $this->selectDnsZone($ctx, $zones['data'], $requestedZone);
+
+            if ($domain === null) {
+                $message = $requestedZone !== null && trim($requestedZone) !== ''
+                    ? 'The selected DNS zone is not available in this cPanel account. Choose one of the listed zones.'
+                    : 'No DNS zones are available in this cPanel account.';
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'data' => [],
+                    'zones' => $zones['data'],
+                    'zone' => '',
+                ];
+            }
+
+            $result = $this->loadDnsZone($ctx, $domain);
 
             if (!$result['success']) {
-                return $result;
+                return $result + ['zones' => $zones['data'], 'zone' => $domain];
             }
 
             return [
                 'success' => true,
                 'message' => $result['message'],
                 'data' => array_map([$this, 'normalizeDnsRecord'], $result['data']),
+                'zones' => $zones['data'],
+                'zone' => $domain,
             ];
         });
     }
@@ -263,13 +367,19 @@ final class CpanelToolsService
         return array_keys(self::DNS_RECORD_FIELDS);
     }
 
-    public function addDnsRecord(int $serviceId, string $name, string $type, string $value, int $ttl): array
+    public function addDnsRecord(int $serviceId, string $name, string $type, string $value, int $ttl, ?string $zoneDomain = null): array
     {
-        return $this->withContext($serviceId, function (array $ctx) use ($name, $type, $value, $ttl) {
-            $domain = trim((string) ($ctx['domain'] ?? ''));
+        return $this->withContext($serviceId, function (array $ctx) use ($name, $type, $value, $ttl, $zoneDomain) {
+            $zones = $this->loadDnsZones($ctx);
 
-            if ($domain === '') {
-                return ['success' => false, 'message' => 'This service has no domain to add a DNS record to.', 'data' => []];
+            if (!$zones['success']) {
+                return $zones;
+            }
+
+            $domain = $this->selectDnsZone($ctx, $zones['data'], $zoneDomain);
+
+            if ($domain === null) {
+                return ['success' => false, 'message' => 'Choose a DNS zone that belongs to this cPanel account.', 'data' => []];
             }
 
             $type = strtoupper(trim($type));
@@ -286,7 +396,7 @@ final class CpanelToolsService
             $normalizedName = $this->normalizeDnsName($name, $domain);
 
             if ($normalizedName === null) {
-                return ['success' => false, 'message' => 'The DNS name must be the service domain or a name within that domain.', 'data' => []];
+                return ['success' => false, 'message' => 'The DNS name must be the selected zone or a name within that zone.', 'data' => []];
             }
 
             $params = [
@@ -309,16 +419,26 @@ final class CpanelToolsService
         });
     }
 
-    public function deleteDnsRecord(int $serviceId, int $line, string $name, string $type, string $value): array
+    public function deleteDnsRecord(int $serviceId, int $line, string $name, string $type, string $value, ?string $zoneDomain = null): array
     {
-        return $this->withContext($serviceId, function (array $ctx) use ($line, $name, $type, $value) {
-            $domain = trim((string) ($ctx['domain'] ?? ''));
-
-            if ($domain === '' || $line < 1) {
-                return ['success' => false, 'message' => 'This DNS record cannot be deleted because its zone or line number is unavailable.', 'data' => []];
+        return $this->withContext($serviceId, function (array $ctx) use ($line, $name, $type, $value, $zoneDomain) {
+            if ($line < 1) {
+                return ['success' => false, 'message' => 'This DNS record cannot be deleted because its line number is unavailable.', 'data' => []];
             }
 
-            $zone = $this->loadDnsZone($ctx);
+            $zones = $this->loadDnsZones($ctx);
+
+            if (!$zones['success']) {
+                return $zones;
+            }
+
+            $domain = $this->selectDnsZone($ctx, $zones['data'], $zoneDomain);
+
+            if ($domain === null) {
+                return ['success' => false, 'message' => 'Choose a DNS zone that belongs to this cPanel account.', 'data' => []];
+            }
+
+            $zone = $this->loadDnsZone($ctx, $domain);
 
             if (!$zone['success']) {
                 return $zone;
@@ -729,6 +849,14 @@ final class CpanelToolsService
             $result = $this->uapi->callApi2($ctx['server'], $ctx['username'], 'SSH', 'listkeys');
 
             if (!$result['success']) {
+                if (self::apiFunctionMissing((string) $result['message'])) {
+                    return [
+                        'success' => false,
+                        'message' => 'This cPanel server does not expose API 2 SSH::listkeys, so SSH keys cannot be listed in the client area. Ask the hosting provider to enable/support SSH key management, or use cPanel > Security > SSH Access.',
+                        'data' => [],
+                    ];
+                }
+
                 return $result;
             }
 
@@ -871,10 +999,102 @@ final class CpanelToolsService
         });
     }
 
-    /** @return array{success: bool, message: string, data: array<int, array<string, mixed>>} */
-    private function loadDnsZone(array $ctx): array
+    /** @return array{success: bool, message: string, data: array<int, string>} */
+    private function loadDnsZones(array $ctx): array
     {
-        $domain = trim((string) ($ctx['domain'] ?? ''));
+        $result = $this->uapi->callApi2($ctx['server'], $ctx['username'], 'ZoneEdit', 'fetchzones');
+
+        if (!$result['success']) {
+            return $result;
+        }
+
+        $data = is_array($result['data']) ? $result['data'] : [];
+        $response = $data;
+
+        if (self::isListArray($data)) {
+            foreach ($data as $row) {
+                if (is_array($row) && (array_key_exists('zones', $row) || array_key_exists('status', $row) || array_key_exists('statusmsg', $row))) {
+                    $response = $row;
+                    break;
+                }
+            }
+        }
+
+        $status = $response['status'] ?? null;
+
+        if ($status !== null && (string) $status !== '1') {
+            $message = trim((string) ($response['statusmsg'] ?? $result['message'] ?? ''));
+            return ['success' => false, 'message' => $message !== '' ? $message : 'cPanel could not list this account\'s DNS zones.', 'data' => []];
+        }
+
+        $rawZones = $response['zones'] ?? null;
+
+        if (!is_array($rawZones)) {
+            return ['success' => false, 'message' => 'cPanel returned the DNS zones in an unexpected format.', 'data' => []];
+        }
+
+        $zones = [];
+        $seen = [];
+
+        foreach ($rawZones as $key => $row) {
+            $name = '';
+
+            if (is_string($key) && !ctype_digit($key)) {
+                $name = $key;
+            } elseif (is_string($row)) {
+                $name = $row;
+            } elseif (is_array($row)) {
+                $name = (string) ($row['domain'] ?? $row['zone'] ?? $row['name'] ?? '');
+            }
+
+            $name = rtrim(trim($name), '.');
+            $keyName = strtolower($name);
+
+            if ($name === '' || isset($seen[$keyName])) {
+                continue;
+            }
+
+            $seen[$keyName] = true;
+            $zones[] = $name;
+        }
+
+        return [
+            'success' => true,
+            'message' => (string) ($response['statusmsg'] ?? $result['message'] ?? 'OK'),
+            'data' => $zones,
+        ];
+    }
+
+    /** @param array<int, string> $zones */
+    private function selectDnsZone(array $ctx, array $zones, ?string $requestedZone): ?string
+    {
+        $requestedZone = trim((string) $requestedZone);
+
+        if ($requestedZone !== '') {
+            foreach ($zones as $zone) {
+                if (strcasecmp(rtrim($requestedZone, '.'), rtrim($zone, '.')) === 0) {
+                    return $zone;
+                }
+            }
+
+            return null;
+        }
+
+        $serviceDomain = trim((string) ($ctx['domain'] ?? ''));
+
+        foreach ($zones as $zone) {
+            if ($serviceDomain !== '' && strcasecmp(rtrim($serviceDomain, '.'), rtrim($zone, '.')) === 0) {
+                return $zone;
+            }
+        }
+
+        return $zones[0] ?? null;
+    }
+
+    /** @return array{success: bool, message: string, data: array<int, array<string, mixed>>} */
+    private function loadDnsZone(array $ctx, string $domain): array
+    {
+        $domain = trim($domain);
         $result = $this->uapi->callApi2($ctx['server'], $ctx['username'], 'ZoneEdit', 'fetchzone', ['domain' => $domain]);
 
         if (!$result['success']) {
@@ -1149,6 +1369,17 @@ final class CpanelToolsService
         } catch (\Throwable) {
             return $expires;
         }
+    }
+
+    private static function apiFunctionMissing(string $message): bool
+    {
+        foreach (['function not found', 'could not find function', 'unknown function', 'no such function'] as $needle) {
+            if (stripos($message, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isListArray(array $value): bool
