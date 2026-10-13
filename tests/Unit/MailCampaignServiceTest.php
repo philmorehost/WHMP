@@ -27,6 +27,8 @@ final class MailCampaignServiceTest extends DatabaseTestCase
     private MailCampaignService $service;
     private EmailLogRepository $emailLog;
     private string $mailLogPath;
+    private bool $hadAppUrl = false;
+    private mixed $savedAppUrl = null;
 
     protected function setUp(): void
     {
@@ -40,6 +42,13 @@ final class MailCampaignServiceTest extends DatabaseTestCase
         $this->groups = new ClientGroupRepository($this->db);
         $this->emailLog = new EmailLogRepository($this->db);
 
+        $this->hadAppUrl = array_key_exists('APP_URL', $_ENV);
+        $this->savedAppUrl = $_ENV['APP_URL'] ?? null;
+        $_ENV['APP_URL'] = 'https://billing.example.test';
+        if (function_exists('brand_name_forget')) {
+            \brand_name_forget();
+        }
+
         $dispatcher = new EmailDispatcher(new EmailTemplateRepository($this->db), $this->emailLog, new SyncQueue());
         $this->service = new MailCampaignService($this->campaigns, $this->clients, $dispatcher);
 
@@ -52,18 +61,74 @@ final class MailCampaignServiceTest extends DatabaseTestCase
     protected function tearDown(): void
     {
         @unlink($this->mailLogPath);
+        if ($this->hadAppUrl) {
+            $_ENV['APP_URL'] = $this->savedAppUrl;
+        } else {
+            unset($_ENV['APP_URL']);
+        }
+        if (function_exists('brand_name_forget')) {
+            \brand_name_forget();
+        }
         parent::tearDown();
     }
 
-    private function createActiveClient(string $email, ?int $groupId = null): int
+    /** @param array<string, mixed> $details */
+    private function createActiveClient(string $email, ?int $groupId = null, array $details = []): int
     {
-        return $this->clients->create([
+        return $this->clients->create(array_merge([
             'email' => $email,
             'password' => 'secret123',
             'first_name' => 'Test',
             'last_name' => 'Client',
             'client_group_id' => $groupId,
-        ]);
+        ], $details));
+    }
+
+    private function captureCampaignMailer(): object
+    {
+        $spy = new class implements Mailer {
+            /** @var array<int, array{to: string, subject: string, html: string}> */
+            public array $sent = [];
+
+            public function send(string $to, string $subject, string $html, ?array $from = null): void
+            {
+                $this->sent[] = ['to' => $to, 'subject' => $subject, 'html' => $html];
+            }
+        };
+
+        $container = new Container();
+        $container->instance(Mailer::class, $spy);
+        $container->instance(EmailLogRepository::class, $this->emailLog);
+        App::setContainer($container);
+
+        $dispatcher = new EmailDispatcher(new EmailTemplateRepository($this->db), $this->emailLog, new SyncQueue());
+        $this->service = new MailCampaignService($this->campaigns, $this->clients, $dispatcher);
+
+        return $spy;
+    }
+
+    private function addActiveServiceDomain(int $clientId, string $domain): void
+    {
+        $now = date('Y-m-d H:i:s');
+        $this->db->connection()->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->db->insert(
+                'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, domain, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$clientId, 1, 'Hosting', 'monthly', 10.00, 'active', $domain, '2030-01-01', $now, $now]
+            );
+        } finally {
+            $this->db->connection()->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
+
+    private function addActiveRegisteredDomain(int $clientId, string $domain): void
+    {
+        $now = date('Y-m-d H:i:s');
+        $tld = substr(strrchr($domain, '.') ?: '.test', 1);
+        $this->db->insert(
+            'INSERT INTO domains (client_id, domain_name, tld, registrar_slug, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$clientId, $domain, $tld, 'local', 'active', $now, $now]
+        );
     }
 
     public function test_send_delivers_to_every_active_client_when_no_group_is_set(): void
@@ -181,6 +246,110 @@ final class MailCampaignServiceTest extends DatabaseTestCase
 
         $token = $this->campaigns->recipients($campaignId)[0]['open_token'];
         $this->assertStringContainsString("<img src=\"/campaigns/track/{$token}\"", $spy->sent[0]);
+    }
+
+    public function test_send_substitutes_recipient_fields_in_html_subject_and_body(): void
+    {
+        $spy = $this->captureCampaignMailer();
+        $aliceId = $this->createActiveClient('alice@example.test', null, [
+            'first_name' => 'Alice',
+            'last_name' => 'Example',
+            'company_name' => 'A&B <Hosting>',
+            'phone' => '+234 800 000 0101',
+            'city' => 'Lagos',
+            'state' => 'Lagos',
+            'postcode' => '100001',
+            'country' => 'NG',
+        ]);
+        $bobId = $this->createActiveClient('bob@example.test', null, [
+            'first_name' => 'Bob',
+            'last_name' => 'Second',
+            'company_name' => 'Bob Networks',
+        ]);
+        $this->addActiveServiceDomain($aliceId, 'hosting-alice.example.test');
+        $this->addActiveRegisteredDomain($aliceId, 'registered-alice.example.test');
+        $this->addActiveRegisteredDomain($bobId, 'registered-bob.example.test');
+
+        $body = '<p>Hello [Client Name] / {{client_name}}</p>'
+            . '<p>{{first_name}} {{last_name}} — {{client_email}} / [Email] ({{email_domain}})</p>'
+            . '<p>Account {{client_id}}; company {{client_company}}; business [Company Name].</p>'
+            . '<p>{{phone}}, {{city}}, {{state}}, {{postcode}}, {{country}}</p>'
+            . '<p>Domain: [Domain]. <a href="[Billing Website]">Billing website</a> — <a href="[Billing URL]">Invoices</a></p>'
+            . '<p>Client area [Client Area URL]; support [Support URL].</p>';
+        $campaignId = $this->campaigns->create('Hello [Client Name] — {{email}} — {{domain}}', $body, null);
+
+        $this->assertSame(2, $this->service->send($campaignId));
+
+        $sent = [];
+        foreach ($spy->sent as $message) {
+            $sent[$message['to']] = $message;
+        }
+
+        $this->assertCount(2, $sent);
+        $alice = $sent['alice@example.test'];
+        $bob = $sent['bob@example.test'];
+        $this->assertStringContainsString('Hello Alice Example — alice@example.test — hosting-alice.example.test', $alice['subject']);
+        $this->assertStringContainsString('registered-bob.example.test', $bob['subject']);
+        $this->assertStringContainsString('Hello Alice Example / Alice Example', $alice['html']);
+        $this->assertStringContainsString('Alice Example — alice@example.test / alice@example.test (example.test)', $alice['html']);
+        $this->assertStringContainsString("Account {$aliceId}; company A&amp;B &lt;Hosting&gt;", $alice['html']);
+        $brandName = htmlspecialchars(\brand_name(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $this->assertStringContainsString("business {$brandName}.", $alice['html']);
+        $this->assertStringContainsString('Domain: hosting-alice.example.test.', $alice['html']);
+        $this->assertStringContainsString('hosting-alice.example.test', $alice['html']);
+        $this->assertStringContainsString('registered-bob.example.test', $bob['html']);
+        $this->assertStringContainsString('A&amp;B &lt;Hosting&gt;', $alice['html'], 'client-supplied HTML values must be escaped inside authored HTML');
+        $this->assertStringContainsString('+234 800 000 0101, Lagos, Lagos, 100001, NG', $alice['html']);
+        $this->assertStringContainsString('https://billing.example.test', $alice['html']);
+        $this->assertStringContainsString('https://billing.example.test/client/invoices', $alice['html']);
+        $this->assertStringContainsString('https://billing.example.test/client/dashboard', $alice['html']);
+        $this->assertStringContainsString('https://billing.example.test/client/tickets', $alice['html']);
+        $this->assertStringNotContainsString('{{', $alice['html']);
+        $this->assertStringNotContainsString('[Client Name]', $alice['html']);
+    }
+
+    public function test_queued_plain_text_campaign_personalizes_client_and_external_recipients(): void
+    {
+        $spy = $this->captureCampaignMailer();
+        $groupId = $this->groups->create('Queued Merge Test');
+        $clientId = $this->createActiveClient('queued@example.test', $groupId, [
+            'first_name' => 'Queue',
+            'last_name' => 'Client',
+            'company_name' => 'Queue Hosting',
+        ]);
+        $this->addActiveRegisteredDomain($clientId, 'queued-domain.example.test');
+
+        $campaignId = $this->campaigns->create(
+            'Hello {{client_name}}',
+            "Hi [Client Name],\nEmail: {{email}} ({{email_domain}})\nDomain: {{domain}}\nInvoices: {{billing_url}}\nCompany: {{client_company}}",
+            $groupId,
+            null,
+            'lead@prospect.example'
+        );
+
+        $this->assertSame(2, $this->service->queue($campaignId));
+        $this->assertSame(2, $this->service->dispatchQueued(10));
+
+        $sent = [];
+        foreach ($spy->sent as $message) {
+            $sent[$message['to']] = $message;
+        }
+
+        $this->assertCount(2, $sent);
+        $client = $sent['queued@example.test'];
+        $external = $sent['lead@prospect.example'];
+        $this->assertSame('Hello Queue Client', $client['subject']);
+        $this->assertSame('Hello there', $external['subject']);
+        $this->assertStringContainsString('Hi Queue Client,', $client['html']);
+        $this->assertStringContainsString('queued@example.test (example.test)', $client['html']);
+        $this->assertStringContainsString('queued-domain.example.test', $client['html']);
+        $this->assertStringContainsString('Queue Hosting', $client['html']);
+        $this->assertStringContainsString('https://billing.example.test/client/invoices', $external['html']);
+        $this->assertStringContainsString('Hi there,', $external['html']);
+        $this->assertStringContainsString('lead@prospect.example (prospect.example)', $external['html']);
+        $this->assertStringNotContainsString('{{', $client['html']);
+        $this->assertStringNotContainsString('{{', $external['html']);
+        $this->assertStringNotContainsString('[Client Name]', $external['html']);
     }
 
     public function test_send_to_inactive_targets_only_accounts_with_no_active_product_or_domain(): void

@@ -13,9 +13,9 @@ use Throwable;
 /**
  * Mass-mail campaigns (blueprint §4.4/§5 marketing automation): sends an
  * admin-composed subject/body to every active client in a group (or every
- * active client, if no group is set), with a per-recipient open-tracking
- * pixel appended to the body and `[Client Name]`/`{{client_name}}` merge
- * tags substituted with the real recipient.
+ * active client, if no group is set), with recipient-specific client, domain,
+ * billing and support merge fields substituted at send time and a unique
+ * open-tracking pixel appended to each message.
  */
 final class MailCampaignService
 {
@@ -110,7 +110,8 @@ final class MailCampaignService
                 (string) $recipient['body'],
                 $recipient['first_name'] ?? null,
                 $recipient['last_name'] ?? null,
-                (string) $recipient['open_token']
+                (string) $recipient['open_token'],
+                $recipient
             );
 
             try {
@@ -322,17 +323,24 @@ final class MailCampaignService
 
         $sent = 0;
         $alreadySent = [];
+        $primaryDomains = $this->campaigns->primaryDomainsForClients(array_map(
+            static fn (array $client): int => (int) ($client['id'] ?? 0),
+            $recipients
+        ));
 
         foreach ($recipients as $client) {
             $openToken = bin2hex(random_bytes(32));
             $this->campaigns->addRecipient($campaignId, (int) $client['id'], $openToken);
 
+            $mergeRecipient = $client;
+            $mergeRecipient['domain'] = $primaryDomains[(int) $client['id']] ?? '';
             $message = $this->buildMessage(
                 (string) $campaign['subject'],
                 (string) $campaign['body'],
                 $client['first_name'] ?? null,
                 $client['last_name'] ?? null,
-                $openToken
+                $openToken,
+                $mergeRecipient
             );
 
             $this->mail->sendRaw($message['subject'], $message['html'], $client['email'], (int) $client['id']);
@@ -353,7 +361,14 @@ final class MailCampaignService
             // No name on file for an external address — buildMessage() falls
             // back to a neutral greeting rather than leaving the merge tag
             // literally visible in the delivered email.
-            $message = $this->buildMessage((string) $campaign['subject'], (string) $campaign['body'], null, null, $openToken);
+            $message = $this->buildMessage(
+                (string) $campaign['subject'],
+                (string) $campaign['body'],
+                null,
+                null,
+                $openToken,
+                ['email' => $email]
+            );
 
             // No client id: these addresses have no account, so the email log
             // records them against no client rather than a wrong one.
@@ -401,30 +416,144 @@ final class MailCampaignService
      *
      * @return array{subject: string, html: string}
      */
-    private function buildMessage(string $subject, string $body, ?string $firstName, ?string $lastName, string $openToken): array
-    {
-        $name = trim(trim((string) $firstName) . ' ' . trim((string) $lastName));
-        $first = trim((string) $firstName);
+    private function buildMessage(
+        string $subject,
+        string $body,
+        ?string $firstName,
+        ?string $lastName,
+        string $openToken,
+        array $recipient = []
+    ): array {
+        $recipient['first_name'] = $firstName ?? ($recipient['first_name'] ?? null);
+        $recipient['last_name'] = $lastName ?? ($recipient['last_name'] ?? null);
+        $mergeFields = $this->mergeFields($recipient);
 
-        // "there" matches the fallback this app already uses elsewhere
-        // (ServiceDetailsNotifier) for "no name on file" — never leave the
-        // literal merge tag in a delivered email.
-        $fullReplacement = $name !== '' ? $name : 'there';
-        $firstReplacement = $first !== '' ? $first : 'there';
+        $subject = $this->substituteMergeFields($subject, $mergeFields);
 
-        $patterns = [
-            '/\[\s*client\s*name\s*\]/i' => $fullReplacement,
-            '/\{\{\s*client_name\s*\}\}/i' => $fullReplacement,
-            '/\[\s*first\s*name\s*\]/i' => $firstReplacement,
-            '/\{\{\s*first_name\s*\}\}/i' => $firstReplacement,
-        ];
-
-        $subject = preg_replace(array_keys($patterns), array_values($patterns), $subject) ?? $subject;
-        $body = preg_replace(array_keys($patterns), array_values($patterns), $body) ?? $body;
+        // Plain-text bodies are escaped by EmailContent::toHtml() below. For
+        // authored HTML, escape merge values now so client-controlled values
+        // remain text instead of becoming markup or breaking an attribute.
+        $bodyIsHtml = EmailContent::isHtml($body);
+        $body = $this->substituteMergeFields($body, $mergeFields, $bodyIsHtml);
 
         $safeBody = EmailContent::toHtml($body);
         $html = $safeBody . '<img src="/campaigns/track/' . $openToken . '" width="1" height="1" alt="" style="display:none;">';
 
         return ['subject' => $subject, 'html' => $html];
+    }
+
+    /** @param array<string, mixed> $recipient @return array<string, string> */
+    private function mergeFields(array $recipient): array
+    {
+        $first = trim((string) ($recipient['first_name'] ?? ''));
+        $last = trim((string) ($recipient['last_name'] ?? ''));
+        $fullName = trim($first . ' ' . $last);
+        $email = trim((string) ($recipient['email'] ?? ''));
+        $clientId = $recipient['client_id'] ?? $recipient['id'] ?? null;
+        $clientId = $clientId !== null && (int) $clientId > 0 ? (string) (int) $clientId : '';
+        $clientCompany = trim((string) ($recipient['client_company'] ?? $recipient['company_name'] ?? ''));
+        $domain = trim((string) ($recipient['domain'] ?? ''));
+        $websiteUrl = $this->billingWebsiteUrl();
+        $billingUrl = $websiteUrl . '/client/invoices';
+        $clientAreaUrl = $websiteUrl . '/client/dashboard';
+        $supportUrl = $websiteUrl . '/client/tickets';
+        $companyName = function_exists('brand_name') ? trim((string) \brand_name()) : '';
+
+        if ($companyName === '') {
+            $companyName = 'WHMP';
+        }
+
+        $emailDomain = '';
+        $atPosition = strrpos($email, '@');
+
+        if ($atPosition !== false) {
+            $emailDomain = substr($email, $atPosition + 1);
+        }
+
+        $phone = trim((string) ($recipient['phone'] ?? ''));
+        $city = trim((string) ($recipient['city'] ?? ''));
+        $state = trim((string) ($recipient['state'] ?? ''));
+        $postcode = trim((string) ($recipient['postcode'] ?? ''));
+        $country = trim((string) ($recipient['country'] ?? ''));
+
+        // Common aliases are included as real values so both bracketed labels
+        // and {{snake_case}} tags can be normalised by substituteMergeFields().
+        return [
+            'client_name' => $fullName !== '' ? $fullName : 'there',
+            'first_name' => $first !== '' ? $first : 'there',
+            'last_name' => $last,
+            'client_email' => $email,
+            'email' => $email,
+            'email_address' => $email,
+            'email_domain' => $emailDomain,
+            'client_domain' => $domain,
+            'domain' => $domain,
+            'domain_name' => $domain,
+            'client_id' => $clientId,
+            'account_id' => $clientId,
+            'company_name' => $companyName,
+            'billing_company_name' => $companyName,
+            'client_company' => $clientCompany,
+            'client_company_name' => $clientCompany,
+            'phone' => $phone,
+            'client_phone' => $phone,
+            'city' => $city,
+            'client_city' => $city,
+            'state' => $state,
+            'region' => $state,
+            'postcode' => $postcode,
+            'postal_code' => $postcode,
+            'zip' => $postcode,
+            'country' => $country,
+            'client_country' => $country,
+            'billing_website' => $websiteUrl,
+            'billing_website_url' => $websiteUrl,
+            'website_url' => $websiteUrl,
+            'site_url' => $websiteUrl,
+            'app_url' => $websiteUrl,
+            'billing_url' => $billingUrl,
+            'billing_portal_url' => $billingUrl,
+            'invoice_url' => $billingUrl,
+            'client_area_url' => $clientAreaUrl,
+            'client_portal_url' => $clientAreaUrl,
+            'support_url' => $supportUrl,
+            'tickets_url' => $supportUrl,
+        ];
+    }
+
+    private function billingWebsiteUrl(): string
+    {
+        // APP_URL is the canonical public base URL used by billing links.
+        // Kernel/Config loads it from .env into the process environment at boot.
+        $configuredUrl = $_ENV['APP_URL'] ?? getenv('APP_URL');
+        $url = trim((string) ($configuredUrl ?: 'http://localhost'));
+
+        return rtrim($url !== '' ? $url : 'http://localhost', '/');
+    }
+
+    /** @param array<string, string> $fields */
+    private function substituteMergeFields(string $content, array $fields, bool $escapeHtml = false): string
+    {
+        $rendered = preg_replace_callback(
+            '/\\{\\{\\s*([a-z][a-z0-9 _-]*)\\s*\\}\\}|\\[\\s*([a-z][a-z0-9 _-]*)\\s*\\]/i',
+            static function (array $matches) use ($fields, $escapeHtml): string {
+                $rawToken = (string) (($matches[1] ?? '') !== '' ? $matches[1] : ($matches[2] ?? ''));
+                $token = strtolower(trim($rawToken));
+                $key = (string) preg_replace('/[\\s-]+/', '_', $token);
+
+                if (!array_key_exists($key, $fields)) {
+                    return $matches[0];
+                }
+
+                $value = $fields[$key];
+
+                return $escapeHtml
+                    ? htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                    : $value;
+            },
+            $content
+        );
+
+        return $rendered ?? $content;
     }
 }

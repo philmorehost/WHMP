@@ -28,6 +28,8 @@ $feedback = [
     <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);"><?= e((string) $_GET['edit_error']) ?></div>
 <?php endif; ?>
 
+<?= $view->partial('marketing.campaign-merge-fields') ?>
+
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <p><strong>Status:</strong> <?= e(ucfirst($campaign['status'])) ?></p>
     <p>
@@ -115,11 +117,8 @@ $feedback = [
                     <input class="cv-input" name="subject" value="<?= e((string) $campaign['subject']) ?>" required>
                 </div>
                 <div class="cv-field">
-                    <label class="cv-label">Body (HTML)</label>
+                    <label class="cv-label">Body (Plain Text or HTML)</label>
                     <textarea class="cv-input" name="body" rows="8" required><?= e((string) $campaign['body']) ?></textarea>
-                    <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
-                        <code>[Client Name]</code> or <code>{{client_name}}</code> is replaced with each recipient's real name when sent.
-                    </div>
                 </div>
                 <button class="cv-btn" type="submit">Save Changes</button>
             </form>
@@ -157,7 +156,7 @@ $feedback = [
             <?= CodeVault\Mail\EmailContent::toHtml((string) $campaign['body']) ?>
         </div>
         <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:14px 24px;text-align:center;font-size:12px;color:#64748b;">
-            This is how the message body will appear to recipients. <code>[Client Name]</code> becomes each recipient's real name when sent.
+            Merge fields are shown as written here and are personalized separately for each recipient when the campaign is sent.
         </div>
     </div>
 </div>
