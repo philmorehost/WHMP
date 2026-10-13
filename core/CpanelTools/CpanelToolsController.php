@@ -199,7 +199,52 @@ final class CpanelToolsController
             return $denied;
         }
 
-        $result = $this->tools->createDatabase($id, trim((string) $request->input('name', '')));
+        $password = (string) $request->input('password', '');
+        $passwordConfirmation = (string) $request->input('confirm_password', '');
+
+        if ($password !== $passwordConfirmation) {
+            return $this->render($id, $service, 'databases', [
+                'success' => false,
+                'message' => 'The database passwords do not match. Nothing was created.',
+                'data' => [],
+            ]);
+        }
+
+        $result = $this->tools->createDatabase(
+            $id,
+            trim((string) $request->input('name', '')),
+            trim((string) $request->input('user', '')),
+            $password
+        );
+
+        return $this->render($id, $service, 'databases', $result);
+    }
+
+    public function changeDatabaseUserPassword(Request $request, array $params): Response
+    {
+        $id = (int) $params['id'];
+        [$service, $denied] = $this->requireOwnedService($id);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $password = (string) $request->input('password', '');
+        $passwordConfirmation = (string) $request->input('confirm_password', '');
+
+        if ($password !== $passwordConfirmation) {
+            return $this->render($id, $service, 'databases', [
+                'success' => false,
+                'message' => 'The new database-user passwords do not match. No password was changed.',
+                'data' => [],
+            ]);
+        }
+
+        $result = $this->tools->setDatabaseUserPassword(
+            $id,
+            (string) $request->input('user', ''),
+            $password
+        );
 
         return $this->render($id, $service, 'databases', $result);
     }
@@ -530,12 +575,14 @@ final class CpanelToolsController
         $subdomains = $tab === 'domains' ? $this->tools->listSubdomains($serviceId) : ['data' => []];
         $redirects = $tab === 'domains' ? $this->tools->listRedirects($serviceId) : ['data' => []];
         $usage = $tab === 'usage' ? $this->tools->diskUsage($serviceId) : ['data' => null];
+        $databaseUsers = $tab === 'databases' ? $this->tools->listDatabaseUsers($serviceId) : ['data' => []];
 
         $additionalResults = match ($tab) {
             'email' => [
                 'Email forwarders' => $forwarders,
                 'Autoresponders' => $autoresponders,
             ],
+            'databases' => ['Database users' => $databaseUsers],
             'domains' => [
                 'Addon domains' => $addonDomains,
                 'Subdomains' => $subdomains,
@@ -589,6 +636,7 @@ final class CpanelToolsController
             'subdomains' => is_array($subdomains['data'] ?? null) ? $subdomains['data'] : [],
             'redirects' => is_array($redirects['data'] ?? null) ? $redirects['data'] : [],
             'usage' => $usageData,
+            'databaseUsers' => is_array($databaseUsers['data'] ?? null) ? $databaseUsers['data'] : [],
         ]);
         return Response::html($this->view->render('layouts.client', [
             'title' => 'cPanel Tools — ' . (string) $service['product_name'],

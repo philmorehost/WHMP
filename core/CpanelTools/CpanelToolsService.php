@@ -16,11 +16,11 @@ use CodeVault\Provisioning\ServerRepository;
  * yet, or isn't on a cPanel server, fails closed with a plain-English
  * reason rather than a stack trace.
  *
- * Domain, email, FTP, database, SSL, quota, and cPanel SSO operations use the
- * documented UAPI/WHM API endpoints. Cron jobs, SSH keys, DNS zone editing, and
- * subdomain management use cPanel API 2 where cPanel has no equivalent UAPI
- * operation. Calls are isolated by the provisioned service's WHM server and
- * account name.
+ * Domain, email, FTP, database mutations, SSL, quota, and cPanel SSO operations
+ * use the documented UAPI/WHM API endpoints. MySQL user listing, cron jobs, SSH
+ * keys, DNS zone editing, and subdomain management use cPanel API 2 where cPanel
+ * has no equivalent UAPI operation. Calls are isolated by the provisioned
+ * service's WHM server and account name.
  */
 final class CpanelToolsService
 {
@@ -278,14 +278,282 @@ final class CpanelToolsService
         });
     }
 
-    public function createDatabase(int $serviceId, string $name): array
+    /**
+     * API 2 is the only cPanel API that lists database users. Normalize its
+     * `dblist` associations so the client page can show each user and the
+     * databases it can access.
+     *
+     * @return array{success: bool, message: string, data: array<int, array{user: string, shortuser: string, databases: array<int, string>}>}
+     */
+    public function listDatabaseUsers(int $serviceId): array
     {
-        return $this->withContext($serviceId, fn (array $ctx) => $this->uapi->call(
+        return $this->withContext($serviceId, function (array $ctx): array {
+            $result = $this->uapi->callApi2($ctx['server'], $ctx['username'], 'MysqlFE', 'listusers');
+
+            if (!$result['success']) {
+                return $result;
+            }
+
+            $payload = is_array($result['data']) ? $result['data'] : [];
+            $rows = $payload['users'] ?? $payload['userlist'] ?? $payload;
+
+            if (!is_array($rows)) {
+                $rows = [];
+            } elseif (isset($rows['user']) || isset($rows['username'])) {
+                $rows = [$rows];
+            }
+
+            $usersByName = [];
+
+            foreach ($rows as $rowKey => $row) {
+                if (is_string($row) || is_numeric($row)) {
+                    $username = trim((string) $row);
+                    $row = [];
+                } elseif (is_array($row)) {
+                    $username = trim((string) ($row['user'] ?? $row['username'] ?? (is_string($rowKey) ? $rowKey : '')));
+                } else {
+                    continue;
+                }
+
+                if ($username === '') {
+                    continue;
+                }
+
+                $databaseRows = $row['dblist'] ?? $row['databases'] ?? [];
+
+                if (!is_array($databaseRows)) {
+                    $databaseRows = [];
+                } elseif (isset($databaseRows['db']) || isset($databaseRows['database'])) {
+                    $databaseRows = [$databaseRows];
+                }
+
+                $databases = [];
+
+                foreach ($databaseRows as $databaseKey => $databaseRow) {
+                    if (is_string($databaseRow) || is_numeric($databaseRow)) {
+                        $database = trim((string) $databaseRow);
+
+                        // Some legacy hosts key the database map by name and
+                        // store the authorized username (or a truthy flag) as
+                        // the value instead of returning a list of records.
+                        if (is_string($databaseKey)
+                            && ($database === '' || strcasecmp($database, $username) === 0 || in_array(strtolower($database), ['1', 'true'], true))) {
+                            $database = trim($databaseKey);
+                        }
+                    } elseif (is_array($databaseRow)) {
+                        $database = trim((string) ($databaseRow['db'] ?? $databaseRow['database'] ?? ''));
+
+                        if ($database === '' && is_string($databaseKey)) {
+                            $database = trim($databaseKey);
+                        }
+                    } else {
+                        continue;
+                    }
+
+                    if ($database !== '') {
+                        $databases[] = $database;
+                    }
+                }
+
+                $shortuser = trim((string) ($row['shortuser'] ?? ''));
+
+                if ($shortuser === '') {
+                    $separator = strrpos($username, '_');
+                    $shortuser = $separator === false ? $username : substr($username, $separator + 1);
+                }
+
+                if (!isset($usersByName[$username])) {
+                    $usersByName[$username] = [
+                        'user' => $username,
+                        'shortuser' => $shortuser,
+                        'databases' => [],
+                    ];
+                }
+
+                $usersByName[$username]['databases'] = array_values(array_unique(array_merge(
+                    $usersByName[$username]['databases'],
+                    $databases
+                )));
+            }
+
+            $users = array_values($usersByName);
+
+            foreach ($users as &$user) {
+                sort($user['databases'], SORT_NATURAL | SORT_FLAG_CASE);
+            }
+            unset($user);
+
+            usort($users, static fn (array $left, array $right): int => strnatcasecmp($left['user'], $right['user']));
+
+            return ['success' => true, 'message' => $result['message'], 'data' => $users];
+        });
+    }
+
+    /**
+     * cPanel's MySQL Database Wizard creates the database, creates its user,
+     * then grants that user ALL privileges. If a later step fails, compensate
+     * for the already-completed work and report any resource that could not be
+     * removed instead of claiming the wizard succeeded.
+     *
+     * @return array{success: bool, message: string, data: array<string, mixed>}
+     */
+    public function createDatabase(int $serviceId, string $name, string $databaseUser, string $password): array
+    {
+        $name = trim($name);
+        $databaseUser = trim($databaseUser);
+
+        if ($name === '' || $databaseUser === '' || $password === '') {
+            return [
+                'success' => false,
+                'message' => 'Enter a database name, database username, and password to continue.',
+                'data' => [],
+            ];
+        }
+
+        return $this->withContext($serviceId, function (array $ctx) use ($name, $databaseUser, $password): array {
+            $databaseResult = $this->uapi->call(
+                $ctx['server'],
+                $ctx['username'],
+                'Mysql',
+                'create_database',
+                ['name' => $name]
+            );
+
+            if (!$databaseResult['success']) {
+                return [
+                    'success' => false,
+                    'message' => 'Database creation failed: ' . $databaseResult['message'],
+                    'data' => ['database_created' => false, 'user_created' => false, 'privileges_granted' => false],
+                ];
+            }
+
+            $userResult = $this->uapi->callPost(
+                $ctx['server'],
+                $ctx['username'],
+                'Mysql',
+                'create_user',
+                ['name' => $databaseUser, 'password' => $password]
+            );
+
+            if (!$userResult['success']) {
+                $cleanup = $this->uapi->call(
+                    $ctx['server'],
+                    $ctx['username'],
+                    'Mysql',
+                    'delete_database',
+                    ['name' => $name]
+                );
+                $message = 'The database was created, but cPanel could not create the database user: '
+                    . $userResult['message'] . '. ';
+                $message .= $cleanup['success']
+                    ? 'The unused database was removed.'
+                    : 'The database could not be removed automatically: ' . $cleanup['message']
+                        . '. Delete the partial database from the MySQL Databases page after reviewing it.';
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'data' => [
+                        'database_created' => true,
+                        'user_created' => false,
+                        'privileges_granted' => false,
+                        'database_removed' => (bool) $cleanup['success'],
+                    ],
+                ];
+            }
+
+            $privilegeResult = $this->uapi->call(
+                $ctx['server'],
+                $ctx['username'],
+                'Mysql',
+                'set_privileges_on_database',
+                ['user' => $databaseUser, 'database' => $name, 'privileges' => 'ALL']
+            );
+
+            if (!$privilegeResult['success']) {
+                $userCleanup = $this->uapi->call(
+                    $ctx['server'],
+                    $ctx['username'],
+                    'Mysql',
+                    'delete_user',
+                    ['name' => $databaseUser]
+                );
+                $databaseCleanup = $this->uapi->call(
+                    $ctx['server'],
+                    $ctx['username'],
+                    'Mysql',
+                    'delete_database',
+                    ['name' => $name]
+                );
+                $message = 'The database and user were created, but cPanel could not grant ALL privileges: '
+                    . $privilegeResult['message'] . '. ';
+
+                if ($userCleanup['success'] && $databaseCleanup['success']) {
+                    $message .= 'The partial database and user were removed.';
+                } else {
+                    $cleanupIssues = [];
+
+                    if (!$userCleanup['success']) {
+                        $cleanupIssues[] = 'the database user remains (' . $userCleanup['message'] . ')';
+                    }
+
+                    if (!$databaseCleanup['success']) {
+                        $cleanupIssues[] = 'the database remains (' . $databaseCleanup['message'] . ')';
+                    }
+
+                    $message .= 'Cleanup was incomplete: ' . implode('; ', $cleanupIssues)
+                        . '. Review the resources on the MySQL Databases page.';
+                }
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'data' => [
+                        'database_created' => true,
+                        'user_created' => true,
+                        'privileges_granted' => false,
+                        'database_removed' => (bool) $databaseCleanup['success'],
+                        'user_removed' => (bool) $userCleanup['success'],
+                    ],
+                ];
+            }
+
+            return [
+                'success' => true,
+                'message' => 'The database and user were created, and ALL privileges were granted.',
+                'data' => [
+                    'database_created' => true,
+                    'user_created' => true,
+                    'privileges_granted' => true,
+                    'database' => $name,
+                    'user' => $databaseUser,
+                    'privileges' => 'ALL',
+                ],
+            ];
+        });
+    }
+
+    /**
+     * Change a database user's password without putting the secret in the WHM
+     * API query string. The UAPI accepts the full MySQL username returned by
+     * MysqlFE::listusers.
+     *
+     * @return array{success: bool, message: string, data: mixed}
+     */
+    public function setDatabaseUserPassword(int $serviceId, string $databaseUser, string $password): array
+    {
+        $databaseUser = trim($databaseUser);
+
+        if ($databaseUser === '' || $password === '') {
+            return ['success' => false, 'message' => 'Enter a database user and a new password.', 'data' => []];
+        }
+
+        return $this->withContext($serviceId, fn (array $ctx) => $this->uapi->callPost(
             $ctx['server'],
             $ctx['username'],
             'Mysql',
-            'create_database',
-            ['name' => $name]
+            'set_password',
+            ['user' => $databaseUser, 'password' => $password]
         ));
     }
 

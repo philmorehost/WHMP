@@ -13,6 +13,8 @@
 /** @var array<int, array<string, mixed>> $subdomains */
 /** @var array<int, array<string, mixed>> $redirects */
 /** @var array{usedMb: float, limitMb: float}|null $usage */
+/** @var array<int, array{user: string, shortuser: string, databases: array<int, string>}> $databaseUsers */
+$databaseUsers = $databaseUsers ?? [];
 $id = (int) $service['id'];
 
 $tabs = [
@@ -247,11 +249,12 @@ $tabs = [
             <thead><tr><th>Database</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($items as $database): ?>
+                <?php $databaseName = (string) ($database['database'] ?? $database['name'] ?? ''); ?>
                 <tr>
-                    <td><?= e((string) ($database['database'] ?? $database['name'] ?? '')) ?></td>
+                    <td><?= e($databaseName) ?></td>
                     <td>
                         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/database/delete" data-confirm="Delete this database? This cannot be undone."><?= csrf_field() ?>
-                            <input type="hidden" name="name" value="<?= e((string) ($database['database'] ?? $database['name'] ?? '')) ?>">
+                            <input type="hidden" name="name" value="<?= e($databaseName) ?>">
                             <button class="cv-btn cv-btn--danger" type="submit">Delete</button>
                         </form>
                     </td>
@@ -263,21 +266,114 @@ $tabs = [
             </tbody>
         </table>
     </div>
-    <div class="cv-card">
-        <h3>Create Database</h3>
+
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <h2 class="cv-card__title">Create Database &amp; User</h2>
+        <p style="color:var(--cv-text-secondary);">This wizard creates the database, creates its MySQL user, and grants that user ALL privileges on the database. Enter the complete names cPanel expects, including your account prefix if your server uses one.</p>
         <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/database" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
             <div class="cv-field" style="margin-bottom:0;">
-                <label class="cv-label">Database Name</label>
-                <input class="cv-input" name="name" required>
+                <label class="cv-label" for="mysql-database-name">Database Name</label>
+                <input class="cv-input" id="mysql-database-name" name="name" autocomplete="off" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label" for="mysql-database-user">Database User</label>
+                <input class="cv-input" id="mysql-database-user" name="user" autocomplete="username" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label" for="mysql-database-password">Password</label>
+                <input class="cv-input" id="mysql-database-password" type="password" name="password" autocomplete="new-password" required>
+            </div>
+            <div class="cv-field" style="margin-bottom:0;">
+                <label class="cv-label" for="mysql-database-password-confirm">Confirm Password</label>
+                <input class="cv-input" id="mysql-database-password-confirm" type="password" name="confirm_password" autocomplete="new-password" required>
             </div>
             <div style="grid-column: 1 / -1;">
-                <button class="cv-btn" type="submit">Create Database</button>
+                <button class="cv-btn" type="submit">Create Database &amp; User</button>
             </div>
         </form>
+    </div>
+
+    <div class="cv-card">
+        <h2 class="cv-card__title">Database User Passwords</h2>
+        <p style="color:var(--cv-text-secondary);">Changing a password affects every database assigned to that user. Update the saved credentials in any website or application that uses the account.</p>
+        <table class="cv-table">
+            <thead><tr><th>Database User</th><th>Assigned Databases</th><th>Change Password</th></tr></thead>
+            <tbody>
+            <?php foreach ($databaseUsers as $userIndex => $databaseUser): ?>
+                <?php
+                    $databaseUsername = (string) ($databaseUser['user'] ?? '');
+                    $userDatabases = is_array($databaseUser['databases'] ?? null) ? $databaseUser['databases'] : [];
+                ?>
+                <tr>
+                    <td><code><?= e($databaseUsername) ?></code></td>
+                    <td>
+                        <?php if ($userDatabases !== []): ?>
+                            <?php foreach ($userDatabases as $userDatabase): ?>
+                                <div><?= e((string) $userDatabase) ?></div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <span style="color:var(--cv-text-secondary);">No database assigned</span>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/database/user/password" data-confirm="Change this database user's password? Remember to update applications that use it."><?= csrf_field() ?>
+                            <input type="hidden" name="user" value="<?= e($databaseUsername) ?>">
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--cv-space-2);align-items:end;">
+                                <div class="cv-field" style="margin-bottom:0;">
+                                    <label class="cv-label" for="database-user-password-<?= (int) $userIndex ?>">New Password</label>
+                                    <input class="cv-input" id="database-user-password-<?= (int) $userIndex ?>" type="password" name="password" autocomplete="new-password" required>
+                                </div>
+                                <div class="cv-field" style="margin-bottom:0;">
+                                    <label class="cv-label" for="database-user-password-confirm-<?= (int) $userIndex ?>">Confirm Password</label>
+                                    <input class="cv-input" id="database-user-password-confirm-<?= (int) $userIndex ?>" type="password" name="confirm_password" autocomplete="new-password" required>
+                                </div>
+                                <button class="cv-btn" type="submit">Update Password</button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if ($databaseUsers === []): ?>
+                <tr><td colspan="3" style="color:var(--cv-text-secondary);">No database users found.</td></tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
     </div>
 <?php endif; ?>
 
 <?php if ($tab === 'dns'): ?>
+    <?php if ($selectedDnsZone !== ''): ?>
+        <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+            <h2 class="cv-card__title">Add DNS Record to <?= e($selectedDnsZone) ?></h2>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Supports A, AAAA, CNAME, and TXT records. Enter a label such as www, a full name within this zone, or @ for the root domain.</p>
+            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
+                <input type="hidden" name="zone" value="<?= e($selectedDnsZone) ?>">
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Name</label>
+                    <input class="cv-input" name="name" placeholder="www" required>
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Type</label>
+                    <select class="cv-select" name="type">
+                        <?php foreach ($dnsRecordTypes as $type): ?>
+                            <option value="<?= e($type) ?>"><?= e($type) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">Value</label>
+                    <input class="cv-input" name="value" required>
+                </div>
+                <div class="cv-field" style="margin-bottom:0;">
+                    <label class="cv-label">TTL</label>
+                    <input class="cv-input" type="number" name="ttl" value="14400" min="60">
+                </div>
+                <div style="grid-column: 1 / -1;">
+                    <button class="cv-btn" type="submit">Add Record</button>
+                </div>
+            </form>
+        </div>
+    <?php endif; ?>
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
         <h2 class="cv-card__title">DNS Zone Editor</h2>
         <?php if ($dnsZones !== []): ?>
@@ -331,38 +427,6 @@ $tabs = [
             </tbody>
         </table>
     </div>
-    <?php if ($selectedDnsZone !== ''): ?>
-        <div class="cv-card">
-            <h3>Add DNS Record to <?= e($selectedDnsZone) ?></h3>
-            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">Supports A, AAAA, CNAME, and TXT records. Enter a label such as www, a full name within this zone, or @ for the root domain.</p>
-            <form method="post" action="/client/services/<?= $id ?>/cpanel-tools/dns" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:var(--cv-space-3);align-items:end;"><?= csrf_field() ?>
-                <input type="hidden" name="zone" value="<?= e($selectedDnsZone) ?>">
-                <div class="cv-field" style="margin-bottom:0;">
-                    <label class="cv-label">Name</label>
-                    <input class="cv-input" name="name" placeholder="www" required>
-                </div>
-                <div class="cv-field" style="margin-bottom:0;">
-                    <label class="cv-label">Type</label>
-                    <select class="cv-select" name="type">
-                        <?php foreach ($dnsRecordTypes as $type): ?>
-                            <option value="<?= e($type) ?>"><?= e($type) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="cv-field" style="margin-bottom:0;">
-                    <label class="cv-label">Value</label>
-                    <input class="cv-input" name="value" required>
-                </div>
-                <div class="cv-field" style="margin-bottom:0;">
-                    <label class="cv-label">TTL</label>
-                    <input class="cv-input" type="number" name="ttl" value="14400" min="60">
-                </div>
-                <div style="grid-column: 1 / -1;">
-                    <button class="cv-btn" type="submit">Add Record</button>
-                </div>
-            </form>
-        </div>
-    <?php endif; ?>
 <?php endif; ?>
 
 <?php if ($tab === 'domains'): ?>

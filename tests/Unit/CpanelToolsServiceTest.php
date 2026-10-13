@@ -161,21 +161,128 @@ final class CpanelToolsServiceTest extends TestCase
             ])],
             ['status' => 200, 'body' => $this->uapiJson(null)],
             ['status' => 200, 'body' => $this->uapiJson(null)],
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+            ['status' => 200, 'body' => $this->uapiJson(null)],
         ]);
         $tools = $this->tools($http);
 
         $databases = $tools->listDatabases(self::SERVICE_ID);
         $this->assertSame('cvuser_store', $databases['data'][0]['database']);
-        $this->assertTrue($tools->createDatabase(self::SERVICE_ID, 'cvuser_new')['success']);
+        $wizard = $tools->createDatabase(self::SERVICE_ID, 'cvuser_new', 'cvuser_app', 'db-secret');
+        $this->assertTrue($wizard['success']);
+        $this->assertTrue($wizard['data']['privileges_granted']);
         $this->assertTrue($tools->deleteDatabase(self::SERVICE_ID, 'cvuser_old')['success']);
 
         $create = $this->query($http->requests[1]['url']);
-        $delete = $this->query($http->requests[2]['url']);
+        $createUserRequest = $http->requests[2];
+        $createUser = $this->requestParams($createUserRequest);
+        $grant = $this->query($http->requests[3]['url']);
+        $delete = $this->query($http->requests[4]['url']);
         $this->assertSame('Mysql', $create['cpanel_jsonapi_module']);
         $this->assertSame('create_database', $create['cpanel_jsonapi_func']);
         $this->assertSame('cvuser_new', $create['name']);
+        $this->assertSame('POST', $createUserRequest['method']);
+        $this->assertArrayNotHasKey('password', $this->query($createUserRequest['url']), 'MySQL user passwords must not be sent in the URL');
+        $this->assertSame('create_user', $createUser['cpanel_jsonapi_func']);
+        $this->assertSame('cvuser_app', $createUser['name']);
+        $this->assertSame('db-secret', $createUser['password']);
+        $this->assertSame('set_privileges_on_database', $grant['cpanel_jsonapi_func']);
+        $this->assertSame('cvuser_new', $grant['database']);
+        $this->assertSame('cvuser_app', $grant['user']);
+        $this->assertSame('ALL', $grant['privileges']);
         $this->assertSame('delete_database', $delete['cpanel_jsonapi_func']);
         $this->assertSame('cvuser_old', $delete['name']);
+    }
+
+    public function test_database_wizard_reports_user_creation_failure_and_removes_the_partial_database(): void
+    {
+        $http = new FakeHttpClient();
+        $http->respondInSequence([
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+            ['status' => 200, 'body' => json_encode([
+                'result' => ['status' => 0, 'errors' => ['Password does not meet the server policy.'], 'data' => null],
+            ], JSON_THROW_ON_ERROR)],
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+        ]);
+        $tools = $this->tools($http);
+
+        $result = $tools->createDatabase(self::SERVICE_ID, 'cvuser_partial', 'cvuser_app', 'weak-password');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('could not create the database user', $result['message']);
+        $this->assertStringContainsString('Password does not meet the server policy.', $result['message']);
+        $this->assertStringContainsString('unused database was removed', $result['message']);
+        $this->assertFalse($result['data']['privileges_granted']);
+        $this->assertSame('delete_database', $this->query($http->requests[2]['url'])['cpanel_jsonapi_func']);
+        $this->assertCount(3, $http->requests, 'the wizard stops after the failed step and only calls cleanup');
+    }
+
+    public function test_database_wizard_reports_privilege_failure_and_incomplete_cleanup(): void
+    {
+        $http = new FakeHttpClient();
+        $http->respondInSequence([
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+            ['status' => 200, 'body' => json_encode([
+                'result' => ['status' => 0, 'errors' => ['Could not grant privileges.'], 'data' => null],
+            ], JSON_THROW_ON_ERROR)],
+            ['status' => 200, 'body' => json_encode([
+                'result' => ['status' => 0, 'errors' => ['Could not remove user.'], 'data' => null],
+            ], JSON_THROW_ON_ERROR)],
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+        ]);
+        $tools = $this->tools($http);
+
+        $result = $tools->createDatabase(self::SERVICE_ID, 'cvuser_partial', 'cvuser_app', 'db-secret');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('could not grant ALL privileges', $result['message']);
+        $this->assertStringContainsString('Could not grant privileges.', $result['message']);
+        $this->assertStringContainsString('database user remains', $result['message']);
+        $this->assertStringNotContainsString('the database remains', $result['message']);
+        $this->assertTrue($result['data']['database_removed']);
+        $this->assertFalse($result['data']['user_removed']);
+        $this->assertSame('delete_user', $this->query($http->requests[3]['url'])['cpanel_jsonapi_func']);
+        $this->assertSame('delete_database', $this->query($http->requests[4]['url'])['cpanel_jsonapi_func']);
+    }
+
+    public function test_database_user_list_normalizes_api2_user_associations_and_password_change_uses_post(): void
+    {
+        $http = new FakeHttpClient();
+        $http->respondInSequence([
+            ['status' => 200, 'body' => $this->api2Json([
+                [
+                    'dblist' => [
+                        ['db' => 'cvuser_store', 'user' => 'cvuser_app'],
+                        ['db' => 'cvuser_logs', 'user' => 'cvuser_app'],
+                    ],
+                    'shortuser' => 'app',
+                    'user' => 'cvuser_app',
+                ],
+                ['dblist' => [], 'shortuser' => 'unused', 'user' => 'cvuser_unused'],
+            ])],
+            ['status' => 200, 'body' => $this->uapiJson(null)],
+        ]);
+        $tools = $this->tools($http);
+
+        $users = $tools->listDatabaseUsers(self::SERVICE_ID);
+        $this->assertTrue($users['success']);
+        $this->assertSame(['cvuser_logs', 'cvuser_store'], $users['data'][0]['databases']);
+        $this->assertSame('cvuser_app', $users['data'][0]['user']);
+        $this->assertSame('app', $users['data'][0]['shortuser']);
+        $this->assertSame([], $users['data'][1]['databases']);
+        $this->assertSame('2', $this->query($http->requests[0]['url'])['cpanel_jsonapi_apiversion']);
+        $this->assertSame('MysqlFE', $this->query($http->requests[0]['url'])['cpanel_jsonapi_module']);
+        $this->assertSame('listusers', $this->query($http->requests[0]['url'])['cpanel_jsonapi_func']);
+
+        $this->assertTrue($tools->setDatabaseUserPassword(self::SERVICE_ID, 'cvuser_app', 'replacement-secret')['success']);
+        $passwordRequest = $http->requests[1];
+        $passwordParams = $this->requestParams($passwordRequest);
+        $this->assertSame('POST', $passwordRequest['method']);
+        $this->assertArrayNotHasKey('password', $this->query($passwordRequest['url']), 'database passwords must not be sent in the URL');
+        $this->assertSame('set_password', $passwordParams['cpanel_jsonapi_func']);
+        $this->assertSame('cvuser_app', $passwordParams['user']);
+        $this->assertSame('replacement-secret', $passwordParams['password']);
     }
 
     public function test_database_and_dns_views_render_cpanel_listings_and_the_selected_zone(): void
@@ -194,6 +301,11 @@ final class CpanelToolsServiceTest extends TestCase
             $databaseHtml = $view->render('cpanel-tools.index', $base + [
                 'tab' => 'databases',
                 'items' => [['database' => 'cvuser1_store']],
+                'databaseUsers' => [[
+                    'user' => 'cvuser1_app',
+                    'shortuser' => 'app',
+                    'databases' => ['cvuser1_store'],
+                ]],
             ]);
             $dnsHtml = $view->render('cpanel-tools.index', $base + [
                 'tab' => 'dns',
@@ -213,9 +325,17 @@ final class CpanelToolsServiceTest extends TestCase
         }
 
         $this->assertStringContainsString('cvuser1_store', $databaseHtml, 'the MySQL page displays database names returned by cPanel');
+        $this->assertStringContainsString('cvuser1_app', $databaseHtml, 'the MySQL page lists database users');
+        $this->assertStringContainsString('/cpanel-tools/database/user/password', $databaseHtml, 'each database user has a password editor');
+        $this->assertStringContainsString('name="confirm_password"', $databaseHtml);
         $this->assertStringContainsString('value="shop.example.test" selected', $dnsHtml);
         $this->assertStringContainsString('name="zone" value="shop.example.test"', $dnsHtml, 'DNS mutations retain the selected zone');
         $this->assertStringContainsString('www.shop.example.test.', $dnsHtml);
+        $this->assertLessThan(
+            strpos($dnsHtml, 'DNS Zone Editor'),
+            strpos($dnsHtml, 'Add DNS Record to'),
+            'the Add DNS Record card appears above the DNS Zone Editor'
+        );
     }
 
     public function test_dns_listing_reads_all_cpanel_zones_then_fetches_the_selected_zone_records(): void

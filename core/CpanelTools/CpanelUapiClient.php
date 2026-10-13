@@ -18,9 +18,9 @@ use CodeVault\Provisioning\HttpClient;
  * The proxy can return the documented UAPI result envelope, a legacy
  * `cpanelresult` envelope (including a nested UAPI result), or a plain text
  * error object. All three are normalized here so tool callers get the real
- * panel error instead of a generic shape failure. Cron jobs and SSH key
- * management still use cPanel API 2 because cPanel does not expose those
- * operations through UAPI.
+ * panel error instead of a generic shape failure. Cron jobs, SSH key
+ * management, and MySQL user listing still use cPanel API 2 because cPanel does
+ * not expose those operations through UAPI.
  */
 final class CpanelUapiClient
 {
