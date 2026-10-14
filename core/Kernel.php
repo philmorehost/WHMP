@@ -1377,6 +1377,9 @@ class Kernel
                 $c->make(TicketService::class),
                 $c->make(ClientRepository::class),
                 $c->make(BlockedEmailSenderRepository::class),
+                // MailPipingJob uses the recipient address to attribute inbound
+                // tickets to the correct reseller store (or the platform).
+                $c->make(ResellerStoreRepository::class),
             );
         });
 

@@ -86,6 +86,39 @@ final class KernelClassReferencesTest extends TestCase
         $this->assertSame([], array_values(array_unique($problems)), implode("\n", array_unique($problems)));
     }
 
+    public function test_mail_piping_factory_matches_the_job_constructor_dependencies(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 2) . '/core/Kernel.php');
+
+        $matched = preg_match(
+            '/\$this->container->singleton\(MailPipingJob::class,\s*function \(Container \$c\) \{(.*?)\n\s*\}\);/s',
+            $source,
+            $factory
+        );
+        $this->assertSame(1, $matched, 'Kernel must define the MailPipingJob container factory');
+
+        preg_match_all('/\$c->make\((\w+)::class\)/', $factory[1], $matches);
+
+        $namespace = $this->currentNamespace($source);
+        $imports = $this->imports($source);
+        $actual = array_map(
+            static fn (string $name): string => $imports[$name] ?? $namespace . '\\' . $name,
+            $matches[1]
+        );
+
+        $constructor = (new \ReflectionMethod(\CodeVault\Support\MailPipingJob::class, '__construct'))->getParameters();
+        $expected = array_map(
+            static fn (\ReflectionParameter $parameter): string => $parameter->getType()->getName(),
+            $constructor
+        );
+
+        $this->assertSame(
+            $expected,
+            $actual,
+            'The Kernel must inject every MailPipingJob dependency in constructor order'
+        );
+    }
+
     private function currentNamespace(string $source): string
     {
         preg_match('/^namespace\s+([^;]+);/m', $source, $m);
