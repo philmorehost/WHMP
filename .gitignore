@@ -25,5 +25,7 @@ coverage.xml
 *.sql
 *.sql.gz
 *.zip
+# ...but the container's bootstrap schema is part of the repo
+!docker/db-init/*.sql
 /storage/ticket_attachments/*
 !/storage/ticket_attachments/.gitkeep
