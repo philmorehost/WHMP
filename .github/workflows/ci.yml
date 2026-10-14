@@ -188,7 +188,22 @@ jobs:
           coverage: none
 
       - name: Audit dependencies for known advisories
-        run: composer audit --no-interaction
+        # --locked audits composer.lock itself, so the job needs no vendor/
+        # install to answer "is anything we ship vulnerable?".
+        run: |
+          composer --version
+          set +e
+          output=$(composer audit --locked --no-interaction 2>&1)
+          status=$?
+          echo "$output"
+          set -e
+          if [ "$status" -ne 0 ]; then
+            # Surface the reason as an annotation: job logs are not always
+            # reachable from every environment that consumes this workflow.
+            escaped=$(printf '%s' "$output" | tail -c 1400 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=composer audit failed::${escaped}"
+          fi
+          exit "$status"
 
       - name: Scan for committed secrets
         uses: gitleaks/gitleaks-action@v2
