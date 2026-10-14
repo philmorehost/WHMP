@@ -111,6 +111,8 @@ final class MailCampaignController
             // Shown in the preview's header bar so it mirrors the real email.
             'brandName' => trim((string) ($this->settings->get('theme.brand_name', '') ?? '')) ?: 'Email preview',
             'queuedCount' => $request->query('queued') !== null ? max(0, (int) $request->query('queued')) : null,
+            // Left out by the Invalid Email Blocker (addresses marked invalid).
+            'skippedInvalid' => max(0, (int) $request->query('skipped', 0)),
         ]);
     }
 
@@ -123,8 +125,9 @@ final class MailCampaignController
         // Queue only — the cron sends in throttled batches, so this returns
         // immediately regardless of audience size.
         $queued = $this->service->queue((int) $params['id']);
+        $skipped = $this->service->skippedInvalid();
 
-        return Response::redirect("/admin/campaigns/{$params['id']}?queued={$queued}");
+        return Response::redirect("/admin/campaigns/{$params['id']}?queued={$queued}" . ($skipped > 0 ? "&skipped={$skipped}" : ''));
     }
 
     /**

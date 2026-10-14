@@ -39,7 +39,8 @@ final class SystemDiagnosticsAddon implements AddonModule
         private readonly Database $db,
         private readonly Config $config,
         private readonly string $basePath,
-        private readonly Migrator $migrator
+        private readonly Migrator $migrator,
+        private readonly ?\CodeVault\Database\Schema\SchemaReconciler $schema = null
     ) {
     }
 
@@ -206,6 +207,8 @@ final class SystemDiagnosticsAddon implements AddonModule
             : $okBadge(false) . ' ' . count($pendingMigrations) . ' pending: ' . e(implode(', ', array_slice($pendingMigrations, 0, 5)))
                 . (count($pendingMigrations) > 5 ? ' …' : '');
 
+        $schemaHtml = $this->schemaHtml($okBadge);
+
         return <<<HTML
         <div class="cv-card" style="margin-bottom: var(--cv-space-4);">
             <h3 class="cv-card__title">Environment</h3>
@@ -270,6 +273,7 @@ final class SystemDiagnosticsAddon implements AddonModule
         <div class="cv-card">
             <h3 class="cv-card__title">Database migrations</h3>
             <p style="margin:0;">{$migrationsHtml}</p>
+            {$schemaHtml}
         </div>
         HTML;
     }
@@ -475,5 +479,60 @@ final class SystemDiagnosticsAddon implements AddonModule
         }
 
         return ['counts' => $counts, 'recentFailures' => $recentFailures];
+    }
+
+    /**
+     * Whether every table and column in database/schema.php exists, what is missing if
+     * not, and what the automatic repair last did. Read-only: the repair itself runs on
+     * boot (SchemaReconciler::reconcileIfDue) and from bin/migrate.php.
+     */
+    private function schemaHtml(callable $okBadge): string
+    {
+        if ($this->schema === null) {
+            return '';
+        }
+
+        try {
+            $plan = $this->schema->plan();
+        } catch (\Throwable $e) {
+            return '<p style="margin:var(--cv-space-2) 0 0;">' . $okBadge(false) . ' Could not read the database schema: ' . e($e->getMessage()) . '</p>';
+        }
+
+        $fixable = array_values(array_filter($plan, static fn (array $step): bool => $step['sql'] !== null));
+        $manual = array_values(array_filter($plan, static fn (array $step): bool => $step['sql'] === null));
+
+        if ($plan === []) {
+            $html = '<p style="margin:var(--cv-space-2) 0 0;">' . $okBadge(true) . ' Every table and column the code expects exists (' . count($this->schema->expected()) . ' tables).</p>';
+        } else {
+            $items = '';
+            foreach (array_slice($plan, 0, 15) as $step) {
+                $items .= '<li><code>' . e($step['table'] . ($step['name'] !== $step['table'] ? '.' . $step['name'] : '')) . '</code> — ' . e($step['note']) . '</li>';
+            }
+            $html = '<p style="margin:var(--cv-space-2) 0 0;">' . $okBadge($fixable === []) . ' '
+                . count($fixable) . ' missing item(s) will be added automatically on the next page load'
+                . ($manual !== [] ? ', ' . count($manual) . ' need attention' : '') . ':</p>'
+                . '<ul style="margin:var(--cv-space-1) 0 0;">' . $items . (count($plan) > 15 ? '<li>…</li>' : '') . '</ul>';
+        }
+
+        $marker = $this->basePath . '/storage/system/schema-reconcile.json';
+        $last = is_file($marker) ? json_decode((string) @file_get_contents($marker), true) : null;
+
+        // The boot check runs once per deploy. Something missing now (e.g. dropped
+        // by hand since) would otherwise wait for the next upload — clearing the
+        // marker makes "on the next page load" true.
+        if ($fixable !== [] && is_file($marker)) {
+            @unlink($marker);
+        }
+        if (is_array($last) && isset($last['at'])) {
+            $html .= '<p style="margin:var(--cv-space-2) 0 0;color:var(--cv-text-secondary);">Last automatic check: '
+                . e(date('Y-m-d H:i', (int) $last['at']))
+                . ' — added ' . count((array) ($last['applied'] ?? []))
+                . ', failed ' . count((array) ($last['failed'] ?? [])) . '.</p>';
+            foreach ((array) ($last['failed'] ?? []) as $label => $error) {
+                $html .= '<p style="margin:var(--cv-space-1) 0 0;">' . $okBadge(false) . ' <code>' . e((string) $label) . '</code>: ' . e((string) $error) . '</p>';
+            }
+        }
+
+        return $html;
     }
 }

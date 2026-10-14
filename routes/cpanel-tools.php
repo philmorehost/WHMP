@@ -12,6 +12,7 @@ $router->post('/client/services/{id}/cpanel-tools/email/delete', [CpanelToolsCon
 $router->post('/client/services/{id}/cpanel-tools/ftp', [CpanelToolsController::class, 'storeFtp']);
 $router->post('/client/services/{id}/cpanel-tools/ftp/delete', [CpanelToolsController::class, 'destroyFtp']);
 $router->post('/client/services/{id}/cpanel-tools/database', [CpanelToolsController::class, 'storeDatabase']);
+$router->post('/client/services/{id}/cpanel-tools/database/user/password', [CpanelToolsController::class, 'changeDatabaseUserPassword']);
 $router->post('/client/services/{id}/cpanel-tools/database/delete', [CpanelToolsController::class, 'destroyDatabase']);
 $router->post('/client/services/{id}/cpanel-tools/dns', [CpanelToolsController::class, 'storeDns']);
 $router->post('/client/services/{id}/cpanel-tools/dns/delete', [CpanelToolsController::class, 'destroyDns']);
@@ -35,4 +36,5 @@ $router->post('/client/services/{id}/cpanel-tools/ssh', [CpanelToolsController::
 $router->post('/client/services/{id}/cpanel-tools/ssh/delete', [CpanelToolsController::class, 'destroySshKey']);
 $router->post('/client/services/{id}/cpanel-tools/ssh/authorize', [CpanelToolsController::class, 'authorizeSshKey']);
 
+$router->post('/client/services/{id}/cpanel-tools/ssl', [CpanelToolsController::class, 'storeSslCertificate']);
 $router->post('/client/services/{id}/cpanel-tools/sso/{app}', [CpanelToolsController::class, 'sso']);

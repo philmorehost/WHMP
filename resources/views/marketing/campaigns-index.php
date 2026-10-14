@@ -138,13 +138,9 @@
             <input class="cv-input" name="subject" data-campaign-subject required>
         </div>
         <div class="cv-field">
-            <label class="cv-label">Body (HTML)</label>
+            <label class="cv-label">Body (Plain Text or HTML)</label>
             <textarea class="cv-input" name="body" data-campaign-body rows="8" required></textarea>
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
-                Write plain text or HTML — either works. Use <code>[Client Name]</code> or <code>{{client_name}}</code>
-                anywhere you want the recipient's real name; each recipient gets their own name substituted in when
-                the campaign sends.
-            </div>
+            <?= $view->partial('marketing.campaign-merge-fields') ?>
         </div>
         <button class="cv-btn" type="submit">Save as Draft</button>
     </form>

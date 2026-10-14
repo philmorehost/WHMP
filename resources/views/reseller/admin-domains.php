@@ -41,7 +41,8 @@ $statusBadge = static function (string $status): string {
     };
 };
 ?>
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+<?= $view->render('partials.reseller-admin-nav') ?>
+<div class="cv-card rs-page-head" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Store domains</h1>
     <p style="color:var(--cv-text-secondary);">
         A reseller asks for a custom domain; you approve or refuse it here. Approving records your decision and

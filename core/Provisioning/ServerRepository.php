@@ -160,6 +160,25 @@ final class ServerRepository
         );
     }
 
+    /**
+     * Store (or clear, with null) the encrypted provider account password. Kept out
+     * of create()/update() so no other caller, such as the active/inactive toggle,
+     * can wipe it by not knowing it exists.
+     */
+    public function setAccountSecret(int $id, ?string $encrypted): void
+    {
+        $sql = 'UPDATE servers SET account_secret = ?, updated_at = ? WHERE id = ?';
+        $bindings = [$encrypted, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id];
+
+        try {
+            $this->db->update($sql, $bindings);
+        } catch (\Throwable) {
+            // An install that has the code before migration 0212: add the column, retry.
+            $this->db->statement('ALTER TABLE servers ADD COLUMN account_secret TEXT NULL AFTER api_token');
+            $this->db->update($sql, $bindings);
+        }
+    }
+
     public function delete(int $id): void
     {
         $this->db->delete('DELETE FROM servers WHERE id = ?', [$id]);

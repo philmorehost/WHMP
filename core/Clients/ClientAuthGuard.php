@@ -43,12 +43,15 @@ final class ClientAuthGuard
     public function login(array $client): void
     {
         $this->session->regenerate();
+        // A real sign-in is never "on somebody's behalf" (ClientImpersonation).
+        $this->session->remove(ClientImpersonation::SESSION_KEY);
         $this->session->set('client_id', $client['id']);
     }
 
     public function logout(): void
     {
         $this->session->remove('client_id');
+        $this->session->remove(ClientImpersonation::SESSION_KEY);
         $this->session->regenerate();
     }
 }

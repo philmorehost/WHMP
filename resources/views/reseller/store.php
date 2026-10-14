@@ -1,6 +1,7 @@
 <?php
 /** @var array<string, mixed>|null $store */
 /** @var string $platformHost */
+/** @var string|null $storeDomain the domain free store addresses are served under; null = none set */
 /** @var string|null $platformUrl */
 /** @var string|null $recordName */
 /** @var string|null $error */
@@ -10,9 +11,11 @@
 /** @var array<string, mixed>|null $cost */
 /** @var array<int, array<string, mixed>> $arrears */
 /** @var array<int, array<string, mixed>> $goLive */
+/** @var array<string, mixed>|null $google the store's Google sign-in card (null before the store is opened) */
 
 $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
+$storeDomain = $storeDomain ?? null;
 ?>
 <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
     <header class="rs-head">
@@ -109,10 +112,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <input class="cv-input" type="text" id="slug" name="slug" maxlength="63"
                        placeholder="acme" value="<?= e((string) ($slugSuggestion ?? '')) ?>">
                 <br><span style="color:var(--cv-text-secondary);">
-                    <strong>This becomes a link you give to customers.</strong> Your store's front page will be
-                    <code>https://<?= e((string) (($slugSuggestion ?? '') !== '' ? $slugSuggestion : 'yourname')) ?>.<?= e($platformHost) ?></code>
-                    — so keep it short and easy to say out loud. Letters, numbers and hyphens only; spaces become
-                    hyphens. You can change it later.
+                    <?php if ($storeDomain !== null): ?>
+                        <strong>This becomes a link you give to customers.</strong> Your store's front page will be
+                        <code>https://<?= e((string) (($slugSuggestion ?? '') !== '' ? $slugSuggestion : 'yourname')) ?>.<?= e($storeDomain) ?></code>
+                        — so keep it short and easy to say out loud.
+                    <?php else: ?>
+                        <strong>Your store's short name.</strong> Your store goes live on your own domain name, which
+                        you connect and verify after opening the store.
+                    <?php endif; ?>
+                    Letters, numbers and hyphens only; spaces become hyphens. You can change it later.
                 </span>
             </p>
             <button class="cv-btn" type="submit">Open my store</button>
@@ -130,8 +138,16 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             </tr>
             <tr>
                 <th>Platform address</th>
-                <td><a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a>
-                    <br><span style="color:var(--cv-text-secondary);">Always available.</span></td>
+                <td>
+                    <?php if ($platformUrl !== null): ?>
+                        <a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a>
+                        <br><span style="color:var(--cv-text-secondary);">Free and always available.</span>
+                    <?php else: ?>
+                        <em>not available</em>
+                        <br><span style="color:var(--cv-text-secondary);">Your store is served on your own domain: connect
+                            and verify it below to start selling.</span>
+                    <?php endif; ?>
+                </td>
             </tr>
             <tr>
                 <th>Your own domain</th>
@@ -174,10 +190,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <label for="slug">Your web address</label><br>
                 <input class="cv-input" type="text" id="slug" name="slug" maxlength="63"
                        value="<?= e((string) $store['slug']) ?>">
+                <?php if ($storeDomain !== null): ?>
                 <br><span style="color:var(--cv-text-secondary);">This is the link you give to customers:
-                    <code>https://<?= e((string) $store['slug']) ?>.<?= e($platformHost) ?></code>.
+                    <code>https://<?= e((string) $store['slug']) ?>.<?= e($storeDomain) ?></code>.
                     Keep it short and easy to say out loud. Changing it stops every link you have already
                     handed out from working, so only change it if you have to.</span>
+                <?php else: ?>
+                <br><span style="color:var(--cv-text-secondary);">Your store's short name. Customers reach your store
+                    on your own domain.</span>
+                <?php endif; ?>
             </p>
             <p>
                 <label for="logo_url">Logo URL</label><br>
@@ -201,6 +222,29 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         </form>
     </div>
 
+    <div class="cv-card" style="max-width:56rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
+        <h2 class="cv-card__title">Home page</h2>
+        <p>The big headline and the sentence under it at the top of your storefront's home page. Your
+            categories appear automatically under <strong>Services</strong> in the top menu, and a few of your
+            plans are featured on the home page with your prices. Leave a field blank to use the default text.</p>
+        <form method="post" action="/client/reseller/store/homepage"><?= csrf_field() ?>
+            <p>
+                <label for="home_headline">Headline</label><br>
+                <input class="cv-input" type="text" id="home_headline" name="home_headline"
+                       maxlength="<?= \CodeVault\Reseller\ResellerStoreService::HOME_HEADLINE_MAX ?>"
+                       placeholder="<?= e(\CodeVault\Reseller\StorefrontHome::DEFAULT_HEADLINE) ?>"
+                       value="<?= e((string) ($store['home_headline'] ?? '')) ?>">
+            </p>
+            <p>
+                <label for="home_tagline">Tagline</label><br>
+                <textarea class="cv-input" id="home_tagline" name="home_tagline" rows="2"
+                          maxlength="<?= \CodeVault\Reseller\ResellerStoreService::HOME_TAGLINE_MAX ?>"
+                          placeholder="<?= e(\CodeVault\Reseller\StorefrontHome::DEFAULT_TAGLINE) ?>"><?= e((string) ($store['home_tagline'] ?? '')) ?></textarea>
+            </p>
+            <button class="cv-btn" type="submit">Save home page text</button>
+        </form>
+    </div>
+
     <div class="cv-card" style="max-width:56rem;margin:0 auto;">
         <h2 class="cv-card__title">Your support chat</h2>
         <p>This is the chat button on your storefront. Our own chat never appears there — your customers talk to
@@ -211,10 +255,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 <label for="support_whatsapp">WhatsApp number</label><br>
                 <input class="cv-input" type="text" id="support_whatsapp" name="support_whatsapp" maxlength="32"
                        placeholder="+234 801 234 5678"
-                       value="<?= e($chat['support_whatsapp'] !== '' ? $chat['support_whatsapp'] : $phoneHint) ?>">
-                <br><span style="color:var(--cv-text-secondary);">Include the country code. This becomes your default
-                    chat button — it works straight away, and there is nothing to sign up for. Leave both fields blank
-                    to show no chat at all.</span>
+                       value="<?= e($chat['support_whatsapp'] !== '' ? $chat['support_whatsapp'] : (($chatConfigured ?? false) ? '' : $phoneHint)) ?>">
+                <br><span style="color:var(--cv-text-secondary);">Include the country code. This is the WhatsApp chat
+                    button that floats at the bottom-right of every page of your storefront — visitors can minimise it,
+                    and it works straight away with nothing to sign up for.
+                    <?php if (!($chatConfigured ?? false) && $phoneHint !== ''): ?>
+                        <strong>Until you save here, your storefront already uses your account phone
+                        (+<?= e($phoneHint) ?>)</strong> so your customers can reach you from day one.
+                    <?php endif; ?>
+                    To show no chat at all, clear both fields and save.</span>
             </p>
             <p>
                 <label for="tawk_property_id">Tawk.To property id <em>(optional)</em></label><br>
@@ -235,6 +284,96 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <button class="cv-btn" type="submit">Save chat settings</button>
         </form>
     </div>
+
+    <?php if (!empty($google)): ?>
+    <div class="cv-card" id="google-signin" style="max-width:56rem;margin:var(--cv-space-4) auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--cv-space-3);flex-wrap:wrap;">
+            <h2 class="cv-card__title" style="margin:0;display:flex;align-items:center;gap:.6rem;">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                Sign in with Google
+            </h2>
+            <?php if ($google['live']): ?>
+                <span class="cv-badge cv-badge--success">On — showing on your store</span>
+            <?php elseif ($google['enabled']): ?>
+                <span class="cv-badge cv-badge--warning">Switched on, not showing yet</span>
+            <?php else: ?>
+                <span class="cv-badge">Off</span>
+            <?php endif; ?>
+        </div>
+
+        <?php if (!$google['allowed']): ?>
+            <div class="cv-alert cv-alert--warning" style="margin-top:var(--cv-space-3);">
+                Google sign-in for stores is currently switched off by the platform. Your saved settings are kept and
+                will work again as soon as it is available.
+            </div>
+        <?php endif; ?>
+
+        <p style="margin-top:var(--cv-space-3);">Let your customers sign in and sign up on your store with one click
+            using their Google account. It uses <strong>your own</strong> Google app, so Google shows
+            <strong>your</strong> store's name and logo, and customers come straight back to your store — they never
+            see us. New sign-ups become <strong>your</strong> customers, exactly like an email sign-up.</p>
+
+        <details style="margin:var(--cv-space-3) 0;padding:var(--cv-space-3);border:1px solid var(--cv-border-default);border-radius:var(--cv-radius, 8px);background:var(--cv-bg-surface-sunken);">
+            <summary style="cursor:pointer;font-weight:600;">How to get your Google client ID and secret (5 minutes)</summary>
+            <ol style="margin:var(--cv-space-3) 0 0;padding-left:1.25rem;line-height:1.7;">
+                <li>Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console → APIs &amp; Services → Credentials</a> and create (or pick) a project for your store.</li>
+                <li>Under <strong>OAuth consent screen</strong>, choose <em>External</em> and enter your store name, support email and logo. Publish it when you are ready for customers.</li>
+                <li>Back on <strong>Credentials</strong>, click <strong>Create credentials → OAuth client ID</strong> and choose <strong>Web application</strong>.</li>
+                <?php if ($google['origins'] !== []): ?>
+                    <li>Under <strong>Authorized JavaScript origins</strong>, add:
+                        <?php foreach ($google['origins'] as $origin): ?>
+                            <br><code style="user-select:all;"><?= e($origin) ?></code>
+                        <?php endforeach; ?>
+                    </li>
+                    <li>Under <strong>Authorized redirect URIs</strong>, add <?= count($google['callbackUrls']) > 1 ? 'each of these' : 'this' ?>:
+                        <?php foreach ($google['callbackUrls'] as $url): ?>
+                            <br><code style="user-select:all;"><?= e($url) ?></code>
+                        <?php endforeach; ?>
+                        <?php if ($google['customPending']): ?>
+                            <br><span style="color:var(--cv-text-secondary);">Your own domain is not verified yet — the button
+                                works there once it is.</span>
+                        <?php endif; ?>
+                    </li>
+                <?php else: ?>
+                    <li>Your store needs a web address first — add your own domain below. Then the exact redirect address
+                        to give Google appears here.</li>
+                <?php endif; ?>
+                <li>Click <strong>Create</strong>, then copy the <strong>Client ID</strong> and <strong>Client secret</strong> into the form below.</li>
+            </ol>
+        </details>
+
+        <form method="post" action="/client/reseller/store/google"><?= csrf_field() ?>
+            <p>
+                <label for="google_client_id">Client ID</label><br>
+                <input class="cv-input" type="text" id="google_client_id" name="google_client_id" maxlength="191"
+                       autocomplete="off" spellcheck="false"
+                       placeholder="1234567890-abc123.apps.googleusercontent.com"
+                       value="<?= e($google['clientId']) ?>">
+            </p>
+            <p>
+                <label for="google_client_secret">Client secret</label><br>
+                <input class="cv-input" type="password" id="google_client_secret" name="google_client_secret" maxlength="191"
+                       autocomplete="new-password" spellcheck="false"
+                       placeholder="<?= $google['hasSecret'] ? '•••••••• saved — leave blank to keep it' : 'GOCSPX-…' ?>">
+                <br><span style="color:var(--cv-text-secondary);">Stored encrypted and never shown again.
+                    <?= $google['hasSecret'] ? 'Leave blank to keep the saved secret.' : '' ?></span>
+            </p>
+            <p>
+                <label style="display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;">
+                    <input type="checkbox" name="google_enabled" value="1" <?= $google['enabled'] ? 'checked' : '' ?>>
+                    <strong>Show "Sign in with Google" on my store</strong>
+                </label>
+            </p>
+            <div style="display:flex;gap:var(--cv-space-2);flex-wrap:wrap;">
+                <button class="cv-btn" type="submit">Save Google sign-in</button>
+                <?php if ($google['clientId'] !== '' || $google['hasSecret']): ?>
+                    <button class="cv-btn cv-btn--secondary" type="submit" name="google_action" value="remove"
+                            onclick="return confirm('Remove Google sign-in and delete your saved Google keys?');">Remove keys</button>
+                <?php endif; ?>
+            </div>
+        </form>
+    </div>
+    <?php endif; ?>
 
     <?php
     // What the SERVER has, which is not the same question as what the store is
@@ -350,9 +489,13 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                 store, two more things have to happen on the server: the domain is <strong>added to the server</strong>
                 (so the server answers for that address) <em>and</em> its DNS points here. Ask support to finish those and
                 your store will answer on it.</p>
+            <?php if ($platformUrl !== null): ?>
             <p style="color:var(--cv-text-secondary);">Until then your store keeps working at
-                <?php if ($platformUrl !== null): ?><code><?= e((string) $platformUrl) ?></code><?php else: ?>its platform address<?php endif; ?>
-                — you do not have to wait to start selling.</p>
+                <code><?= e((string) $platformUrl) ?></code> — you do not have to wait to start selling.</p>
+            <?php else: ?>
+            <p style="color:var(--cv-text-secondary);">Your store opens to customers once these steps are done: it is
+                served on your own domain only.</p>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 <?php endif; ?>

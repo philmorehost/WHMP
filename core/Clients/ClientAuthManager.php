@@ -33,7 +33,7 @@ final class ClientAuthManager
      *
      * @return array{success: bool, client?: array<string, mixed>, error?: string}
      */
-    public function register(string $email, string $password, string $firstName, string $lastName, string $ip, string $country = '', string $vatNumber = '', string $phone = '', string $address1 = '', string $city = '', string $postcode = '', string $securityPin = ''): array
+    public function register(string $email, string $password, string $firstName, string $lastName, string $ip, string $country = '', string $vatNumber = '', string $phone = '', string $address1 = '', string $city = '', string $postcode = '', string $securityPin = '', ?int $resellerId = null): array
     {
         if ($this->clients->findByEmail($email) !== null) {
             return ['success' => false, 'error' => 'An account with that email already exists.'];
@@ -55,6 +55,8 @@ final class ClientAuthManager
             'city' => $city !== '' ? $city : null,
             'postcode' => $postcode !== '' ? $postcode : null,
             'security_pin' => $securityPin,
+            // The store whose website the account was created on (null: the platform).
+            'reseller_id' => $resellerId !== null && $resellerId > 0 ? $resellerId : null,
         ]);
 
         $client = $this->clients->find($id);

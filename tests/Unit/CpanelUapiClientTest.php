@@ -43,10 +43,58 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertSame('GET', $request['method']);
         $this->assertStringStartsWith('https://whm.example.test:2087/json-api/cpanel?', $request['url']);
         $this->assertStringContainsString('cpanel_jsonapi_user=cvuser1', $request['url']);
+        $this->assertStringContainsString('api.version=1', $request['url']);
         $this->assertStringContainsString('cpanel_jsonapi_apiversion=3', $request['url']);
         $this->assertStringContainsString('cpanel_jsonapi_module=Email', $request['url']);
         $this->assertStringContainsString('cpanel_jsonapi_func=list_pops', $request['url']);
         $this->assertSame('whm root:a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0', $request['headers']['Authorization']);
+    }
+
+    public function test_private_key_parameters_are_sent_in_post_body_not_url(): void
+    {
+        $this->http->respondWith(200, json_encode(['result' => ['status' => 1, 'data' => []]]));
+        $secret = "-----BEGIN PRIVATE KEY-----\nsecret-private-material\n-----END PRIVATE KEY-----";
+        $result = $this->client->callPost($this->server, 'cvuser1', 'SSL', 'install_ssl', [
+            'domain' => 'example.com',
+            'key' => $secret,
+            'cert' => 'cert',
+        ]);
+
+        $this->assertTrue($result['success']);
+        $request = $this->http->lastRequest();
+        $this->assertSame('POST', $request['method']);
+        parse_str((string) parse_url($request['url'], PHP_URL_QUERY), $query);
+        parse_str((string) $request['body'], $body);
+        $this->assertArrayNotHasKey('key', $query, 'the private key must not become a query parameter');
+        $this->assertSame($secret, $body['key'] ?? null, 'the private key is form-encoded in the request body');
+        $this->assertSame('application/x-www-form-urlencoded', $request['headers']['Content-Type']);
+    }
+
+    public function test_api2_secret_parameters_are_sent_in_post_body_not_url(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            'cpanelresult' => [
+                'apiversion' => 2,
+                'data' => [['result' => 1]],
+                'event' => ['result' => 1],
+            ],
+        ]));
+
+        $result = $this->client->callApi2Post($this->server, 'cvuser1', 'SSH', 'genkey', [
+            'name' => 'deploy',
+            'pass' => 'secret-passphrase',
+        ]);
+
+        $request = $this->http->lastRequest();
+        parse_str((string) parse_url($request['url'], PHP_URL_QUERY), $query);
+        parse_str((string) $request['body'], $body);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('POST', $request['method']);
+        $this->assertArrayNotHasKey('pass', $query);
+        $this->assertSame('secret-passphrase', $body['pass'] ?? null);
+        $this->assertSame('2', $body['cpanel_jsonapi_apiversion'] ?? null);
+        $this->assertSame('application/x-www-form-urlencoded', $request['headers']['Content-Type']);
     }
 
     public function test_a_password_shaped_secret_is_sent_as_basic_auth(): void
@@ -152,6 +200,103 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertStringContainsString('cpanel_jsonapi_apiversion=2', $this->http->requests[1]['url']);
     }
 
+    public function test_uapi_cron_list_uses_the_real_api2_function_name_when_falling_back(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['Failed to load module "Cron": Can\'t locate Cpanel/API/Cron.pm'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, [
+                'cpanelresult' => [
+                    'apiversion' => 2,
+                    'data' => [['count' => 1, 'command' => '/usr/bin/php cron.php']],
+                    'event' => ['result' => 1],
+                    'module' => 'Cron',
+                ],
+            ]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'Cron', 'list_cronjobs');
+        parse_str((string) parse_url($this->http->requests[1]['url'], PHP_URL_QUERY), $legacyQuery);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('2', $result['api_version']);
+        $this->assertSame('Cron', $legacyQuery['cpanel_jsonapi_module']);
+        $this->assertSame('listcron', $legacyQuery['cpanel_jsonapi_func']);
+    }
+
+    public function test_legacy_ssl_installed_name_is_normalized_to_list_certs(): void
+    {
+        $this->http->respondWith(200, json_encode(['result' => ['status' => 1, 'data' => []]], JSON_THROW_ON_ERROR));
+
+        $result = $this->client->call($this->server, 'cvuser1', 'SSL', 'installed');
+        parse_str((string) parse_url($this->http->lastRequest()['url'], PHP_URL_QUERY), $query);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('list_certs', $query['cpanel_jsonapi_func']);
+        $this->assertCount(1, $this->http->requests);
+    }
+
+    public function test_ssl_list_certs_uses_api2_listcrts_if_the_uapi_function_is_missing(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['The system could not find function "list_certs" in module "SSL".'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, [
+                'cpanelresult' => [
+                    'apiversion' => 2,
+                    'data' => [['host' => 'example.test']],
+                    'event' => ['result' => 1],
+                    'module' => 'SSL',
+                ],
+            ]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'SSL', 'list_certs');
+        parse_str((string) parse_url($this->http->requests[1]['url'], PHP_URL_QUERY), $legacyQuery);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('SSL', $legacyQuery['cpanel_jsonapi_module']);
+        $this->assertSame('listcrts', $legacyQuery['cpanel_jsonapi_func']);
+    }
+
+    public function test_mysql_database_listing_falls_back_to_mysqlfe_on_older_servers(): void
+    {
+        $this->http->respondInSequence([
+            $this->json(200, [
+                'result' => [
+                    'status' => 0,
+                    'errors' => ['Failed to load module "Mysql": Can\'t locate Cpanel/API/Mysql.pm'],
+                    'data' => null,
+                ],
+            ]),
+            $this->json(200, [
+                'cpanelresult' => [
+                    'apiversion' => 2,
+                    'data' => [['db' => 'cvuser_store', 'size' => 123]],
+                    'event' => ['result' => 1],
+                    'module' => 'MysqlFE',
+                ],
+            ]),
+        ]);
+
+        $result = $this->client->call($this->server, 'cvuser1', 'Mysql', 'list_databases');
+        parse_str((string) parse_url($this->http->requests[1]['url'], PHP_URL_QUERY), $legacyQuery);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('MysqlFE', $legacyQuery['cpanel_jsonapi_module']);
+        $this->assertSame('listdbs', $legacyQuery['cpanel_jsonapi_func']);
+    }
+
     public function test_a_module_error_outside_a_json_envelope_is_still_recognised(): void
     {
         // The same failure, but the panel answered with plain text instead of a
@@ -226,6 +371,117 @@ final class CpanelUapiClientTest extends TestCase
 
         $this->assertFalse($result['success']);
         $this->assertSame('Access denied', $result['message']);
+    }
+
+    public function test_direct_whm_error_shape_preserves_username_rejection_and_service_username(): void
+    {
+        $this->http->respondWith(403, json_encode([
+            'data' => [
+                'reason' => 'User parameter is invalid or was not supplied',
+                'result' => '0',
+            ],
+            'type' => 'text',
+            'error' => 'WHM API request failed.',
+        ]));
+
+        $result = $this->client->call($this->server, 'actualcpuser', 'Email', 'list_pops_with_disk');
+        $request = $this->http->lastRequest();
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('User parameter is invalid or was not supplied', $result['message']);
+        $this->assertStringContainsString('administrator must verify the service username and assigned server', $result['message']);
+        $this->assertStringContainsString('cpanel_jsonapi_user=actualcpuser', $request['url']);
+    }
+
+    public function test_api2_calls_use_the_api2_envelope_and_event_result(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            'cpanelresult' => [
+                'apiversion' => 2,
+                'data' => [['status' => 0, 'statusmsg' => 'Cron could not be read.']],
+                'event' => ['result' => 0],
+                'module' => 'Cron',
+            ],
+        ]));
+
+        $result = $this->client->callApi2($this->server, 'cvuser1', 'Cron', 'listcron');
+        $request = $this->http->lastRequest();
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('Cron could not be read.', $result['message']);
+        $this->assertSame('2', $result['api_version']);
+        $this->assertStringContainsString('cpanel_jsonapi_apiversion=2', $request['url']);
+        $this->assertStringContainsString('cpanel_jsonapi_func=listcron', $request['url']);
+    }
+
+    public function test_api2_descriptive_status_does_not_override_successful_event_result(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            'cpanelresult' => [
+                'apiversion' => 2,
+                'data' => [['name' => 'id_rsa.pub', 'status' => 'authorized']],
+                'event' => ['result' => 1],
+                'module' => 'SSH',
+            ],
+        ]));
+
+        $result = $this->client->callApi2($this->server, 'cvuser1', 'SSH', 'authkey');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('authorized', $result['data'][0]['status']);
+    }
+
+    public function test_api2_zoneedit_nested_result_status_is_decoded_as_success_or_failure(): void
+    {
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => json_encode([
+                'cpanelresult' => [
+                    'data' => [['result' => ['status' => 1, 'newserial' => 2026101201, 'statusmsg' => 'Zone updated']]],
+                    'event' => ['result' => 1],
+                ],
+            ])],
+            ['status' => 200, 'body' => json_encode([
+                'cpanelresult' => [
+                    'data' => [['result' => ['status' => 0, 'statusmsg' => 'Zone record rejected']]],
+                    'event' => ['result' => 1],
+                ],
+            ])],
+        ]);
+
+        $success = $this->client->callApi2($this->server, 'cvuser1', 'ZoneEdit', 'add_zone_record');
+        $failure = $this->client->callApi2($this->server, 'cvuser1', 'ZoneEdit', 'add_zone_record');
+
+        $this->assertTrue($success['success']);
+        $this->assertFalse($failure['success']);
+        $this->assertSame('Zone record rejected', $failure['message']);
+    }
+
+    public function test_nested_uapi_result_inside_cpanelresult_is_unwrapped(): void
+    {
+        $this->http->respondWith(200, json_encode([
+            'cpanelresult' => [
+                'data' => [[
+                    'status' => 1,
+                    'errors' => null,
+                    'data' => [['name' => 'id_rsa', 'authstatus' => 1]],
+                ]],
+                'event' => ['result' => 1],
+            ],
+        ]));
+
+        $result = $this->client->call($this->server, 'cvuser1', 'SSH', 'listkeys');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame([['name' => 'id_rsa', 'authstatus' => 1]], $result['data']);
+    }
+
+    public function test_blank_cpanel_username_fails_closed_without_a_request(): void
+    {
+        $result = $this->client->call($this->server, '  ', 'Email', 'list_pops');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('does not have a cPanel username assigned', $result['message']);
+        $this->assertCount(0, $this->http->requests);
     }
 
     /** @param array<string, mixed> $body */

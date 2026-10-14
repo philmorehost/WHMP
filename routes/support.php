@@ -74,3 +74,8 @@ $router->get('/client/tickets/{id}', [ClientTicketController::class, 'show']);
 $router->get('/client/tickets/{id}/attachments/{attId}', [ClientTicketController::class, 'attachment']);
 $router->post('/client/tickets/{id}/reply', [ClientTicketController::class, 'reply']);
 $router->post('/client/tickets/{id}/rate', [ClientTicketController::class, 'rate']);
+
+// Asking to move your account to another provider on the platform. Opens a support
+// ticket for the request; a super admin decides (ClientMigrationService).
+$router->get('/client/account-move', [\CodeVault\Reseller\ClientAccountMoveController::class, 'form']);
+$router->post('/client/account-move', [\CodeVault\Reseller\ClientAccountMoveController::class, 'submit']);

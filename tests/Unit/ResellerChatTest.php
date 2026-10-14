@@ -130,6 +130,58 @@ final class ResellerChatTest extends DatabaseTestCase
         $this->assertStringContainsString('#123456', $html);
     }
 
+    // --- the automatic default ---------------------------------------------
+
+    public function test_a_new_store_shows_whatsapp_on_the_owners_phone_automatically(): void
+    {
+        // Never saved chat settings: the widget must appear anyway, on the number
+        // we already have, rather than waiting for a Save nobody knew to press.
+        $html = $this->renderChat($this->store([
+            'client_id' => $this->owner('+234 801 234 5678'),
+            'chat_configured_at' => null,
+        ]));
+
+        $this->assertStringContainsString('wa.me/2348012345678', $html);
+        $this->assertStringNotContainsString(self::PLATFORM_WIDGET_MARKER, $html);
+    }
+
+    public function test_a_store_that_chose_no_chat_is_not_overridden_by_the_fallback(): void
+    {
+        // Saved with both fields blank = the reseller's explicit choice of "none".
+        $html = $this->renderChat($this->store([
+            'client_id' => $this->owner('+234 801 234 5678'),
+            'chat_configured_at' => '2026-01-01 00:00:00',
+        ]));
+
+        $this->assertStringNotContainsString('wa.me', $html);
+        $this->assertStringNotContainsString(self::PLATFORM_WIDGET_MARKER, $html);
+    }
+
+    public function test_a_saved_number_wins_over_the_owners_phone(): void
+    {
+        $html = $this->renderChat($this->store([
+            'client_id' => $this->owner('+234 801 234 5678'),
+            'support_whatsapp' => '447700900123',
+            'chat_configured_at' => '2026-01-01 00:00:00',
+        ]));
+
+        $this->assertStringContainsString('wa.me/447700900123', $html);
+        $this->assertStringNotContainsString('wa.me/2348012345678', $html);
+    }
+
+    public function test_the_widget_floats_and_can_be_minimised(): void
+    {
+        $html = $this->renderChat($this->store(['support_whatsapp' => '2348012345678']));
+
+        $this->assertStringContainsString('position: fixed', $html);
+        $this->assertStringContainsString('data-cv-wa-minimize', $html);
+        $this->assertStringContainsString('@media (max-width: 480px)', $html);
+        // The launcher is a real link, so the store is reachable without JavaScript.
+        $this->assertMatchesRegularExpression('~<a class="cv-wa__launcher" href="https://wa\.me/2348012345678~', $html);
+        // The behaviour script must carry the nonce or script-src blocks it.
+        $this->assertMatchesRegularExpression('~<script nonce="[^"]+">~', $html);
+    }
+
     // --- validation -------------------------------------------------------
 
     public function test_whatsapp_accepts_the_shapes_people_actually_type(): void
@@ -214,6 +266,16 @@ final class ResellerChatTest extends DatabaseTestCase
             'tawk_property_id' => null,
             'tawk_widget_id' => null,
         ], $overrides);
+    }
+
+    /** A store owner's client row with the given phone; returns the client id. */
+    private function owner(string $phone): int
+    {
+        return (int) $this->db->insert(
+            'INSERT INTO clients (email, password_hash, first_name, last_name, phone, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [uniqid('owner', true) . '@example.com', '', 'Store', 'Owner', $phone, 'active', '2026-01-01 00:00:00', '2026-01-01 00:00:00']
+        );
     }
 
     /**

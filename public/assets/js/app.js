@@ -373,6 +373,7 @@
         var tokenLabel = form && form.querySelector('[data-server-token-label]');
         var tokenInput = form && form.querySelector('[data-server-token-input]');
         var portField = form && form.querySelector('[data-server-port-field]');
+        var secretField = form && form.querySelector('[data-server-secret-field]');
 
         if (!usernameField || !tokenLabel) {
             return;
@@ -380,17 +381,22 @@
 
         var val = select.value;
 
+        // The provider account password is only asked for where a module uses it.
+        if (secretField) {
+            secretField.style.display = (val === 'interserver-vps' || val === 'interserver_vps') ? 'block' : 'none';
+        }
+
         if (val === 'interserver-vps' || val === 'interserver_vps') {
             usernameField.style.display = 'none';
             tokenLabel.textContent = 'API Key';
-            if (portField) portField.style.display = 'block';
+            if (portField) portField.style.display = 'none'; // fixed HTTPS API, no port
         } else if (val === 'interserver-dedicated' || val === 'interserver_dedicated') {
             usernameField.style.display = 'block';
             if (usernameLabel) usernameLabel.textContent = 'API Username';
             if (usernameInput) usernameInput.placeholder = 'e.g., api_username';
             tokenLabel.textContent = 'API Token / Password';
             if (tokenInput) tokenInput.placeholder = '';
-            if (portField) portField.style.display = 'block';
+            if (portField) portField.style.display = 'none'; // fixed HTTPS API, no port
         } else if (val === 'resellerclub-email' || val === 'resellerclub_email') {
             usernameField.style.display = 'block';
             if (usernameLabel) usernameLabel.textContent = 'Reseller ID';
@@ -408,7 +414,7 @@
             if (usernameInput) usernameInput.placeholder = 'e.g., api_user';
             tokenLabel.textContent = 'API Token';
             if (tokenInput) tokenInput.placeholder = '';
-            if (portField) portField.style.display = 'block';
+            if (portField) portField.style.display = 'none'; // fixed HTTPS API, no port
         } else {
             usernameField.style.display = 'block';
             if (usernameLabel) usernameLabel.textContent = 'API Username';
@@ -541,6 +547,22 @@
             }
             resultEl.textContent = data.message || (data.success ? 'Connected.' : 'Connection failed.');
             resultEl.className = 'server-test-result cv-badge ' + (data.success ? 'cv-badge--success' : 'cv-badge--danger');
+            resultEl.style.whiteSpace = 'normal';
+            resultEl.style.textAlign = 'left';
+
+            var debugEl = document.querySelector('[data-server-test-debug="' + id + '"]');
+            if (debugEl) {
+                renderServerTestExchanges(debugEl, data);
+            } else if (!btn.parentElement.querySelector('.server-test-details-link')) {
+                // The servers list has no room for the full answer: link to the edit
+                // page, which runs the test again and shows it.
+                var link = document.createElement('a');
+                link.className = 'server-test-details-link';
+                link.href = '/admin/servers/' + id + '/edit#test-connection';
+                link.textContent = 'See full API response →';
+                link.style.cssText = 'font-size:.75rem;margin-left:6px;text-decoration:underline;';
+                btn.parentElement.appendChild(link);
+            }
         })
         .catch(function () {
             if (resultEl) {
@@ -553,6 +575,255 @@
             btn.innerText = originalLabel;
         });
     });
+
+    // On the server edit page, #test-connection (from the list's "See full API
+    // response" link) runs the test straight away.
+    if (window.location.hash === '#test-connection') {
+        var autoTest = document.querySelector('#test-connection [data-test-server]');
+        if (autoTest) {
+            autoTest.click();
+        }
+    }
+
+    // Admin service page: "Run self-service check". Lists each read-only check
+    // with its result and the buttons that depend on it, then the raw provider
+    // answers. Everything is set with textContent.
+    document.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-remote-check]');
+        if (!btn) {
+            return;
+        }
+
+        var id = btn.getAttribute('data-remote-check');
+        var out = document.querySelector('[data-remote-check-result="' + id + '"]');
+        var originalLabel = btn.textContent;
+
+        btn.disabled = true;
+        btn.textContent = 'Checking…';
+        if (out) {
+            out.textContent = '';
+        }
+
+        fetch('/admin/services/' + id + '/remote-check', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: '_token=' + encodeURIComponent(btn.getAttribute('data-token') || ''),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (out) {
+                renderRemoteCheck(out, data);
+            }
+        })
+        .catch(function () {
+            if (out) {
+                addLine(out, 'The check could not be run (the request failed). Reload the page and try again.', true, '#f87171');
+            }
+        })
+        .finally(function () {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        });
+    });
+
+    function renderRemoteCheck(container, data) {
+        container.textContent = '';
+
+        var summary = document.createElement('div');
+        summary.className = 'cv-alert ' + (data.success ? 'cv-alert--success' : 'cv-alert--error');
+        summary.style.cssText = 'margin-bottom:10px;';
+        summary.textContent = (data.success ? '✅ ' : '❌ ') + (data.message || '');
+        container.appendChild(summary);
+
+        var list = document.createElement('ol');
+        list.style.cssText = 'margin:0 0 10px 0;padding-left:1.2rem;font-size:.85rem;';
+        (Array.isArray(data.steps) ? data.steps : []).forEach(function (step) {
+            var li = document.createElement('li');
+            li.style.cssText = 'margin-bottom:8px;';
+            var icon = step.ok === true ? '✅' : (step.ok === false ? '❌' : '⚠️');
+            var head = document.createElement('div');
+            head.style.cssText = 'font-weight:600;';
+            head.textContent = icon + ' ' + step.label;
+            li.appendChild(head);
+            var msg = document.createElement('div');
+            msg.style.cssText = 'word-break:break-word;color:' + (step.ok === false ? '#f87171' : 'var(--cv-text-secondary)') + ';';
+            msg.textContent = step.message || '';
+            li.appendChild(msg);
+            if (step.affects) {
+                var affects = document.createElement('div');
+                affects.style.cssText = 'font-size:.75rem;margin-top:2px;';
+                affects.textContent = 'Client buttons affected: ' + step.affects;
+                li.appendChild(affects);
+            }
+            list.appendChild(li);
+        });
+        container.appendChild(list);
+
+        var raw = document.createElement('details');
+        raw.open = !data.success;
+        var rawSummary = document.createElement('summary');
+        rawSummary.textContent = 'Raw API requests and responses (' + (Array.isArray(data.exchanges) ? data.exchanges.length : 0) + ')';
+        rawSummary.style.cssText = 'cursor:pointer;font-weight:600;font-size:.85rem;margin-bottom:8px;';
+        raw.appendChild(rawSummary);
+        var rawBody = document.createElement('div');
+        raw.appendChild(rawBody);
+        container.appendChild(raw);
+        renderServerTestExchanges(rawBody, data);
+    }
+
+    // Builds the "API response details" panel from the test's recorded exchanges.
+    // Everything is set with textContent: provider bodies are untrusted HTML.
+    function renderServerTestExchanges(container, data) {
+        var exchanges = Array.isArray(data.exchanges) ? data.exchanges : [];
+        var report = buildServerTestReport(data, exchanges);
+
+        container.textContent = '';
+
+        var panel = document.createElement('div');
+        panel.style.cssText = 'border:1px solid var(--cv-border-default);border-radius:10px;padding:14px;background:rgba(15,23,42,0.35);';
+
+        var head = document.createElement('div');
+        head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;';
+        var title = document.createElement('strong');
+        title.textContent = '🔎 API response details' + (data.testedAt ? ' (' + data.testedAt + ')' : '');
+        head.appendChild(title);
+
+        var actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'cv-btn cv-btn--secondary';
+        copyBtn.style.cssText = 'padding:4px 10px;font-size:.75rem;';
+        copyBtn.textContent = '📋 Copy report';
+        copyBtn.addEventListener('click', function () {
+            var done = function () { copyBtn.textContent = '✅ Copied'; setTimeout(function () { copyBtn.textContent = '📋 Copy report'; }, 2000); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(report).then(done, function () { selectReport(); });
+            } else {
+                selectReport();
+            }
+        });
+        actions.appendChild(copyBtn);
+
+        var downloadBtn = document.createElement('button');
+        downloadBtn.type = 'button';
+        downloadBtn.className = 'cv-btn cv-btn--secondary';
+        downloadBtn.style.cssText = 'padding:4px 10px;font-size:.75rem;';
+        downloadBtn.textContent = '⬇️ Download .txt';
+        downloadBtn.addEventListener('click', function () {
+            var blob = new Blob([report], { type: 'text/plain' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'api-test-' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        });
+        actions.appendChild(downloadBtn);
+        head.appendChild(actions);
+        panel.appendChild(head);
+
+        var note = document.createElement('p');
+        note.style.cssText = 'font-size:.75rem;color:var(--cv-text-secondary);margin:0 0 10px 0;';
+        note.textContent = 'Exactly what the provider sent back. API keys and passwords are hidden.';
+        panel.appendChild(note);
+
+        if (exchanges.length === 0) {
+            var none = document.createElement('p');
+            none.style.cssText = 'font-size:.8rem;margin:0;';
+            none.textContent = 'No request was sent: the check stopped before contacting the provider (see the message above).';
+            panel.appendChild(none);
+        }
+
+        exchanges.forEach(function (x, i) {
+            var box = document.createElement('div');
+            box.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px dashed var(--cv-border-default);font-size:.8rem;';
+
+            addLine(box, (i + 1) + '. ' + x.method + ' ' + x.url, true);
+
+            var outcome = x.status === 0 ? 'No HTTP response' : 'HTTP ' + x.status;
+            outcome += ' in ' + x.seconds + ' s';
+            if (x.connectedTo) { outcome += ' · connected to ' + x.connectedTo; }
+            if (x.localIp) { outcome += ' · from local IP ' + x.localIp; }
+            if (x.viaProxy) { outcome += ' · via proxy'; }
+            addLine(box, outcome, false, x.status >= 200 && x.status < 300 ? '#34d399' : '#f87171');
+
+            if (x.error) {
+                addLine(box, 'cURL error: ' + x.error, false, '#f87171');
+            }
+
+            addPre(box, 'Request headers sent', Object.keys(x.requestHeaders || {}).map(function (k) { return k + ': ' + x.requestHeaders[k]; }).join('\n') || '(none)');
+            addPre(box, 'Response headers', (x.responseHeaders || []).join('\n') || '(none)');
+            addPre(box, 'Response body (' + x.bodyBytes + ' bytes)', x.body || '(empty)');
+
+            panel.appendChild(box);
+        });
+
+        var raw = document.createElement('textarea');
+        raw.readOnly = true;
+        raw.value = report;
+        raw.className = 'cv-textarea';
+        raw.style.cssText = 'display:none;width:100%;height:220px;margin-top:10px;font-family:monospace;font-size:.72rem;';
+        panel.appendChild(raw);
+
+        function selectReport() {
+            raw.style.display = 'block';
+            raw.focus();
+            raw.select();
+            copyBtn.textContent = 'Press Ctrl+C to copy';
+        }
+
+        container.appendChild(panel);
+    }
+
+    function addLine(parent, text, bold, color) {
+        var el = document.createElement('div');
+        el.textContent = text;
+        el.style.cssText = 'word-break:break-all;margin-bottom:4px;' + (bold ? 'font-weight:700;' : '') + (color ? 'color:' + color + ';' : '');
+        parent.appendChild(el);
+    }
+
+    function addPre(parent, label, text) {
+        var details = document.createElement('details');
+        details.open = label.indexOf('Response') === 0;
+        details.style.cssText = 'margin-top:6px;';
+        var summary = document.createElement('summary');
+        summary.textContent = label;
+        summary.style.cssText = 'cursor:pointer;font-weight:600;';
+        details.appendChild(summary);
+        var pre = document.createElement('pre');
+        pre.textContent = text;
+        pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;background:rgba(0,0,0,0.35);padding:8px;border-radius:6px;font-size:.72rem;margin:4px 0 0 0;';
+        details.appendChild(pre);
+        parent.appendChild(details);
+    }
+
+    function buildServerTestReport(data, exchanges) {
+        var lines = [(Array.isArray(data.steps) ? 'WHMP self-service check' : 'WHMP server connection test') + (data.testedAt ? ' - ' + data.testedAt : ''), 'Result: ' + (data.success ? 'OK' : 'FAILED') + ' - ' + (data.message || ''), ''];
+        (Array.isArray(data.steps) ? data.steps : []).forEach(function (step) {
+            lines.push('[' + (step.ok === true ? 'PASS' : (step.ok === false ? 'FAIL' : 'WARN')) + '] ' + step.label + ': ' + (step.message || '') + (step.affects ? ' (affects: ' + step.affects + ')' : ''));
+        });
+        if (Array.isArray(data.steps) && data.steps.length) { lines.push(''); }
+        exchanges.forEach(function (x, i) {
+            lines.push('=== Request ' + (i + 1) + ' ===');
+            lines.push(x.method + ' ' + x.url);
+            Object.keys(x.requestHeaders || {}).forEach(function (k) { lines.push(k + ': ' + x.requestHeaders[k]); });
+            lines.push('');
+            lines.push('--- Response: ' + (x.status === 0 ? 'no HTTP response' : 'HTTP ' + x.status) + ' in ' + x.seconds + ' s'
+                + (x.connectedTo ? ', connected to ' + x.connectedTo : '') + (x.localIp ? ', local IP ' + x.localIp : '') + (x.viaProxy ? ', via proxy' : ''));
+            if (x.error) { lines.push('cURL error: ' + x.error); }
+            (x.responseHeaders || []).forEach(function (h) { lines.push(h); });
+            lines.push('');
+            lines.push(x.body || '(empty body)');
+            lines.push('');
+        });
+        if (exchanges.length === 0) { lines.push('No request was sent.'); }
+        return lines.join('\n');
+    }
 
     // Generic show/hide toggle — a trigger with data-toggle-target (a CSS
     // selector) flips the target's visibility. data-toggle-class switches
@@ -2400,6 +2671,13 @@
             return;
         }
 
+        // An input with its own live search (the admin clients box) is left to it.
+        // Both used to run: this one cancelled the other's timer and then found no
+        // .cv-table to update, so typing showed nothing until Enter was pressed.
+        if (target.matches('[data-own-live-search]')) {
+            return;
+        }
+
         clearTimeout(searchDebounceTimer);
         searchDebounceTimer = setTimeout(function () {
             var form = target.closest('form');
@@ -2426,18 +2704,31 @@
                 var parser = new DOMParser();
                 var doc = parser.parseFromString(html, 'text/html');
 
-                var targets = [
-                    { selector: '.cv-table', replacer: '.cv-table' },
-                    { selector: '.cv-datatable__pagination', replacer: '.cv-datatable__pagination' }
-                ];
+                // A page marks its results area with data-live-results (and an id):
+                // the whole area is swapped, so the "no results" state and the
+                // pagination update too. Older pages fall back to .cv-table.
+                var areas = document.querySelectorAll('[data-live-results][id]');
+                if (areas.length) {
+                    areas.forEach(function (area) {
+                        var fresh = doc.getElementById(area.id);
+                        if (fresh) {
+                            area.innerHTML = fresh.innerHTML;
+                        }
+                    });
+                } else {
+                    var targets = [
+                        { selector: '.cv-table', replacer: '.cv-table' },
+                        { selector: '.cv-datatable__pagination', replacer: '.cv-datatable__pagination' }
+                    ];
 
-                targets.forEach(function (t) {
-                    var oldEl = document.querySelector(t.selector);
-                    var newEl = doc.querySelector(t.replacer);
-                    if (oldEl && newEl) {
-                        oldEl.innerHTML = newEl.innerHTML;
-                    }
-                });
+                    targets.forEach(function (t) {
+                        var oldEl = document.querySelector(t.selector);
+                        var newEl = doc.querySelector(t.replacer);
+                        if (oldEl && newEl) {
+                            oldEl.innerHTML = newEl.innerHTML;
+                        }
+                    });
+                }
                 
                 window.history.replaceState(null, '', url.toString());
             })
@@ -2557,10 +2848,12 @@
         if (!hintEl) return;
         
         if (module === 'interserver-vps' || module === 'interserver-dedicated' || module === 'interserver_vps' || module === 'interserver_dedicated') {
-            hintEl.innerHTML = 'Hint: Use <strong>https://my.interserver.net/</strong>';
+            // Both InterServer modules call the fixed API address https://my.interserver.net/apiv2
+            // themselves; this field is only a label, so nothing here can point them elsewhere.
+            hintEl.innerHTML = 'Enter <strong>my.interserver.net</strong>. WHMP always connects to the InterServer API at <strong>https://my.interserver.net/apiv2</strong> by itself, so this field is only a label and no port is needed.';
             hintEl.style.display = 'block';
         } else if (module === 'nocix-dedicated' || module === 'nocix_dedicated' || module === 'nocix') {
-            hintEl.innerHTML = 'Hint: Use <strong>https://manage.nocix.net/</strong>';
+            hintEl.innerHTML = 'Enter <strong>my.nocix.net</strong> (wholesale accounts: <strong>my.wholesaleinternet.net</strong>). WHMP adds the API path (<strong>/api</strong>) itself, and no port is needed.';
             hintEl.style.display = 'block';
         } else if (module === 'resellerclub-email' || module === 'resellerclub_email') {
             hintEl.innerHTML = 'Hint: Use <strong>https://httpapi.com/api</strong>';
@@ -2769,7 +3062,9 @@
     var clientSearchInput = document.getElementById('client-search-input');
     var clientResultsContainer = document.getElementById('admin-client-results');
     if (clientSearchInput && clientResultsContainer) {
-        var searchDebounceTimer = null;
+        // Its own name: a shared `var searchDebounceTimer` with the generic live
+        // search above meant each cancelled the other's pending search.
+        var clientSearchDebounceTimer = null;
         var searchRequestSeq = 0;
         var clientSearchXhr = null;
         var clientSearchMessage = null;
@@ -2794,6 +3089,22 @@
                 }
                 clientResultsContainer.innerHTML = clientSearchXhr.responseText;
                 clientSearchMessage = null;
+
+                // Keep the address bar and the CSV export on the same search, so a
+                // reload, Back or Export shows what is on screen.
+                var pageUrl = new URL(window.location.href);
+                if (query.trim() === '') {
+                    pageUrl.searchParams.delete('q');
+                } else {
+                    pageUrl.searchParams.set('q', query);
+                }
+                pageUrl.searchParams.delete('page');
+                window.history.replaceState(null, '', pageUrl.toString());
+                var exportLink = document.querySelector('a[href^="/admin/clients/export"]');
+                if (exportLink) {
+                    exportLink.setAttribute('href', '/admin/clients/export?q=' + encodeURIComponent(query));
+                }
+
                 clientSearchInput.focus();
                 clientSearchInput.setSelectionRange(clientSearchInput.value.length, clientSearchInput.value.length);
             };
@@ -2812,11 +3123,11 @@
         }
 
         clientSearchInput.addEventListener('input', function () {
-            clearTimeout(searchDebounceTimer);
+            clearTimeout(clientSearchDebounceTimer);
             var query = this.value;
-            searchDebounceTimer = setTimeout(function () {
+            clientSearchDebounceTimer = setTimeout(function () {
                 performClientSearch(query);
-            }, 400);
+            }, 300);
         });
     }
 

@@ -108,7 +108,10 @@ final class TicketRepository
         $perPage = max(1, min(100, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $where = [];
+        // STRICT RESELLER ISOLATION: the admin's list holds the platform's own
+        // customers' records only. A store's customers' records are reached through
+        // that reseller's page (/admin/resellers/{id}/customers), never listed here.
+        $where = ['t.reseller_id IS NULL'];
         $bindings = [];
 
         if (isset($filters['status'])) {
@@ -191,7 +194,7 @@ final class TicketRepository
     /** Dashboard tile (R17) — everything not closed, not the full joined row set. */
     public function countOpen(): int
     {
-        $row = $this->db->selectOne("SELECT COUNT(*) AS c FROM tickets WHERE status != 'closed'");
+        $row = $this->db->selectOne("SELECT COUNT(*) AS c FROM tickets WHERE status != 'closed' AND reseller_id IS NULL"); // the platform desk only — store tickets are the reseller's
 
         return (int) ($row['c'] ?? 0);
     }

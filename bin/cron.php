@@ -116,6 +116,22 @@ $scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     $scheduler->register($kernel->container->make(ServicePruningJob::class));
     $scheduler->register($kernel->container->make(DomainPruningJob::class));
 
+    // cPanel Username Changer: runs queued renames, expires unconfirmed
+    // requests, reconciles fee invoices and refreshes the per-server account
+    // copy that keeps the live username check instant. A no-op while the add-on
+    // is inactive.
+    $scheduler->register($kernel->container->make(\CodeVault\UsernameChanger\UsernameChangeCronJob::class));
+
+    // Invalid Email Blocker: re-runs the Email Validation scan every N days (addon
+    // setting) so fixed addresses are un-blocked and newly dead ones caught. A no-op
+    // while the addon is inactive or its re-scan is set to 0.
+    $scheduler->register($kernel->container->make(\CodeVault\Clients\EmailValidationRescanJob::class));
+
+    // Cloudflare (free): deletes zones whose grace period ended, checks pending
+    // zones for activation (with day-3/day-7 reminders) and reconciles live zones
+    // with their services daily. A no-op while the add-on is inactive.
+    $scheduler->register($kernel->container->make(\CodeVault\Cloudflare\CloudflareCronJob::class));
+
     // Drains queued campaign emails a few per minute so a large campaign
     // never floods the mail host in one burst.
     $scheduler->register($kernel->container->make(CampaignDispatchJob::class));

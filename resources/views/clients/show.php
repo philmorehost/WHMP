@@ -405,6 +405,7 @@ $id = (int) $client['id'];
                 <button class="admin-detail-btn admin-detail-btn--primary" type="submit" title="Login as Client">🔑 Login as Client</button>
             </form>
             <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/clients/<?= $id ?>/edit" title="Edit">✏️ Edit</a>
+            <a class="admin-detail-btn admin-detail-btn--secondary" href="/admin/resellers/migrations/review?client=<?= $id ?>" title="Move this client, with their services, domains, invoices and tickets, to another reseller or the main site">⇄ Move provider</a>
             <?php if ($client['status'] !== 'closed'): ?>
             <form method="post" action="/admin/clients/<?= $id ?>/close"><?= csrf_field() ?>
                 <button class="admin-detail-btn admin-detail-btn--danger" type="submit" title="Close Account">🛑 Close</button>

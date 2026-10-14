@@ -246,7 +246,21 @@ $isCpanelSharedHosting ??= false;
             </div>
             <div class="admin-service-meta__item">
                 <span class="admin-service-meta__label">👤 Username</span>
-                <span class="admin-service-meta__value"><?= e((string) ($service['username'] ?? '-')) ?></span>
+                <span class="admin-service-meta__value"><?= e((string) ($service['username'] ?? '-')) ?>
+                    <?php
+                    // Shortcut into the cPanel Username Changer while the add-on is active.
+                    $ucnShortcut = false;
+                    if (!empty($isCpanelSharedHosting) && !empty($service['username'])) {
+                        try {
+                            $ucnShortcut = \CodeVault\Support\App::container()->make(\CodeVault\Modules\AddonModuleRepository::class)
+                                ->isActive(\CodeVault\UsernameChanger\UsernameChangeCronJob::SLUG);
+                        } catch (\Throwable) {
+                            $ucnShortcut = false;
+                        }
+                    }
+                    ?>
+                    <?php if ($ucnShortcut): ?><a href="/admin/username-changer/manual?service_id=<?= (int) $service['id'] ?>" style="font-size:.8em;margin-left:6px;" title="Rename this cPanel account">✏️ Change</a><?php endif; ?>
+                </span>
             </div>
         </div>
 
@@ -405,6 +419,111 @@ $isCpanelSharedHosting ??= false;
 <?php endif; ?>
 <?php if (($_GET['create_error'] ?? '') !== ''): ?>
     <div class="admin-service-error">⚠️ <?= e((string) $_GET['create_error']) ?></div>
+<?php endif; ?>
+
+<?php
+$remoteLinkable = $remoteLinkable ?? false;
+$remoteLink = $remoteLink ?? null;
+$remoteServices = $remoteServices ?? null;
+$remoteNotice = $remoteNotice ?? null;
+$isVpsProduct = $isVpsProduct ?? false;
+$currentRef = is_array($remoteLink) ? ($remoteLink['ref'] ?? null) : null;
+$remoteLabel = null;
+foreach ((array) ($remoteServices['services'] ?? []) as $remoteRow) {
+    if ($currentRef !== null && (string) $remoteRow['ref'] === (string) $currentRef) {
+        $remoteLabel = (string) $remoteRow['label'];
+    }
+}
+$viaText = ['hostname' => 'its hostname', 'ip' => 'its IP address', 'username' => 'its username'];
+$isNocix = ($remoteProvider ?? null) === 'nocix';
+$providerName = $isNocix ? 'Nocix' : 'InterServer';
+$machineWord = $isNocix ? 'dedicated server' : 'VPS';
+$clientActions = $isNocix ? 'restart and OS reload buttons act' : "power, console, reverse DNS, snapshot, reinstall and restore buttons act";
+?>
+<?php if ($remoteLinkable): ?>
+<div class="admin-service-card" id="remote-link">
+    <h2 class="admin-service-card__title">🔗 <?= e($providerName) ?> <?= $isNocix ? 'server' : 'VPS' ?> link (client self-service)</h2>
+    <div class="admin-service-card__body">
+        <?php if ($remoteNotice !== null && $remoteNotice !== ''): ?>
+            <div class="admin-service-error" style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35);color:#60a5fa;margin-bottom:var(--cv-space-3);"><?= e($remoteNotice) ?></div>
+        <?php endif; ?>
+
+        <?php if (is_array($remoteLink) && ($remoteLink['linked'] ?? null) !== null): ?>
+            <p>✅ <strong>Linked</strong> to <?= $remoteLabel !== null ? e($remoteLabel) : '<code>' . e((string) $remoteLink['linked']) . '</code>' ?>.
+                The client's <?= e($clientActions) ?> on this <?= e($machineWord) ?>.</p>
+        <?php elseif ($currentRef !== null): ?>
+            <p>🟡 <strong>Matched automatically</strong> by <?= e($viaText[$remoteLink['via']] ?? 'its details') ?>
+                to <?= $remoteLabel !== null ? e($remoteLabel) : '<code>' . e((string) $currentRef) . '</code>' ?>.
+                It works, but changing the <?= $isNocix ? 'IP or username' : 'hostname or IP' ?> above would break it. Link it to make it permanent.</p>
+        <?php else: ?>
+            <p>⚠️ <strong>Not linked.</strong> No <?= e($machineWord) ?> on the <?= e($providerName) ?> account matches this service's <?= $isNocix ? 'IP addresses' : 'hostname or IP' ?>,
+                so the client's server buttons open support tickets. Choose the <?= e($machineWord) ?> below.</p>
+        <?php endif; ?>
+
+        <?php if (is_array($remoteServices) && !$remoteServices['success']): ?>
+            <div class="admin-service-error">⚠️ Could not read the <?= e($providerName) ?> account: <?= e((string) $remoteServices['message']) ?></div>
+        <?php elseif (is_array($remoteServices)): ?>
+            <form method="post" action="/admin/services/<?= $id ?>/remote-link" style="display:flex;gap:var(--cv-space-2);flex-wrap:wrap;align-items:flex-end;">
+                <?= csrf_field() ?>
+                <div class="admin-service-field" style="flex:1 1 22rem;margin:0;">
+                    <label><?= e(ucfirst($machineWord)) ?> on the <?= e($providerName) ?> account</label>
+                    <select name="remote_id" required>
+                        <option value="">Choose a <?= e($machineWord) ?>…</option>
+                        <?php foreach ($remoteServices['services'] as $remoteRow): ?>
+                            <option value="<?= e((string) $remoteRow['ref']) ?>" <?= $currentRef !== null && (string) $remoteRow['ref'] === (string) $currentRef ? 'selected' : '' ?>><?= e((string) $remoteRow['label']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <button class="admin-service-btn admin-service-btn--primary" type="submit">🔗 Link this <?= $isNocix ? 'server' : 'VPS' ?></button>
+            </form>
+            <?php if (is_array($remoteLink) && ($remoteLink['linked'] ?? null) !== null): ?>
+                <form method="post" action="/admin/services/<?= $id ?>/remote-link" style="margin-top:var(--cv-space-2);" data-confirm="Unlink this service from its <?= e($providerName) ?> <?= e($machineWord) ?>?">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="remote_id" value="">
+                    <button class="admin-service-btn admin-service-btn--secondary" type="submit">Unlink</button>
+                </form>
+            <?php endif; ?>
+            <?php if ($remoteServices['services'] === []): ?>
+                <small style="color:var(--cv-text-secondary);">The <?= e($providerName) ?> account behind this server lists none. Check that the API credentials belong to the account the <?= e($machineWord) ?> was bought on.</small>
+            <?php endif; ?>
+        <?php endif; ?>
+
+        <div style="margin-top:var(--cv-space-3);padding-top:var(--cv-space-3);border-top:1px dashed var(--cv-border-default);">
+            <div style="display:flex;align-items:center;gap:var(--cv-space-2);flex-wrap:wrap;">
+                <button type="button" class="admin-service-btn admin-service-btn--secondary" data-remote-check="<?= $id ?>" data-token="<?= e(csrf_token()) ?>">🩺 Run self-service check</button>
+                <small style="color:var(--cv-text-secondary);">Shows exactly why a client button would open a ticket. Read-only: it does not reboot, snapshot or change the <?= e($machineWord) ?>.</small>
+            </div>
+            <div data-remote-check-result="<?= $id ?>" style="margin-top:var(--cv-space-3);"></div>
+        </div>
+
+        <small style="color:var(--cv-text-secondary);display:block;margin-top:var(--cv-space-3);">
+            <?php if ($isNocix): ?>
+                ℹ️ Through the Nocix API the client can restart the server and reload its OS. After a reload they can reveal
+                the new login Nocix stores in its portal. Suspending this service disconnects the server from the network and
+                unsuspending reconnects it. Terminating does not cancel it at Nocix (the API cannot); cancel it in the Nocix portal.
+            <?php elseif (!empty($remoteHasAccountPassword)): ?>
+                ✅ The InterServer account password is saved on the server, so clients can also reinstall the OS and restore backups themselves.
+            <?php else: ?>
+                ℹ️ OS reinstall and backup restore also need the InterServer account password. Until it is saved on the
+                <a href="/admin/servers/<?= (int) ($remoteServerId ?? 0) ?>/edit" style="color:var(--cv-color-brand-500);text-decoration:underline;">server record</a>,
+                those two requests come to you as support tickets. Everything else works now.
+            <?php endif; ?>
+            <?php if (!$isNocix): ?>
+                Note: suspending this service in WHMP stops the VPS at InterServer, unsuspending starts it, and terminating it cancels the VPS on your InterServer account.
+            <?php endif; ?>
+        </small>
+    </div>
+</div>
+<?php elseif ($isVpsProduct): ?>
+<div class="admin-service-card" id="remote-link">
+    <h2 class="admin-service-card__title">🔗 Client self-service is off</h2>
+    <div class="admin-service-card__body">
+        <p>This server is not assigned to <?= !empty($isDedicatedProduct) ? 'a Nocix' : 'an InterServer VPS' ?> server record, so the client's server buttons open support tickets.
+            To turn on self-service: set <strong>Assigned Server</strong> below to your <?= !empty($isDedicatedProduct) ? 'Nocix Dedicated' : 'InterServer VPS' ?> server
+            (<a href="/admin/servers" style="color:var(--cv-color-brand-500);text-decoration:underline;">add one</a> with your API credentials if there is none),
+            save, then link the <?= !empty($isDedicatedProduct) ? 'server' : 'VPS' ?> in the card that appears here.</p>
+    </div>
+</div>
 <?php endif; ?>
 
 <div class="admin-service-card">

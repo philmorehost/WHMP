@@ -50,7 +50,14 @@ final class ClientResellerController
         // Appended last on purpose: this controller is constructed BY HAND in two
         // test files, and a new dependency in the middle would silently rebind
         // every argument after it.
-        private readonly ResellerDomainSync $domainSync
+        private readonly ResellerDomainSync $domainSync,
+        // Overview figures and sub-reseller pricing. Optional and last for the same
+        // reason as above; without them the overview simply shows less.
+        private readonly ?ResellerStoreRepository $storeRows = null,
+        private readonly ?ResellerClientDirectory $directory = null,
+        private readonly ?ResellerLedgerService $ledger = null,
+        // "Sign in with Google" for the store. Optional and last, as above.
+        private readonly ?\CodeVault\Clients\GoogleSignIn $google = null
     ) {
     }
 
@@ -73,6 +80,12 @@ final class ClientResellerController
         // page says so rather than leaving them stuck with an unusable key.
         $issued = $this->session->pullFlash('reseller_issued', null);
 
+        // A SUB-RESELLER (a customer of another reseller's store) buys at that
+        // store's retail prices, not at our discount — so that is the price list
+        // shown here, and the one their own store is priced over.
+        $upline = $this->uplineForClient($client);
+        $store = $this->storeFor($clientId);
+
         return $this->page('reseller.client-index', [
             'state' => $this->stateFor($credential),
             'credential' => $credential,
@@ -80,11 +93,85 @@ final class ClientResellerController
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'discounts' => $this->settings->all(),
-            'services' => $this->presentServices($this->pricing->serviceCatalogue(), $currency),
-            'domains' => $this->presentDomains($this->pricing->domainCatalogue(), $currency),
+            'services' => $this->presentServices($upline !== null ? $this->retail->wholesaleServices($upline) : $this->pricing->serviceCatalogue(), $currency),
+            'domains' => $this->presentDomains($upline !== null ? $this->retail->wholesaleDomains($upline) : $this->pricing->domainCatalogue(), $currency),
             'currency' => $currency,
             'docsUrl' => '/client/reseller/docs',
+            // Shown at the top: every reseller is known by its Reseller ID, every account by its User ID.
+            'userId' => $clientId,
+            'resellerId' => $store === null ? null : (int) $store['id'],
+            'client' => $client,
+            'store' => $store,
+            'upline' => $upline,
+            'overview' => $this->overviewFor($store),
         ]);
+    }
+
+    /** @return array<string, mixed>|null the client's own store */
+    private function storeFor(int $clientId): ?array
+    {
+        try {
+            return $this->stores->forClient($clientId);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The store the client registered under, when they are a customer of another
+     * reseller (which makes them a sub-reseller).
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>|null
+     */
+    private function uplineForClient(array $client): ?array
+    {
+        $uplineId = (int) ($client['reseller_id'] ?? 0);
+
+        if ($uplineId <= 0 || $this->storeRows === null) {
+            return null;
+        }
+
+        try {
+            $upline = $this->storeRows->find($uplineId);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $upline !== null && (int) $upline['client_id'] !== (int) $client['id'] ? $upline : null;
+    }
+
+    /**
+     * The figures on the overview's stat cards. Each source is optional and each
+     * failure is contained: the overview must render even if one figure cannot.
+     *
+     * @param array<string, mixed>|null $store
+     * @return array<string, mixed>
+     */
+    private function overviewFor(?array $store): array
+    {
+        $overview = ['summary' => null, 'account' => null, 'pending_orders' => null];
+
+        if ($store === null) {
+            return $overview;
+        }
+
+        $storeId = (int) $store['id'];
+
+        try {
+            if ($this->directory !== null) {
+                $overview['summary'] = $this->directory->summary($storeId);
+                $overview['pending_orders'] = $this->directory->pendingOrderCount($storeId);
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $overview['account'] = $this->ledger?->accountFor($storeId);
+        } catch (\Throwable) {
+        }
+
+        return $overview;
     }
 
     /**
@@ -270,7 +357,13 @@ final class ClientResellerController
             // chat button would use — so it works out of the box rather than waiting
             // for them to retype a number we already have.
             'phoneHint' => ResellerChat::normaliseWhatsapp((string) ($client['phone'] ?? '')) ?? '',
+            // Whether the reseller has ever saved chat settings. Until they have, the
+            // storefront ALREADY shows a WhatsApp button on the phone hint above, and
+            // the page says so; afterwards, a blank field means "no chat".
+            'chatConfigured' => $store !== null && ResellerChat::isConfigured($store),
             'platformHost' => $this->locator->platformHost(),
+            // Where free store addresses live; null when the super admin has set none.
+            'storeDomain' => $this->locator->storeDomain(),
             'slugSuggestion' => $this->stores->suggestSlug($companyName !== '' ? $companyName : $personName),
             'platformUrl' => $store === null ? null : $this->stores->platformUrl($store),
             'recordName' => $store === null || ($store['custom_domain'] ?? null) === null
@@ -280,7 +373,124 @@ final class ClientResellerController
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),
             'docsUrl' => '/client/reseller/docs',
+            'google' => $store === null ? null : $this->googleFormValues($store),
         ]);
+    }
+
+    /**
+     * What the store's "Sign in with Google" card shows. The secret itself is never
+     * sent back to the browser — only whether one is saved.
+     *
+     * @param array<string, mixed> $store
+     * @return array<string, mixed>
+     */
+    private function googleFormValues(array $store): array
+    {
+        $google = $this->googleSignIn();
+        $custom = ResellerStoreLocator::normaliseHost((string) ($store['custom_domain'] ?? ''));
+        $free = $this->locator->platformAddressFor($store);
+
+        $callbacks = array_merge(
+            $free === null ? [] : \CodeVault\Clients\GoogleSignIn::callbackUrlsFor([$free], $this->locator->platformScheme()),
+            $custom === '' ? [] : \CodeVault\Clients\GoogleSignIn::callbackUrlsFor([$custom], 'https')
+        );
+        $origins = array_map(static fn (string $url): string => substr($url, 0, -strlen(\CodeVault\Clients\GoogleSignIn::CALLBACK_PATH)), $callbacks);
+
+        return [
+            'allowed' => $google === null || $google->resellersAllowed(),
+            'enabled' => (int) ($store['google_enabled'] ?? 0) === 1,
+            'clientId' => (string) ($store['google_client_id'] ?? ''),
+            'hasSecret' => trim((string) ($store['google_client_secret'] ?? '')) !== '',
+            'live' => $google !== null && $google->storeCredentials($store) !== null,
+            'callbackUrls' => $callbacks,
+            'origins' => $origins,
+            'customPending' => $custom !== '' && empty($store['domain_verified_at']),
+        ];
+    }
+
+    /**
+     * Turns "Sign in with Google" on or off for the store, with the reseller's OWN
+     * Google app. Their customers then come back to the store's own address and see
+     * the reseller's name on Google's consent screen — never ours.
+     */
+    public function saveStoreGoogle(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+        $google = $this->googleSignIn();
+
+        if ($store === null || $this->storeRows === null || $google === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $storeId = (int) $store['id'];
+
+        if ((string) $request->input('google_action', '') === 'remove') {
+            $this->storeRows->clearGoogle($storeId);
+            $this->session->flash('reseller_notice', 'Google sign-in removed from your store, and your Google keys were deleted.');
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        $enabled = (string) $request->input('google_enabled', '') === '1';
+
+        if ($enabled && !$google->resellersAllowed()) {
+            $this->session->flash('reseller_error', 'Google sign-in is not available for stores at the moment.');
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        $result = \CodeVault\Clients\GoogleSignIn::validateStoreSettings(
+            $enabled,
+            (string) $request->input('google_client_id', ''),
+            (string) $request->input('google_client_secret', ''),
+            trim((string) ($store['google_client_secret'] ?? '')) !== ''
+        );
+
+        if (!$result['success']) {
+            $this->session->flash('reseller_error', (string) $result['error']);
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        try {
+            $sealed = $result['secret'] === null ? null : $google->sealSecret($result['secret']);
+        } catch (\Throwable) {
+            $this->session->flash('reseller_error', 'Your Google secret could not be stored securely. Please contact support.');
+
+            return Response::redirect('/client/reseller/store#google-signin');
+        }
+
+        $this->storeRows->saveGoogle($storeId, $result['enabled'], $result['clientId'], $sealed);
+
+        $this->session->flash(
+            'reseller_notice',
+            $result['enabled']
+                ? 'Google sign-in is ON — your customers now see "Sign in with Google" on your login and sign-up pages.'
+                : 'Google sign-in saved and switched off. Your customers sign in with email and password.'
+        );
+
+        return Response::redirect('/client/reseller/store#google-signin');
+    }
+
+    private function googleSignIn(): ?\CodeVault\Clients\GoogleSignIn
+    {
+        if ($this->google !== null) {
+            return $this->google;
+        }
+
+        try {
+            return \CodeVault\Support\App::container()->make(\CodeVault\Clients\GoogleSignIn::class);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -317,6 +527,40 @@ final class ClientResellerController
             $result['success']
                 ? 'Support chat saved — this is what your customers see on your storefront.'
                 : (string) $result['error']
+        );
+
+        return Response::redirect('/client/reseller/store');
+    }
+
+    /**
+     * The headline and tagline at the top of the store's home page. Blank means
+     * "use the default", so clearing a field is how a reseller undoes it.
+     */
+    public function saveStoreHomepage(Request $request): Response
+    {
+        $client = $this->guard->currentClient();
+
+        if ($client === null) {
+            return Response::redirect('/client/login');
+        }
+
+        $store = $this->stores->forClient((int) $client['id']);
+
+        if ($store === null) {
+            $this->session->flash('reseller_error', 'Open your store first.');
+
+            return Response::redirect('/client/reseller/store');
+        }
+
+        $result = $this->stores->saveHomepage(
+            (int) $store['id'],
+            (string) $request->input('home_headline', ''),
+            (string) $request->input('home_tagline', '')
+        );
+
+        $this->session->flash(
+            $result['success'] ? 'reseller_notice' : 'reseller_error',
+            $result['success'] ? 'Home page text saved.' : (string) $result['error']
         );
 
         return Response::redirect('/client/reseller/store');
@@ -585,6 +829,8 @@ final class ClientResellerController
             'notice' => $this->session->pullFlash('reseller_notice'),
             'discounts' => $this->settings->all(),
             'currency' => $currency,
+            // A sub-reseller prices over its upline's retail, not our list.
+            'upline' => $this->retail->uplineOf($store),
         ]);
     }
 

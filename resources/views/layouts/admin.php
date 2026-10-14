@@ -4,6 +4,10 @@
 /** @var string $content */
 /** @var array{brandName: string, logoUrl: ?string, primaryColor: string, primaryColorDark: string}|null $theme */
 $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2f6fed', 'primaryColorDark' => '#26569c'];
+// The reseller management pages share the reseller panel's modern skin, scoped to
+// one class on <main> so the rest of the admin is untouched.
+$adminPath = rtrim((string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH), '/');
+$resellerAdmin = $adminPath === '/admin/resellers' || str_starts_with($adminPath, '/admin/resellers/');
 ?>
 <!doctype html>
 <html lang="en" data-skin="admin">
@@ -22,6 +26,9 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
     <link rel="stylesheet" href="/assets/css/tokens.css">
     <link rel="stylesheet" href="/assets/css/components.css">
     <style>:root { --cv-color-brand-500: <?= e($theme['primaryColor']) ?>; --cv-color-brand-600: <?= e($theme['primaryColorDark']) ?>; }</style>
+    <?php if ($resellerAdmin): ?>
+        <link rel="stylesheet" href="<?= asset('assets/css/reseller.css') ?>">
+    <?php endif; ?>
     <script src="<?= asset('assets/js/app.js') ?>" defer></script>
 </head>
 <body data-skin="admin">
@@ -40,7 +47,7 @@ $theme ??= ['brandName' => 'CodeVault', 'logoUrl' => null, 'primaryColor' => '#2
                 <svg class="cv-icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M2.5 8H1M15 8h-1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1"/></svg>
             </button>
         </div>
-        <main class="cv-shell__main">
+        <main class="cv-shell__main<?= $resellerAdmin ? ' rs-admin' : '' ?>">
             <?= $content ?>
         </main>
     </div>

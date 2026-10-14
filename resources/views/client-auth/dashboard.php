@@ -11,6 +11,7 @@
 /** @var \CodeVault\Billing\CurrencyService $currencyService */
 /** @var float $creditBalance */
 /** @var bool $aiCopilotEnabled */
+/** @var bool|null $canResell false for a customer of a sub-reseller (no Reseller area) */
 $sym = e($currency['symbol'] ?? 'N');
 $recentTickets = $recentTickets ?? [];
 $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
@@ -420,6 +421,10 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
 <!-- Domain register/transfer lookup — the client index page (dashboard),
      where the client's services are listed. Theme-adaptive, so it reads
      correctly in both light and dark themes. -->
+<!-- Free Reseller programme advert — direct platform clients on the main
+     website who do not already resell (partials/free-reseller-advert.php). -->
+<?= $view->partial('partials.free-reseller-advert') ?>
+
 <?= $view->partial('partials.domain-lookup') ?>
 
 <!-- MAIN 2-COL GRID -->
@@ -592,9 +597,11 @@ $clientName = e((string)($client['first_name'] ?? $client['name'] ?? 'there'));
                 <a href="/client/affiliate" class="dbd-action">
                     <div class="dbd-action__icon" style="background:rgba(245,158,11,.12);">🤝</div>Affiliate Program
                 </a>
+                <?php if ($canResell ?? true): ?>
                 <a href="/client/reseller" class="dbd-action">
                     <div class="dbd-action__icon" style="background:rgba(16,185,129,.12);">📦</div>Reseller Area &amp; API
                 </a>
+                <?php endif; ?>
                 <form method="post" action="/client/logout" style="margin:0;"><?= csrf_field() ?>
                     <button type="submit" class="dbd-action dbd-action--danger">
                         <div class="dbd-action__icon" style="background:rgba(239,68,68,.1);">🚪</div>Log Out

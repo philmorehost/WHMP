@@ -8,7 +8,11 @@
  * @var string|null $notice
  * @var array{service: float, domain: float} $discounts
  * @var array<string, mixed> $currency
+ * @var array<string, mixed>|null $upline the store this reseller registered under (a sub-reseller buys at its prices)
  */
+
+$upline = $upline ?? null;
+$uplineName = $upline === null ? '' : (trim((string) ($upline['brand_name'] ?? '')) !== '' ? (string) $upline['brand_name'] : (string) $upline['slug']);
 
 $servicePct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['service']);
 $domainPct = \CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain']);
@@ -33,9 +37,14 @@ $currencyCode = (string) $currency['code'];
         don't advertise these figures yet.
     </div>
 
+    <?php if ($upline !== null): ?>
+    <p>You buy at <strong><?= e($uplineName) ?></strong>'s prices (the provider you registered with). Your markup is
+        added on top of their price, so your markup is your margin. Your customers cannot open reseller accounts.</p>
+    <?php else: ?>
     <p>You pay <strong><?= e($servicePct) ?>%</strong> below list on services and
         <strong><?= e($domainPct) ?>%</strong> below list on domains. Your markup is added on top of the list
         price, so your margin is the markup plus that discount.</p>
+    <?php endif; ?>
     <p style="color:var(--cv-text-secondary);">All figures in <?= e($currencyCode) ?>, the currency your
         catalogue is priced in.</p>
 </div>
@@ -45,8 +54,13 @@ $currencyCode = (string) $currency['code'];
 
     <div class="cv-card" style="max-width:64rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
         <h2 class="cv-card__title">Store-wide markup</h2>
+        <?php if ($upline !== null): ?>
+        <p>Added to every price you have not set by hand. <strong>0%</strong> means you charge exactly what you
+            pay, with no margin — set a markup to earn on each sale.</p>
+        <?php else: ?>
         <p>Added to every price you have not set by hand. <strong>0%</strong> means you charge the platform's
             list price and keep the reseller discount as your margin.</p>
+        <?php endif; ?>
         <p>
             <label for="markup_percent">Markup (%)</label><br>
             <input class="cv-input" type="number" id="markup_percent" name="markup_percent"
@@ -60,7 +74,7 @@ $currencyCode = (string) $currency['code'];
         <table class="cv-table">
             <thead>
             <tr>
-                <th>Service</th><th>Cycle</th><th>List</th><th>You pay</th>
+                <th>Service</th><th>Cycle</th><th><?= $upline !== null ? 'Their price' : 'List' ?></th><th>You pay</th>
                 <th>Your price</th><th>Your margin</th>
             </tr>
             </thead>
@@ -115,7 +129,7 @@ $currencyCode = (string) $currency['code'];
             be set independently — many resellers discount registration and make it back on renewal.</p>
         <table class="cv-table">
             <thead>
-            <tr><th>TLD</th><th>Type</th><th>List</th><th>You pay</th><th>Your price</th><th>Your margin</th></tr>
+            <tr><th>TLD</th><th>Type</th><th><?= $upline !== null ? 'Their price' : 'List' ?></th><th>You pay</th><th>Your price</th><th>Your margin</th></tr>
             </thead>
             <tbody>
             <?php foreach ($domains as $row): ?>

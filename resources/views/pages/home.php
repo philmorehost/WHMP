@@ -60,6 +60,17 @@ $whatsappHref = $whatsappNumber !== '' ? 'https://wa.me/' . preg_replace('/\D/',
                     </span>
                 </a>
             </li>
+            <?php if (\CodeVault\Reseller\FreeResellerProgramme::advertFor(\CodeVault\Reseller\FreeResellerProgramme::PLACEMENT_NAV) !== null): ?>
+            <li style="margin-bottom: var(--cv-space-1);">
+                <a href="/free-reseller" style="display: flex; align-items: center; justify-content: space-between; padding: var(--cv-space-3) var(--cv-space-4); color: var(--cv-text-primary); text-decoration: none; font-weight: 700; font-size: var(--cv-text-sm); transition: background var(--cv-transition-fast);" onmouseover="this.style.background='var(--cv-bg-surface-sunken)'" onmouseout="this.style.background='transparent'">
+                    <span style="display: flex; align-items: center; gap: var(--cv-space-3);">
+                        <span style="font-size: 1.1rem;">🎁</span>
+                        <span>Free Reseller</span>
+                    </span>
+                    <span style="background:#22c55e;color:#052e16;font-size:.62rem;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:999px;">FREE</span>
+                </a>
+            </li>
+            <?php endif; ?>
             <li style="margin-bottom: var(--cv-space-1);">
                 <a href="/client/affiliate" style="display: flex; align-items: center; padding: var(--cv-space-3) var(--cv-space-4); color: var(--cv-text-primary); text-decoration: none; font-weight: 600; font-size: var(--cv-text-sm); transition: background var(--cv-transition-fast);" onmouseover="this.style.background='var(--cv-bg-surface-sunken)'" onmouseout="this.style.background='transparent'">
                     <span style="display: flex; align-items: center; gap: var(--cv-space-3);">
@@ -145,6 +156,10 @@ $whatsappHref = $whatsappNumber !== '' ? 'https://wa.me/' . preg_replace('/\D/',
                 No products found. Please add products and product groups in the admin dashboard.
             </div>
         <?php endif; ?>
+
+        <!-- Free Reseller programme — main website only, hidden when the admin
+             switches the public banner off (partials/free-reseller-promo.php). -->
+        <?= $view->partial('partials.free-reseller-promo') ?>
 
         <!-- Our Guarantees Section (Blue Block) -->
         <div style="background: #0d6efd; color: #ffffff; border-radius: var(--cv-radius-md); padding: var(--cv-space-6) var(--cv-space-8); margin-top: var(--cv-space-8);">

@@ -13,8 +13,10 @@ use CodeVault\Config;
  * authorisation-shaped decision, so the rules are deliberately narrow:
  *
  *   1. The platform's own host is never a store — it falls through untouched.
- *   2. A single label in front of the platform host is a platform subdomain:
- *      `acme.{platform}` -> the store whose slug is `acme`.
+ *   2. A single label in front of the STORE DOMAIN is a store's free address:
+ *      `acme.{store domain}` -> the store whose slug is `acme`. The store domain
+ *      is set by the super admin (ResellerPlatformAddress). When it is not set,
+ *      no free addresses exist and this step never matches.
  *   3. Any other host is a custom domain, and only matches a store whose
  *      domain we have DNS-VERIFIED (the test lives in the query, in
  *      ResellerStoreRepository::forVerifiedDomain()).
@@ -29,8 +31,55 @@ final class ResellerStoreLocator
 {
     public function __construct(
         private readonly ResellerStoreRepository $stores,
-        private readonly Config $config
+        private readonly Config $config,
+        // Where store subdomains live. Optional and trailing so hand-built instances
+        // keep working. Without it, the store domain falls back to the platform host
+        // (the behaviour before the setting existed). The container always supplies
+        // it, so on a real install the admin's setting decides.
+        private readonly ?ResellerPlatformAddress $address = null
     ) {
+    }
+
+    /**
+     * The domain store subdomains are served under, or null when the super admin
+     * has not set one. In that case stores are reachable only on their own
+     * verified domains.
+     */
+    public function storeDomain(): ?string
+    {
+        if ($this->address === null) {
+            return $this->platformHost();
+        }
+
+        return $this->address->domain();
+    }
+
+    /**
+     * The store's free address (`{slug}.{store domain}`), or null when no store
+     * domain is configured.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function platformAddressFor(array $store): ?string
+    {
+        return ResellerPlatformAddress::addressFor((string) ($store['slug'] ?? ''), $this->storeDomain());
+    }
+
+    /**
+     * The host the store is ACTUALLY served on: its verified custom domain, else its
+     * free address. Null means the store has no working address yet.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function publicHostFor(array $store): ?string
+    {
+        $custom = self::normaliseHost((string) ($store['custom_domain'] ?? ''));
+
+        if ($custom !== '' && !empty($store['domain_verified_at'])) {
+            return $custom;
+        }
+
+        return $this->platformAddressFor($store);
     }
 
     /**
@@ -54,6 +103,43 @@ final class ResellerStoreLocator
     }
 
     /**
+     * The public address of a store, for links written OUTSIDE a request to it —
+     * an email sent by a cron job has no Host header to copy.
+     *
+     * The verified custom domain when there is one, because that is the address the
+     * reseller advertises; otherwise the platform subdomain, which always works. An
+     * unverified custom domain is never used: we do not serve it yet, so a link to it
+     * would be a dead link with the reseller's name on it.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function baseUrlFor(array $store): string
+    {
+        return $this->platformScheme() . '://' . $this->hostFor($store);
+    }
+
+    /**
+     * A host NAME for the store, for places that always need one: a mail sender
+     * domain, a label. This is publicHostFor() when the store has a working address.
+     * Otherwise it falls back to the domain it has claimed, and then to its slug under
+     * the platform host. Use publicHostFor() wherever the answer has to actually load.
+     *
+     * @param array<string, mixed> $store
+     */
+    public function hostFor(array $store): string
+    {
+        $public = $this->publicHostFor($store);
+
+        if ($public !== null) {
+            return $public;
+        }
+
+        $claimed = self::normaliseHost((string) ($store['custom_domain'] ?? ''));
+
+        return $claimed !== '' ? $claimed : strtolower((string) ($store['slug'] ?? '')) . '.' . $this->platformHost();
+    }
+
+    /**
      * @return array{store: array<string, mixed>, host: string}|null
      */
     public function resolve(string $host): ?array
@@ -66,6 +152,13 @@ final class ResellerStoreLocator
 
         // `www.` on the platform's own domain is the platform, not a store.
         if ($host === 'www.' . $this->platformHost()) {
+            return null;
+        }
+
+        // The store domain itself, and its www, are not stores either.
+        $storeDomain = $this->storeDomain();
+
+        if ($storeDomain !== null && ($host === $storeDomain || $host === 'www.' . $storeDomain)) {
             return null;
         }
 
@@ -83,14 +176,14 @@ final class ResellerStoreLocator
     }
 
     /**
-     * The slug when $host is exactly one label in front of the platform host,
-     * else null. A slug that normaliseSlug() would reject (too short, reserved
+     * The slug when $host is exactly one label in front of the store domain,
+     * else null (always null when no store domain is configured). A slug that normaliseSlug() would reject (too short, reserved
      * like `www`, or not a legal DNS label) is not a store address, so there is
      * no query to make.
      */
     private function subdomainSlug(string $host): ?string
     {
-        $platform = $this->platformHost();
+        $platform = (string) $this->storeDomain();
         $suffix = '.' . $platform;
 
         if ($platform === '' || !str_ends_with($host, $suffix)) {

@@ -19,8 +19,21 @@ use RuntimeException;
  */
 class Migrator
 {
+    /**
+     * MySQL/MariaDB errors that mean "what this statement does is already done":
+     * 1050 table exists, 1060 duplicate column, 1061 duplicate key name, 1068 multiple
+     * primary key, 1091 can't drop (already gone), 1826 duplicate foreign key name.
+     *
+     * Deliberately NOT 1062 (duplicate entry): a multi-row seed INSERT that hits one
+     * existing row inserts none of the others, so "already there" would be a lie.
+     */
+    public const ALREADY_DONE_ERRORS = [1050, 1060, 1061, 1068, 1091, 1826];
+
     /** @var array<string, string> filename => error, filled by run(true) */
     private array $failures = [];
+
+    /** @var array<string, array<int, string>> filename => "already done" errors that were skipped */
+    private array $tolerated = [];
 
     public function __construct(
         private readonly Database $db,
@@ -67,6 +80,7 @@ class Migrator
     {
         $this->ensureMigrationsTable();
         $this->failures = [];
+        $this->tolerated = [];
         $ran = [];
 
         foreach ($this->pending() as $filename) {
@@ -102,6 +116,18 @@ class Migrator
         return $this->failures;
     }
 
+    /**
+     * Statements the most recent run() skipped as "already done". A multi-clause
+     * ALTER skipped this way may have carried other changes with it, so the caller
+     * should let SchemaReconciler check the schema afterwards.
+     *
+     * @return array<string, array<int, string>>
+     */
+    public function tolerated(): array
+    {
+        return $this->tolerated;
+    }
+
     private function apply(string $filename): void
     {
         $definition = require $this->migrationsPath . '/' . $filename;
@@ -125,11 +151,32 @@ class Migrator
                 continue;
             }
 
-            // Use prepared statement to ensure proper buffering and result cleanup
-            $stmt = $this->db->connection()->prepare($statement);
-            $stmt->execute();
-            // Explicitly close the statement to release any locks
-            $stmt = null;
+            try {
+                // Use prepared statement to ensure proper buffering and result cleanup
+                $stmt = $this->db->connection()->prepare($statement);
+                $stmt->execute();
+                // Explicitly close the statement to release any locks
+                $stmt = null;
+            } catch (\PDOException $e) {
+                // The change this statement makes is ALREADY in place — the table or
+                // column exists, the index is already there or already gone. That
+                // happens when SchemaReconciler restored it ahead of a migration that
+                // had been failing, or when a site was patched by hand. The schema is in the state this statement wanted, so treat it
+                // as done: otherwise a plain `ALTER TABLE ... ADD COLUMN` would fail on
+                // every boot, forever, and keep its whole file pending.
+                //
+                // Only SQL strings get this: each is a single atomic statement, so its
+                // failure means nothing else happened. A closure may already have done
+                // part of its work, so its errors still fail the migration.
+                $code = (int) ($e->errorInfo[1] ?? 0);
+
+                if (!in_array($code, self::ALREADY_DONE_ERRORS, true)) {
+                    throw $e;
+                }
+
+                $this->tolerated[$filename][] = $e->getMessage();
+                error_log("[CodeVault] migration {$filename}: treated as already applied — " . $e->getMessage());
+            }
         }
 
         $this->db->insert(

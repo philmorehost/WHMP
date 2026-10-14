@@ -8,6 +8,7 @@ use CodeVault\Auth\AuthGuard;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
 use CodeVault\Request;
+use CodeVault\Security\SecretBox;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
 use CodeVault\View;
@@ -19,7 +20,10 @@ final class ServerController
         private readonly View $view,
         private readonly ServerRepository $servers,
         private readonly ServerGroupRepository $groups,
-        private readonly ModuleManager $modules
+        private readonly ModuleManager $modules,
+        // Encrypts the provider account password. Optional and trailing like the
+        // other late additions; without it, the field is simply not saved.
+        private readonly ?SecretBox $secrets = null
     ) {
     }
 
@@ -113,7 +117,8 @@ final class ServerController
             return $denied;
         }
 
-        $this->servers->create($this->extractFields($request));
+        $id = $this->servers->create($this->extractFields($request));
+        $this->saveAccountSecret($request, $id);
 
         return Response::redirect('/admin/servers');
     }
@@ -155,6 +160,7 @@ final class ServerController
         }
 
         $this->servers->update($id, $fields);
+        $this->saveAccountSecret($request, $id);
 
         return Response::redirect("/admin/servers/{$id}/edit");
     }
@@ -217,16 +223,52 @@ final class ServerController
             ]);
         }
 
+        // Record the raw exchange so the admin can see exactly what the provider
+        // answered (status, headers, body, IPs), with the server's secrets hidden.
+        $secrets = [$server['api_token'] ?? null, $server['account_secret'] ?? null];
+
+        if ($this->secrets !== null && !empty($server['account_secret'])) {
+            $secrets[] = $this->secrets->decrypt((string) $server['account_secret']);
+        }
+
+        HttpExchangeLog::start();
+
         try {
             $result = $module->testConnection(['server' => $server]);
         } catch (\Throwable $e) {
-            return Response::json(['success' => false, 'message' => 'Connection test failed: ' . $e->getMessage()]);
+            $result = ['success' => false, 'message' => 'Connection test failed: ' . $e->getMessage()];
+        } finally {
+            $exchanges = HttpExchangeLog::stop($secrets);
         }
 
         return Response::json([
             'success' => (bool) ($result['success'] ?? false),
             'message' => (string) ($result['message'] ?? ($result['success'] ?? false ? 'Connected.' : 'Connection failed.')),
-        ]);
+            'exchanges' => $exchanges,
+            'testedAt' => gmdate('Y-m-d H:i:s') . ' UTC',
+        ])->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * The provider ACCOUNT password (InterServer: re-checked on OS reinstall and
+     * backup restore), stored encrypted. Blank means "keep what is saved", the same
+     * as the API token. The separate "clear" box removes it.
+     */
+    private function saveAccountSecret(Request $request, int $id): void
+    {
+        if ($request->input('clear_account_secret')) {
+            $this->servers->setAccountSecret($id, null);
+
+            return;
+        }
+
+        $plain = (string) $request->input('account_secret', '');
+
+        if (trim($plain) === '' || $this->secrets === null || !$this->secrets->available()) {
+            return;
+        }
+
+        $this->servers->setAccountSecret($id, $this->secrets->encrypt($plain));
     }
 
     /** @return array<string, mixed> */
@@ -234,14 +276,22 @@ final class ServerController
     {
         $groupId = $request->input('server_group_id');
         $port = trim((string) $request->input('api_port', ''));
+        $slug = (string) $request->input('module_slug', 'local');
+        $token = trim((string) $request->input('api_token', ''));
+
+        // InterServer keys are long single strings. One copied from an email or a
+        // wrapped page can pick up line breaks or spaces, which make it invalid.
+        if (str_contains($slug, 'interserver')) {
+            $token = (string) preg_replace('/\s+/', '', $token);
+        }
 
         return [
             'server_group_id' => $groupId !== null && $groupId !== '' ? (int) $groupId : null,
             'name' => trim((string) $request->input('name', '')),
             'hostname' => trim((string) $request->input('hostname', '')),
-            'module_slug' => (string) $request->input('module_slug', 'local'),
+            'module_slug' => $slug,
             'api_username' => trim((string) $request->input('api_username', '')) ?: null,
-            'api_token' => trim((string) $request->input('api_token', '')) ?: null,
+            'api_token' => $token !== '' ? $token : null,
             'api_port' => $port === '' ? null : (int) $port,
             'use_ssl' => $request->input('use_ssl') ? 1 : 0,
             'active' => $request->input('active') ? 1 : 0,

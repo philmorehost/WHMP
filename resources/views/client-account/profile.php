@@ -32,8 +32,8 @@
     <h2 class="cv-card__title" style="font-size:var(--cv-text-md);">Contact Details</h2>
     <form method="post" action="/client/account"><?= csrf_field() ?>
         <div class="cv-field">
-            <label class="cv-label">Email</label>
-            <input class="cv-input" type="email" name="email" value="<?= e($client['email']) ?>" required>
+            <label class="cv-label" for="ieb-email">Email</label>
+            <input class="cv-input" type="email" name="email" id="ieb-email" value="<?= e($client['email']) ?>" required>
         </div>
         <div style="display:flex;gap:var(--cv-space-3);">
             <div class="cv-field" style="flex:1;">

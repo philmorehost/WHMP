@@ -92,6 +92,8 @@ final class AdminResellerAccountsController
             'claimable' => $claimable,
             'holdingDays' => $this->ledger->holdingDays(),
             'minimums' => $this->ledger->payoutMinimums(),
+            'minimumAmount' => $this->ledger->payoutMinimum(),
+            'minimumCurrency' => $this->ledger->payoutMinimumCurrency(),
             'baseCode' => $this->baseCurrencyCode(),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
@@ -456,12 +458,14 @@ final class AdminResellerAccountsController
     }
 
     /**
-     * The two numbers a payout is measured against.
+     * The numbers a payout is measured against: the holding period, the minimum
+     * (an amount in an anchor currency — $10 by default) and the conversion rate
+     * used to turn that minimum into every other currency.
      *
-     * Both are floored rather than trusted from the form, for the same reason the
-     * billing page floors its own: a negative holding period would make the
-     * withdrawable figure exceed the balance, and a negative minimum would make
-     * every account claimable — including one that is overdrawn.
+     * All are floored rather than trusted from the form: a negative holding
+     * period would make the withdrawable figure exceed the balance, a negative
+     * minimum would make an overdrawn account claimable, and a zero or negative
+     * conversion rate would make a currency's minimum nothing at all.
      */
     public function saveSettings(Request $request): Response
     {
@@ -472,45 +476,80 @@ final class AdminResellerAccountsController
         $holdingDays = max(0, (int) $request->input('payout_holding_days', 30));
         $this->settings->set('reseller.payout_holding_days', (string) $holdingDays);
 
-        $postedMinimums = $request->input('payout_minimums');
         $minimumSummary = '';
+        $configured = [];
 
-        if (is_array($postedMinimums)) {
-            $values = [];
+        foreach ($this->currency->all() as $currency) {
+            $code = strtoupper(trim((string) ($currency['code'] ?? '')));
 
-            foreach ($this->currency->all() as $currency) {
-                $code = strtoupper(trim((string) ($currency['code'] ?? '')));
-                if ($code === '') {
+            if ($code !== '') {
+                $configured[$code] = $currency;
+            }
+        }
+
+        // The anchor currency. Only a configured currency is accepted; anything
+        // else keeps the current one rather than pointing the rule at a currency
+        // that has no exchange rate.
+        $postedAnchor = strtoupper(trim((string) $request->input('payout_minimum_currency', '')));
+
+        if ($postedAnchor !== '' && array_key_exists($postedAnchor, $configured)) {
+            $this->settings->set('reseller.payout_minimum_currency', $postedAnchor);
+        }
+
+        $anchor = $this->ledger->payoutMinimumCurrency();
+
+        // `payout_minimum` (the old field name) is still accepted so older forms
+        // and automation keep working; it now means "amount in the anchor currency".
+        $postedAmount = $request->input('payout_minimum_amount', $request->input('payout_minimum'));
+
+        if ($postedAmount !== null) {
+            $amount = $this->normaliseMinimum($postedAmount, $this->ledger->payoutMinimum());
+            $this->settings->set('reseller.payout_minimum_amount', number_format($amount, 2, '.', ''));
+            $minimumSummary = 'minimum ' . number_format($amount, 2) . ' ' . $anchor;
+        }
+
+        $postedRates = $request->input('payout_minimum_rates');
+
+        if (is_array($postedRates)) {
+            $rates = [];
+
+            foreach ($configured as $code => $currency) {
+                if ($code === $anchor) {
+                    continue; // 1 anchor = 1 anchor, by definition.
+                }
+
+                $raw = $postedRates[$code] ?? '';
+
+                // Blank means "follow the live exchange rate"; so does anything
+                // that is not a positive, finite number.
+                if (!is_scalar($raw) || trim((string) $raw) === '' || !is_numeric($raw)) {
                     continue;
                 }
 
-                // The form's default is the current effective threshold, including
-                // the legacy base-currency fallback. Missing or malformed fields
-                // therefore preserve the existing rule rather than zeroing a
-                // threshold because of a partial POST.
-                $effective = $this->ledger->payoutMinimumForCurrency($currency);
-                $raw = $postedMinimums[$code] ?? $effective['minimum'];
-                $amount = $this->normaliseMinimum($raw, (float) $effective['minimum']);
-                $values[$code] = number_format($amount, 2, '.', '');
+                $rate = (float) $raw;
+
+                if (!is_finite($rate) || $rate <= 0.0) {
+                    continue;
+                }
+
+                $rates[$code] = round($rate, 6);
             }
 
             $this->settings->set(
-                'reseller.payout_minimums',
-                (string) json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                'reseller.payout_minimum_rates',
+                (string) json_encode($rates, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             );
-            $minimumSummary = count($values) . ' currency-specific minimum(s)';
-        } elseif ($request->input('payout_minimum') !== null) {
-            // Backward-compatible path for older admin forms/automation. This is
-            // the base-unit fallback used by currencies without a specific row.
-            $minimum = $this->normaliseMinimum($request->input('payout_minimum'), $this->ledger->payoutMinimum());
-            $this->settings->set('reseller.payout_minimum', number_format($minimum, 2, '.', ''));
-            $minimumSummary = 'base-currency fallback ' . number_format($minimum, 2);
+
+            $minimumSummary .= ($minimumSummary === '' ? '' : ', ')
+                . ($rates === []
+                    ? 'every other currency converted at the live exchange rate'
+                    : count($rates) . ' custom conversion rate(s)');
         }
 
         $this->session->flash(
             'reseller_notice',
             'Payout settings saved: receipts become withdrawable after ' . $holdingDays . ' day(s)'
-            . ($minimumSummary === '' ? '' : ', with ' . $minimumSummary . '.')
+            . ($minimumSummary === '' ? '.' : ', with ' . $minimumSummary . '.')
             . ($holdingDays === 0
                 ? ' A zero-day holding period means a receipt is withdrawable the moment it is posted.'
                 : '')

@@ -3,6 +3,7 @@
 /** @var array<string, string> $filters */
 /** @var array<int, array<string, mixed>> $filterColumns */
 /** @var string $statusFilter */
+/** @var array<int, array<string, mixed>>|null $storePending pending orders from reseller customers, per reseller */
 ?>
 <style>
 /* Admin Orders List Styles */
@@ -259,6 +260,18 @@
     </div>
     <a href="/admin/orders/create" class="cv-btn cv-btn--primary" style="white-space:nowrap;">＋ Create Order</a>
 </div>
+
+<?php $storePending = $storePending ?? []; ?>
+<?php if ($storePending !== []): ?>
+    <div class="cv-alert cv-alert--warning" style="margin-bottom:24px;" role="status">
+        <strong>Reseller orders are reviewed on each reseller's page.</strong>
+        Orders placed by a reseller's customers are not listed here (each reseller's customers are kept separate).
+        Waiting for acceptance:
+        <?php foreach ($storePending as $i => $pendingStore): ?>
+            <?= $i > 0 ? ' · ' : '' ?><a href="/admin/resellers/<?= (int) $pendingStore['owner_client_id'] ?>/customers#orders"><?= e((string) ($pendingStore['brand_name'] ?? $pendingStore['slug'])) ?> (Reseller ID <?= (int) $pendingStore['store_id'] ?>): <?= (int) $pendingStore['pending'] ?></a>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
 
 <!-- Status Tabs -->
 <div class="admin-orders-tabs">

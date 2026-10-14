@@ -50,6 +50,9 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 | `REDIS_*` | Optional — sessions/queue/cache silently fall back to file/sync/in-memory if Redis is unreachable or `ext-redis` isn't loaded. |
 | `SESSION_DRIVER`, `QUEUE_DRIVER`, `CACHE_DRIVER` | `redis` or anything else (falls back). |
 | `QUEUE_CRON_DRAIN` | `1` = cron also drains the `default` (order-acceptance) queue as a fallback when no dedicated worker runs. Keep unset/`0` if a `queue-worker.php` process is running. |
+| `PROVIDER_HTTP_PROXY` | Optional. Sends InterServer and Nocix API calls through a proxy, for when their Cloudflare firewall blocks this server's IP. Examples: `http://user:pass@203.0.113.5:3128`, `socks5h://203.0.113.5:1080`. Other traffic is not affected. |
+| `PROVIDER_HTTP_USER_AGENT` | Optional. The User-Agent sent to InterServer and Nocix (default `WHMP-CodeVault/1.0`). Set it if the provider's support asks for a specific value. |
+| `PROVIDER_FORCE_IPV4` | Optional. `1` makes InterServer and Nocix calls use IPv4 only (some Cloudflare rules distrust a host's IPv6 range). |
 | `DEEPSEEK_API_KEY` | Powers the AI features (ticket reply suggestions, fraud triage, Ask AI, AI-assisted KB search). All of them fail open — a missing key or API error never blocks the underlying flow, it just skips the AI step. |
 
 ## Directory map
@@ -59,7 +62,307 @@ Tests run against a real MariaDB database (`codevault_test` by default — see `
 - `resources/views/` — plain-PHP templates, mirroring the `core/` structure.
 - `resources/lang/{code}.php` — localization string catalogs (storefront + shared chrome only — see docs/ADMIN_GUIDE.md).
 - `database/migrations/` — plain PHP arrays (`return ['up' => [...]]`), run in filename order by `bin/migrate.php`.
+- `database/schema.php` — **generated** snapshot of the complete schema the migrations build. Every live site checks itself against it and adds whatever it is missing (see *Database schema on live sites* below). Never edit it by hand.
 - `docs/ADMIN_GUIDE.md` — day-to-day operations guide for whoever runs the admin panel.
+
+## Database schema on live sites
+
+Upload the new code and you're done — no SSH, no button:
+
+1. On the first request after an upload, every pending migration in `database/migrations/` runs (`Migrator::run`). A migration that fails is logged and retried on the next request; it does not block the ones after it.
+2. Then `SchemaReconciler` compares the live database with `database/schema.php` and **adds** anything missing: whole tables (with their foreign keys), columns (in their original position), indexes, and missing ENUM values. This covers what migrations alone cannot — a migration edited after a site had already run it never runs again on that site. It runs once per upload (when `schema.php` changes) and retries hourly if a repair failed.
+3. It only ever adds. It never drops, renames or narrows anything. A few things are only *reported*, because changing them could break existing data: a foreign key missing on an existing table, an ENUM a site customised, a missing primary key. They appear on the **System Diagnostics** addon page (the *Database migrations* card), along with the last automatic check and any failure.
+
+`php bin/migrate.php` does the same from a terminal, and `php bin/migrate.php --check` lists what is missing without changing anything.
+
+**When you add or change a migration, regenerate the snapshot and commit it with the migration:**
+
+```bash
+php bin/build-schema.php          # rewrites database/schema.php
+php bin/build-schema.php --check  # exit 1 if it is out of date (also enforced by SchemaSnapshotTest)
+```
+
+The snapshot is built by replaying every migration against an in-memory model of MySQL (`core/Database/Schema/`), so building it needs no database. Never fix a live schema by editing a migration that has already shipped: add a new migration, guarded with an INFORMATION_SCHEMA check, and rebuild the snapshot.
+
+## Reseller customers
+
+A reseller manages its own store's customers from **Customers** in the reseller area (`/client/reseller/clients`):
+
+- **List and search** every customer of the store, with active/suspended services, domains and unpaid invoices per customer.
+- **Customer page:** edit contact details (not the login email), send a password-reset email, suspend / unsuspend / terminate services, turn domain auto-renew on or off, lock or unlock domains, and change nameservers. Invoices and tickets are listed; invoices are read-only because payments are collected by the platform.
+- **Log in as customer** opens the store's own website (subdomain or verified custom domain) in a new tab, signed in to that account, with a banner and a *Return to your reseller area* link. While signed in this way a reseller cannot change the customer's password, PIN, 2FA, security question, login email or saved cards, request data export/erasure, or open the customer's own reseller area (`ClientImpersonation::restrictedForReseller`).
+- **Suspensions:** a store can lift only a suspension it made (`services.suspended_by_reseller_id`). Suspensions made by the platform (overdue invoice, abuse, by an admin) need support. A payment does not lift a store's hold while the customer still belongs to that store.
+- Every read and write is scoped to the store inside the SQL (`ResellerClientDirectory`); a suspended store sees its customers but cannot change them. Everything is written to the activity log as `reseller.*`.
+
+### Strict reseller isolation
+
+Each reseller is a separate tenant, identified everywhere by its **Reseller ID** (`resellers.id`); every account has a **User ID** (`clients.id`). Both are shown on the admin's reseller list, every admin reseller page, the reseller area and the customer lists.
+
+- **Registration:** an account created on a reseller's website (subdomain or verified custom domain) belongs to that reseller from the `INSERT` that creates it (`clients.reseller_id`). Accounts created on the main site have no reseller. A pending registration is discarded if it is finished on a different site. Google sign-in is turned off on reseller sites, because its redirect URL is the main site's.
+- **Sign-in:** a reseller's customers can sign in only on that reseller's site. Main-site accounts cannot sign in on a reseller's site; the only exception is the reseller themselves on their own store. A store's owner is never claimed as one of their own store's customers.
+- **Admin panel:** the general Clients, Services, Domains, Invoices, Orders and Tickets lists, the client counts, pickers, exports and mass mail all cover **main-site customers only**. Any `/admin/clients/{id}` URL for a reseller's customer redirects to that reseller's page (`StoreCustomerAdminRedirect`).
+- **Managing a reseller's customers as super admin:** open **Resellers → (store) → Customers** (`/admin/resellers/{owner user ID}/customers`). You get the same customer list and customer pages as the reseller, with the same actions, recorded in the activity log as yours. Unlike the reseller, you can still act while the store is suspended, and you can lift any suspension. Or use **Log in to reseller account** to work in the reseller's own control panel.
+- **Orders** placed by a reseller's customers are still fulfilled by the platform. They are listed and accepted from the reseller's Customers page. The main Orders page shows a notice with the number of pending orders for each reseller.
+- **Moving a customer** between the main site and a reseller, or between resellers, is done with **Move provider** (`/admin/resellers/migrations`, super admin). Accounts registered on a reseller's site before this fix were recorded as main-site customers. Move them to the right reseller this way; until they are moved, they cannot sign in on the reseller's site.
+
+Login tickets (`client_impersonation_tokens`) are stored only as SHA-256 hashes, can be used once, and only work on the site they name while the customer still belongs to it.
+
+### Sub-resellers (two tiers, never three)
+
+A reseller's customer may open a reseller account of their own and become a **sub-reseller**. The chain stops there (`ResellerEligibility`, `MAX_TIER = 2`):
+
+| Who | Can resell? | Buys at |
+|---|---|---|
+| Main-site customer | Yes (partner reseller, tier 1) | Our list price less the admin's reseller discount |
+| Customer of a partner reseller | Yes (sub-reseller, tier 2) | **The partner's own retail prices**, including any prices the partner set by hand |
+| Customer of a sub-reseller | **No.** The Reseller Area link is hidden on their dashboard, and every `/client/reseller…` URL returns 403 (Kernel guard). | n/a |
+
+- **The first reseller keeps its profit.** A sub-reseller's cost for an item is what the upline's customers would pay for it. The sub-reseller's markup and hand-set prices go on top of that, and it cannot set a price below that cost. Setup fees, configurable options and domains all work the same way (`ResellerRetailPricing`).
+- **Money.** Each order records `orders.upline_reseller_id` and `upline_cost_total` (migration 0211). When the invoice is paid:
+  - the sub-reseller is billed `cost_total` (the upline's prices);
+  - the upline is credited `upline_margin = cost_total − upline_cost_total` on its account, held for the usual holding period.
+
+  A refund posts a proportional `upline_margin_reversal`.
+- **Where it shows.**
+  - The sub-reseller's overview, prices page and `/api/reseller/pricing` show the upline's prices instead of our discount.
+  - The admin's reseller list has a **Tier** column, and the store page explains whom a sub-reseller buys from.
+  - A store whose upline is itself a sub-reseller (possible only for stores opened before the cap) is flagged **Legacy 3rd tier**.
+
+### Platform address (free store subdomains)
+
+Each reseller store has a short name (its slug). Its free web address is `{slug}.{platform address domain}`. The super admin picks that domain under **Admin → Resellers → Platform address**.
+
+- **Pick a separate domain, ideally a neutral one** (for example `resellerhub.com`). It should not be a subdomain of the client area. If the client area runs on `client.example.com` and stores were built under it, addresses become `acme.client.example.com`. That is long, shows your brand, and a `*.example.com` wildcard certificate does not cover it.
+- **Not set means not served.** With no domain configured, a store's slug is just its name. No `slug.anything` address answers, and the store is reachable only on its own custom domain once that domain is verified. The reseller's store page and the admin pages say so.
+- **Set means live at once.** `acme.resellerhub.com` serves the store `acme`. The bare domain, its `www`, and deeper names (`x.acme.resellerhub.com`) are never stores. Verified custom domains keep working either way, and become the store's main address.
+- **Server set-up for the domain** (listed in the admin card, which also has a **Check DNS** button):
+  1. A wildcard `A` record `*.domain` pointing at this server, or a `CNAME` to the platform host.
+  2. The domain added to the web server with a wildcard subdomain `*`, both on the platform's document root.
+  3. A wildcard SSL certificate for `*.domain`, from AutoSSL or a DNS-01 certificate.
+- **No store can claim the domain** or any name under it as its custom domain.
+- **Verification is unchanged.** Custom-domain checks still accept a CNAME to the platform host (APP_URL).
+- **For developers:** the setting is stored under the `reseller.platform_domain` key and read by `ResellerPlatformAddress`. `ResellerStoreLocator::storeDomain()`, `publicHostFor()` and `platformAddressFor()` are the API. A locator built by hand without the address service keeps the old behaviour (subdomains of the APP_URL host), so hand-built test fixtures need no change.
+
+### Reseller panel design
+
+The reseller control panel (`/client/reseller…`) and the admin's reseller pages (`/admin/resellers…`) share a modern skin in `public/assets/css/reseller.css`.
+
+- **Scoping:** the skin applies only under `.rs-panel` / `.rs-admin`, which the layouts add to `<main>` on those paths. The rest of the app is unchanged.
+- **What it covers:** a hero header, stat cards with icons, pill navigation with inline SVG icons, quick-action tiles, and restyled `cv-*` buttons, cards, tables, inputs, alerts and badges. Dark mode is supported.
+- **Colours:** everything uses theme tokens, so a tenant's brand colour carries through.
+- **Navigation:** the admin's programme-wide reseller pages share one nav (`partials/reseller-admin-nav.php`).
+
+### Free Reseller programme
+
+A public offer of free reseller websites, advertised on the **main website only**.
+
+- **Landing page:** `/free-reseller` explains:
+  - how resellers earn, with a worked example and an earnings calculator;
+  - what they can sell, from the live catalogue;
+  - who collects payment and when payouts happen;
+  - that we handle servers and support;
+  - how to activate a domain (TXT or CNAME, admin approval, SSL);
+  - the master-reseller (second tier) model;
+  - the free features, admin demo links and an FAQ.
+- **Live rules:** every figure on the page is read from the setting that enforces it: discounts, `reseller.payout_holding_days`, payout minimum, cost billing period, maximum markup and the platform address domain.
+- **Application:** `/free-reseller/apply` takes a business name, a store ID and a domain. The domain is either a new one (live availability check; it goes into the normal cart for checkout) or one the applicant already owns.
+  - **Guests:** their answers are kept in the session (`free_reseller_draft`) while they register (email code and PIN) or sign in. `ClientAuthController::afterSignIn()` then sends them back to finish.
+  - **On submit:** the controller follows the same steps as the Reseller area: `ResellerStoreService::openForClient`, then `claimDomain`, then `ResellerDomainSync::syncStore`.
+  - **Afterwards:** `/free-reseller/welcome` shows the exact DNS records and the next steps.
+- **Adverts:** these are a "Get Free Reseller" strip on public pages, a home-page section and sidebar link, a header menu link, and a dismissible card on direct clients' dashboards. `FreeResellerProgramme::advertFor()` decides every placement:
+  - never on a reseller's store;
+  - never to a store's customer;
+  - never to someone who already runs a store.
+  - All `/free-reseller` routes return 404 on store hosts.
+- **Admin:** *Resellers → Free programme* (`/admin/resellers/free-programme`) has:
+  - switches for programme open/closed, the public banner and the dashboard advert;
+  - the headline, introduction and banner text;
+  - up to six demo links (http(s) only).
+  - While the programme is closed, visitors see a "not open" notice and admins see a marked preview.
+
+### Main website design (premium)
+
+The main website (the platform's own host) now uses the same premium hosting design as the reseller
+storefronts, on **every public page**: home, store and product pages, cart, domain register/transfer, deals,
+knowledgebase, sign-in/register, and the client area.
+
+- **Home page** (`CodeVault\Theme\PlatformHome`, view `pages/home-premium.php`): hero with live "from" prices,
+  domain search with TLD prices, a services grid (every category, its lowest price and plan count), popular
+  plans in tabs, the guarantees band, the Free Reseller offer (when it is advertised), an "all in one place"
+  split with real counts, three steps and an FAQ with WhatsApp/ticket buttons.
+- **Header**: contact strip (company email, WhatsApp/phone, network status, currency, sign in), sticky menu
+  with a Services mega menu, Domains, Deals, Support (tickets, WhatsApp, Knowledgebase, network status) and
+  Free Reseller. Signed-in customers get an account menu (dashboard, services, domains, invoices, tickets,
+  emails, payment methods, account, affiliates, sign out) and a notifications bell.
+- **Footer**: services, domains & account, company pages (Free Reseller, affiliates, knowledgebase, status,
+  terms) and contact details from **Settings → Company** (email, phone, WhatsApp, address).
+- **Admin → Theme → Website design**: switch between *Premium* (default) and *Classic*, and set the home-page
+  headline, tagline and the line under "Why customers choose us". Colours follow the theme's primary colour.
+
+Isolation: the platform-only parts (company contacts, knowledgebase/status links, affiliates, Free Reseller)
+are rendered only when `layouts/client.php` passes `platform => true`, which it does only in its main-website
+branch. A reseller store never receives them. Platform-only styles live in `public/assets/css/platform.css`,
+loaded only on the main website.
+
+### Sign in with Google (main website and reseller stores)
+
+`CodeVault\Clients\GoogleSignIn` runs "Sign in with Google" for **whichever site is being served**:
+
+- **Main website** — Admin → Security: paste the Google OAuth client ID **and** secret (the button appears
+  only when both are saved). Redirect URI: `{APP_URL}/client/auth/google/callback`. The secret is never shown
+  back on the page; leave it blank to keep it, or tick *Delete the saved secret*.
+- **Reseller stores** — Reseller panel → Your store → *Sign in with Google*: the reseller pastes **their own**
+  Google client ID and secret and ticks *Show "Sign in with Google" on my store*. The card lists the exact
+  redirect URIs to give Google (the store's free address and its own domain). Their customers see the
+  reseller's brand on Google's consent screen, come back to the store's own address, and new sign-ups become
+  the **store's** customers. The secret is stored encrypted with `APP_KEY` (`SecretBox`).
+- Admin → Security → *Let resellers offer "Sign in with Google" on their stores* switches it off for every
+  store at once (on by default). Admin → Resellers → a store shows whether it is on.
+
+Isolation rules: a store **never** uses the platform's Google app (and vice versa); an existing account that
+belongs to another provider is refused, exactly as with a password. Hardening: a single-use `state` (15
+minutes) is checked on every callback, only Google-**verified** email addresses are accepted, closed accounts
+are refused, and an account with two-factor sign-in still has to enter its code after Google.
+
+Migration `0213_reseller_google_signin` adds `google_enabled`, `google_client_id` and `google_client_secret`
+to `resellers`. Nothing to run by hand: like every migration, it is applied automatically on the first page
+load after the update is uploaded, and SchemaReconciler adds the columns from `database/schema.php` if it
+ever fails. Until then a store simply shows no Google button.
+
+## cPanel Username Changer (add-on)
+
+Lets customers rename the cPanel account of their hosting from the service page. This includes customers
+of reseller stores, white-labelled. Full design: `docs/CPANEL_USERNAME_CHANGER_PLAN.md`.
+
+- **Off until activated:** Admin → Addons → *cPanel Username Changer* → Activate. While it is inactive there
+  is no UI, and every endpoint returns 404. Manage it at `/admin/username-changer`: dashboard, manual
+  change with preflight, settings and pricing, and the audit log. There is a ✏️ shortcut beside the username
+  on the admin service page.
+- **Client flow:** a *Change* button and banner beside the cPanel username open a modal (a bottom sheet on
+  phones). The client:
+  1. picks a name with an instant live check and suggestions;
+  2. ticks what changes;
+  3. confirms by email link or Security PIN.
+
+  Optional admin or reseller approval comes next, then the WHM `modifyacct` rename, which is verified even
+  if the connection drops. Finally the service record is synced.
+- **Fast, server-confirmed precheck:** the rules are checked in the browser on every keystroke. The "is it
+  free?" check is debounced, cancellable and cached:
+  - names already taken in WHMP's records are rejected in about a millisecond;
+  - a name that is free locally is then **confirmed with WHM** (`verify_new_username`, 6-second timeout), so
+    "available" always means the server agrees;
+  - if WHM can't be reached, the modal says so and retries. It never shows the name as available.
+
+  Suggestion chips are verified in the background before they show a ✓. Opening the modal re-syncs the
+  server's account list if it is more than 15 minutes old, so this works even without cron. WHM is asked
+  again at submit and right before the rename.
+- **Payment (ON/OFF, off by default):** Settings & pricing → *Charge a fee*. When it is on:
+  - the client pays after confirming and after any approval, and the rename runs once the invoice is paid;
+  - resellers set their own price at or above their cost, under *Reseller Area → Username requests*. The
+    margin is credited to their balance on payment and reversed on refund. Sub-resellers buy at their
+    upline's price, and the upline earns the difference.
+- **Forgotten Security PIN:** if the PIN is wrong, locked out or was never set, a PIN modal opens on top
+  of the username modal. The client confirms by emailed code (or account password) and sets a new PIN.
+  The PIN modal then closes, and the username change carries on with everything still filled in.
+- **Paying inside the modal:** when the fee is on, confirming leads to a *Pay* step. The client can pay in
+  one click from the wallet (only if it covers the full amount; no part-charging) or with any configured
+  gateway. After a gateway payment the client returns to the service page with the modal open.
+- **Reseller panel:** stores see only their own customers' requests. They can make the rules stricter
+  (never looser), approve requests themselves (when the platform does not), and set their price.
+- **Cron:** `cpanel-username-changer` runs every 5 minutes. It runs queued renames, retries with backoff,
+  expires links, reconciles payments, refreshes account lists and prunes history.
+
+## InterServer VPS: client self-service
+
+Clients control their InterServer VPS from their service page: start, restart and stop;
+VNC console; reverse DNS; on-demand snapshots; OS reinstall; and restore from a snapshot.
+All of these go through the InterServer API (`https://my.interserver.net/apiv2`,
+`X-API-KEY`). If a call can't be made, the client's request becomes a support ticket.
+
+VPSs that are ordered and set up by hand also work. Each one just needs to be tied to its
+machine:
+
+1. **Admin → Servers:** add a server with module **InterServer VPS** and your InterServer
+   API key. Optionally, save the **InterServer account password** too. InterServer checks
+   it again on every OS reinstall and backup restore. It is stored encrypted with
+   AES-256-GCM, using a key derived from `APP_KEY`. Without it, those two actions become
+   tickets and everything else still works.
+2. **Admin → the client's service:** set **Assigned Server** to that server and save.
+3. In the **InterServer VPS link** card on the same page, pick the VPS from the
+   account's list and click **Link this VPS**. This saves the VPS's InterServer id in
+   `services.remote_id` and fills in an empty hostname or IP. A WHMP username is not
+   needed.
+
+An unlinked service is matched automatically by its hostname, then its IP, then its
+username. Linking is what makes the match permanent.
+
+The VNC console first allows the client's own public IPv4 (InterServer accepts VNC from
+one allowed address) and then shows the host and port. If WHMP is behind a proxy, make
+sure `Request::ip()` sees the real client address.
+
+**Why did a client button open a ticket?** Open the client's service in the admin area
+and click **Run self-service check** in the link card. It walks through everything the
+buttons need, in order: the assigned server, the API key, which VPS the service is, the
+live details, reverse DNS, backups, OS templates and the saved account password. Each
+step shows ✅ or ❌, InterServer's own message, and which client buttons it breaks, and
+the raw API requests and responses are shown underneath. The check only reads: it never
+reboots, snapshots or changes the VPS. The reason is also written in the body of every
+ticket a button opens.
+
+When InterServer answers and gives its own reason for refusing (HTTP 400, 409 or 422, for
+example "VPS is not active" or "Backups are disabled for this type"), the client sees
+that reason on the page and no ticket is opened, because staff could not make it succeed
+either. The provider is not named, so reseller stores stay white-labelled. OS reinstall
+and restore are the exception: a 400 there can mean the saved account password is
+wrong, so those still become tickets.
+
+**Seeing the provider's real answer:** on a server's edit page, Test Connection shows an
+**API response details** panel. It contains the exact request, the HTTP status, the
+response headers and body, the IP connected to, and any cURL error. API keys, passwords
+and cookies are hidden. **Copy report** and **Download .txt** let you send it to the
+provider's support. The servers list links to this panel.
+
+**If Test Connection says Cloudflare blocked the request:** InterServer's API is behind
+Cloudflare, which sometimes blocks web-hosting IP addresses. The message includes the IP
+Cloudflare saw and a Ray ID. Either ask InterServer support to allow API access from that
+IP (quote the Ray ID), or set `PROVIDER_HTTP_PROXY` in `.env` so these calls leave from a
+server with a clean IP, such as one of your own VPSs. Try `PROVIDER_FORCE_IPV4=1` first if
+your server has IPv6.
+
+**Lifecycle:** once a service is tied to a VPS, suspending it in WHMP (manually or for an
+overdue invoice) stops the VPS. Unsuspending starts it again. **Terminating it cancels
+the VPS on the InterServer account** (`DELETE /vps/{id}`).
+
+## Nocix dedicated servers: restart and OS reload
+
+Clients can restart a Nocix dedicated server and reload its OS from their service page,
+through the Nocix client API (`https://my.nocix.net/api/{call}/`, HTTP Basic
+`api_username:api_token`; docs at https://my.nocix.net/apidoc/, BETA). Wholesale
+accounts use `my.wholesaleinternet.net`, picked when the server record's hostname names it.
+The old `manage.nocix.net` host does not exist, so earlier versions could never reach Nocix.
+
+| Client action | Nocix call |
+| --- | --- |
+| Restart | `reboot-server?service_id=` |
+| OS list for the reload form | `os-list?service_id=` |
+| Reload OS (typed REINSTALL confirmation) | `os-reload?service_id=&os=<name from os-list>` |
+| Reload progress (Pending / Completed) | `reloadstatus?service=` |
+| Show login details, only after a completed reload | `get-server-credentials?service_id=` |
+
+Nocix takes no root password on reload. It sets the login itself and emails it to the
+account holder, so once the reload has completed the client can reveal the login Nocix
+stores. It is shown once, sent with `Cache-Control: no-store`, and never logged.
+
+**Setup for a server bought by hand:** add a server with module **Nocix Dedicated Server**
+and your Nocix API username and token. Set it as the service's **Assigned Server**, then
+use the **Nocix server link** card on the service page to pick the Nocix service. Without
+a link, WHMP uses a numeric WHMP username as the Nocix service id (the older convention),
+then the Nocix service whose IP block contains the service's IP.
+`php bin/check-nocix-config.php` tests each Nocix server record.
+
+**Lifecycle:** once a service is tied to a Nocix server, suspending it (including for an
+overdue invoice) **disconnects the server from the network**, and unsuspending reconnects
+it. Nocix's API cannot cancel a server, so terminate it in the Nocix portal.
 
 ## Known environment-dependent gaps
 

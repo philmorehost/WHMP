@@ -32,6 +32,10 @@ $kindLabels = [
     'cost_invoice' => 'What you owe us',
     'payout' => 'Paid out to you',
     'adjustment' => 'Adjustment',
+    'receipt_reversal' => 'Refund to a customer',
+    'cost_reversal' => 'Cost refunded to you',
+    'upline_margin' => 'Your share of a sub-reseller sale',
+    'upline_margin_reversal' => 'Sub-reseller refund (your share)',
 ];
 ?>
 

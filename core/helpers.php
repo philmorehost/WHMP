@@ -204,10 +204,47 @@ if (!function_exists('brand_name_forget')) {
     }
 }
 
+if (!function_exists('current_storefront')) {
+    /**
+     * The reseller store this request is being served as, or null on the
+     * platform's own site (and whenever there is no container yet — installer,
+     * CLI bootstrap, a view rendered in isolation by a test).
+     *
+     * Views use this to choose the storefront chrome (premium header, SERVICES
+     * menu, footer) over the platform's client-area chrome. It never decides
+     * anything about money or access — those read CurrentReseller through
+     * constructor injection like everything else.
+     *
+     * @return array<string, mixed>|null
+     */
+    function current_storefront(): ?array
+    {
+        try {
+            return \CodeVault\Support\App::container()->make(\CodeVault\Reseller\CurrentReseller::class)->get();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+}
+
+if (!function_exists('platform_premium_site')) {
+    /**
+     * True when this request is on the MAIN website and the main website uses
+     * the premium design (Admin → Theme → Website design). Always false on a
+     * store's host — a store has its own chrome — and whenever there is no
+     * container or settings yet, so isolated view renders keep the classic look.
+     */
+    function platform_premium_site(): bool
+    {
+        return \CodeVault\Theme\PlatformSite::premiumEnabled();
+    }
+}
+
 if (!function_exists('active_promo_banner')) {
     /**
-     * The one promo banner (if any) an admin has targeted at the current
-     * request path, or null. Resolved through the container rather than
+     * The one promo banner (if any) targeted at the current request path ON THE
+     * SITE BEING SERVED, or null — the platform's banners on the platform, a
+     * store's own banners on that store. Resolved through the container rather than
      * injected because layouts.client is shared by every public controller —
      * adding a constructor dependency to each just to thread this through
      * would be a much larger change for a single popup.
@@ -220,7 +257,14 @@ if (!function_exists('active_promo_banner')) {
             $container = \CodeVault\Support\App::container();
             $repo = $container->make(\CodeVault\Marketing\PromoBannerRepository::class);
             $pageKey = \CodeVault\Marketing\PromoBannerPages::keyForPath((string) ($_SERVER['REQUEST_URI'] ?? '/'));
-            $banner = $repo->activeForPage($pageKey);
+
+            // WHICH SITE is being served decides whose banners are eligible: the
+            // platform's own banners on the platform, a store's own banners on
+            // that store — never the platform's popup on a reseller's website.
+            // Resolving the tenant can only fail before the container is built,
+            // and the catch below then shows nothing, which is the safe side.
+            $resellerId = $container->make(\CodeVault\Reseller\CurrentReseller::class)->id();
+            $banner = $repo->activeForPage($pageKey, $resellerId);
 
             if ($banner !== null) {
                 $repo->incrementImpressions((int) $banner['id']);
@@ -247,5 +291,46 @@ if (!function_exists('csp_nonce')) {
     function csp_nonce(): string
     {
         return \CodeVault\Security\SecurityHeaders::nonce();
+    }
+}
+
+if (!function_exists('invalid_email_notice')) {
+    /**
+     * What to tell the signed-in client about their own email address, or null
+     * (Invalid Email Blocker addon — EmailSuppression::clientNotice()).
+     *
+     * Only inside the main website's client area: never on a reseller's store
+     * (store customers are not scanned, and nothing platform-side shows there),
+     * never on the sign-in / sign-up pages, and not while the client has chosen
+     * "Remind me tomorrow". Fails quiet — no container, no banner.
+     *
+     * @return array{email: string, reason: string, blocking: bool, onProfile: bool}|null
+     */
+    function invalid_email_notice(?string $path = null): ?array
+    {
+        $path = rtrim($path ?? (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH), '/');
+
+        if (!str_starts_with($path . '/', '/client/')
+            || in_array($path, ['/client/login', '/client/register', '/client/forgot-password', '/client/reset-password', '/client/logout'], true)) {
+            return null;
+        }
+
+        $clientId = (int) ($_SESSION['client_id'] ?? 0);
+
+        if ($clientId <= 0 || (int) ($_SESSION[\CodeVault\Clients\InvalidEmailNoticeController::HIDE_KEY] ?? 0) > time()) {
+            return null;
+        }
+
+        try {
+            if (current_storefront() !== null) {
+                return null;
+            }
+
+            $notice = \CodeVault\Support\App::container()->make(\CodeVault\Mail\EmailSuppression::class)->clientNotice($clientId);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $notice === null ? null : $notice + ['onProfile' => $path === '/client/account'];
     }
 }

@@ -100,12 +100,18 @@ final class CheckoutController
                         // On a store this is the price the CUSTOMER will be
                         // charged, not the catalogue figure — the shelf label
                         // and the checkout must not disagree.
+                        //
+                        // quoteProduct(), not priceFor(..., null): the latter
+                        // applied the markup but ignored the reseller's own
+                        // per-product price, so a plan priced by hand showed one
+                        // figure here and was charged another at checkout.
                         if ($store !== null && $this->retail !== null) {
-                            $prod['starting_price'] = $this->retail->priceFor(
+                            $prod['starting_price'] = $this->retail->quoteProduct(
                                 (float) $monthlyRow['price'],
-                                $this->retail->markupFor($store),
-                                null
-                            );
+                                $store,
+                                (int) $prod['id'],
+                                (string) $monthlyRow['billing_cycle']
+                            )['retail'];
                         }
                     } else {
                         $prod['starting_price'] = 0.00;
@@ -128,7 +134,17 @@ final class CheckoutController
             $groups = array_filter($groups, static fn ($g) => (int) $g['id'] === $selectedGroupId);
         }
 
-        return $this->page('cart.store', ['groups' => $groups, 'currency' => $currency], [
+        // A category page (reached from the SERVICES menu) is titled after its
+        // category, so the browser tab and the storefront's page banner name
+        // what the visitor is looking at rather than a generic "Store".
+        $pageTitle = 'Services';
+
+        if ($selectedGroupId !== null && $groups !== []) {
+            $pageTitle = (string) (array_values($groups)[0]['name'] ?? 'Services');
+        }
+
+        return $this->page('cart.store', ['groups' => $groups, 'currency' => $currency, 'selectedGroupId' => $selectedGroupId], [
+            'title' => $pageTitle,
             'canonicalUrl' => $this->seo->canonicalUrl('/store'),
             'metaDescription' => 'Browse web hosting plans, domain registration, and add-ons built for reliability and fast support.',
             'currencies' => $this->currencies->all(),
@@ -159,11 +175,16 @@ final class CheckoutController
         // customer would be billed more than the page told them.
         $store = $this->cartService->activeStore();
 
+        // Per cycle through quoteProduct() — the call CartService makes — so a
+        // reseller's own per-product price shows here exactly as it is charged.
         if ($store !== null && $this->retail !== null) {
-            $markup = $this->retail->markupFor($store);
-
             foreach ($pricing as $i => $row) {
-                $pricing[$i]['price'] = $this->retail->priceFor((float) $row['price'], $markup, null);
+                $pricing[$i]['price'] = $this->retail->quoteProduct(
+                    (float) $row['price'],
+                    $store,
+                    (int) $product['id'],
+                    (string) ($row['billing_cycle'] ?? $i)
+                )['retail'];
             }
         }
 

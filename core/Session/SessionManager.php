@@ -101,6 +101,19 @@ class SessionManager
         return $value;
     }
 
+    /**
+     * Writes the session and releases its lock. PHP's file sessions allow one
+     * request per session at a time; an endpoint that is about to wait on a
+     * remote server calls this first so the visitor's other requests are not
+     * queued behind it. Later set() calls in the same request are not saved.
+     */
+    public function release(): void
+    {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+    }
+
     public function regenerate(): void
     {
         session_regenerate_id(true);

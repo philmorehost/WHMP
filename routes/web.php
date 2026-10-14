@@ -25,14 +25,22 @@ $router->get('/', function (Request $request, array $params, Container $containe
     // prices: the one combination a white-label store must never show, because the
     // customer cannot tell they are being quoted the platform's retail.
     //
-    // The storefront itself (/store) is already tenant-aware end to end — its
-    // catalogue index, its cache key and its retail pricing all key off the
-    // resolved store — so the fix is to send the apex there rather than to
-    // reproduce any of that here.
+    // So a store gets its OWN home page (StorefrontHome): hero, domain search, a
+    // few featured plans at the store's retail prices, and its categories as
+    // compact cards. It used to redirect to /store, which printed the entire
+    // catalogue on one very long page; the full list now lives under SERVICES in
+    // the menu (/store?group_id=N). Every figure the home page shows comes from
+    // StorefrontCatalogue, which prices through the same retail engine as the cart.
     $tenant = $container->make(\CodeVault\Reseller\CurrentReseller::class);
 
     if ($tenant->get() !== null) {
-        return Response::redirect('/store');
+        return $container->make(\CodeVault\Reseller\StorefrontHome::class)->index($request);
+    }
+
+    // The main website's premium home page (Admin → Theme → Website design). The
+    // classic page below stays available as a fallback when the admin picks it.
+    if (\CodeVault\Theme\PlatformSite::premiumEnabled()) {
+        return $container->make(\CodeVault\Theme\PlatformHome::class)->index($request);
     }
 
     /** @var View $view */
@@ -102,13 +110,31 @@ $router->get('/deals', function (Request $request, array $params, Container $con
     $settings = $container->make(\CodeVault\Settings\SettingsRepository::class);
     $whatsappNumber = trim((string) $settings->get('company.whatsapp', ''));
 
+    // Deals are a SITE's deals. On a reseller's host this lists only that store's
+    // own codes and links to the store's own WhatsApp — never the platform's
+    // promotions or the platform's number, which belong to a different business.
+    $tenant = $container->make(\CodeVault\Reseller\CurrentReseller::class);
+    $store = $tenant->get();
+
+    if ($store !== null) {
+        $ownerPhone = null;
+
+        if (!\CodeVault\Reseller\ResellerChat::isConfigured($store) && (int) ($store['client_id'] ?? 0) > 0) {
+            $owner = $container->make(\CodeVault\Clients\ClientRepository::class)->find((int) $store['client_id']);
+            $ownerPhone = $owner === null ? null : (string) ($owner['phone'] ?? '');
+        }
+
+        $whatsappNumber = (string) (\CodeVault\Reseller\ResellerChat::whatsappDigitsFor($store, $ownerPhone) ?? '');
+    }
+
     $promotions = $db->select("
-        SELECT * FROM promotions 
-        WHERE status = 'active' 
-          AND (starts_at IS NULL OR starts_at <= CURRENT_DATE()) 
+        SELECT * FROM promotions
+        WHERE status = 'active'
+          AND " . ($store !== null ? 'reseller_id = ?' : 'reseller_id IS NULL') . "
+          AND (starts_at IS NULL OR starts_at <= CURRENT_DATE())
           AND (expires_at IS NULL OR expires_at >= CURRENT_DATE())
         ORDER BY id DESC
-    ");
+    ", $store !== null ? [(int) $store['id']] : []);
 
     $content = $view->render('pages.deals', [
         'promotions' => $promotions,

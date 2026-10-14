@@ -18,8 +18,10 @@
         'submitLabel' => 'Save Changes',
     ]) ?>
 
-    <div style="margin-top:var(--cv-space-4);padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);display:flex;align-items:center;gap:var(--cv-space-3);">
+    <div id="test-connection" style="margin-top:var(--cv-space-4);padding-top:var(--cv-space-4);border-top:1px solid var(--cv-border-default);display:flex;align-items:center;gap:var(--cv-space-3);flex-wrap:wrap;">
         <button type="button" class="cv-btn cv-btn--secondary" data-test-server="<?= (int) $server['id'] ?>" data-token="<?= e(csrf_token()) ?>">Test Connection</button>
         <span class="server-test-result" style="font-size:var(--cv-text-xs);"></span>
     </div>
+    <?php // Filled by app.js after a test: the provider's raw answer, secrets hidden. ?>
+    <div data-server-test-debug="<?= (int) $server['id'] ?>" style="margin-top:var(--cv-space-3);"></div>
 </div>

@@ -528,6 +528,11 @@ final class ClientServiceController
             return $this->back((int) $service['id'], null, 'Unrecognised power action.');
         }
 
+        // Nocix (the dedicated-server API) can restart a server but not start or stop it.
+        if ($action !== 'restart' && $this->kindOf($service) === self::KIND_DEDICATED) {
+            return $this->back((int) $service['id'], null, 'Dedicated servers can only be restarted from here.');
+        }
+
         return $this->performOrTicket(
             $request,
             $service,
@@ -540,8 +545,10 @@ final class ClientServiceController
     }
 
     /**
-     * Reads live VNC connection info; never invents a port. Falls back to a
-     * support ticket when the console details cannot be read from the API.
+     * The VNC console. The module first allows the CLIENT's own IP (InterServer only
+     * accepts console connections from one allowed address), then reads the host and
+     * port. It never invents a port. Falls back to a support ticket when the console
+     * cannot be set up through the API.
      */
     public function vnc(Request $request, array $params): Response
     {
@@ -557,9 +564,9 @@ final class ClientServiceController
             $client,
             'vps.vnc_requested',
             "Client requested the VNC console for service #{$service['id']} ({$service['product_name']})",
-            fn () => $this->provisioning->singleSignOn((int) $service['id']),
+            fn () => $this->provisioning->console((int) $service['id'], (string) $request->ip()),
             fn (array $result) => "VNC console details could not be retrieved from the VPS API ({$result['message']}). Please provide the connection details manually.",
-            fn (array $result) => 'VNC console ready — connect with a VNC client to ' . (string) ($result['url'] ?? '')
+            fn (array $result) => (string) $result['message']
         );
     }
 
@@ -587,11 +594,11 @@ final class ClientServiceController
     }
 
     /**
-     * Restore overwrites the VPS disk and InterServer re-checks the MyAdmin
-     * account password on every call — a credential WHMP does not hold. So
-     * this opens a support ticket naming the chosen snapshot rather than
-     * firing a destructive call that would be rejected, and a human
-     * confirms before any disk is overwritten.
+     * Restore from one of the VPS's own backups. This overwrites the disk, so the
+     * client must tick the confirmation, and only a backup this VPS actually lists
+     * is accepted. InterServer re-checks its account password on restore. When that
+     * is saved on the server record the restore runs straight away; otherwise, or if
+     * the API refuses, it becomes a support ticket naming the backup.
      */
     public function restore(Request $request, array $params): Response
     {
@@ -601,30 +608,44 @@ final class ClientServiceController
             return $denied;
         }
 
+        $id = (int) $service['id'];
         $backupRef = trim((string) $request->input('backup', ''));
 
         if ($backupRef === '') {
-            return $this->back((int) $service['id'], null, 'Choose which snapshot to restore from.');
+            return $this->back($id, null, 'Choose which snapshot to restore from.');
         }
 
-        return $this->openRequestTicket(
+        if (!$request->input('confirm')) {
+            return $this->back($id, null, 'Tick the box to confirm the restore: it overwrites everything on the server.');
+        }
+
+        $listed = $this->provisioning->listBackups($id);
+
+        if ($listed['success'] && !in_array($backupRef, array_column($listed['backups'] ?? [], 'ref'), true)) {
+            return $this->back($id, null, 'That snapshot is not available for this server any more. Reload the page and choose again.');
+        }
+
+        return $this->performOrTicket(
             $request,
             $service,
             $client,
             'vps.restore_requested',
-            "Restore request for service #{$service['id']} ({$service['product_name']})",
-            "The client has requested a restore of service #{$service['id']} ({$service['product_name']}).\n\n"
-                . "Snapshot: {$backupRef}\n"
-                . 'Hostname: ' . ($service['domain'] ?: $service['hostname'] ?: 'not set') . "\n\n"
-                . 'This overwrites the VPS disk and requires the MyAdmin account password, so it needs an operator to run it.',
-            'Restore requested. Our team will confirm before anything is overwritten.'
+            "Restore request for service #{$id} ({$service['product_name']})",
+            fn () => $this->provisioning->restore($id, $backupRef),
+            fn (array $result) => "The client asked to restore service #{$id} ({$service['product_name']}) from snapshot {$backupRef}, "
+                . "but it could not be run through the VPS API ({$result['message']}).\n\n"
+                . 'Hostname: ' . ($service['domain'] ?: $service['hostname'] ?: 'not set') . "\n"
+                . 'This overwrites the VPS disk. Please run the restore manually.'
         );
     }
 
     /**
-     * Reinstall wipes the disk with no rollback and, like restore, needs the
-     * MyAdmin password InterServer re-checks per call. Routed to a ticket
-     * for the same reason.
+     * OS reinstall. It wipes the disk with no rollback, so the client must type
+     * REINSTALL. They also choose the new root password: InterServer emails a
+     * generated one to the ACCOUNT holder (us), never to the client, so without
+     * their own password the client would be locked out of the fresh machine. On
+     * success the new password is also saved on the service record. Without a saved account password, or if the API refuses, the
+     * request becomes a support ticket (the password is not copied into it).
      */
     public function reinstall(Request $request, array $params): Response
     {
@@ -634,24 +655,160 @@ final class ClientServiceController
             return $denied;
         }
 
+        $id = (int) $service['id'];
         $template = trim((string) $request->input('template', ''));
+        $rootPassword = (string) $request->input('root_password', '');
 
         if ($template === '') {
-            return $this->back((int) $service['id'], null, 'Choose an operating system to reinstall.');
+            return $this->back($id, null, 'Choose an operating system to reinstall.');
         }
 
-        return $this->openRequestTicket(
+        if (strtoupper(trim((string) $request->input('confirm', ''))) !== 'REINSTALL') {
+            return $this->back($id, null, 'Type REINSTALL to confirm: reinstalling erases everything on the server.');
+        }
+
+        if ($this->kindOf($service) === self::KIND_DEDICATED) {
+            return $this->reloadDedicated($request, $service, $client, $template);
+        }
+
+        if ($passwordProblem = self::rootPasswordProblem($rootPassword)) {
+            return $this->back($id, null, $passwordProblem);
+        }
+
+        $templates = $this->provisioning->osTemplates($id);
+
+        if ($templates['success'] && !in_array($template, array_column($templates['templates'] ?? [], 'file'), true)) {
+            return $this->back($id, null, 'That operating system is not available for this server. Reload the page and choose again.');
+        }
+
+        return $this->performOrTicket(
             $request,
             $service,
             $client,
             'vps.reinstall_requested',
-            "OS reinstall request for service #{$service['id']} ({$service['product_name']})",
-            "The client has requested an OS reinstall of service #{$service['id']} ({$service['product_name']}).\n\n"
-                . "Requested template: {$template}\n"
-                . 'Hostname: ' . ($service['domain'] ?: $service['hostname'] ?: 'not set') . "\n\n"
-                . 'This destroys all data on the server with no rollback and requires the MyAdmin account password, so it needs an operator to run it.',
-            'OS reinstall requested. Our team will confirm with you before any data is destroyed.'
+            "OS reinstall request for service #{$id} ({$service['product_name']})",
+            function () use ($id, $template, $rootPassword): array {
+                $result = $this->provisioning->reinstall($id, $template, '', $rootPassword);
+
+                if ($result['success']) {
+                    $this->services->updateDetails($id, ['password' => $rootPassword]);
+                }
+
+                return $result;
+            },
+            fn (array $result) => "The client asked to reinstall service #{$id} ({$service['product_name']}) with {$template}, "
+                . "but it could not be run through the VPS API ({$result['message']}).\n\n"
+                . 'Hostname: ' . ($service['domain'] ?: $service['hostname'] ?: 'not set') . "\n"
+                . 'This destroys all data on the server. Confirm with the client, then reinstall manually and send them the new root password.',
+            fn (array $result) => 'OS reinstall started (' . $template . '). It takes a few minutes. Log in as root with the new password you just chose.'
         );
+    }
+
+    /**
+     * OS reload on a dedicated server (Nocix). Nocix takes no root password: it sets
+     * the login itself and keeps it in its portal, which the client reveals with
+     * "Show login details" once the reload has completed. A reload already in
+     * progress is not started twice.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $client
+     */
+    private function reloadDedicated(Request $request, array $service, array $client, string $template): Response
+    {
+        $id = (int) $service['id'];
+        $templates = $this->provisioning->osTemplates($id);
+
+        if ($templates['success'] && !in_array($template, array_column($templates['templates'] ?? [], 'file'), true)) {
+            return $this->back($id, null, 'That operating system is not available for this server. Reload the page and choose again.');
+        }
+
+        $status = $this->provisioning->reloadStatus($id);
+
+        if ($status['success'] && strcasecmp((string) ($status['status'] ?? ''), 'Pending') === 0) {
+            return $this->back($id, null, 'An OS reload is already in progress on this server. Wait for it to finish.');
+        }
+
+        return $this->performOrTicket(
+            $request,
+            $service,
+            $client,
+            'server.reload_requested',
+            "OS reload request for service #{$id} ({$service['product_name']})",
+            fn () => $this->provisioning->reinstall($id, $template),
+            fn (array $result) => "The client asked to reload the OS of dedicated server #{$id} ({$service['product_name']}) with {$template}, "
+                . "but it could not be run through the Nocix API ({$result['message']}).\n\n"
+                . 'Primary IP: ' . ((string) ($service['dedicated_ip'] ?? '') ?: 'not set') . "\n"
+                . 'This erases the server. Confirm with the client, reload it in the Nocix portal, then send them the new login.',
+            fn (array $result) => "OS reload started ({$template}). It can take a while to finish. "
+                . 'When the status below says Completed, use Show login details to get the new login.'
+        );
+    }
+
+    /**
+     * Reveal the server login Nocix stores, after an OS reload has completed (the
+     * reload sets a new one, and Nocix emails it to the account holder, not to the
+     * client). Shown once on this response, sent with no-store, and never logged.
+     */
+    public function serverCredentials(Request $request, array $params): Response
+    {
+        [$service, $client, $denied] = $this->ownedService($params);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $id = (int) $service['id'];
+
+        if ($this->kindOf($service) !== self::KIND_DEDICATED || ($service['status'] ?? '') !== 'active') {
+            return $this->back($id, null, 'Login details are only available for an active dedicated server.');
+        }
+
+        $status = $this->provisioning->reloadStatus($id);
+
+        if (!$status['success'] || strcasecmp((string) ($status['status'] ?? ''), 'Completed') !== 0) {
+            return $this->back($id, null, 'The new login can be shown once an OS reload has completed.');
+        }
+
+        $credentials = $this->provisioning->serverCredentials($id);
+
+        $this->activity->log(
+            'client',
+            (int) $client['id'],
+            'server.credentials_viewed',
+            'service',
+            $id,
+            sprintf('Client viewed the server login for service #%d: %s', $id, $credentials['success'] ? 'shown' : 'unavailable (' . $credentials['message'] . ')'),
+            $request->ip()
+        );
+
+        if (!$credentials['success']) {
+            return $this->back($id, null, 'The login could not be read right now (' . $credentials['message'] . '). Please open a support ticket.');
+        }
+
+        return $this->renderService($service, $client, null, null, [
+            'username' => (string) ($credentials['username'] ?? ''),
+            'password' => (string) ($credentials['password'] ?? ''),
+        ])
+            ->withHeader('Cache-Control', 'no-store, max-age=0')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** Why a chosen root password is not acceptable, or null when it is. */
+    public static function rootPasswordProblem(string $password): ?string
+    {
+        if (strlen($password) < 10) {
+            return 'Choose a new root password of at least 10 characters.';
+        }
+
+        if (preg_match('/[A-Za-z]/', $password) !== 1 || preg_match('/\d/', $password) !== 1) {
+            return 'The new root password needs both letters and numbers.';
+        }
+
+        if (strlen($password) > 64 || preg_match('/[\s\'"\\\\]/', $password) === 1) {
+            return 'The new root password must be at most 64 characters, without spaces, quotes or backslashes.';
+        }
+
+        return null;
     }
 
     /**
@@ -925,6 +1082,19 @@ final class ClientServiceController
             );
         }
 
+        // The provider answered and explained why it will not do this (the VPS is not
+        // running, backups are disabled for its type, the snapshot limit is reached).
+        // Staff cannot make that succeed either, so the client is told why instead of
+        // a ticket being opened. The provider is not named: reseller stores are
+        // white-labelled.
+        if (!empty($result['refused']) && trim((string) ($result['providerMessage'] ?? '')) !== '') {
+            return $this->back(
+                (int) $service['id'],
+                null,
+                'The server could not do this right now: ' . trim((string) $result['providerMessage'])
+            );
+        }
+
         return $this->openRequestTicket(
             $request,
             $service,
@@ -997,7 +1167,7 @@ final class ClientServiceController
      * @param array<string, mixed> $service
      * @param array<string, mixed> $client
      */
-    private function renderService(array $service, array $client, ?string $message, ?string $error): Response
+    private function renderService(array $service, array $client, ?string $message, ?string $error, ?array $serverLogin = null): Response
     {
         $id = (int) $service['id'];
         $kind = $this->kindOf($service);
@@ -1010,9 +1180,15 @@ final class ClientServiceController
         $backups = [];
         $osTemplates = [];
 
+        // Whether the VPS answers through the provider API at all. When it does not
+        // (not linked to a machine yet, or the API is down), the page says so, so the
+        // buttons below are not mistaken for live controls.
+        $vpsControl = null;
+
         if ($isActive && $kind === self::KIND_VPS) {
             $info = $this->provisioning->remoteInfo($id);
             $remote = $info['success'] ? ($info['info'] ?? []) : [];
+            $vpsControl = ['live' => (bool) $info['success']];
 
             $ptr = $this->provisioning->reverseDnsEntries($id);
             $reverseDns = $ptr['success'] ? ($ptr['ips'] ?? []) : [];
@@ -1024,6 +1200,23 @@ final class ClientServiceController
             $osTemplates = $templates['success'] ? ($templates['templates'] ?? []) : [];
         }
 
+        // Dedicated (Nocix): restart and OS reload. "Live" means WHMP knows which
+        // Nocix service this is (linked, numeric username, or matched by IP).
+        $dedicatedControl = null;
+
+        if ($isActive && $kind === self::KIND_DEDICATED) {
+            $link = $this->provisioning->remoteLink($id);
+            $live = is_array($link) && ($link['ref'] ?? null) !== null;
+            $templates = $live ? $this->provisioning->osTemplates($id) : ['success' => false];
+            $osTemplates = $templates['success'] ? ($templates['templates'] ?? []) : [];
+            $reload = $live ? $this->provisioning->reloadStatus($id) : ['success' => false];
+
+            $dedicatedControl = [
+                'live' => $live,
+                'reloadStatus' => $reload['success'] ? ($reload['status'] ?? null) : null,
+            ];
+        }
+
         return $this->page('billing.client-service-show', [
             'service' => $service,
             'kind' => $kind,
@@ -1032,8 +1225,12 @@ final class ClientServiceController
             'reverseDns' => $reverseDns,
             'backups' => $backups,
             'osTemplates' => $osTemplates,
+            'vpsControl' => $vpsControl,
+            'dedicatedControl' => $dedicatedControl,
+            'serverLogin' => $serverLogin,
             'cpanelToolsAvailable' => $this->isOnCpanelServer($service),
             'domainChangerAvailable' => $this->isOnCpanelServer($service) && $this->addons->isActive(self::DOMAIN_CHANGER_SLUG),
+            'usernameChanger' => $this->usernameChangerFor($id, $client),
             'currency' => $currency,
             // services.amount is written once at checkout via
             // CheckoutService::buildOrder(), which locks currency through
@@ -1059,6 +1256,26 @@ final class ClientServiceController
      * @param array<string, mixed> $params
      * @return array{0: array<string, mixed>|null, 1: array<string, mixed>|null, 2: Response|null}
      */
+    /**
+     * The cPanel Username Changer banner/modal data, or null when it must not
+     * show (add-on off, not a cPanel service, policy says no). Resolved from the
+     * container rather than injected so this controller's constructor — built
+     * by hand in tests — is unchanged, and any failure only hides the banner.
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>|null
+     */
+    private function usernameChangerFor(int $serviceId, array $client): ?array
+    {
+        try {
+            return \CodeVault\Support\App::container()
+                ->make(\CodeVault\UsernameChanger\ClientUsernameController::class)
+                ->bannerFor($serviceId, $client);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     private function ownedService(array $params): array
     {
         $client = $this->guard->currentClient();

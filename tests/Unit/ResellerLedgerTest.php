@@ -302,7 +302,7 @@ final class ResellerLedgerTest extends DatabaseTestCase
 
     public function test_a_receipt_inside_its_holding_period_counts_but_cannot_be_withdrawn(): void
     {
-        $this->settings->set('reseller.payout_minimum', '0.00');
+        $this->settings->set('reseller.payout_minimum_amount', '0.00');
         $order = $this->storeOrder(120.0, '2026-01-10 09:00:00');
         $this->service->accrueStoreReceipt($order['invoiceId'], '2026-01-10 09:00:00');
 
@@ -316,7 +316,7 @@ final class ResellerLedgerTest extends DatabaseTestCase
 
     public function test_a_receipt_becomes_withdrawable_after_the_holding_period(): void
     {
-        $this->settings->set('reseller.payout_minimum', '0.00');
+        $this->settings->set('reseller.payout_minimum_amount', '0.00');
         $order = $this->storeOrder(120.0, '2026-01-10 09:00:00');
         $this->service->accrueStoreReceipt($order['invoiceId'], '2026-01-10 09:00:00');
 
@@ -340,7 +340,7 @@ final class ResellerLedgerTest extends DatabaseTestCase
     public function test_a_zero_day_holding_period_makes_funds_withdrawable_at_once(): void
     {
         $this->settings->set('reseller.payout_holding_days', '0');
-        $this->settings->set('reseller.payout_minimum', '0.00');
+        $this->settings->set('reseller.payout_minimum_amount', '0.00');
         $order = $this->storeOrder(120.0, '2026-01-10 09:00:00');
         $this->service->accrueStoreReceipt($order['invoiceId'], '2026-01-10 09:00:00');
 
@@ -351,7 +351,7 @@ final class ResellerLedgerTest extends DatabaseTestCase
 
     public function test_withdrawing_needs_the_configured_minimum(): void
     {
-        $this->settings->set('reseller.payout_minimum', '50.00');
+        $this->settings->set('reseller.payout_minimum_amount', '50.00');
 
         // Below the minimum: withdrawable, but not yet withdrawable *enough*.
         $small = $this->storeOrder(20.0, '2026-01-10 09:00:00');
@@ -367,50 +367,75 @@ final class ResellerLedgerTest extends DatabaseTestCase
         $this->assertTrue($this->service->accountFor($this->storeId, '2026-06-01 00:00:00')['can_withdraw']);
     }
 
-    public function test_a_currency_specific_minimum_is_compared_in_base_units(): void
+    public function test_the_default_minimum_is_ten_us_dollars(): void
     {
-        $this->settings->set('reseller.payout_minimum', '50.00');
-        $this->settings->set('reseller.payout_holding_days', '0');
-        $this->settings->set('reseller.payout_minimums', '{"NGN":"50000.00"}');
+        // Migration 0205 moved the threshold from $50 to $10, anchored in USD.
+        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+
+        $this->assertSame('USD', $this->service->payoutMinimumCurrency());
+        $this->assertEqualsWithDelta(10.0, $this->service->payoutMinimum(), 0.001);
+        $this->assertEqualsWithDelta(10.0, (float) $account['minimum'], 0.001);
+        $this->assertEqualsWithDelta(10.0, (float) $account['minimum_base'], 0.001);
+        $this->assertNull($this->settings->get('reseller.payout_minimum'), 'the old base-unit key is retired');
+    }
+
+    public function test_another_currency_follows_the_live_exchange_rate_by_default(): void
+    {
+        $this->settings->set('reseller.payout_minimum_amount', '10.00');
+        $this->settings->set('reseller.payout_minimum_rates', '{}');
         $this->db->update('UPDATE clients SET currency_id = ? WHERE id = ?', [$this->ngnId, $this->resellerClientId]);
 
-        $sale = $this->storeOrder(40.0, '2026-01-10 09:00:00');
+        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+
+        // $10 x 1490 = NGN 14,900, which is still $10 in base units.
+        $this->assertEqualsWithDelta(14900.0, (float) $account['minimum'], 0.001);
+        $this->assertEqualsWithDelta(10.0, (float) $account['minimum_base'], 0.001);
+    }
+
+    public function test_an_admin_set_conversion_rate_drives_that_currencys_minimum(): void
+    {
+        $this->settings->set('reseller.payout_minimum_amount', '10.00');
+        $this->settings->set('reseller.payout_holding_days', '0');
+        $this->settings->set('reseller.payout_minimum_rates', '{"NGN":"1600"}');
+        $this->db->update('UPDATE clients SET currency_id = ? WHERE id = ?', [$this->ngnId, $this->resellerClientId]);
+
+        $sale = $this->storeOrder(10.5, '2026-01-10 09:00:00');
         $this->service->accrueStoreReceipt($sale['invoiceId'], '2026-01-10 09:00:00');
 
         $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
-        $this->assertEqualsWithDelta(50000.0, (float) $account['minimum'], 0.001);
-        $this->assertEqualsWithDelta(50000.0 / 1490.0, (float) $account['minimum_base'], 0.000001);
-        $this->assertTrue($account['can_withdraw'], '40 base units exceed the NGN 50,000 minimum at the current rate');
 
-        // Raising only the NGN threshold beyond the same 40-unit balance must
-        // refuse the payout without changing what the ledger says is owed.
-        $this->settings->set('reseller.payout_minimums', '{"NGN":"65000.00"}');
+        // The fixed payout rate sets the nominal minimum (10 x 1600)...
+        $this->assertEqualsWithDelta(16000.0, (float) $account['minimum'], 0.001);
+        // ...and the balance is compared in base units at today's exchange rate.
+        $this->assertEqualsWithDelta(16000.0 / 1490.0, (float) $account['minimum_base'], 0.000001);
+        $this->assertFalse($account['can_withdraw'], '10.50 base units is below NGN 16,000 at 1490');
+
+        $this->settings->set('reseller.payout_minimum_rates', '{}');
         $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
-        $this->assertFalse($account['can_withdraw']);
-        $this->assertEqualsWithDelta(40.0, (float) $account['balance_base'], 0.001);
+        $this->assertTrue($account['can_withdraw'], 'at the live rate the minimum is exactly $10, which 10.50 clears');
     }
 
-    public function test_an_unconfigured_currency_keeps_the_legacy_base_minimum(): void
+    public function test_changing_the_one_amount_moves_every_currency(): void
     {
-        $this->settings->set('reseller.payout_minimum', '50.00');
-        $this->settings->set('reseller.payout_minimums', '{"NGN":"50000.00"}');
+        $this->settings->set('reseller.payout_minimum_amount', '25.00');
+        $this->settings->set('reseller.payout_minimum_rates', '{}');
 
-        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
+        $rows = [];
+        foreach ($this->service->payoutMinimums() as $row) {
+            $rows[$row['currency_code']] = $row;
+        }
 
-        $this->assertEqualsWithDelta(50.0, (float) $account['minimum_base'], 0.001);
-        $this->assertEqualsWithDelta(50.0, (float) $account['minimum'], 0.001);
+        $this->assertEqualsWithDelta(25.0, (float) $rows['USD']['minimum'], 0.001);
+        $this->assertTrue($rows['USD']['anchor']);
+        $this->assertEqualsWithDelta(37250.0, (float) $rows['NGN']['minimum'], 0.001);
+        $this->assertFalse($rows['NGN']['custom']);
     }
 
-    public function test_the_legacy_minimum_is_converted_for_an_unconfigured_foreign_currency(): void
+    public function test_an_unknown_anchor_currency_falls_back_to_the_base_currency(): void
     {
-        $this->settings->set('reseller.payout_minimum', '50.00');
-        $this->settings->set('reseller.payout_minimums', '{}');
-        $this->db->update('UPDATE clients SET currency_id = ? WHERE id = ?', [$this->ngnId, $this->resellerClientId]);
+        $this->settings->set('reseller.payout_minimum_currency', 'ZZZ');
 
-        $account = $this->service->accountFor($this->storeId, '2026-01-10 09:00:00');
-
-        $this->assertEqualsWithDelta(50.0, (float) $account['minimum_base'], 0.001);
-        $this->assertEqualsWithDelta(74500.0, (float) $account['minimum'], 0.001);
+        $this->assertSame('USD', $this->service->payoutMinimumCurrency());
     }
 
     // ---------------------------------------------------------------- refunds

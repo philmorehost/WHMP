@@ -26,5 +26,6 @@ $router->post('/client/services/{id}/vnc', [ClientServiceController::class, 'vnc
 $router->post('/client/services/{id}/backup', [ClientServiceController::class, 'backup']);
 $router->post('/client/services/{id}/restore', [ClientServiceController::class, 'restore']);
 $router->post('/client/services/{id}/reinstall', [ClientServiceController::class, 'reinstall']);
+$router->post('/client/services/{id}/server-credentials', [ClientServiceController::class, 'serverCredentials']);
 $router->post('/client/services/{id}/rdns', [ClientServiceController::class, 'rdns']);
 $router->post('/client/services/{id}/change-domain', [ClientServiceController::class, 'changeDomain']);

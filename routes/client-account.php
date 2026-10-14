@@ -16,6 +16,8 @@ $router->post('/client/payment-methods/{id}/delete', [PaymentMethodController::c
 
 $router->get('/client/account', [ClientAccountController::class, 'profile']);
 $router->post('/client/account', [ClientAccountController::class, 'updateProfile']);
+// "Remind me tomorrow" on the Invalid Email Blocker's update-your-email banner.
+$router->post('/client/email-notice/hide', [\CodeVault\Clients\InvalidEmailNoticeController::class, 'hide']);
 $router->post('/client/account/verify-vat', [ClientAccountController::class, 'verifyVat']);
 $router->post('/client/account/password', [ClientAccountController::class, 'updatePassword']);
 $router->post('/client/account/security-pin', [ClientAccountController::class, 'updateSecurityPin']);

@@ -282,6 +282,38 @@ class Kernel
         // answer; null on the platform's own host.
         $this->container->singleton(CurrentReseller::class, fn () => new CurrentReseller());
 
+        // "Sign in with Google" for whichever site is being served: the platform's
+        // own Google app on the main website, a reseller's own app on their store.
+        // A short timeout — someone is waiting on the sign-in page.
+        $this->container->bind(\CodeVault\Clients\GoogleSignIn::class, fn (Container $c) => new \CodeVault\Clients\GoogleSignIn(
+            $c->make(SettingsRepository::class),
+            $c->make(Config::class),
+            $c->make(CurrentReseller::class),
+            new \CodeVault\Security\SecretBox($c->make(Config::class)),
+            new CurlHttpClient(timeoutSeconds: 20)
+        ));
+
+        // Cloudflare add-on: the token is SecretBox-encrypted, and API calls get a
+        // short timeout — a client may be waiting on the page.
+        $this->container->bind(\CodeVault\Cloudflare\CloudflareSettings::class, fn (Container $c) => new \CodeVault\Cloudflare\CloudflareSettings(
+            $c->make(SettingsRepository::class),
+            new \CodeVault\Security\SecretBox($c->make(Config::class)),
+            new CurlHttpClient(timeoutSeconds: 20)
+        ));
+
+        $this->container->bind(\CodeVault\Cloudflare\NameserverGateway::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\DomainServiceNameservers::class));
+        $this->container->bind(\CodeVault\Cloudflare\OriginCertificateInstaller::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\CpanelOriginInstaller::class));
+        $this->container->bind(\CodeVault\Cloudflare\OriginCertificateKeyGenerator::class, fn (Container $c) => $c->make(\CodeVault\Cloudflare\OpenSslOriginCertificateKeyGenerator::class));
+
+        // What a storefront sells, for its SERVICES menu, footer and home page.
+        // A singleton so the header, the page and the footer of one request
+        // share one set of catalogue queries.
+        $this->container->singleton(\CodeVault\Reseller\StorefrontCatalogue::class, fn (Container $c) => new \CodeVault\Reseller\StorefrontCatalogue(
+            $c->make(Database::class),
+            $c->make(CurrentReseller::class),
+            $c->make(ResellerRetailPricing::class)
+        ));
+
         $this->container->singleton(Database::class, function (Container $c) {
             /** @var Config $config */
             $config = $c->make(Config::class);
@@ -301,6 +333,13 @@ class Kernel
 
         $this->container->singleton(Migrator::class, function (Container $c) use ($basePath) {
             return new Migrator($c->make(Database::class), $basePath . '/database/migrations');
+        });
+
+        // Adds whatever the live database is missing compared with database/schema.php
+        // (generated from the migrations) — see SchemaReconciler for why the Migrator
+        // alone cannot guarantee that.
+        $this->container->singleton(\CodeVault\Database\Schema\SchemaReconciler::class, function (Container $c) use ($basePath) {
+            return new \CodeVault\Database\Schema\SchemaReconciler($c->make(Database::class), $basePath . '/database/schema.php');
         });
 
         $this->container->singleton(LocalizationService::class, function (Container $c) use ($basePath) {
@@ -675,6 +714,12 @@ class Kernel
                 $c->make(\CodeVault\Settings\SettingsRepository::class),
                 $c->make(\CodeVault\Config::class),
                 $c->make(\CodeVault\Notifications\ClientNotificationRepository::class),
+                // Decides, per message, whether it is written as the platform or as
+                // the reseller store whose customer it is for (white-label mail).
+                $c->make(\CodeVault\Reseller\StoreMailBranding::class),
+                // Invalid Email Blocker addon: skips addresses Email Validation marked
+                // invalid, for every email type. A no-op until the addon is activated.
+                $c->make(\CodeVault\Mail\EmailSuppression::class),
             );
         });
 
@@ -704,7 +749,13 @@ class Kernel
         // create() also re-verifies via accountsummary after a dropped
         // connection, so a slow-but-successful create reports success.
         $this->container->singleton(CpanelProvisioningModule::class, function (Container $c) {
-            return new CpanelProvisioningModule(new CurlHttpClient(timeoutSeconds: 300, verifySsl: false));
+            // The second client is for verify_new_username, which a person
+            // waits on while typing in the username changer: 6s, so a hung
+            // WHM reports "couldn't reach the server" instead of a spinner.
+            return new CpanelProvisioningModule(
+                new CurlHttpClient(timeoutSeconds: 300, verifySsl: false),
+                new CurlHttpClient(timeoutSeconds: 6, verifySsl: false)
+            );
         });
 
         $this->container->singleton(\CodeVault\CpanelTools\CpanelUapiClient::class, function (Container $c) {
@@ -715,20 +766,40 @@ class Kernel
             return new CyberPanelProvisioningModule($c->make(HttpClient::class));
         });
 
-        $this->container->singleton(InterServerVpsProvisioningModule::class, function (Container $c) {
-            return new InterServerVpsProvisioningModule($c->make(HttpClient::class));
+        // InterServer and Nocix sit behind Cloudflare. When it blocks this server's IP,
+        // PROVIDER_HTTP_PROXY sends just these calls out through another server, and
+        // PROVIDER_FORCE_IPV4=1 avoids an IPv6 range Cloudflare distrusts, and
+        // PROVIDER_HTTP_USER_AGENT sends the User-Agent a provider asks for.
+        $providerHttp = function (Container $c): HttpClient {
+            $config = $c->make(Config::class);
+            $proxy = trim((string) $config->env('PROVIDER_HTTP_PROXY', ''));
+            $ipv4 = in_array(strtolower(trim((string) $config->env('PROVIDER_FORCE_IPV4', ''))), ['1', 'true', 'yes', 'on'], true);
+            $agent = trim((string) $config->env('PROVIDER_HTTP_USER_AGENT', ''));
+
+            return $proxy === '' && !$ipv4 && $agent === ''
+                ? $c->make(HttpClient::class)
+                : new CurlHttpClient(
+                    timeoutSeconds: 120,
+                    proxy: $proxy !== '' ? $proxy : null,
+                    forceIpv4: $ipv4,
+                    userAgent: $agent !== '' ? $agent : null
+                );
+        };
+
+        $this->container->singleton(InterServerVpsProvisioningModule::class, function (Container $c) use ($providerHttp) {
+            return new InterServerVpsProvisioningModule($providerHttp($c));
         });
 
-        $this->container->singleton(InterServerDedicatedProvisioningModule::class, function (Container $c) {
-            return new InterServerDedicatedProvisioningModule($c->make(HttpClient::class));
+        $this->container->singleton(InterServerDedicatedProvisioningModule::class, function (Container $c) use ($providerHttp) {
+            return new InterServerDedicatedProvisioningModule($providerHttp($c));
         });
 
         $this->container->singleton(ResellerClubEmailProvisioningModule::class, function (Container $c) {
             return new ResellerClubEmailProvisioningModule($c->make(HttpClient::class), $c->make(RegistrarRepository::class));
         });
 
-        $this->container->singleton(NocixDedicatedServerModule::class, function (Container $c) {
-            return new NocixDedicatedServerModule($c->make(HttpClient::class));
+        $this->container->singleton(NocixDedicatedServerModule::class, function (Container $c) use ($providerHttp) {
+            return new NocixDedicatedServerModule($providerHttp($c));
         });
 
         $this->container->singleton(LocalRegistrarModule::class, fn () => new LocalRegistrarModule(
@@ -801,6 +872,9 @@ class Kernel
             $manager->register(AddonModule::class, 'system-diagnostics', $c->make(SystemDiagnosticsAddon::class));
             $manager->register(AddonModule::class, 'domain-changer', $c->make(DomainChangerAddon::class));
             $manager->register(AddonModule::class, 'tawk-to', $c->make(TawkToAddon::class));
+            $manager->register(AddonModule::class, 'cpanel-username-changer', $c->make(\CodeVault\UsernameChanger\UsernameChangerAddon::class));
+            $manager->register(AddonModule::class, \CodeVault\Mail\EmailSuppression::SLUG, $c->make(\CodeVault\Modules\Addons\InvalidEmailBlockerAddon::class));
+            $manager->register(AddonModule::class, \CodeVault\Cloudflare\CloudflareCronJob::SLUG, $c->make(\CodeVault\Cloudflare\CloudflareAddon::class));
             $manager->register(WidgetModule::class, 'top-clients', $c->make(TopClientsWidget::class));
             $manager->register(WidgetModule::class, 'ai-insights', $c->make(AiInsightsWidget::class));
             $manager->register(ReportModule::class, 'service-churn', $c->make(ServiceChurnReport::class));
@@ -872,12 +946,27 @@ class Kernel
         ));
 
         $this->container->singleton(SystemDiagnosticsAddon::class, function (Container $c) use ($basePath) {
-            return new SystemDiagnosticsAddon($c->make(Database::class), $c->make(Config::class), $basePath, $c->make(Migrator::class));
+            return new SystemDiagnosticsAddon($c->make(Database::class), $c->make(Config::class), $basePath, $c->make(Migrator::class), $c->make(\CodeVault\Database\Schema\SchemaReconciler::class));
         });
 
         $this->container->singleton(DomainChangerAddon::class, function (Container $c) {
             return new DomainChangerAddon($c->make(Database::class));
         });
+
+        // cPanel Username Changer — every collaborator shared per request, so the
+        // settings memo and the resolver's lookups are built once.
+        foreach ([
+            \CodeVault\UsernameChanger\UsernameChangeRepository::class,
+            \CodeVault\UsernameChanger\UsernameChangerSettings::class,
+            \CodeVault\UsernameChanger\PolicyResolver::class,
+            \CodeVault\UsernameChanger\UsernameAvailability::class,
+            \CodeVault\UsernameChanger\UsernameChangeNotifier::class,
+            \CodeVault\UsernameChanger\UsernameChangeService::class,
+            \CodeVault\UsernameChanger\UsernameChangeExecutor::class,
+            \CodeVault\UsernameChanger\UsernameChangerAddon::class,
+        ] as $usernameChangerClass) {
+            $this->container->singleton($usernameChangerClass);
+        }
 
         $this->container->singleton(TawkToAddon::class, function (Container $c) {
             return new TawkToAddon($c->make(AddonModuleRepository::class));
@@ -1081,6 +1170,38 @@ class Kernel
         //
         // Wrapped like every listener here — the refund has already happened by the
         // time this runs, so a bookkeeping failure must not surface as an error.
+        // cPanel Username Changer: a paid fee invoice releases its request to the
+        // rename queue and credits the resellers' resale margins; a refund takes the
+        // margins back. Registered whether or not the add-on is active, so an invoice
+        // raised while it was on is still honoured if it is paid after it is switched
+        // off. One indexed lookup by invoice_id — nothing at all for other invoices.
+        $hooks->register(HookPoints::INVOICE_PAID, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $this->container->make(\CodeVault\UsernameChanger\UsernameChangeService::class)->invoicePaid((int) $invoiceId);
+            } catch (\Throwable) {
+                // Cron reconciles awaiting_payment requests against invoice status.
+            }
+        });
+
+        $hooks->register(HookPoints::INVOICE_REFUNDED, function (array $payload) {
+            $invoiceId = $payload['invoiceId'] ?? null;
+
+            if ($invoiceId === null) {
+                return;
+            }
+
+            try {
+                $this->container->make(\CodeVault\UsernameChanger\UsernameChangeService::class)->invoiceRefunded((int) $invoiceId);
+            } catch (\Throwable) {
+            }
+        });
+
         $hooks->register(HookPoints::INVOICE_REFUNDED, function (array $payload) {
             $invoiceId = $payload['invoiceId'] ?? null;
 
@@ -1256,6 +1377,9 @@ class Kernel
                 $c->make(TicketService::class),
                 $c->make(ClientRepository::class),
                 $c->make(BlockedEmailSenderRepository::class),
+                // MailPipingJob uses the recipient address to attribute inbound
+                // tickets to the correct reseller store (or the platform).
+                $c->make(ResellerStoreRepository::class),
             );
         });
 
@@ -1573,7 +1697,15 @@ class Kernel
                 }
             }
 
-            $dispatcher->sendTemplate('ticket_opened', $ticket['email'], [
+            // The ticket's own store decides who the customer hears from — not the site
+            // the ticket happened to be opened on (mail piping runs from cron, with no
+            // site at all) and not a guess from the address (a guest has no account).
+            $ticketStore = !empty($ticket['reseller_id'])
+                ? $this->container->make(ResellerStoreRepository::class)->find((int) $ticket['reseller_id'])
+                : null;
+            $customerMail = $ticketStore !== null ? $dispatcher->onBehalfOfStore($ticketStore) : $dispatcher;
+
+            $customerMail->sendTemplate('ticket_opened', $ticket['email'], [
                 'ticket_id' => (string) $ticketId,
                 'ticket_subject' => $ticket['subject'],
                 'department_name' => $ticket['department_name'],
@@ -1585,7 +1717,7 @@ class Kernel
             $admins = $this->container->make(AdminRepository::class)->all();
             foreach ($admins as $admin) {
                 if (!empty($admin['email'])) {
-                    $dispatcher->sendTemplate('admin_ticket_opened', $admin['email'], [
+                    $dispatcher->onBehalfOfPlatform()->sendTemplate('admin_ticket_opened', $admin['email'], [
                         'ticket_id' => (string) $ticketId,
                         'ticket_subject' => $ticket['subject'],
                         'department_name' => $ticket['department_name'],
@@ -1648,11 +1780,13 @@ class Kernel
                 $store = $this->container->make(ResellerStoreRepository::class)->find((int) $ticket['reseller_id']);
             }
 
-            $identity = ResellerMailIdentity::forStore($store, $platformName);
-
             // Customer-facing mail is signed with the STORE's name; staff mail below is
-            // signed with ours, because the admins reading it are ours.
-            $companyName = $identity['name'];
+            // signed with ours, because the admins reading it are ours. The dispatcher is
+            // told explicitly whose ticket this is: the reply may have been written in OUR
+            // admin panel, but the customer must still hear from the store — From name and
+            // address, links and shell included (StoreMailBranding).
+            $companyName = $store !== null ? ResellerMailIdentity::displayName($store) : $platformName;
+            $customerMail = $store !== null ? $dispatcher->onBehalfOfStore($store) : $dispatcher;
 
             $clientName = $ticket['email'];
             if (!empty($ticket['client_id'])) {
@@ -1668,13 +1802,13 @@ class Kernel
                 // recorded, the ticket moved to 'answered', and the customer was never
                 // told it existed. It is treated exactly as our own answer is, because
                 // functionally that is what it is.
-                $dispatcher->sendTemplate('ticket_reply', $ticket['email'], [
+                $customerMail->sendTemplate('ticket_reply', $ticket['email'], [
                     'ticket_id' => (string) $ticketId,
                     'ticket_subject' => $ticket['subject'],
                     'client_name' => $clientName,
                     'reply_message' => nl2br(e($reply['message'])),
                     'company_name' => $companyName,
-                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null, $identity);
+                ], !empty($ticket['client_id']) ? (int) $ticket['client_id'] : null);
             } elseif ($authorType === 'client') {
                 // A customer has written in. On a store's ticket that is the STORE's work,
                 // not ours, and mailing every admin about every reseller customer would
@@ -1690,7 +1824,7 @@ class Kernel
                 $admins = $this->container->make(AdminRepository::class)->all();
                 foreach ($admins as $admin) {
                     if (!empty($admin['email'])) {
-                        $dispatcher->sendTemplate('admin_ticket_reply', $admin['email'], [
+                        $dispatcher->onBehalfOfPlatform()->sendTemplate('admin_ticket_reply', $admin['email'], [
                             'ticket_id' => (string) $ticketId,
                             'ticket_subject' => $ticket['subject'],
                             'client_name' => $clientName,
@@ -1812,7 +1946,25 @@ class Kernel
                 // cause of several unrelated "Table ... doesn't exist" fatals at
                 // once. bin/migrate.php calls run() WITHOUT it, so an operator still
                 // gets the error and a non-zero exit.
-                $this->container->make(Migrator::class)->run(true);
+                $migrator = $this->container->make(Migrator::class);
+                $migrator->run(true);
+
+                // Then fill any gap the migrations leave: a table or column a live site
+                // never got (a migration that failed on its MySQL and was later rewritten,
+                // a file edited after the site ran it). Due once per deploy — when
+                // database/schema.php changes — or hourly while a repair keeps failing,
+                // so an ordinary request pays one small file read. Forced when the
+                // Migrator skipped an "already exists" statement, since a multi-clause
+                // ALTER skipped that way may have carried other changes.
+                try {
+                    $this->container->make(\CodeVault\Database\Schema\SchemaReconciler::class)->reconcileIfDue(
+                        $this->basePath('storage/system/schema-reconcile.json'),
+                        $migrator->tolerated() !== []
+                    );
+                } catch (\Throwable $e) {
+                    error_log('[CodeVault] schema reconcile failed: ' . $e->getMessage());
+                }
+
                 $this->container->make(AddonModuleService::class)->bootActiveAddons();
             } catch (\Throwable $e) {
                 // Not fatal on purpose — a boot that throws takes the whole site
@@ -1922,7 +2074,71 @@ class Kernel
         // recovery PIN on the client's behalf; that secret only means
         // anything if the client themselves is the one who set it.
         $path = $request->path();
-        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin') && !$session->has('original_admin_id')) {
+
+        // STRICT RESELLER ISOLATION: a reseller's customer is never opened from the
+        // admin's client pages — /admin/clients/{id}[/...] for one goes to the
+        // reseller's page instead (StoreCustomerAdminRedirect).
+        if (\CodeVault\Reseller\StoreCustomerAdminRedirect::clientIdIn($path) !== null) {
+            try {
+                $storeCustomerTarget = $this->container->make(\CodeVault\Reseller\StoreCustomerAdminRedirect::class)->targetFor($path);
+            } catch (\Throwable) {
+                $storeCustomerTarget = null;
+            }
+
+            if ($storeCustomerTarget !== null) {
+                return SecurityHeaders::apply(Response::redirect($storeCustomerTarget));
+            }
+        }
+
+        // TWO TIERS OF RESELLERS, NEVER THREE: a customer of a sub-reseller's store may
+        // not resell, so the whole Reseller area refuses them (ResellerEligibility).
+        if (\CodeVault\Reseller\ResellerEligibility::isResellerAreaPath($path) && (int) $session->get('client_id', 0) > 0) {
+            try {
+                $resellerAreaClient = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class)->currentClient();
+                $resellerAreaAllowed = $resellerAreaClient === null
+                    || $this->container->make(\CodeVault\Reseller\ResellerEligibility::class)->canResell($resellerAreaClient);
+            } catch (\Throwable) {
+                $resellerAreaAllowed = true;
+            }
+
+            if (!$resellerAreaAllowed) {
+                return SecurityHeaders::apply(Response::html(
+                    '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not available</title>'
+                    . '<div style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;">'
+                    . '<h1 style="font-size:1.25rem;">The reseller programme is not available on this account</h1>'
+                    . '<p>Your account is with a provider who is itself a reseller, and their customers cannot open reseller accounts. '
+                    . 'You can still order and manage your own services.</p>'
+                    . '<p><a href="/client/dashboard">Back to your dashboard</a></p></div>',
+                    403
+                ));
+            }
+        }
+
+        // Signed in on a customer's behalf through a one-time link (a reseller for its
+        // customer, or an admin): same reasoning as original_admin_id below for the
+        // PIN, and a reseller additionally may not touch what would take the account
+        // from the customer (ClientImpersonation::restrictedForReseller()).
+        $impersonation = \CodeVault\Clients\ClientImpersonation::activeIn(
+            $session->get(\CodeVault\Clients\ClientImpersonation::SESSION_KEY),
+            $session->get('client_id')
+        );
+
+        if ($impersonation !== null
+            && ($impersonation['actor_type'] ?? '') === 'reseller'
+            && \CodeVault\Clients\ClientImpersonation::restrictedForReseller($request->method(), $path)
+        ) {
+            return SecurityHeaders::apply(Response::html(
+                '<!doctype html><meta charset="utf-8"><title>Not available</title>'
+                . '<div style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;">'
+                . '<h1 style="font-size:1.25rem;">Not available while signed in for the customer</h1>'
+                . '<p>Passwords, security settings, saved cards, the login email and privacy requests can only be '
+                . 'changed by the customer. You can send them a password-reset email from their page in your reseller area.</p>'
+                . '<p><a href="/client/dashboard">Back to the account</a> &middot; <a href="/client/impersonate/end">Return to your reseller area</a></p></div>',
+                403
+            ));
+        }
+
+        if (str_starts_with($path, '/client') && !str_starts_with($path, '/client/login') && !str_starts_with($path, '/client/logout') && !str_starts_with($path, '/client/register') && !str_starts_with($path, '/client/recover-pin') && !str_starts_with($path, '/client/set-pin') && !str_starts_with($path, '/client/impersonate') && !$session->has('original_admin_id') && $impersonation === null) {
             /** @var \CodeVault\Clients\ClientAuthGuard $clientGuard */
             $clientGuard = $this->container->make(\CodeVault\Clients\ClientAuthGuard::class);
             $currentClient = $clientGuard->currentClient();

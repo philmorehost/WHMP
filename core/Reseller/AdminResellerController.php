@@ -45,7 +45,16 @@ final class AdminResellerController
         // Appended last: this controller is autowired, but keeping new deps at the
         // end is the standing rule here so a hand-built site can never silently
         // rebind the arguments after it.
-        private readonly ResellerDomainSync $domainSync
+        private readonly ResellerDomainSync $domainSync,
+        // The store's customers, listed on the store page so an admin can open any of
+        // them. Nullable so a hand-built instance needs no change.
+        private readonly ?ResellerClientDirectory $customers = null,
+        // The work queues counted on the overview's stat cards. Nullable for the same reason.
+        private readonly ?ResellerStoreRepository $storeRows = null,
+        private readonly ?ResellerPayoutRepository $payouts = null,
+        private readonly ?ClientMigrationRepository $migrations = null,
+        // The domain stores get their free subdomain under. Nullable like the rest.
+        private readonly ?ResellerPlatformAddress $platformAddress = null
     ) {
     }
 
@@ -56,17 +65,204 @@ final class AdminResellerController
         }
 
         $resellers = $this->credentials->all();
+        $stores = $this->stores->all();
 
         return $this->render('reseller.admin-index', [
             'discounts' => $this->settings->all(),
             'resellers' => $resellers,
-            'stores' => $this->stores->all(),
+            'stores' => $stores,
+            'stats' => self::overviewStats($stores, $this->queueCounts()),
             'platformHost' => $this->locator->platformHost(),
+            'storeDomain' => $this->locator->storeDomain(),
+            'storeDomainSetting' => $this->platformAddress?->domain(),
+            'dnsCheck' => $this->session->pullFlash('reseller_dns_check'),
             'activeCount' => count(array_filter($resellers, static fn (array $r): bool => (int) ($r['active'] ?? 0) === 1)),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'docsUrl' => '/admin/resellers/docs',
         ]);
+    }
+
+    /**
+     * The figures on the overview's stat cards, from the store list already loaded for
+     * the table plus the queue counts. Static so it can be checked without a database.
+     *
+     * @param array<int, array<string, mixed>> $stores rows from ResellerStoreRepository::all()
+     * @param array{domains: ?int, payouts: ?int, migrations: ?int} $queues
+     * @return array<string, int|null>
+     */
+    public static function overviewStats(array $stores, array $queues): array
+    {
+        $stats = [
+            'stores' => count($stores),
+            'active' => 0,
+            'sub_resellers' => 0,
+            'third_tier' => 0,
+            'customers' => 0,
+            'pending_orders' => 0,
+            'custom_domains' => 0,
+            'domain_requests' => $queues['domains'] ?? null,
+            'payout_requests' => $queues['payouts'] ?? null,
+            'migrations' => $queues['migrations'] ?? null,
+        ];
+
+        foreach ($stores as $store) {
+            $stats['active'] += ($store['status'] ?? 'active') === 'active' ? 1 : 0;
+            $stats['customers'] += (int) ($store['customer_count'] ?? 0);
+            $stats['pending_orders'] += (int) ($store['pending_orders'] ?? 0);
+            $stats['custom_domains'] += ($store['domain_verified_at'] ?? null) !== null ? 1 : 0;
+
+            if ((int) ($store['upline_id'] ?? 0) > 0) {
+                $stats['sub_resellers']++;
+                $stats['third_tier'] += (int) ($store['upline_upline_id'] ?? 0) > 0 ? 1 : 0;
+            }
+        }
+
+        return $stats;
+    }
+
+    /** @return array{domains: ?int, payouts: ?int, migrations: ?int} each null when it cannot be counted */
+    private function queueCounts(): array
+    {
+        $count = static function (callable $read): ?int {
+            try {
+                return count($read());
+            } catch (\Throwable) {
+                return null;
+            }
+        };
+
+        return [
+            'domains' => $this->storeRows === null ? null : $count(fn (): array => $this->storeRows->pendingDomainRequests()),
+            'payouts' => $this->payouts === null ? null : $count(fn (): array => $this->payouts->pending()),
+            'migrations' => $this->migrations === null ? null : $count(fn (): array => $this->migrations->pending()),
+        ];
+    }
+
+    /**
+     * Set (or clear) the platform address domain, the domain every store's free
+     * subdomain lives under. Clearing it takes every free address offline at once,
+     * which is why the notice says so in as many words.
+     */
+    public function savePlatformDomain(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        if ($this->platformAddress === null) {
+            $this->session->flash('reseller_error', 'The platform address cannot be changed on this install.');
+
+            return Response::redirect('/admin/resellers#rs-platform-address');
+        }
+
+        $result = ResellerPlatformAddress::normalise((string) $request->input('platform_domain', ''));
+
+        if ($result['error'] !== null) {
+            $this->session->flash('reseller_error', $result['error']);
+
+            return Response::redirect('/admin/resellers#rs-platform-address');
+        }
+
+        $domain = $result['domain'];
+
+        // A domain a reseller has proved is theirs cannot become everyone's.
+        if ($domain !== null && $this->storeRows !== null) {
+            try {
+                $owner = $this->storeRows->forVerifiedDomain($domain);
+            } catch (\Throwable) {
+                $owner = null;
+            }
+
+            if ($owner !== null) {
+                $this->session->flash('reseller_error', $domain . ' is the verified domain of reseller store #' . (int) $owner['id'] . '. Choose a domain of your own.');
+
+                return Response::redirect('/admin/resellers#rs-platform-address');
+            }
+        }
+
+        $previous = $this->platformAddress->domain();
+        $this->platformAddress->save($domain);
+
+        $this->activity->log(
+            'admin',
+            $this->adminId(),
+            'reseller.platform_domain.updated',
+            null,
+            null,
+            $domain === null
+                ? 'Cleared the reseller platform address domain' . ($previous !== null ? ' (was ' . $previous . ')' : '')
+                : 'Set the reseller platform address domain to ' . $domain . ($previous !== null && $previous !== $domain ? ' (was ' . $previous . ')' : ''),
+            $request->ip()
+        );
+
+        $this->session->flash('reseller_notice', $domain === null
+            ? 'Platform address cleared. Stores are now served only on their own verified domains; free addresses no longer load.'
+            : 'Platform address saved. Every store\'s free address is now {store name}.' . $domain . '. Point *.' . $domain . ' at this server and install a wildcard SSL certificate for it (see below).');
+
+        return Response::redirect('/admin/resellers#rs-platform-address');
+    }
+
+    /**
+     * Check that the wildcard DNS for the platform address domain points here: a made-up
+     * name under it must resolve to the same IPs as the platform host. On demand only
+     * (a button), never on page load, because a DNS lookup can take seconds.
+     */
+    public function checkPlatformDomain(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $domain = $this->platformAddress?->domain();
+
+        if ($domain === null) {
+            $this->session->flash('reseller_error', 'Set a platform address domain first.');
+
+            return Response::redirect('/admin/resellers#rs-platform-address');
+        }
+
+        $probe = 'cv-check-' . bin2hex(random_bytes(4)) . '.' . $domain;
+        $this->session->flash('reseller_dns_check', self::dnsCheckResult(
+            $domain,
+            $probe,
+            self::lookup($probe),
+            self::lookup($this->locator->platformHost())
+        ));
+
+        return Response::redirect('/admin/resellers#rs-platform-address');
+    }
+
+    /**
+     * The verdict of a wildcard DNS check, from the two lookups. Static so it can be
+     * checked without a network.
+     *
+     * @param array<int, string> $probeIps what the made-up name under the domain resolved to
+     * @param array<int, string> $platformIps what the platform host resolves to
+     * @return array{ok: bool, domain: string, probe: string, found: array<int, string>, expected: array<int, string>, message: string}
+     */
+    public static function dnsCheckResult(string $domain, string $probe, array $probeIps, array $platformIps): array
+    {
+        $probeIps = array_values(array_unique($probeIps));
+        $platformIps = array_values(array_unique($platformIps));
+        $ok = $probeIps !== [] && ($platformIps === [] || array_intersect($probeIps, $platformIps) !== []);
+
+        $message = match (true) {
+            $probeIps === [] => 'No wildcard record: ' . $probe . ' does not resolve. Add an A record for *.' . $domain . ' pointing at this server\'s IP.',
+            $ok && $platformIps === [] => '*.' . $domain . ' resolves (' . implode(', ', $probeIps) . '). The platform host could not be looked up to compare, so confirm this is this server\'s IP.',
+            $ok => '*.' . $domain . ' points at this server (' . implode(', ', $probeIps) . ').',
+            default => '*.' . $domain . ' resolves to ' . implode(', ', $probeIps) . ', but this server is ' . implode(', ', $platformIps) . '. Update the wildcard A record.',
+        };
+
+        return ['ok' => $ok, 'domain' => $domain, 'probe' => $probe, 'found' => $probeIps, 'expected' => $platformIps, 'message' => $message];
+    }
+
+    /** @return array<int, string> IPv4 addresses, or none */
+    private static function lookup(string $host): array
+    {
+        $ips = @gethostbynamel($host);
+
+        return is_array($ips) ? $ips : [];
     }
 
     public function saveDiscounts(Request $request): Response
@@ -526,6 +722,24 @@ final class AdminResellerController
     /** @param array<string, mixed>|null $store */
     private function renderStorePage(int $clientId, ?array $store, Request $request): Response
     {
+        $upline = null;
+        $legacyThirdTier = false;
+
+        if ($store !== null) {
+            try {
+                $upline = $this->retail->uplineOf($store);
+
+                if ($upline !== null) {
+                    $uplineOwner = $this->clients->find((int) $upline['client_id']);
+                    // The upline is itself a sub-reseller, so this store is a third tier —
+                    // possible only for stores opened before the two-tier cap.
+                    $legacyThirdTier = ResellerEligibility::tierFromOwnerStore($uplineOwner['reseller_id'] ?? null) === null;
+                }
+            } catch (\Throwable) {
+                $upline = null;
+            }
+        }
+
         return $this->render('reseller.admin-store', [
             'clientId' => $clientId,
             'store' => $store,
@@ -540,6 +754,11 @@ final class AdminResellerController
                 : '_codevault-verify.' . $store['custom_domain'],
             'goLive' => $store === null ? [] : $this->stores->goLiveChecklist($store),
             'chat' => ResellerChat::formValues($store),
+            'customerSummary' => $store === null || $this->customers === null ? null : $this->customers->summary((int) $store['id']),
+            // A sub-reseller (its owner registered on another store) buys at that store's prices.
+            'upline' => $upline,
+            'legacyThirdTier' => $legacyThirdTier,
+            'pendingOrders' => $store === null || $this->customers === null ? 0 : $this->customers->pendingOrderCount((int) $store['id']),
             'error' => $this->session->pullFlash('reseller_error'),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'verification' => $this->session->pullFlash('reseller_verification'),

@@ -59,6 +59,8 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
                         <span class="cv-badge cv-badge--success">Sent</span>
                     <?php elseif ($entry['status'] === 'failed'): ?>
                         <span class="cv-badge cv-badge--danger">Failed</span>
+                    <?php elseif ($entry['status'] === 'suppressed'): ?>
+                        <span class="cv-badge cv-badge--warning" title="<?= e((string) ($entry['error'] ?? 'Not sent — invalid address')) ?>">Not sent · invalid address</span>
                     <?php else: ?>
                         <span class="cv-badge cv-badge--neutral">Queued</span>
                     <?php endif; ?>

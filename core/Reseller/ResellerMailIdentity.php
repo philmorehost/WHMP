@@ -52,6 +52,66 @@ final class ResellerMailIdentity
     }
 
     /**
+     * The COMPLETE sender for mail written on a store's behalf: always a name and
+     * always an address, neither of them ours.
+     *
+     * forStore() above is allowed to return a name alone, which tells the transport
+     * to keep the configured platform address — and that address is exactly what a
+     * store's customer must not see. So when the store has no usable support address
+     * of its own, this falls back to `noreply@` on the STORE's host: the verified
+     * custom domain if it has one, else its platform subdomain (an address the
+     * customer already sees in their browser, so it reveals nothing new).
+     *
+     * Same trade-off as the class docblock describes, on purpose: an address the
+     * domain has not authorised can be filtered, but reverting to our address is a
+     * silent white-label leak. The reseller mail page tells them which DNS records
+     * make it deliverable.
+     *
+     * @param array<string, mixed> $store
+     * @param string               $storeHost the host the store is served on (ResellerStoreLocator::hostFor)
+     * @return array{name: string, email: string}
+     */
+    public static function senderFor(array $store, string $storeHost): array
+    {
+        $email = self::address($store);
+
+        if ($email === null) {
+            $candidate = 'noreply@' . strtolower(trim($storeHost));
+            $email = filter_var($candidate, FILTER_VALIDATE_EMAIL) !== false ? $candidate : null;
+        }
+
+        return [
+            'name' => self::displayName($store),
+            // Last resort for a host so odd it is not a legal address (an IP-only
+            // dev install): still not ours by name.
+            'email' => $email ?? 'noreply@localhost.localdomain',
+        ];
+    }
+
+    /**
+     * The name a store is known by — its brand, else its slug made readable.
+     *
+     * NEVER the platform's name. forStore() falls back to ours because a ticket reply
+     * has to be signed with SOMETHING, but on a store that something must be the store:
+     * "acme-hosting" becomes "Acme Hosting", which is at least the name in the address
+     * bar.
+     *
+     * @param array<string, mixed> $store
+     */
+    public static function displayName(array $store): string
+    {
+        $brand = trim((string) ($store['brand_name'] ?? ''));
+
+        if ($brand !== '') {
+            return $brand;
+        }
+
+        $slug = trim((string) ($store['slug'] ?? ''));
+
+        return $slug !== '' ? ucwords(str_replace(['-', '_'], ' ', $slug)) : 'Support';
+    }
+
+    /**
      * The store's own support address, or null when there is not a usable one.
      *
      * @param array<string, mixed>|null $store

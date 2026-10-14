@@ -192,7 +192,7 @@ final class ResellerLedgerService
 
         $now ??= $this->now();
 
-        return $this->ledger->append([
+        $receiptId = $this->ledger->append([
             'reseller_id' => (int) $facts['reseller_id'],
             'client_id' => $facts['reseller_client_id'] === null ? null : (int) $facts['reseller_client_id'],
             'kind' => 'store_receipt',
@@ -205,6 +205,155 @@ final class ResellerLedgerService
             'admin_id' => null,
             'created_at' => $now,
         ]);
+
+        // Posted only AFTER the receipt, whose (kind, invoice_id) key is unique: a
+        // re-fired hook fails on the receipt and never reaches this line, so the
+        // upline cannot be credited twice for one sale.
+        $this->accrueUplineMargin($facts, $invoiceId, $now);
+
+        return $receiptId;
+    }
+
+    /**
+     * The UPLINE's share of a sub-reseller's sale (orders.upline_reseller_id): the
+     * sub-reseller paid the upline's retail (cost_total) and the upline owes us
+     * upline_cost_total, so the upline earns the difference. Same holding period as
+     * a receipt, because it is funded by the same customer payment.
+     *
+     * @param array<string, mixed> $facts storeOrderForInvoice()
+     */
+    public function accrueUplineMargin(array $facts, int $invoiceId, ?string $now = null): ?int
+    {
+        $amount = self::uplineMarginOf($facts);
+
+        if ($amount === null || ($facts['upline_reseller_id'] ?? null) === null) {
+            return null;
+        }
+
+        $orderId = (int) $facts['order_id'];
+
+        if ($this->ledger->hasEntryForOrder($orderId, 'upline_margin')) {
+            return null;
+        }
+
+        $base = $this->baseAmount($amount, $facts['currency_id'] ?? null, $facts['currency_rate'] ?? 1.0);
+
+        if ($base < 0.01) {
+            return null;
+        }
+
+        $now ??= $this->now();
+
+        return $this->ledger->append([
+            'reseller_id' => (int) $facts['upline_reseller_id'],
+            'client_id' => ($facts['upline_client_id'] ?? null) === null ? null : (int) $facts['upline_client_id'],
+            'kind' => 'upline_margin',
+            'amount' => round($base, 2),
+            'withdrawable_at' => $this->withdrawableFrom($now),
+            'order_id' => $orderId,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => 'Sub-reseller sale — order #' . $orderId . ' at reseller ID ' . (int) $facts['reseller_id'],
+            'admin_id' => null,
+            'created_at' => $now,
+        ]);
+    }
+
+    /**
+     * Credit a reseller its share of a paid add-on fee that is not an order — the
+     * cPanel Username Changer's resale margin. The customer paid the store's price,
+     * we keep what the store owes upstream, and the difference is posted here.
+     *
+     * Kind `adjustment` for the store's own margin and `upline_margin` for an
+     * upline's share of a sub-reseller's sale, so both read correctly on the
+     * account page. The amount is given in the INVOICE's currency and converted to
+     * base exactly as receipts are; it is held for the same holding period because
+     * it is funded by the same kind of customer payment.
+     *
+     * Idempotency is the CALLER's job (an atomic claim on its own row): adjustment
+     * and upline_margin entries carry no unique key on invoice_id.
+     */
+    public function creditFeeShare(int $resellerId, string $kind, float $amount, ?int $currencyId, float $currencyRate, int $invoiceId, string $description, ?string $now = null): ?int
+    {
+        if (!in_array($kind, ['adjustment', 'upline_margin'], true)) {
+            return null;
+        }
+
+        $base = round($this->baseAmount($amount, $currencyId, $currencyRate), 2);
+
+        if ($base < 0.01) {
+            return null;
+        }
+
+        $store = $this->stores->find($resellerId);
+
+        if ($store === null) {
+            return null;
+        }
+
+        $now ??= $this->now();
+
+        return $this->ledger->append([
+            'reseller_id' => $resellerId,
+            'client_id' => ($store['client_id'] ?? null) === null ? null : (int) $store['client_id'],
+            'kind' => $kind,
+            'amount' => $base,
+            'withdrawable_at' => $this->withdrawableFrom($now),
+            'order_id' => null,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => mb_substr($description, 0, 250),
+            'admin_id' => null,
+            'created_at' => $now,
+        ]);
+    }
+
+    /**
+     * Take back a share creditFeeShare() posted, because the fee was refunded.
+     * Withdrawable immediately (negative), for the reason reverseStoreReceipt()
+     * gives: a refund is money we no longer hold.
+     */
+    public function reverseFeeShare(int $resellerId, string $kind, float $amount, ?int $currencyId, float $currencyRate, int $invoiceId, string $description, ?string $now = null): ?int
+    {
+        $reversalKind = $kind === 'upline_margin' ? 'upline_margin_reversal' : 'adjustment';
+        $base = round($this->baseAmount($amount, $currencyId, $currencyRate), 2);
+        $store = $this->stores->find($resellerId);
+
+        if ($base < 0.01 || $store === null) {
+            return null;
+        }
+
+        return $this->ledger->append([
+            'reseller_id' => $resellerId,
+            'client_id' => ($store['client_id'] ?? null) === null ? null : (int) $store['client_id'],
+            'kind' => $reversalKind,
+            'amount' => -$base,
+            'withdrawable_at' => null,
+            'order_id' => null,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => mb_substr($description, 0, 250),
+            'admin_id' => null,
+            'created_at' => $now ?? $this->now(),
+        ]);
+    }
+
+    /**
+     * cost_total − upline_cost_total in the order's currency, or null when the order
+     * has no upline share (a first-tier store, or a sub-reseller priced at or under
+     * the upline's own cost).
+     *
+     * @param array<string, mixed> $facts
+     */
+    public static function uplineMarginOf(array $facts): ?float
+    {
+        if (($facts['upline_reseller_id'] ?? null) === null || ($facts['upline_cost_total'] ?? null) === null || ($facts['cost_total'] ?? null) === null) {
+            return null;
+        }
+
+        $margin = round((float) $facts['cost_total'] - (float) $facts['upline_cost_total'], 2);
+
+        return $margin >= 0.01 ? $margin : null;
     }
 
     /**
@@ -271,7 +420,9 @@ final class ResellerLedgerService
             return null;
         }
 
-        return $this->ledger->append([
+        $now ??= $this->now();
+
+        $reversalId = $this->ledger->append([
             'reseller_id' => (int) $facts['reseller_id'],
             'client_id' => $facts['reseller_client_id'] === null ? null : (int) $facts['reseller_client_id'],
             'kind' => 'receipt_reversal',
@@ -285,7 +436,56 @@ final class ResellerLedgerService
             'payout_id' => null,
             'description' => 'Refund on store order #' . $orderId . ' — retail returned to the customer',
             'admin_id' => null,
-            'created_at' => $now ?? $this->now(),
+            'created_at' => $now,
+        ]);
+
+        $this->reverseUplineMargin($facts, $invoiceId, $refundedAmount, $now);
+
+        return $reversalId;
+    }
+
+    /**
+     * Take back the upline's share of a refunded sub-reseller sale, in the same
+     * proportion as the refund, never more than is still credited. Immediate, like
+     * every reversal: it is money nobody holds any more.
+     *
+     * @param array<string, mixed> $facts
+     */
+    private function reverseUplineMargin(array $facts, int $invoiceId, float $refundedAmount, string $now): ?int
+    {
+        $margin = self::uplineMarginOf($facts);
+        $total = (float) ($facts['total'] ?? 0.0);
+
+        if ($margin === null || $total <= 0.0 || ($facts['upline_reseller_id'] ?? null) === null) {
+            return null;
+        }
+
+        $orderId = (int) $facts['order_id'];
+        $outstanding = $this->ledger->uplineMarginOutstanding($orderId);
+
+        if ($outstanding <= 0.0) {
+            return null;
+        }
+
+        $share = $margin * min(1.0, max(0.0, $refundedAmount / $total));
+        $amount = min(round($this->baseAmount($share, $facts['currency_id'] ?? null, $facts['currency_rate'] ?? 1.0), 2), $outstanding);
+
+        if ($amount < 0.01) {
+            return null;
+        }
+
+        return $this->ledger->append([
+            'reseller_id' => (int) $facts['upline_reseller_id'],
+            'client_id' => ($facts['upline_client_id'] ?? null) === null ? null : (int) $facts['upline_client_id'],
+            'kind' => 'upline_margin_reversal',
+            'amount' => -$amount,
+            'withdrawable_at' => null,
+            'order_id' => $orderId,
+            'invoice_id' => $invoiceId,
+            'payout_id' => null,
+            'description' => 'Refund on sub-reseller order #' . $orderId . ' — your share returned',
+            'admin_id' => null,
+            'created_at' => $now,
         ]);
     }
 
@@ -518,59 +718,148 @@ final class ResellerLedgerService
         return max(0, (int) $this->settings->get('reseller.payout_holding_days', '30'));
     }
 
-    /** The legacy fallback minimum, in base units, retained for currencies not configured individually. */
+    /** The default threshold: $10, anchored in USD. */
+    public const DEFAULT_PAYOUT_MINIMUM = 10.0;
+    public const DEFAULT_PAYOUT_MINIMUM_CURRENCY = 'USD';
+
+    /**
+     * The payout threshold as the admin set it: an amount in an ANCHOR currency
+     * (USD by default — "$10"). Every other currency's minimum is this amount
+     * multiplied by that currency's conversion rate, so there is one figure to
+     * change and the currencies cannot drift away from each other.
+     */
     public function payoutMinimum(): float
     {
-        return max(0.0, (float) $this->settings->get('reseller.payout_minimum', '50.00'));
+        $raw = $this->settings->get('reseller.payout_minimum_amount', null);
+
+        if ($raw === null || !is_numeric($raw) || !is_finite((float) $raw)) {
+            return self::DEFAULT_PAYOUT_MINIMUM;
+        }
+
+        return round(max(0.0, (float) $raw), 2);
+    }
+
+    /**
+     * The currency the threshold is written in. Falls back to the base currency
+     * when the configured anchor is not (or no longer) a configured currency, so
+     * a deleted currency can never make the minimum unresolvable.
+     */
+    public function payoutMinimumCurrency(): string
+    {
+        $configured = strtoupper(trim((string) $this->settings->get(
+            'reseller.payout_minimum_currency',
+            self::DEFAULT_PAYOUT_MINIMUM_CURRENCY
+        )));
+
+        foreach ($this->currency->all() as $currency) {
+            if (strtoupper(trim((string) ($currency['code'] ?? ''))) === $configured && $configured !== '') {
+                return $configured;
+            }
+        }
+
+        return strtoupper(trim($this->currency->codeFor(null)));
+    }
+
+    /**
+     * Admin-set conversion rates for the minimum: code => units of that currency
+     * per ONE unit of the anchor currency. A currency with no entry follows the
+     * live exchange rate.
+     *
+     * @return array<string, float>
+     */
+    public function payoutMinimumRates(): array
+    {
+        $decoded = json_decode((string) $this->settings->get('reseller.payout_minimum_rates', '{}'), true);
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $rates = [];
+
+        foreach ($decoded as $code => $rate) {
+            $code = strtoupper(trim((string) $code));
+
+            if ($code === '' || !is_numeric($rate) || !is_finite((float) $rate) || (float) $rate <= 0.0) {
+                continue;
+            }
+
+            $rates[$code] = (float) $rate;
+        }
+
+        return $rates;
+    }
+
+    /**
+     * The live rate between the anchor and $currency, from the exchange rates on
+     * /admin/currencies: how many units of $currency one anchor unit buys.
+     *
+     * @param array<string, mixed> $currency
+     */
+    public function liveMinimumRate(array $currency): float
+    {
+        $anchor = $this->payoutMinimumCurrency();
+        $code = strtoupper(trim((string) ($currency['code'] ?? '')));
+
+        if ($code === '' || $code === $anchor) {
+            return 1.0;
+        }
+
+        $anchorRate = $this->currency->rateForCode($anchor);
+        $anchorRate = $anchorRate > 0.0 ? $anchorRate : 1.0;
+        $targetRate = $this->currency->rateFor($currency);
+        $targetRate = $targetRate > 0.0 ? $targetRate : 1.0;
+
+        return $targetRate / $anchorRate;
     }
 
     /**
      * The minimum expressed in both the account's base unit and the reseller's
-     * currency. Explicit per-currency settings are nominal amounts in that
-     * currency; an unconfigured currency keeps the legacy behavior by converting
-     * the old base-unit minimum at the current rate.
+     * currency.
+     *
+     *   minimum      = anchor amount x conversion rate (admin-set, else live)
+     *   minimum_base = minimum / the currency's live exchange rate
+     *
+     * minimum_base is what a balance is compared against, because the account is
+     * kept in base units.
      *
      * @param array<string, mixed> $currency
-     * @return array{minimum: float, minimum_base: float, currency_code: string, custom: bool}
+     * @return array{minimum: float, minimum_base: float, currency_code: string, rate: float, live_rate: float, custom: bool}
      */
     public function payoutMinimumForCurrency(array $currency): array
     {
         $code = strtoupper(trim((string) ($currency['code'] ?? '')));
-        $rate = $this->currency->rateFor($currency);
-        $rate = $rate > 0.0 ? $rate : 1.0;
-        $map = $this->payoutMinimumMap();
+        $anchor = $this->payoutMinimumCurrency();
+        $amount = $this->payoutMinimum();
+        $liveRate = $this->liveMinimumRate($currency);
+        $overrides = $this->payoutMinimumRates();
 
-        if ($code !== '' && array_key_exists($code, $map)) {
-            $minimum = $map[$code];
+        $custom = $code !== '' && $code !== $anchor && array_key_exists($code, $overrides);
+        $rate = $code === $anchor ? 1.0 : ($custom ? $overrides[$code] : $liveRate);
 
-            return [
-                'minimum' => $minimum,
-                'minimum_base' => round($minimum / $rate, 6),
-                'currency_code' => $code,
-                'custom' => true,
-            ];
-        }
+        $minimum = round($amount * $rate, 2);
 
-        $baseMinimum = $this->payoutMinimum();
+        $exchange = $this->currency->rateFor($currency);
+        $exchange = $exchange > 0.0 ? $exchange : 1.0;
 
         return [
-            'minimum' => $this->currency->convert($baseMinimum, $rate),
-            'minimum_base' => $baseMinimum,
+            'minimum' => $minimum,
+            'minimum_base' => round($minimum / $exchange, 6),
             'currency_code' => $code,
-            'custom' => false,
+            'rate' => $rate,
+            'live_rate' => $liveRate,
+            'custom' => $custom,
         ];
     }
 
     /**
-     * Effective settings for the admin form. Values are shown in each currency;
-     * for currencies without an explicit setting, the legacy base minimum is
-     * converted at today's rate so saving the form does not silently change its
-     * current behavior.
+     * Effective settings for the admin form, one row per configured currency.
      *
-     * @return array<int, array{currency_code: string, currency_name: string, minimum: float, minimum_base: float, custom: bool}>
+     * @return array<int, array{currency_code: string, currency_name: string, minimum: float, minimum_base: float, rate: float, live_rate: float, custom: bool, anchor: bool}>
      */
     public function payoutMinimums(): array
     {
+        $anchor = $this->payoutMinimumCurrency();
         $minimums = [];
 
         foreach ($this->currency->all() as $currency) {
@@ -580,34 +869,14 @@ final class ResellerLedgerService
                 'currency_name' => (string) ($currency['name'] ?? $currency['code'] ?? ''),
                 'minimum' => $effective['minimum'],
                 'minimum_base' => $effective['minimum_base'],
+                'rate' => $effective['rate'],
+                'live_rate' => $effective['live_rate'],
                 'custom' => $effective['custom'],
+                'anchor' => $effective['currency_code'] === $anchor,
             ];
         }
 
         return $minimums;
-    }
-
-    /** @return array<string, float> */
-    private function payoutMinimumMap(): array
-    {
-        $decoded = json_decode((string) $this->settings->get('reseller.payout_minimums', '{}'), true);
-
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        $map = [];
-        foreach ($decoded as $code => $amount) {
-            $code = strtoupper(trim((string) $code));
-
-            if ($code === '' || !is_numeric($amount) || !is_finite((float) $amount)) {
-                continue;
-            }
-
-            $map[$code] = round(max(0.0, (float) $amount), 2);
-        }
-
-        return $map;
     }
 
     /**

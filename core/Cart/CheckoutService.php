@@ -97,6 +97,10 @@ final class CheckoutService
         $priced['total'] = $convert((float) $priced['total']);
         $priced['costTotal'] = $convert((float) ($priced['costTotal'] ?? 0.0));
 
+        if (($priced['uplineCostTotal'] ?? null) !== null) {
+            $priced['uplineCostTotal'] = $convert((float) $priced['uplineCostTotal']);
+        }
+
         return $priced;
     }
 
@@ -367,6 +371,17 @@ final class CheckoutService
                 $now,
             ]
         );
+
+        // A sub-reseller's store: snapshot the upline and what IT owes us for this
+        // order, so the upline's margin (cost_total − upline_cost_total) can be
+        // credited when the customer pays (ResellerLedgerService). A separate write
+        // so a first-tier order's INSERT is exactly what it always was.
+        if ($storeId !== null && ($priced['upline_store_id'] ?? null) !== null && ($priced['uplineCostTotal'] ?? null) !== null) {
+            $this->db->update(
+                'UPDATE orders SET upline_reseller_id = ?, upline_cost_total = ? WHERE id = ?',
+                [(int) $priced['upline_store_id'], (float) $priced['uplineCostTotal'], $orderId]
+            );
+        }
 
         // Insert domains into DB now that we have orderId
         $domainPricingRepo = \CodeVault\Support\App::container()->make(\CodeVault\Domains\DomainPricingRepository::class);

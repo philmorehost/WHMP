@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use CodeVault\Reseller\AdminClientMigrationController;
+use CodeVault\Reseller\AdminFreeResellerController;
+use CodeVault\Reseller\FreeResellerController;
 use CodeVault\Reseller\AdminResellerAccountsController;
 use CodeVault\Reseller\AdminResellerBillingController;
 use CodeVault\Reseller\AdminResellerDomainController;
@@ -9,8 +12,12 @@ use CodeVault\Reseller\AdminResellerPayoutsController;
 use CodeVault\Reseller\AdminResellerTicketController;
 use CodeVault\Reseller\AdminResellerController;
 use CodeVault\Reseller\ClientResellerAccountController;
+use CodeVault\Reseller\ClientResellerClientsController;
+use CodeVault\Reseller\AdminResellerCustomersController;
 use CodeVault\Reseller\ClientResellerController;
 use CodeVault\Reseller\ClientResellerMailController;
+use CodeVault\Reseller\ClientResellerMigrationController;
+use CodeVault\Reseller\ClientResellerPromotionsController;
 use CodeVault\Reseller\ClientResellerTicketController;
 
 /** @var CodeVault\Router $router */
@@ -72,6 +79,43 @@ $router->post('/client/reseller/tickets/{ticketId}/escalate', [ClientResellerTic
 // Taking a request back before we answer it — the store resolved it itself after all.
 $router->post('/client/reseller/tickets/{ticketId}/withdraw', [ClientResellerTicketController::class, 'withdraw']);
 
+// The store's own customers: list, details, and what the reseller may do for them —
+// edit details, send a password reset, sign in as them on the store's website, suspend /
+// unsuspend / terminate services, and look after domains. No store id in any path: the
+// store is the signed-in reseller's own, and every customer, service and domain id is
+// looked up THROUGH it (ResellerClientDirectory), so another store's id is not found.
+$router->get('/client/reseller/clients', [ClientResellerClientsController::class, 'index']);
+$router->get('/client/reseller/clients/{id}', [ClientResellerClientsController::class, 'show']);
+$router->post('/client/reseller/clients/{id}/profile', [ClientResellerClientsController::class, 'saveProfile']);
+$router->post('/client/reseller/clients/{id}/password-reset', [ClientResellerClientsController::class, 'sendPasswordReset']);
+$router->post('/client/reseller/clients/{id}/login', [ClientResellerClientsController::class, 'login']);
+$router->post('/client/reseller/clients/{id}/services/{serviceId}/suspend', [ClientResellerClientsController::class, 'suspendService']);
+$router->post('/client/reseller/clients/{id}/services/{serviceId}/unsuspend', [ClientResellerClientsController::class, 'unsuspendService']);
+$router->post('/client/reseller/clients/{id}/services/{serviceId}/terminate', [ClientResellerClientsController::class, 'terminateService']);
+$router->post('/client/reseller/clients/{id}/domains/{domainId}/auto-renew', [ClientResellerClientsController::class, 'domainAutoRenew']);
+$router->post('/client/reseller/clients/{id}/domains/{domainId}/lock', [ClientResellerClientsController::class, 'domainLock']);
+$router->post('/client/reseller/clients/{id}/domains/{domainId}/nameservers', [ClientResellerClientsController::class, 'domainNameservers']);
+
+// Asking us to move a customer INTO this store, or one of its customers OUT to another
+// provider. A request only — a super admin decides (ClientMigrationService). No store
+// id in either path: the store is the signed-in reseller's own.
+$router->get('/client/reseller/migrations', [ClientResellerMigrationController::class, 'index']);
+$router->post('/client/reseller/migrations', [ClientResellerMigrationController::class, 'submit']);
+
+// The store's OWN promo codes and discount banner. Strictly isolated: no store id in
+// any path (the store comes from the session guard) and every query is scoped to it,
+// so one store can never see or change another's — or the platform's — offers, and
+// the platform's banner never appears on a store's website (migration 0204).
+$router->get('/client/reseller/promotions', [ClientResellerPromotionsController::class, 'index']);
+$router->post('/client/reseller/promotions/codes', [ClientResellerPromotionsController::class, 'saveCode']);
+$router->post('/client/reseller/promotions/codes/{id}/toggle', [ClientResellerPromotionsController::class, 'toggleCode']);
+$router->post('/client/reseller/promotions/codes/{id}/delete', [ClientResellerPromotionsController::class, 'deleteCode']);
+$router->post('/client/reseller/promotions/banners', [ClientResellerPromotionsController::class, 'createBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/update', [ClientResellerPromotionsController::class, 'updateBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/pause', [ClientResellerPromotionsController::class, 'pauseBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/resume', [ClientResellerPromotionsController::class, 'resumeBanner']);
+$router->post('/client/reseller/promotions/banners/{id}/delete', [ClientResellerPromotionsController::class, 'deleteBanner']);
+
 // The white-label store. Claiming a domain and proving control of it are
 // separate steps on purpose: nothing is served on a claimant's domain until
 // DNS shows they control it.
@@ -79,6 +123,8 @@ $router->get('/client/reseller/store', [ClientResellerController::class, 'store'
 $router->post('/client/reseller/store', [ClientResellerController::class, 'openStore']);
 $router->post('/client/reseller/store/brand', [ClientResellerController::class, 'saveStoreBrand']);
 $router->post('/client/reseller/store/chat', [ClientResellerController::class, 'saveStoreChat']);
+$router->post('/client/reseller/store/homepage', [ClientResellerController::class, 'saveStoreHomepage']);
+$router->post('/client/reseller/store/google', [ClientResellerController::class, 'saveStoreGoogle']);
 $router->post('/client/reseller/store/domain', [ClientResellerController::class, 'claimStoreDomain']);
 $router->post('/client/reseller/store/verify', [ClientResellerController::class, 'verifyStoreDomain']);
 
@@ -90,6 +136,8 @@ $router->post('/client/reseller/prices', [ClientResellerController::class, 'save
 // Admin side: the discounts resellers get, and the keys issued to them.
 $router->get('/admin/resellers', [AdminResellerController::class, 'index']);
 $router->post('/admin/resellers/discounts', [AdminResellerController::class, 'saveDiscounts']);
+$router->post('/admin/resellers/platform-domain', [AdminResellerController::class, 'savePlatformDomain']);
+$router->post('/admin/resellers/platform-domain/check', [AdminResellerController::class, 'checkPlatformDomain']);
 $router->post('/admin/resellers/{clientId}/toggle', [AdminResellerController::class, 'toggle']);
 $router->get('/admin/resellers/docs', [AdminResellerController::class, 'docs']);
 
@@ -97,6 +145,11 @@ $router->get('/admin/resellers/docs', [AdminResellerController::class, 'docs']);
 // parameterised store routes below so these literal paths cannot be read as a
 // client id. "Bill now" is safe to press twice — an order carries the id of the
 // invoice that billed it, so idempotency is a property of the data.
+// The Free Reseller programme's settings (adverts, landing page copy, demo stores).
+// A literal path, so it sits before the parameterised routes like the pages above.
+$router->get('/admin/resellers/free-programme', [AdminFreeResellerController::class, 'index']);
+$router->post('/admin/resellers/free-programme', [AdminFreeResellerController::class, 'save']);
+
 $router->get('/admin/resellers/billing', [AdminResellerBillingController::class, 'index']);
 $router->post('/admin/resellers/billing/settings', [AdminResellerBillingController::class, 'saveSettings']);
 $router->post('/admin/resellers/billing/run', [AdminResellerBillingController::class, 'runNow']);
@@ -136,8 +189,33 @@ $router->post('/admin/resellers/domains/{storeId}/provision', [AdminResellerDoma
 // parameterised store routes below so 'escalations' is never read as a client id.
 $router->get('/admin/resellers/escalations', [AdminResellerTicketController::class, 'index']);
 
+// Moving clients between providers (store -> store, store <-> platform). Literal paths,
+// registered before the parameterised store routes below for the same reason as the
+// groups above. The review page changes nothing; only `execute` moves a client, and
+// only a super admin may press it (AdminClientMigrationController).
+$router->get('/admin/resellers/migrations', [AdminClientMigrationController::class, 'index']);
+$router->get('/admin/resellers/migrations/review', [AdminClientMigrationController::class, 'review']);
+$router->post('/admin/resellers/migrations/execute', [AdminClientMigrationController::class, 'execute']);
+$router->post('/admin/resellers/migrations/{id}/reject', [AdminClientMigrationController::class, 'reject']);
+
 // Store management, addressed by client id so a client who has no store yet is
 // still reachable (that is exactly when an admin needs to look).
+// A reseller's customers, managed from the RESELLER'S page (strict reseller isolation:
+// they are not on the admin's Clients list, and /admin/clients/{id} for one of them
+// redirects here). Plus signing in to the reseller's own account.
+$router->post('/admin/resellers/{clientId}/login', [AdminResellerCustomersController::class, 'loginAsReseller']);
+$router->get('/admin/resellers/{clientId}/customers', [AdminResellerCustomersController::class, 'index']);
+$router->get('/admin/resellers/{clientId}/customers/{id}', [AdminResellerCustomersController::class, 'show']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/profile', [AdminResellerCustomersController::class, 'saveProfile']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/password-reset', [AdminResellerCustomersController::class, 'sendPasswordReset']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/login', [AdminResellerCustomersController::class, 'login']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/services/{serviceId}/suspend', [AdminResellerCustomersController::class, 'suspendService']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/services/{serviceId}/unsuspend', [AdminResellerCustomersController::class, 'unsuspendService']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/services/{serviceId}/terminate', [AdminResellerCustomersController::class, 'terminateService']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/domains/{domainId}/auto-renew', [AdminResellerCustomersController::class, 'domainAutoRenew']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/domains/{domainId}/lock', [AdminResellerCustomersController::class, 'domainLock']);
+$router->post('/admin/resellers/{clientId}/customers/{id}/domains/{domainId}/nameservers', [AdminResellerCustomersController::class, 'domainNameservers']);
+
 $router->get('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'store']);
 $router->post('/admin/resellers/{clientId}/store', [AdminResellerController::class, 'openStore']);
 $router->post('/admin/resellers/{clientId}/store/brand', [AdminResellerController::class, 'saveStoreBrand']);
@@ -173,3 +251,13 @@ $router->get('/admin/resellers/{clientId}/statements/{statementId}', [AdminResel
 // store routes above, so a client with no store still lands somewhere that can
 // explain why rather than on a 404.
 $router->get('/admin/resellers/{clientId}/account', [AdminResellerAccountsController::class, 'show']);
+
+// The Free Reseller programme's public pages — the platform's own marketing, so the
+// controller answers 404 on every reseller store's host. Applying reuses the normal
+// store, domain and cart steps; a guest's answers wait in the session while they
+// register or sign in (ClientAuthController sends them back to /free-reseller/apply).
+$router->get('/free-reseller', [FreeResellerController::class, 'landing']);
+$router->get('/free-reseller/apply', [FreeResellerController::class, 'applyForm']);
+$router->post('/free-reseller/apply', [FreeResellerController::class, 'apply']);
+$router->post('/free-reseller/apply/discard', [FreeResellerController::class, 'discardDraft']);
+$router->get('/free-reseller/welcome', [FreeResellerController::class, 'welcome']);

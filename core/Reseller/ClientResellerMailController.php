@@ -52,7 +52,10 @@ final class ClientResellerMailController
         // INJECTED rather than built here on purpose. A checker that builds its own DNS
         // lookup cannot be faked, so every test of this page would reach the network — and
         // a test that depends on real DNS is one that fails when a resolver is slow.
-        private readonly MailDomainAlignment $alignment
+        private readonly MailDomainAlignment $alignment,
+        // Trailing and optional for the hand-built tests; the container supplies it. Used
+        // to name the no-reply address on the store's OWN host that its mail falls back to.
+        private readonly ?ResellerStoreLocator $locator = null
     ) {
     }
 
@@ -84,7 +87,7 @@ final class ClientResellerMailController
             'created' => $this->session->pullFlash(self::FLASH_CREATED, null),
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
-            'platformSender' => $this->platformSender(),
+            'platformSender' => $this->fallbackSender($store),
         ]);
     }
 
@@ -134,7 +137,7 @@ final class ClientResellerMailController
 
         $this->session->flash(
             'reseller_notice',
-            'Cleared. Your customers are still written to as your store — our address carries the message and your name is on it.'
+            'Cleared. Your customers are still written to as your store — from a no-reply address on your store\'s own domain, with your name on it.'
         );
 
         return Response::redirect('/client/reseller/mail');
@@ -251,10 +254,25 @@ final class ClientResellerMailController
         return (string) $result['status'];
     }
 
-    /** The address our own mail goes out as — what the store's mail falls back to. */
-    private function platformSender(): string
+    /**
+     * The address a store's mail goes out as while it has no support address of its own.
+     *
+     * This USED to be the platform's own address, which always delivered but told every
+     * customer who the reseller buys from. Store mail now never carries our address
+     * (ResellerMailIdentity::senderFor), so the fallback is `noreply@` on the store's own
+     * host — and this page names it, so the reseller knows what their customers see.
+     *
+     * Without a locator (the hand-built tests) the old answer is kept.
+     *
+     * @param array<string, mixed> $store
+     */
+    private function fallbackSender(array $store): string
     {
-        return trim((string) $this->settings->get('smtp.from_email', ''));
+        if ($this->locator === null) {
+            return trim((string) $this->settings->get('smtp.from_email', ''));
+        }
+
+        return ResellerMailIdentity::senderFor(['support_email' => null] + $store, $this->locator->hostFor($store))['email'];
     }
 
     /**

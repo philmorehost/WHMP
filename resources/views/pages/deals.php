@@ -2,9 +2,89 @@
 /** @var CodeVault\View $view */
 /** @var array<int, array<string, mixed>> $promotions */
 /** @var string $whatsappNumber admin-configured WhatsApp number (international, no +) */
+/** @var bool|null $premium   injectable for tests; otherwise decided by the site being served */
+/** @var callable|null $money injectable for tests */
+use CodeVault\Reseller\StorefrontIcons as Icon;
+
 $whatsappNumber ??= '';
+$promotions ??= [];
 $whatsappHref = $whatsappNumber !== '' ? 'https://wa.me/' . preg_replace('/\D/', '', $whatsappNumber) : '';
+
+// A store's website and the main website in its premium design wear the
+// storefront chrome, so they get the premium deals grid. The classic sidebar
+// below links the PLATFORM's affiliate scheme, so it is only ever rendered on the
+// main website's classic design — never on a store.
+$premium ??= current_storefront() !== null || platform_premium_site();
+$money ??= null;
+
+if ($premium && $money === null) {
+    try {
+        $container = \CodeVault\Support\App::container();
+        $currencyService = $container->make(\CodeVault\Billing\CurrencyService::class);
+        $dealCurrency = $currencyService->resolveEffective(
+            $container->make(\CodeVault\Clients\ClientAuthGuard::class)->currentClient(),
+            $container->make(\CodeVault\Billing\CurrencySelection::class)->get()
+        );
+        $money = static fn (float $amount): string => $currencyService->format($amount, $dealCurrency);
+    } catch (\Throwable) {
+        $money = null;
+    }
+}
+
+$money ??= static fn (float $amount): string => number_format($amount, 2);
 ?>
+<?php if ($premium): ?>
+<div class="sf-deals">
+    <div class="sf-deals__intro">
+        <div>
+            <span class="sf-eyebrow"><?= Icon::svg('tag', 'sf-icon sf-icon--xs') ?> Limited-time offers</span>
+            <h2>Save on your next order</h2>
+            <p>Copy a code below and apply it in your cart at checkout. The discount is taken off before you pay.</p>
+        </div>
+        <div class="sf-deals__intro-actions">
+            <a href="/store" class="sf-btn sf-btn--primary">Browse services <?= Icon::svg('arrow', 'sf-icon sf-icon--xs') ?></a>
+            <?php if ($whatsappHref !== ''): ?>
+                <a href="<?= e($whatsappHref) ?>" target="_blank" rel="noopener" class="sf-btn sf-btn--soft"><?= Icon::svg('phone', 'sf-icon sf-icon--xs') ?> Ask on WhatsApp</a>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <?php if ($promotions === []): ?>
+        <div class="sf-deals__empty">
+            <span class="sf-chip sf-chip--lg"><?= Icon::svg('tag') ?></span>
+            <h3>No active deals right now</h3>
+            <p>New promotions appear here first — check back soon, or browse our plans in the meantime.</p>
+            <a href="/store" class="sf-btn sf-btn--primary">View all plans</a>
+        </div>
+    <?php else: ?>
+        <div class="sf-deals__grid">
+            <?php foreach ($promotions as $promo): ?>
+                <?php
+                $isPercent = ($promo['type'] ?? '') === 'percentage';
+                $amount = $isPercent
+                    ? rtrim(rtrim(number_format((float) $promo['value'], 2), '0'), '.') . '%'
+                    : $money((float) $promo['value']);
+                $expires = trim((string) ($promo['expires_at'] ?? ''));
+                $code = (string) ($promo['code'] ?? '');
+                ?>
+                <article class="sf-deal">
+                    <div class="sf-deal__top">
+                        <span class="sf-deal__badge">Promo</span>
+                        <span class="sf-deal__expiry"><?= Icon::svg('bolt', 'sf-icon sf-icon--xs') ?> <?= $expires !== '' ? 'Ends ' . e(date('j M Y', strtotime($expires) ?: time())) : 'No expiry' ?></span>
+                    </div>
+                    <div class="sf-deal__amount"><strong><?= e($amount) ?></strong><span>off</span></div>
+                    <p class="sf-deal__text"><?= !empty($promo['description']) ? e((string) $promo['description']) : 'Apply this code in your cart to claim the discount.' ?></p>
+                    <div class="sf-deal__code">
+                        <code><?= e($code) ?></code>
+                        <button type="button" class="sf-deal__copy" data-sf-copy="<?= e($code) ?>" data-sf-copied="Copied!">Copy</button>
+                    </div>
+                    <a href="/store" class="sf-btn sf-btn--primary sf-btn--block">Claim deal <?= Icon::svg('arrow', 'sf-icon sf-icon--xs') ?></a>
+                </article>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+</div>
+<?php else: ?>
 <div class="home-layout-wrapper">
     <!-- Left Sidebar (Lagom2 style) -->
     <div class="cv-card home-sidebar">
@@ -92,3 +172,4 @@ $whatsappHref = $whatsappNumber !== '' ? 'https://wa.me/' . preg_replace('/\D/',
         <?php endif; ?>
     </div>
 </div>
+<?php endif; ?>

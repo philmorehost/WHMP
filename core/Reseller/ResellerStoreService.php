@@ -101,6 +101,41 @@ final class ResellerStoreService
         return ['success' => true, 'error' => null];
     }
 
+    /** Longest headline the hero is designed for; matches the column (migration 0207). */
+    public const HOME_HEADLINE_MAX = 120;
+
+    /** Longest tagline; matches the column. */
+    public const HOME_TAGLINE_MAX = 300;
+
+    /**
+     * The words at the top of the store's home page. Plain text only: both are
+     * escaped on output, and a tag typed here would show up as literal text,
+     * so it is refused instead of being stored to confuse the reseller later.
+     *
+     * @return array{success: bool, error: ?string}
+     */
+    public function saveHomepage(int $storeId, string $headline, string $tagline): array
+    {
+        $headline = trim(preg_replace('/\s+/u', ' ', $headline) ?? '');
+        $tagline = trim(preg_replace('/\s+/u', ' ', $tagline) ?? '');
+
+        if (mb_strlen($headline) > self::HOME_HEADLINE_MAX) {
+            return ['success' => false, 'error' => 'Keep the headline to ' . self::HOME_HEADLINE_MAX . ' characters or fewer.'];
+        }
+
+        if (mb_strlen($tagline) > self::HOME_TAGLINE_MAX) {
+            return ['success' => false, 'error' => 'Keep the tagline to ' . self::HOME_TAGLINE_MAX . ' characters or fewer.'];
+        }
+
+        if ($headline !== strip_tags($headline) || $tagline !== strip_tags($tagline)) {
+            return ['success' => false, 'error' => 'The headline and tagline are plain text — remove any HTML tags.'];
+        }
+
+        $this->stores->saveHomepage($storeId, $headline, $tagline);
+
+        return ['success' => true, 'error' => null];
+    }
+
     /**
      * The store's own support chat.
      *
@@ -270,6 +305,13 @@ final class ResellerStoreService
         // the domain our own clients use.
         if ($normalised === $this->locator->platformHost() || str_ends_with($normalised, '.' . $this->locator->platformHost())) {
             return ['success' => false, 'error' => 'That domain belongs to the platform.', 'domain' => null];
+        }
+
+        // Likewise the store domain: every name under it is some store's free address.
+        $storeDomain = $this->locator->storeDomain();
+
+        if ($storeDomain !== null && ($normalised === $storeDomain || str_ends_with($normalised, '.' . $storeDomain))) {
+            return ['success' => false, 'error' => 'That domain is the platform address domain. Your free address under it is already yours; claim a domain of your own here.', 'domain' => null];
         }
 
         $existing = $this->stores->find($storeId);
@@ -481,13 +523,19 @@ final class ResellerStoreService
     }
 
     /**
-     * The store's own web address, platform subdomain form — the one that works
-     * before any DNS is set up. Built from APP_URL's scheme, never from the
-     * request, so it is the same string everywhere it is shown.
+     * The store's free web address (`{slug}.{store domain}`), the one that works
+     * before the reseller sets up a domain of their own. Built from APP_URL's scheme,
+     * never from the request, so it is the same string everywhere it is shown.
+     * Null when the super admin has not set a platform address domain: then the store
+     * is served only on its own verified domain.
+     *
+     * @param array<string, mixed> $store
      */
-    public function platformUrl(array $store): string
+    public function platformUrl(array $store): ?string
     {
-        return $this->locator->platformScheme() . '://' . $store['slug'] . '.' . $this->locator->platformHost();
+        $address = $this->locator->platformAddressFor($store);
+
+        return $address === null ? null : $this->locator->platformScheme() . '://' . $address;
     }
 
     /**

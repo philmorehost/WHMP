@@ -42,6 +42,7 @@ final class CampaignCopilotController
         . "No <div>, no style attributes, no CSS, no scripts, no <html> or <body> wrapper, no Markdown. "
         . "Keep it concise and specific — short paragraphs, no filler. "
         . "Use [Client Name] as the greeting placeholder if a name is needed. "
+        . "Other supported placeholders, only when useful, are [First Name], [Last Name], [Email], [Client Email], [Email Domain], [Domain], [Client Domain], [Client ID], [Client Company], [Phone], [City], [State], [Postcode], [Country], [Company Name], [Billing Website], [Billing URL], [Client Area URL] and [Support URL]. Do not invent other merge tags. "
         . "Do not invent prices, dates, discounts or feature names that were not given to you. "
         . "Do not add a subject line or sign-off inside the body unless asked.";
 

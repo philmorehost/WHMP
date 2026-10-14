@@ -56,7 +56,10 @@ final class OrderRepository
         $perPage = max(1, min(100, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $conditions = [];
+        // STRICT RESELLER ISOLATION: the admin's list holds the platform's own
+        // customers' records only. A store's customers' records are reached through
+        // that reseller's page (/admin/resellers/{id}/customers), never listed here.
+        $conditions = [\CodeVault\Clients\ClientRepository::PLATFORM_ONLY];
         $bindings = [];
 
         if ($status !== null) {

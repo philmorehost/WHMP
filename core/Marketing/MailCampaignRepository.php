@@ -9,6 +9,20 @@ use DateTimeImmutable;
 
 final class MailCampaignRepository
 {
+    /** Active hosting-service domain, falling back to an active registered domain. */
+    private const PRIMARY_DOMAIN_SQL = <<<'SQL'
+        COALESCE(
+            (SELECT NULLIF(TRIM(s.domain), '')
+             FROM services s
+             WHERE s.client_id = c.id AND s.status = 'active' AND s.domain IS NOT NULL AND TRIM(s.domain) <> ''
+             ORDER BY s.id DESC LIMIT 1),
+            (SELECT NULLIF(TRIM(d.domain_name), '')
+             FROM domains d
+             WHERE d.client_id = c.id AND d.status = 'active' AND TRIM(d.domain_name) <> ''
+             ORDER BY d.id DESC LIMIT 1)
+        )
+        SQL;
+
     public function __construct(
         private readonly Database $db
     ) {
@@ -180,11 +194,48 @@ final class MailCampaignRepository
     }
 
     /**
+     * The active primary domain for each client, preferring the newest active
+     * hosting-service domain and then the newest active registered domain.
+     *
+     * @param array<int, int> $clientIds
+     * @return array<int, string> client id => domain
+     */
+    public function primaryDomainsForClients(array $clientIds): array
+    {
+        $clientIds = array_values(array_unique(array_filter(
+            array_map('intval', $clientIds),
+            static fn (int $id): bool => $id > 0
+        )));
+
+        if ($clientIds === []) {
+            return [];
+        }
+
+        $domains = [];
+
+        // Keep each IN clause well below database parameter limits on large
+        // immediate-send campaigns.
+        foreach (array_chunk($clientIds, 500) as $chunk) {
+            $placeholders = implode(', ', array_fill(0, count($chunk), '?'));
+            $rows = $this->db->select(
+                'SELECT c.id, ' . self::PRIMARY_DOMAIN_SQL . " AS domain FROM clients c WHERE c.id IN ({$placeholders})",
+                $chunk
+            );
+
+            foreach ($rows as $row) {
+                $domains[(int) $row['id']] = trim((string) ($row['domain'] ?? ''));
+            }
+        }
+
+        return $domains;
+    }
+
+    /**
      * The next slice of queued recipients to send, oldest campaign first so a
      * big campaign can't starve one queued after it.
      *
-     * Carries the campaign's subject/body so the dispatcher needs one query
-     * per batch rather than one per recipient.
+     * Carries the campaign content and each client's merge-field data so the
+     * dispatcher needs one query per batch rather than one per recipient.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -195,7 +246,9 @@ final class MailCampaignRepository
         return $this->db->select(
             "SELECT r.id, r.campaign_id, r.client_id, r.open_token,
                     COALESCE(c.email, r.email) AS email,
-                    c.first_name, c.last_name,
+                    c.first_name, c.last_name, c.company_name AS client_company,
+                    c.phone, c.city, c.state, c.postcode, c.country,
+                    " . self::PRIMARY_DOMAIN_SQL . " AS domain,
                     mc.subject, mc.body
              FROM mail_campaign_recipients r
              JOIN mail_campaigns mc ON mc.id = r.campaign_id

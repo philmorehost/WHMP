@@ -10,6 +10,8 @@ use CodeVault\Clients\ClientGroupController;
 
 $router->get('/admin/email-validation', [ClientEmailValidationController::class, 'index']);
 $router->post('/admin/email-validation/scan', [ClientEmailValidationController::class, 'scan']);
+$router->post('/admin/email-validation/blocking', [ClientEmailValidationController::class, 'blocking']);
+$router->post('/admin/email-validation/allow', [ClientEmailValidationController::class, 'allow']);
 
 $router->get('/admin/client-groups', [ClientGroupController::class, 'index']);
 $router->post('/admin/client-groups', [ClientGroupController::class, 'store']);

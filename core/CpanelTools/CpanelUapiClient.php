@@ -15,14 +15,12 @@ use CodeVault\Provisioning\HttpClient;
  * token — no per-client cPanel password is ever needed, same as
  * CpanelProvisioningModule.
  *
- * NOT yet verified against a live server. The UAPI-proxy response shape
- * (`decodeUapi`) is built from cPanel's documented `{status, errors, data}`
- * UAPI envelope wrapped under a `result` key, which is the documented
- * behavior for WHM-proxied UAPI calls — but CpanelProvisioningModule's own
- * docblock notes a real WHM server surprised that implementation with an
- * undocumented legacy shape for one function, so this defensively also
- * accepts the raw (unwrapped) UAPI envelope and the legacy `cpanelresult`
- * shape rather than assuming the documented one is exactly right.
+ * The proxy can return the documented UAPI result envelope, a legacy
+ * `cpanelresult` envelope (including a nested UAPI result), or a plain text
+ * error object. All three are normalized here so tool callers get the real
+ * panel error instead of a generic shape failure. Cron jobs, SSH key
+ * management, and MySQL user listing still use cPanel API 2 because cPanel does
+ * not expose those operations through UAPI.
  */
 final class CpanelUapiClient
 {
@@ -32,7 +30,8 @@ final class CpanelUapiClient
     private const API_VERSION = '3';
 
     /**
-     * The legacy API 2 version, tried only when the UAPI module is missing.
+     * The legacy API 2 version, used only when a mapped UAPI list operation is
+     * missing or the UAPI module cannot be loaded.
      *
      * This exists because of a real server. Asking for
      * `AddonDomain::addaddondomain` over UAPI came back with:
@@ -48,6 +47,30 @@ final class CpanelUapiClient
      */
     private const LEGACY_API_VERSION = '2';
 
+    /**
+     * Old application builds used this non-existent UAPI name. Normalize it
+     * before sending the request so already-deployed callers get the supported
+     * SSL certificate listing function.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const UAPI_FUNCTION_ALIASES = [
+        'ssl' => ['installed' => 'list_certs'],
+    ];
+
+    /**
+     * Read-only API 2 replacements for UAPI list operations on older cPanel
+     * servers. The API 2 function names are not always the same as their UAPI
+     * counterparts (Cron::list_cronjobs is Cron::listcron in API 2).
+     *
+     * @var array<string, array<string, array{0: string, 1: string}>>
+     */
+    private const API2_LIST_FALLBACKS = [
+        'cron' => ['list_cronjobs' => ['Cron', 'listcron']],
+        'ssl' => ['list_certs' => ['SSL', 'listcrts']],
+        'mysql' => ['list_databases' => ['MysqlFE', 'listdbs']],
+    ];
+
     public function __construct(
         private readonly HttpClient $http
     ) {
@@ -60,24 +83,47 @@ final class CpanelUapiClient
      */
     public function call(array $server, string $cpanelUser, string $module, string $func, array $params = []): array
     {
-        $result = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::API_VERSION);
+        $cpanelUser = trim($cpanelUser);
 
-        if (!$result['success'] && self::moduleUnavailable((string) $result['message'])) {
-            $legacy = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::LEGACY_API_VERSION);
+        if ($cpanelUser === '') {
+            return [
+                'success' => false,
+                'message' => 'The service does not have a cPanel username assigned.',
+                'data' => [],
+                'api_version' => self::API_VERSION,
+            ];
+        }
+
+        $func = self::uapiFunctionAlias($module, $func);
+        $namedFallback = self::api2ListFallback($module, $func);
+        $legacyTarget = $namedFallback ?? [$module, $func];
+        $hasNamedFallback = $namedFallback !== null;
+        $result = $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::API_VERSION);
+        $moduleMissing = !$result['success'] && self::moduleUnavailable((string) $result['message']);
+        $functionMissing = !$result['success']
+            && $hasNamedFallback
+            && self::functionUnavailable((string) $result['message']);
+
+        if ($moduleMissing || $functionMissing) {
+            [$legacyModule, $legacyFunc] = $legacyTarget;
+            $legacy = $this->callWithVersion($server, $cpanelUser, $legacyModule, $legacyFunc, $params, self::LEGACY_API_VERSION);
 
             if ($legacy['success']) {
                 return $legacy;
             }
 
-            // BOTH failed, and the two messages name different things: the first
-            // says which module file is missing, the second says what the legacy
-            // route made of the same request. Report both rather than only the
-            // last one, because the first is the one an administrator can act on.
+            // Both calls failed. Preserve the original UAPI error and name the
+            // exact API 2 target tried so a host administrator can diagnose the
+            // missing module/function instead of seeing a misleading generic
+            // "function not found" for a different API's name.
+            $firstFailure = $moduleMissing
+                ? 'The hosting panel does not have the ' . $module . ' module for UAPI'
+                : 'The hosting panel could not run UAPI ' . $module . '::' . $func;
+
             return [
                 'success' => false,
-                'message' => 'The hosting panel does not have the ' . $module . ' module for UAPI ('
-                    . $result['message'] . '), and the legacy API 2 equivalent failed too ('
-                    . $legacy['message'] . ').',
+                'message' => $firstFailure . ' (' . $result['message'] . '), and API 2 '
+                    . $legacyModule . '::' . $legacyFunc . ' failed too (' . $legacy['message'] . ').',
                 'data' => [],
                 'api_version' => self::LEGACY_API_VERSION,
             ];
@@ -87,8 +133,60 @@ final class CpanelUapiClient
     }
 
     /**
-     * One attempt at one API version. Split out so the fallback above cannot
-     * drift from the primary path — they differ in exactly one parameter.
+     * Call a legacy cPanel API 2 function directly. Cron jobs and SSH key
+     * management have no equivalent UAPI functions on cPanel, so those tools
+     * must not first try a similarly named but nonexistent UAPI operation.
+     *
+     * @param array<string, mixed> $server
+     * @param array<string, mixed> $params
+     * @return array{success: bool, message: string, data: mixed, api_version: string}
+     */
+    public function callApi2(array $server, string $cpanelUser, string $module, string $func, array $params = []): array
+    {
+        $cpanelUser = trim($cpanelUser);
+
+        if ($cpanelUser === '') {
+            return [
+                'success' => false,
+                'message' => 'The service does not have a cPanel username assigned.',
+                'data' => [],
+                'api_version' => self::LEGACY_API_VERSION,
+            ];
+        }
+
+        return $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::LEGACY_API_VERSION);
+    }
+
+    /**
+     * Secure POST variant for functions which carry passwords or private
+     * material. Secret values belong in the form body, never a query string
+     * that proxies and access logs may retain.
+     *
+     * @param array<string, mixed> $server
+     * @param array<string, mixed> $params
+     * @return array{success: bool, message: string, data: mixed, api_version: string}
+     */
+    public function callPost(array $server, string $cpanelUser, string $module, string $func, array $params = []): array
+    {
+        return $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::API_VERSION, 'POST');
+    }
+
+    /**
+     * Secure POST variant for API 2 mutations with sensitive or long values,
+     * including SSH::genkey passphrases and cron command payloads.
+     *
+     * @param array<string, mixed> $server
+     * @param array<string, mixed> $params
+     * @return array{success: bool, message: string, data: mixed, api_version: string}
+     */
+    public function callApi2Post(array $server, string $cpanelUser, string $module, string $func, array $params = []): array
+    {
+        return $this->callWithVersion($server, $cpanelUser, $module, $func, $params, self::LEGACY_API_VERSION, 'POST');
+    }
+
+    /**
+     * One attempt at one API version and transport method. Split out so the
+     * fallback path and secure POST mutations share the same request shape.
      *
      * @param array<string, mixed> $server
      * @param array<string, mixed> $params
@@ -100,19 +198,32 @@ final class CpanelUapiClient
         string $module,
         string $func,
         array $params,
-        string $apiVersion
+        string $apiVersion,
+        string $method = 'GET'
     ): array {
+        $cpanelUser = trim($cpanelUser);
+
+        if ($cpanelUser === '') {
+            return [
+                'success' => false,
+                'message' => 'The service does not have a cPanel username assigned.',
+                'data' => [],
+                'api_version' => $apiVersion,
+            ];
+        }
+
         $query = array_merge($params, [
+            'api.version' => '1',
             'cpanel_jsonapi_user' => $cpanelUser,
             'cpanel_jsonapi_apiversion' => $apiVersion,
             'cpanel_jsonapi_module' => $module,
             'cpanel_jsonapi_func' => $func,
         ]);
 
-        $decoded = $this->decodeUapi($this->request($server, 'cpanel', $query));
+        $decoded = $this->decodeUapi($this->request($server, 'cpanel', $query, $method));
         $decoded['api_version'] = $apiVersion;
 
-        return $decoded;
+        return self::addUsernameRejectionHint($decoded);
     }
 
     /**
@@ -129,6 +240,35 @@ final class CpanelUapiClient
         }
 
         return false;
+    }
+
+    private static function functionUnavailable(string $message): bool
+    {
+        foreach ([
+            'function not found',
+            'could not find function',
+            'unknown function',
+            'no such function',
+            'function is not available',
+            'function is unavailable',
+        ] as $needle) {
+            if (stripos($message, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function uapiFunctionAlias(string $module, string $func): string
+    {
+        return self::UAPI_FUNCTION_ALIASES[strtolower($module)][strtolower($func)] ?? $func;
+    }
+
+    /** @return array{0: string, 1: string}|null */
+    private static function api2ListFallback(string $module, string $func): ?array
+    {
+        return self::API2_LIST_FALLBACKS[strtolower($module)][strtolower($func)] ?? null;
     }
 
     /**
@@ -152,12 +292,19 @@ final class CpanelUapiClient
      * @param array<string, mixed> $query
      * @return array{status: int, body: string}
      */
-    private function request(array $server, string $function, array $query): array
+    private function request(array $server, string $function, array $query, string $method = 'GET'): array
     {
         $port = $server['api_port'] ?? self::DEFAULT_PORT;
         $scheme = ($server['use_ssl'] ?? true) ? 'https' : 'http';
-
-        $url = "{$scheme}://{$server['hostname']}:{$port}/json-api/{$function}?" . http_build_query($query);
+        $url = "{$scheme}://{$server['hostname']}:{$port}/json-api/{$function}";
+        $body = null;
+        $headers = [];
+        if ($method === 'POST') {
+            $headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            $body = http_build_query($query);
+        } else {
+            $url .= '?' . http_build_query($query);
+        }
 
         $token = $server['api_token'] ?? '';
         $username = $server['api_username'] ?? '';
@@ -166,30 +313,29 @@ final class CpanelUapiClient
             ? "whm {$username}:{$token}" 
             : "Basic " . base64_encode("{$username}:{$token}");
 
-        return $this->http->request('GET', $url, [
-            'Authorization' => $authHeader,
-        ]);
+        $headers['Authorization'] = $authHeader;
+        return $this->http->request($method, $url, $headers, $body);
     }
 
-    /** @param array{status: int, body: string} $response */
+    /** @param array{status: int, body: string, error?: string} $response */
     private function decodeUapi(array $response): array
     {
         if ($response['status'] === 0) {
             $msg = 'Could not reach the WHM server.';
+
             if (!empty($response['error'])) {
                 $msg .= ' (' . $response['error'] . ')';
             }
+
             return ['success' => false, 'message' => $msg, 'data' => []];
         }
 
         $decoded = json_decode($response['body'], true);
 
         if (!is_array($decoded)) {
-            // Include what the panel actually sent. "Unexpected response" alone is
-            // useless precisely when it matters: cPanel reports a missing module
-            // as a Perl compile failure, and if that arrives outside a JSON
-            // envelope the wording is the only clue there is — and it is also
-            // what makes moduleUnavailable() fire, so the API 2 retry happens.
+            // Include the panel's exact text. Missing-module errors are sometimes
+            // Perl compile output rather than JSON, and their wording is the only
+            // useful signal for the API 2 fallback.
             return [
                 'success' => false,
                 'message' => "Unexpected response (HTTP {$response['status']})." . self::excerpt($response['body']),
@@ -197,33 +343,188 @@ final class CpanelUapiClient
             ];
         }
 
-        // Documented shape: the raw UAPI envelope ({status, errors, data, ...})
-        // wrapped under "result". Fall back to treating the top level as the
-        // envelope itself in case a given WHM build doesn't wrap it.
-        $envelope = is_array($decoded['result'] ?? null) ? $decoded['result'] : $decoded;
-
-        if (array_key_exists('status', $envelope)) {
-            $ok = $response['status'] === 200 && (int) $envelope['status'] === 1;
-            $errors = $envelope['errors'] ?? null;
-            $message = $ok
-                ? 'OK'
-                : (is_array($errors) ? implode(' ', $errors) : (string) ($errors ?? "UAPI call failed (HTTP {$response['status']})."));
-
-            return ['success' => $ok, 'message' => $message, 'data' => $envelope['data'] ?? []];
+        // Modern WHM-proxied UAPI: {"result": {"status", "errors", "data"}}.
+        if (is_array($decoded['result'] ?? null) && array_key_exists('status', $decoded['result'])) {
+            return $this->decodeUapiEnvelope($decoded['result'], $response['status']);
         }
 
-        if (isset($decoded['cpanelresult'])) {
-            $cr = $decoded['cpanelresult'];
-            $hasError = isset($cr['error']);
-
-            return [
-                'success' => !$hasError,
-                'message' => $hasError ? (string) $cr['error'] : 'OK',
-                'data' => $cr['data'] ?? [],
-            ];
+        // Some WHM builds return the UAPI envelope without the result wrapper.
+        if (array_key_exists('status', $decoded) && (array_key_exists('errors', $decoded) || array_key_exists('data', $decoded))) {
+            return $this->decodeUapiEnvelope($decoded, $response['status']);
         }
 
-        return ['success' => false, 'message' => "Unrecognized UAPI response shape (HTTP {$response['status']})." . self::excerpt($response['body']), 'data' => []];
+        // Legacy cPanel API 1/2 wrapper. UAPI proxy responses on some builds
+        // also wrap the UAPI result object inside cpanelresult.data[0].
+        if (is_array($decoded['cpanelresult'] ?? null)) {
+            return $this->decodeCpanelResult($decoded['cpanelresult'], $response['status']);
+        }
+
+        // Actual WHM proxy error shape, observed when the cPanel username is
+        // rejected: {"data":{"reason":"...","result":"0"},"type":"text","error":"..."}.
+        // Parse it as an API failure and preserve the panel's message.
+        if (array_key_exists('data', $decoded) && (array_key_exists('error', $decoded) || array_key_exists('type', $decoded))) {
+            return $this->decodeDirectPanelResult($decoded, $response['status']);
+        }
+
+        return [
+            'success' => false,
+            'message' => "Unrecognized UAPI response shape (HTTP {$response['status']})." . self::excerpt($response['body']),
+            'data' => [],
+        ];
+    }
+
+    /** @param array<string, mixed> $envelope */
+    private function decodeUapiEnvelope(array $envelope, int $httpStatus): array
+    {
+        $ok = self::httpSucceeded($httpStatus) && (string) ($envelope['status'] ?? '') === '1';
+        $message = $ok
+            ? 'OK'
+            : (self::panelMessage($envelope['errors'] ?? null)
+                ?: self::panelMessage($envelope['messages'] ?? null)
+                ?: (string) ($envelope['reason'] ?? "UAPI call failed (HTTP {$httpStatus})."));
+
+        return [
+            'success' => $ok,
+            'message' => $message,
+            'data' => $envelope['data'] ?? [],
+        ];
+    }
+
+    /** @param array<string, mixed> $cpanelResult */
+    private function decodeCpanelResult(array $cpanelResult, int $httpStatus): array
+    {
+        $data = $cpanelResult['data'] ?? [];
+
+        // WHM's cpanel proxy may wrap the UAPI envelope in the first API2 data
+        // row. Unwrap it so callers receive the UAPI payload, not its envelope.
+        if (is_array($data) && self::hasUapiEnvelope($data)) {
+            return $this->decodeUapiEnvelope($data, $httpStatus);
+        }
+
+        if (is_array($data) && self::isList($data) && count($data) === 1 && is_array($data[0]) && self::hasUapiEnvelope($data[0])) {
+            return $this->decodeUapiEnvelope($data[0], $httpStatus);
+        }
+
+        $error = self::panelMessage($cpanelResult['error'] ?? null);
+        $rowError = '';
+        $rowFailed = false;
+
+        foreach (self::isList($data) ? $data : [$data] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $nestedResult = is_array($row['result'] ?? null) ? $row['result'] : [];
+            $flag = $nestedResult['status'] ?? $nestedResult['result'] ?? $row['result'] ?? null;
+
+            // API 2 also uses `status` for descriptive values such as
+            // "authorized". Treat it as a success flag only when it is
+            // explicitly boolean-like; otherwise rely on the event result.
+            if ($flag === null && array_key_exists('status', $row)) {
+                $rowStatus = $row['status'];
+
+                if (is_bool($rowStatus)) {
+                    $flag = $rowStatus ? '1' : '0';
+                } elseif (is_scalar($rowStatus)) {
+                    $rowStatus = strtolower(trim((string) $rowStatus));
+
+                    if (in_array($rowStatus, ['0', '1', 'true', 'false'], true)) {
+                        $flag = in_array($rowStatus, ['1', 'true'], true) ? '1' : '0';
+                    }
+                }
+            }
+
+            if ($flag !== null && (string) $flag !== '1') {
+                $rowFailed = true;
+                $rowError = self::panelMessage(
+                    $row['reason']
+                    ?? $row['statusmsg']
+                    ?? $nestedResult['reason']
+                    ?? $nestedResult['statusmsg']
+                    ?? null
+                );
+            }
+        }
+
+        $eventResult = $cpanelResult['event']['result'] ?? null;
+        $eventFailed = $eventResult !== null && (string) $eventResult !== '1';
+        $success = self::httpSucceeded($httpStatus) && $error === '' && !$rowFailed && !$eventFailed;
+        $message = $success
+            ? 'OK'
+            : ($error ?: $rowError ?: "cPanel API call failed (HTTP {$httpStatus}).");
+
+        return ['success' => $success, 'message' => $message, 'data' => $data];
+    }
+
+    /** @param array<string, mixed> $decoded */
+    private function decodeDirectPanelResult(array $decoded, int $httpStatus): array
+    {
+        $data = $decoded['data'] ?? [];
+        $flag = is_array($data) ? ($data['result'] ?? $data['status'] ?? null) : null;
+        $error = self::panelMessage($decoded['error'] ?? null);
+        $dataError = is_array($data) ? self::panelMessage($data['reason'] ?? $data['error'] ?? null) : '';
+        $failed = ($flag !== null && (string) $flag !== '1') || $error !== '' || $dataError !== '';
+        $success = self::httpSucceeded($httpStatus) && !$failed;
+        $messageParts = array_values(array_unique(array_filter([$dataError, $error], static fn (string $message): bool => $message !== '')));
+        $message = $success
+            ? 'OK'
+            : ($messageParts !== [] ? implode(' ', $messageParts) : "cPanel API call failed (HTTP {$httpStatus}).");
+
+        return [
+            'success' => $success,
+            'message' => $message,
+            'data' => is_array($data) && array_key_exists('data', $data) ? $data['data'] : $data,
+        ];
+    }
+
+    /** @param array<string, mixed> $candidate */
+    private static function hasUapiEnvelope(array $candidate): bool
+    {
+        return array_key_exists('status', $candidate) && array_key_exists('data', $candidate);
+    }
+
+    /** @param array<mixed> $value */
+    private static function isList(array $value): bool
+    {
+        return $value === [] || array_keys($value) === range(0, count($value) - 1);
+    }
+
+    private static function httpSucceeded(int $status): bool
+    {
+        return $status >= 200 && $status < 300;
+    }
+
+    private static function panelMessage(mixed $value): string
+    {
+        if (is_string($value) || is_numeric($value)) {
+            return trim((string) $value);
+        }
+
+        if (is_array($value)) {
+            $messages = [];
+
+            foreach ($value as $item) {
+                $message = self::panelMessage($item);
+
+                if ($message !== '') {
+                    $messages[] = $message;
+                }
+            }
+
+            return implode(' ', $messages);
+        }
+
+        return '';
+    }
+
+    /** @param array{success: bool, message: string, data: mixed, api_version?: string} $result */
+    private static function addUsernameRejectionHint(array $result): array
+    {
+        if (!$result['success'] && stripos($result['message'], 'user parameter is invalid or was not supplied') !== false) {
+            $result['message'] .= ' The WHM server rejected the cPanel username assigned to this service; an administrator must verify the service username and assigned server.';
+        }
+
+        return $result;
     }
 
     /**
@@ -273,29 +574,39 @@ final class CpanelUapiClient
         }
 
         if (isset($decoded['metadata'])) {
-            $ok = $response['status'] === 200 && ($decoded['metadata']['result'] ?? null) === 1;
+            $ok = self::httpSucceeded($response['status']) && (string) ($decoded['metadata']['result'] ?? '') === '1';
 
             return [
                 'success' => $ok,
-                'message' => $ok ? 'OK' : (string) ($decoded['metadata']['reason'] ?? "WHM API error (HTTP {$response['status']})."),
+                'message' => $ok ? 'OK' : (self::panelMessage($decoded['metadata']['reason'] ?? null) ?: "WHM API error (HTTP {$response['status']})."),
                 'data' => is_array($decoded['data'] ?? null) ? $decoded['data'] : [],
             ];
         }
 
-        if (isset($decoded['cpanelresult'])) {
+        if (is_array($decoded['cpanelresult'] ?? null)) {
             $cr = $decoded['cpanelresult'];
             $innerData = is_array($cr['data'] ?? null) ? $cr['data'] : [];
-            $hasError = isset($cr['error']);
-            $resultFlag = $innerData['result'] ?? null;
-            $ok = $response['status'] === 200 && !$hasError && ($resultFlag === null || (string) $resultFlag === '1');
+            $error = self::panelMessage($cr['error'] ?? null);
+            $resultFlag = $innerData['result'] ?? $innerData['status'] ?? null;
+            $eventResult = $cr['event']['result'] ?? null;
+            $failed = $error !== ''
+                || ($resultFlag !== null && (string) $resultFlag !== '1')
+                || ($eventResult !== null && (string) $eventResult !== '1');
+            $ok = self::httpSucceeded($response['status']) && !$failed;
 
             return [
                 'success' => $ok,
-                'message' => (string) ($cr['error'] ?? ($innerData['reason'] ?? ($ok ? 'OK' : "WHM API error (HTTP {$response['status']})."))),
+                'message' => $ok ? 'OK' : ($error ?: self::panelMessage($innerData['reason'] ?? null) ?: "WHM API error (HTTP {$response['status']})."),
                 'data' => $innerData,
             ];
         }
 
-        return ['success' => false, 'message' => "Unrecognized WHM response shape (HTTP {$response['status']}).", 'data' => []];
+        if (array_key_exists('data', $decoded) && (array_key_exists('error', $decoded) || array_key_exists('type', $decoded))) {
+            $result = $this->decodeDirectPanelResult($decoded, $response['status']);
+
+            return self::addUsernameRejectionHint($result);
+        }
+
+        return ['success' => false, 'message' => "Unrecognized WHM response shape (HTTP {$response['status']})." . self::excerpt($response['body']), 'data' => []];
     }
 }

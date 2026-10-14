@@ -244,7 +244,7 @@ final class ClientServiceControllerTest extends DatabaseTestCase
         $tickets = $this->tickets();
         $this->assertCount(1, $tickets);
         $this->assertStringContainsString('VNC console', (string) $tickets[0]['subject']);
-        $this->assertStringContainsString('No VNC console is provisioned', (string) $this->repliesFor((int) $tickets[0]['id'])[0]['message']);
+        $this->assertStringContainsString('No VNC console details are available', (string) $this->repliesFor((int) $tickets[0]['id'])[0]['message']);
     }
 
     public function test_rdns_opens_a_support_ticket_when_the_api_rejects_the_update(): void

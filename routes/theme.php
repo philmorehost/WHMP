@@ -8,3 +8,4 @@ use CodeVault\Theme\ThemeController;
 
 $router->get('/admin/theme', [ThemeController::class, 'index']);
 $router->post('/admin/theme', [ThemeController::class, 'update']);
+$router->post('/admin/theme/website', [ThemeController::class, 'updateWebsite']);

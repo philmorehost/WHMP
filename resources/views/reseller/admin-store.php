@@ -12,7 +12,15 @@
  * @var float $markup
  * @var int $overrideCount
  * @var array<int, array<string, mixed>> $goLive
+ * @var array<string, int>|null $customerSummary
+ * @var int|null $pendingOrders orders from this reseller's customers awaiting acceptance
+ * @var array<string, mixed>|null $upline the store this reseller's owner registered under (sub-reseller)
+ * @var bool|null $legacyThirdTier the upline is itself a sub-reseller (a store opened before the two-tier cap)
  */
+
+$upline = $upline ?? null;
+$uplineName = $upline === null ? '' : (trim((string) ($upline['brand_name'] ?? '')) !== '' ? (string) $upline['brand_name'] : (string) $upline['slug']);
+$icon = static fn (string $paths): string => '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' . $paths . '</svg>';
 
 $clientName = $client === null
     ? 'client #' . $clientId
@@ -21,18 +29,75 @@ $clientName = $client === null
 $customDomain = $store === null ? null : ($store['custom_domain'] ?? null);
 $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
 ?>
-<div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h1 class="cv-card__title">Reseller store — <?= e($clientName) ?></h1>
-    <p><a href="/admin/resellers">&larr; Back to resellers</a> &middot;
-        <a href="/admin/clients/<?= (int) $clientId ?>">Client account</a></p>
+<?php if ($store !== null): ?>
+    <?= $view->render('partials.reseller-admin-head', ['store' => $store, 'owner' => $client, 'current' => 'store', 'upline' => $upline]) ?>
+<?php else: ?>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <h1 class="cv-card__title">Reseller store — <?= e($clientName) ?></h1>
+        <p><a href="/admin/resellers">&larr; Back to resellers</a> &middot;
+            <a href="/admin/clients/<?= (int) $clientId ?>">The reseller's own user account (User ID <?= (int) $clientId ?>)</a></p>
+    </div>
+<?php endif; ?>
 
-    <?php if ($error !== null && $error !== ''): ?>
-        <div class="cv-alert cv-alert--error"><?= e((string) $error) ?></div>
-    <?php endif; ?>
-    <?php if ($notice !== null && $notice !== ''): ?>
-        <div class="cv-alert cv-alert--success"><?= e((string) $notice) ?></div>
-    <?php endif; ?>
-</div>
+<?php if ($error !== null && $error !== ''): ?>
+    <div class="cv-alert cv-alert--error" style="margin-bottom:var(--cv-space-4);"><?= e((string) $error) ?></div>
+<?php endif; ?>
+<?php if ($notice !== null && $notice !== ''): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-4);"><?= e((string) $notice) ?></div>
+<?php endif; ?>
+
+<?php if ($store !== null && is_array($customerSummary ?? null)): ?>
+    <div class="rs-stats rs-stats--kpi" style="margin-bottom:var(--cv-space-4);">
+        <a class="rs-stat rs-stat--link" href="/admin/resellers/<?= (int) $clientId ?>/customers">
+            <span class="rs-stat__icon"><?= $icon('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>') ?></span>
+            <div class="rs-stat__label">Customers</div>
+            <div class="rs-stat__value"><?= (int) $customerSummary['customers'] ?></div>
+            <div class="rs-stat__note">registered on this store</div>
+        </a>
+        <div class="rs-stat rs-stat--teal">
+            <span class="rs-stat__icon"><?= $icon('<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>') ?></span>
+            <div class="rs-stat__label">Active services</div>
+            <div class="rs-stat__value"><?= (int) $customerSummary['services_active'] ?></div>
+            <div class="rs-stat__note"><?= (int) $customerSummary['services_suspended'] ?> suspended</div>
+        </div>
+        <div class="rs-stat rs-stat--violet">
+            <span class="rs-stat__icon"><?= $icon('<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>') ?></span>
+            <div class="rs-stat__label">Domains</div>
+            <div class="rs-stat__value"><?= (int) $customerSummary['domains'] ?></div>
+            <div class="rs-stat__note">pending, active or in grace</div>
+        </div>
+        <div class="rs-stat rs-stat--amber">
+            <span class="rs-stat__icon"><?= $icon('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/>') ?></span>
+            <div class="rs-stat__label">Unpaid invoices</div>
+            <div class="rs-stat__value"><?= (int) $customerSummary['invoices_unpaid'] ?></div>
+            <div class="rs-stat__note">across its customers</div>
+        </div>
+        <a class="rs-stat rs-stat--link<?= (int) ($pendingOrders ?? 0) > 0 ? ' rs-stat--alert' : '' ?>" href="/admin/resellers/<?= (int) $clientId ?>/customers#orders">
+            <span class="rs-stat__icon"><?= $icon('<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>') ?></span>
+            <div class="rs-stat__label">Pending orders</div>
+            <div class="rs-stat__value"><?= (int) ($pendingOrders ?? 0) ?></div>
+            <div class="rs-stat__note">awaiting acceptance</div>
+        </a>
+        <div class="rs-stat">
+            <span class="rs-stat__icon"><?= $icon('<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>') ?></span>
+            <div class="rs-stat__label">Store markup</div>
+            <div class="rs-stat__value"><?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($markup)) ?>%</div>
+            <div class="rs-stat__note"><?= (int) $overrideCount ?> hand-set price<?= (int) $overrideCount === 1 ? '' : 's' ?></div>
+        </div>
+    </div>
+<?php endif; ?>
+
+<?php if ($store !== null && $upline !== null): ?>
+    <div class="cv-alert <?= !empty($legacyThirdTier) ? 'cv-alert--warning' : 'cv-alert--neutral' ?>" style="margin-bottom:var(--cv-space-4);">
+        <strong>Sub-reseller.</strong> This reseller registered on <strong><?= e($uplineName) ?></strong>
+        (Reseller ID <?= (int) $upline['id'] ?>), so it buys at that store's prices and <?= e($uplineName) ?> earns
+        the difference on every sale. Its own customers cannot become resellers.
+        <?php if (!empty($legacyThirdTier)): ?>
+            <br><strong>Third tier:</strong> <?= e($uplineName) ?> is itself a sub-reseller. This store was opened
+            before resale was capped at two tiers; no new stores like it can be opened.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
 
 <?php if (is_array($verification)): ?>
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
@@ -85,7 +150,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <tr><th>Slug</th><td><code><?= e((string) $store['slug']) ?></code></td></tr>
             <tr>
                 <th>Platform address</th>
-                <td><a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a></td>
+                <td>
+                    <?php if (($platformUrl ?? null) !== null): ?>
+                        <a href="<?= e((string) $platformUrl) ?>"><?= e((string) $platformUrl) ?></a>
+                    <?php else: ?>
+                        <em>not served</em> — no platform address domain is set
+                        (<a href="/admin/resellers#rs-platform-address">set one</a>), so this store loads only on its
+                        verified domain.
+                    <?php endif; ?>
+                </td>
             </tr>
             <tr>
                 <th>Custom domain</th>
@@ -112,6 +185,18 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                     <?php endif; ?>
                 </td>
             </tr>
+            <tr>
+                <th>Sign in with Google</th>
+                <td>
+                    <?php if ((int) ($store['google_enabled'] ?? 0) === 1 && trim((string) ($store['google_client_id'] ?? '')) !== ''): ?>
+                        <span class="cv-badge cv-badge--success">On</span> using the reseller's own Google app
+                    <?php elseif (trim((string) ($store['google_client_id'] ?? '')) !== ''): ?>
+                        <span class="cv-badge">Off</span> keys saved, switched off
+                    <?php else: ?>
+                        <span class="cv-badge">Off</span>
+                    <?php endif; ?>
+                </td>
+            </tr>
             <tr><th>Opened</th><td><?= e((string) ($store['created_at'] ?? '')) ?></td></tr>
             </tbody>
         </table>
@@ -119,7 +204,7 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         <form method="post" action="/admin/resellers/<?= (int) $clientId ?>/store/status" style="margin-top:var(--cv-space-3);">
             <?= csrf_field() ?>
             <input type="hidden" name="status" value="<?= ($store['status'] ?? 'active') === 'active' ? 'suspended' : 'active' ?>">
-            <button class="cv-btn" type="submit">
+            <button class="cv-btn<?= ($store['status'] ?? 'active') === 'active' ? ' cv-btn--danger' : '' ?>" type="submit">
                 <?= ($store['status'] ?? 'active') === 'active' ? 'Suspend store' : 'Reactivate store' ?>
             </button>
             <?php if (($store['status'] ?? 'active') === 'active'): ?>
@@ -127,6 +212,23 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <?php endif; ?>
         </form>
     </div>
+
+    <?php if (is_array($customerSummary ?? null)): ?>
+    <div class="cv-card" id="store-customers" style="margin-bottom:var(--cv-space-4);">
+        <h2 class="cv-card__title">Customers of this reseller</h2>
+        <p style="color:var(--cv-text-secondary);">
+            Users who registered on this reseller's website belong to <strong>Reseller ID <?= (int) $store['id'] ?></strong> only.
+            They are not on the main Clients list; view and manage them from this reseller's Customers page, or log in to the
+            reseller account and use its own control panel.
+        </p>
+        <p style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="cv-btn" href="/admin/resellers/<?= (int) $clientId ?>/customers">Manage customers</a>
+            <?php if ((int) ($pendingOrders ?? 0) > 0): ?>
+                <a class="cv-btn cv-btn--secondary" href="/admin/resellers/<?= (int) $clientId ?>/customers#orders">Review pending orders</a>
+            <?php endif; ?>
+        </p>
+    </div>
+    <?php endif; ?>
 
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
         <h2 class="cv-card__title">Prices the reseller charges</h2>
@@ -136,7 +238,7 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
             <tbody>
             <tr>
                 <th>Store-wide markup</th>
-                <td><?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($markup)) ?>% over list</td>
+                <td><?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($markup)) ?>% over <?= $upline !== null ? e($uplineName) . "'s prices" : 'list' ?></td>
             </tr>
             <tr>
                 <th>Prices set by hand</th>
@@ -145,10 +247,15 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
                     : (int) $overrideCount . ' override(s)' ?></td>
             </tr>
             <tr>
+                <?php if ($upline !== null): ?>
+                <th>What they pay</th>
+                <td><?= e($uplineName) ?>'s retail prices (Reseller ID <?= (int) $upline['id'] ?>) — not your reseller discount</td>
+                <?php else: ?>
                 <th>Your discount to them</th>
                 <td><?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($discounts['service'])) ?>% services /
                     <?= e(\CodeVault\Reseller\ResellerSettings::formatPercent($discounts['domain'])) ?>% domains
                     &middot; <a href="/admin/resellers">change</a></td>
+                <?php endif; ?>
             </tr>
             </tbody>
         </table>
@@ -191,6 +298,8 @@ $verified = $store !== null && ($store['domain_verified_at'] ?? null) !== null;
         <p style="color:var(--cv-text-secondary);">
             What this store's customers see. The platform's own chatbox is never shown on a store's domain — a store
             either has its own chat here or none at all. The reseller can change this themselves from their portal.
+            Until chat settings have been saved once (here or by the reseller), the store automatically shows a
+            WhatsApp button on the owner's account phone number.
         </p>
         <form method="post" action="/admin/resellers/<?= (int) $clientId ?>/store/chat"><?= csrf_field() ?>
             <p>

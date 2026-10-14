@@ -425,6 +425,36 @@ final class DomainService
         return $result;
     }
 
+    /** Optional DNSSEC capability: only registrar modules which implement both methods are offered. */
+    public function supportsDsRecords(int $domainId): bool
+    {
+        [$domain, $module, $config, $error] = $this->context($domainId);
+        if ($error !== null || $module === null || !method_exists($module, 'addDsRecord') || !method_exists($module, 'deleteDsRecord')) {
+            return false;
+        }
+        if (method_exists($module, 'supportsDsRecord')) {
+            return (bool) $module->supportsDsRecord(['domain'=>$domain['domain_name'],'registrar'=>$config,'registrarDomainId'=>$domain['registrar_domain_id']??null]);
+        }
+        return true;
+    }
+
+    /** @param array{key_tag:int|string,algorithm:int|string,digest_type:int|string,digest:string} $ds @return array{success:bool,message:string} */
+    public function changeDsRecord(int $domainId, array $ds, bool $add): array
+    {
+        [$domain, $module, $config, $error] = $this->context($domainId);
+        $method = $add ? 'addDsRecord' : 'deleteDsRecord';
+        if ($error !== null || $module === null) {
+            return ['success' => false, 'message' => (string) ($error ?? 'Registrar unavailable.')];
+        }
+        if (!method_exists($module, $method)) {
+            return ['success' => false, 'message' => 'This registrar does not support DNSSEC records through its API.'];
+        }
+        return $module->{$method}([
+            'domain' => $domain['domain_name'], 'registrar' => $config,
+            'registrarDomainId' => $domain['registrar_domain_id'] ?? null, 'ds' => $ds,
+        ]);
+    }
+
     /** @return array{success: bool, eppCode?: string, message: string} */
     public function getEppCode(int $domainId): array
     {

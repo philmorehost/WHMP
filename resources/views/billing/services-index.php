@@ -352,13 +352,14 @@ $pendingCount = 0;
 </div>
 
 <!-- Services Table -->
-<div class="admin-table-card">
+<?php // data-live-results: typing in the search box swaps this whole area (see app.js). ?>
+<div class="admin-table-card" id="admin-services-results" data-live-results>
     <?php if ($results['data'] === []): ?>
         <div class="admin-empty-state">
             <div class="admin-empty-state__icon">🖥️</div>
             <h2 class="admin-empty-state__title">No Services Found</h2>
             <p class="admin-empty-state__text">
-                <?= !empty($statusFilter) ? 'No services match this status filter.' : 'No services have been created yet.' ?>
+                <?= ($search ?? '') !== '' || !empty($filters) ? 'No services match your search.' : (!empty($statusFilter) ? 'No services match this status filter.' : 'No services have been created yet.') ?>
             </p>
         </div>
     <?php else: ?>

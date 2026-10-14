@@ -39,8 +39,60 @@ final class ClientAuthController
         private readonly Config $config,
         private readonly SecurityQuestionModuleService $securityQuestions,
         private readonly \CodeVault\Settings\SettingsRepository $settings,
-        private readonly ClientRegistrationOtpRepository $registrationOtps
+        private readonly ClientRegistrationOtpRepository $registrationOtps,
+        // Trailing and optional so the tests that build this controller by hand keep
+        // working; the container always supplies both. Without them the controller
+        // behaves exactly as it did before stores were isolated.
+        private readonly ?\CodeVault\Reseller\ClientSiteAccess $siteAccess = null,
+        private readonly ?\CodeVault\Reseller\CurrentReseller $currentStore = null,
+        // Google sign-in for whichever site is being served. Optional for the same
+        // reason; built from settings + the current store when absent.
+        private readonly ?GoogleSignIn $google = null
     ) {
+    }
+
+    /**
+     * True when this account may NOT be used on the site being served — it belongs to
+     * another provider on the platform (ClientSiteAccess has the rule and its two
+     * exceptions). Checked only AFTER the password is proven, so it cannot be used to
+     * discover which addresses are registered where.
+     *
+     * @param array<string, mixed> $client
+     */
+    private function belongsElsewhere(array $client): bool
+    {
+        if ($this->siteAccess === null) {
+            return false;
+        }
+
+        try {
+            return !$this->siteAccess->canSignInHere($client);
+        } catch (Throwable) {
+            // A lookup failure must not lock everyone out; the owner check is the
+            // common case and is answered without a query.
+            return false;
+        }
+    }
+
+    /**
+     * Whether an existing account is "yours, here" or "another provider's".
+     *
+     * @param array<string, mixed> $client
+     */
+    private function existingAccountKind(array $client): string
+    {
+        return $this->belongsElsewhere($client) ? 'other_provider' : 'same_site';
+    }
+
+    /** @param array<string, mixed> $extra */
+    private function registerPage(array $extra, ?array $googleUser, string $refCode): Response
+    {
+        return $this->page('client-auth.register', $extra + [
+            'error' => null,
+            'refCode' => $refCode,
+            'googleUser' => $googleUser,
+            'googleClientId' => $this->googleClientId(),
+        ]);
     }
 
     public function loginForm(Request $request): Response
@@ -49,10 +101,10 @@ final class ClientAuthController
             return Response::redirect('/client/dashboard');
         }
 
-        return $this->page('client-auth.login', [
-            'error' => null,
+        return $this->page('client-auth.login', $this->loginData([
+            'error' => self::googleErrorMessage((string) $request->query('error', '')),
             'resetSuccess' => $request->query('reset') === 'success',
-        ]);
+        ]));
     }
 
     public function setPinForm(Request $request): Response
@@ -99,6 +151,13 @@ final class ClientAuthController
 
         $result = $this->auth->attempt($email, $password, $request->ip());
 
+        // The right password on the WRONG SITE: an account of another provider on this
+        // platform. Refused before any session state is written (including the pending
+        // 2FA marker), with the same wording whichever provider it belongs to.
+        if (($result->isSuccess() || $result->requiresTwoFactor()) && $result->client !== null && $this->belongsElsewhere($result->client)) {
+            return $this->page('client-auth.login', $this->loginData(['error' => \CodeVault\Reseller\ClientSiteAccess::otherProviderMessage()]));
+        }
+
         if ($result->requiresTwoFactor()) {
             $this->session->set(self::PENDING_2FA_SESSION_KEY, $result->client['id']);
 
@@ -108,18 +167,15 @@ final class ClientAuthController
         if ($result->isSuccess()) {
             $this->guard->login($result->client);
 
-            // If client was placing an order, resume checkout by redirecting to /cart
-            if (!empty($this->session->get('cart_items', []))) {
-                return Response::redirect('/cart');
-            }
-
-            return Response::redirect('/client/dashboard');
+            // Resume what they were doing: a Free Reseller application, an order
+            // (the cart), or simply the dashboard.
+            return $this->afterSignIn();
         }
 
         $message = $result->status === 'blocked' ? 'Access denied. <a href="/client/recover-pin" style="color:var(--cv-color-brand-500);text-decoration:underline;">Recover with Security PIN</a>' : 'Invalid email or password.';
         $status = $result->status === 'blocked' ? 403 : 200;
 
-        return $this->page('client-auth.login', ['error' => $message], $status);
+        return $this->page('client-auth.login', $this->loginData(['error' => $message]), $status);
     }
 
     public function twoFactorForm(Request $request): Response
@@ -162,11 +218,7 @@ final class ClientAuthController
         $this->session->remove(self::PENDING_2FA_SESSION_KEY);
         $this->guard->login($client);
 
-        if (!empty($this->session->get('cart_items', []))) {
-            return Response::redirect('/cart');
-        }
-
-        return Response::redirect('/client/dashboard');
+        return $this->afterSignIn();
     }
 
     /** @return array<string, mixed>|null */
@@ -188,7 +240,7 @@ final class ClientAuthController
         return $this->page('client-auth.register', [
             'error' => null,
             'refCode' => (string) $request->query('ref', ''),
-            'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+            'googleClientId' => $this->googleClientId(),
             'googleUser' => $googleUser,
         ]);
     }
@@ -220,7 +272,7 @@ final class ClientAuthController
         $securityPin = trim((string) $request->input('security_pin', ''));
 
         if ($email === '' || $firstName === '' || $lastName === '') {
-            return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'Email, first name, and last name are required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         // The address submitted here is the recipient of the OTP email, and
@@ -230,22 +282,36 @@ final class ClientAuthController
         // transport, which the SMTP layer now also refuses to send (see
         // SmtpMailer::assertSafeAddress) — defence in depth at both ends.
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            return $this->page('client-auth.register', ['error' => 'Enter a valid email address.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'Enter a valid email address.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         if (strlen($securityPin) < 4) {
-            return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'A Security PIN of at least 4 characters is required.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
         if (strlen($password) < 8) {
-            return $this->page('client-auth.register', ['error' => 'Password must be at least 8 characters.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            return $this->page('client-auth.register', ['error' => 'Password must be at least 8 characters.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->googleClientId()]);
         }
 
-        if ($this->clients->findByEmail($email) !== null) {
-            return $this->page('client-auth.register', ['error' => 'An account with that email already exists.', 'refCode' => $refCode, 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+        // Say WHICH kind of "already exists" this is. "You already have an account here"
+        // and "that address belongs to another provider on this platform" need different
+        // next steps (sign in, versus sign in THERE and ask for an account move), and a
+        // reseller's customer trying to sign up with the platform or another reseller
+        // deserves to be told which. Never which provider: that is another business's
+        // customer list.
+        $existing = $this->clients->findByEmail($email);
+
+        if ($existing !== null) {
+            return $this->registerPage([
+                'error' => 'An account with that email already exists.',
+                'accountExists' => $this->existingAccountKind($existing),
+            ], $googleUser, $refCode);
         }
 
         $pending = compact('email', 'password', 'firstName', 'lastName', 'refCode', 'country', 'vatNumber', 'phone', 'address1', 'city', 'postcode', 'securityPin');
+        // Which website this sign-up started on. Kept with the pending registration so
+        // the OTP step can refuse to finish it anywhere else.
+        $pending['storeId'] = $this->currentStore?->id();
 
         // Google already proved this person controls the email address they
         // signed up with — an OTP round-trip to the same inbox verifies
@@ -266,7 +332,7 @@ final class ClientAuthController
                 'error' => 'Too many verification codes have been requested. Please wait a little while and try again.',
                 'refCode' => $refCode,
                 'googleUser' => $googleUser,
-                'googleClientId' => $this->settings->get('auth.google_client_id', ''),
+                'googleClientId' => $this->googleClientId(),
             ]);
         }
 
@@ -296,6 +362,15 @@ final class ClientAuthController
         $pending = $this->session->get(self::PENDING_REGISTRATION_SESSION_KEY);
 
         if ($pending === null) {
+            return Response::redirect('/client/register');
+        }
+
+        // A sign-up started on one website is finished on that website only. Sessions
+        // are per host so this should never differ, but the store an account belongs to
+        // is too important to rest on that alone.
+        if (array_key_exists('storeId', $pending) && $pending['storeId'] !== $this->currentStore?->id()) {
+            $this->session->remove(self::PENDING_REGISTRATION_SESSION_KEY);
+
             return Response::redirect('/client/register');
         }
 
@@ -355,12 +430,24 @@ final class ClientAuthController
             $pending['address1'],
             $pending['city'],
             $pending['postcode'],
-            $pending['securityPin']
+            $pending['securityPin'],
+            // Stamped in the INSERT itself: an account created on a store's website is
+            // that store's customer from its very first moment.
+            $this->registrationStoreId($pending)
         );
 
         if (!$result['success']) {
-            return $this->page('client-auth.register', ['error' => $result['error'], 'refCode' => $pending['refCode'], 'googleUser' => $googleUser, 'googleClientId' => $this->settings->get('auth.google_client_id', '')]);
+            // The address was taken between the form and the code (a second tab, or a
+            // race): same two-way answer as register() gives.
+            $raced = $this->clients->findByEmail((string) $pending['email']);
+
+            return $this->registerPage([
+                'error' => $result['error'],
+                'accountExists' => $raced !== null ? $this->existingAccountKind($raced) : null,
+            ], $googleUser, (string) $pending['refCode']);
         }
+
+        $result['client'] = $this->claimForCurrentStore($result['client']);
 
         $this->session->remove('google_user');
         $this->session->remove(self::PENDING_REGISTRATION_SESSION_KEY);
@@ -368,11 +455,76 @@ final class ClientAuthController
         $this->affiliateService->registerReferral($pending['refCode'], (int) $result['client']['id']);
         $this->guard->login($result['client']);
 
+        return $this->afterSignIn();
+    }
+
+    /**
+     * Where a client lands once they are signed in.
+     *
+     * A Free Reseller application started as a guest comes first: the applicant
+     * left the form only to get an account, and their answers are waiting at
+     * /free-reseller/apply. Main website only — that programme is never offered on
+     * a reseller's store, so a draft can never pull a store's customer into it.
+     * Otherwise an order in progress resumes at the cart, as it always has.
+     */
+    private function afterSignIn(): Response
+    {
+        if ($this->currentStore?->id() === null
+            && is_array($this->session->get(\CodeVault\Reseller\FreeResellerProgramme::DRAFT_SESSION_KEY))) {
+            return Response::redirect('/free-reseller/apply?resume=1');
+        }
+
         if (!empty($this->session->get('cart_items', []))) {
             return Response::redirect('/cart');
         }
 
         return Response::redirect('/client/dashboard');
+    }
+
+    /**
+     * The store an account being registered belongs to: the store whose website is
+     * serving this request. Null on the platform's own site.
+     *
+     * @param array<string, mixed> $pending
+     */
+    private function registrationStoreId(array $pending): ?int
+    {
+        $storeId = $this->currentStore?->id();
+
+        return $storeId !== null && $storeId > 0 ? $storeId : null;
+    }
+
+    /**
+     * An account created on a store's site is that store's customer FROM THE START.
+     *
+     * Previously the claim waited for the first order, so somebody who registered on a
+     * store and had not bought yet was, as far as the data knew, ours — written to as
+     * us, and able to sign in on our site. Stamping it here is the same atomic,
+     * claim-only-if-unclaimed update the checkout uses (setResellerIfUnclaimed), so it
+     * can never take an account away from an owner it already has.
+     *
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>
+     */
+    private function claimForCurrentStore(array $client): array
+    {
+        $storeId = $this->currentStore?->id();
+
+        if ($storeId === null || empty($client['id'])) {
+            return $client;
+        }
+
+        try {
+            $this->clients->setResellerIfUnclaimed((int) $client['id'], $storeId);
+
+            return $this->clients->find((int) $client['id']) ?? $client;
+        } catch (Throwable $e) {
+            // Not silent: an account that ends up on the wrong side of the isolation
+            // line must leave a trace. (The INSERT already carries the store, so this
+            // is a second line of defence only.)
+            error_log('[CodeVault] could not assign new client #' . (int) $client['id'] . ' to store #' . $storeId . ': ' . $e->getMessage());
+            return $client;
+        }
     }
 
     private function sendRegistrationOtp(string $email, string $firstName, string $ip): void
@@ -543,94 +695,152 @@ final class ClientAuthController
         return Response::redirect('/client/dashboard');
     }
 
+    /**
+     * Starts "Sign in with Google" with THIS site's own Google app — the platform's on
+     * the main website, the reseller's own on their store (see GoogleSignIn for why a
+     * store never borrows ours).
+     */
     public function googleRedirect(Request $request): Response
     {
-        $clientId = $this->settings->get('auth.google_client_id', '');
-        if (empty($clientId)) {
+        $google = $this->google();
+        $credentials = $google->credentials();
+
+        if ($credentials === null) {
             return Response::redirect('/client/login');
         }
 
-        $configuredUrl = (string) ($this->config->get('app.url') ?: $this->config->env('APP_URL', ''));
-        $appUrl = ($configuredUrl !== '' && !str_contains($configuredUrl, 'localhost')) ? $configuredUrl : $request->baseUrl();
-        $redirectUri = rtrim($appUrl, '/') . '/client/auth/google/callback';
+        $state = GoogleSignIn::newState();
+        $redirectUri = $google->redirectUri($request);
 
-        $url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
-            'client_id' => $clientId,
-            'redirect_uri' => $redirectUri,
-            'response_type' => 'code',
-            'scope' => 'email profile',
-            'access_type' => 'online',
-            'state' => csrf_token(),
+        // The exact redirect address goes in the session with the state: Google insists
+        // the token request repeats it byte for byte, and the callback must not rebuild
+        // it from a Host header that could differ.
+        $this->session->set(GoogleSignIn::SESSION_KEY, [
+            'state' => $state,
+            'redirect' => $redirectUri,
+            'owner' => $credentials['owner'],
+            'storeId' => $credentials['storeId'],
+            'at' => time(),
         ]);
 
-        return Response::redirect($url);
+        return Response::redirect(GoogleSignIn::authorizeUrl($credentials['clientId'], $redirectUri, $state));
     }
 
     public function googleCallback(Request $request): Response
     {
-        $clientId = $this->settings->get('auth.google_client_id', '');
-        $clientSecret = $this->settings->get('auth.google_client_secret', '');
+        $google = $this->google();
+        $credentials = $google->credentials();
 
-        if (empty($clientId) || empty($clientSecret)) {
-            return Response::redirect('/client/login');
+        $pending = GoogleSignIn::matchPending(
+            $this->session->get(GoogleSignIn::SESSION_KEY),
+            (string) $request->query('state', '')
+        );
+        $this->session->remove(GoogleSignIn::SESSION_KEY);
+
+        if ((string) $request->query('error', '') !== '') {
+            return Response::redirect('/client/login?error=google_cancelled');
         }
 
-        $code = $request->query('code');
-        if (!$code) {
-            return Response::redirect('/client/login');
+        // A callback we did not start (or started on another site's Google app) is
+        // refused: otherwise a forged link could sign a visitor into SOMEONE ELSE's
+        // account, or carry a sign-in from one provider's site onto another's.
+        if (
+            $credentials === null
+            || $pending === null
+            || $pending['owner'] !== $credentials['owner']
+            || $pending['storeId'] !== $credentials['storeId']
+        ) {
+            return Response::redirect('/client/login?error=google_expired');
         }
 
-        $configuredUrl = (string) ($this->config->get('app.url') ?: $this->config->env('APP_URL', ''));
-        $appUrl = ($configuredUrl !== '' && !str_contains($configuredUrl, 'localhost')) ? $configuredUrl : $request->baseUrl();
-        $redirectUri = rtrim($appUrl, '/') . '/client/auth/google/callback';
+        $code = (string) $request->query('code', '');
 
-        $ch = curl_init('https://oauth2.googleapis.com/token');
-        if ($ch !== false) {
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
-                'client_id' => $clientId,
-                'client_secret' => $clientSecret,
-                'code' => $code,
-                'grant_type' => 'authorization_code',
-                'redirect_uri' => $redirectUri,
-            ]));
-            
-            $response = curl_exec($ch);
-            curl_close($ch);
-            
-            $data = json_decode((string) $response, true);
-            if (!empty($data['access_token'])) {
-                $ch2 = curl_init('https://www.googleapis.com/oauth2/v2/userinfo');
-                if ($ch2 !== false) {
-                    curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch2, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $data['access_token']]);
-                    
-                    $userResponse = curl_exec($ch2);
-                    curl_close($ch2);
+        if ($code === '') {
+            return Response::redirect('/client/login?error=google_failed');
+        }
 
-                    $googleUser = json_decode((string) $userResponse, true);
-                    if (!empty($googleUser['email'])) {
-                        $email = $googleUser['email'];
-                        $existing = $this->clients->findByEmail($email);
-                        
-                        if ($existing) {
-                            return $this->completeTwoFactorLogin($existing);
-                        }
+        $profile = $google->fetchProfile($credentials, $code, $pending['redirect']);
 
-                        // Register new user
-                        $this->session->set('google_user', [
-                            'email' => $email,
-                            'first_name' => $googleUser['given_name'] ?? '',
-                            'last_name' => $googleUser['family_name'] ?? '',
-                            'google_id' => $googleUser['id'] ?? '',
-                        ]);
-                        return Response::redirect('/client/register');
-                    }
-                }
+        if ($profile === null) {
+            return Response::redirect('/client/login?error=google_failed');
+        }
+
+        $existing = $this->clients->findByEmail($profile['email']);
+
+        if ($existing !== null) {
+            // Same isolation as the password path: proving you own the address at
+            // Google does not make another provider's account usable on this site.
+            if ($this->belongsElsewhere($existing)) {
+                return $this->page('client-auth.login', $this->loginData(['error' => \CodeVault\Reseller\ClientSiteAccess::otherProviderMessage()]));
             }
+
+            if (($existing['status'] ?? '') === 'closed') {
+                return $this->page('client-auth.login', $this->loginData(['error' => 'This account is closed. Please contact support.']));
+            }
+
+            // Google proves the email address, not the second factor. An account that
+            // has two-factor sign-in on still has to give its code.
+            $twoFactorOn = $this->settings->get('security.2fa_enabled', '1') === '1'
+                && (int) ($existing['two_factor_enabled'] ?? 0) === 1;
+
+            if ($twoFactorOn) {
+                $this->session->set(self::PENDING_2FA_SESSION_KEY, $existing['id']);
+
+                return Response::redirect('/client/login/2fa');
+            }
+
+            return $this->completeTwoFactorLogin($existing);
         }
 
-        return Response::redirect('/client/login?error=google_failed');
+        // New here: finish sign-up with the details Google gave us. The registration
+        // belongs to the site being served (a store's customer on a store), exactly as
+        // a password sign-up would.
+        $this->session->set('google_user', $profile);
+
+        return Response::redirect('/client/register');
+    }
+
+    /** The Google client id when the button should be shown on this site, else ''. */
+    private function googleClientId(): string
+    {
+        try {
+            return $this->google()->buttonClientId();
+        } catch (Throwable) {
+            // A settings read failing must not take the sign-in page down with it.
+            return '';
+        }
+    }
+
+    private function google(): GoogleSignIn
+    {
+        return $this->google ?? new GoogleSignIn($this->settings, $this->config, $this->currentStore);
+    }
+
+    /**
+     * Everything the login page needs, in one place — the Google button used to be
+     * missing because the login page was the one render that never passed it.
+     *
+     * @param array<string, mixed> $extra
+     * @return array<string, mixed>
+     */
+    private function loginData(array $extra = []): array
+    {
+        return $extra + [
+            'error' => null,
+            'resetSuccess' => false,
+            'googleClientId' => $this->googleClientId(),
+        ];
+    }
+
+    /** The friendly message for a ?error= code Google sign-in sends back to the login page. */
+    public static function googleErrorMessage(string $code): ?string
+    {
+        return match ($code) {
+            'google_cancelled' => 'Google sign-in was cancelled. You can try again or sign in with your email and password.',
+            'google_expired' => 'That Google sign-in link has expired. Please click "Sign in with Google" again.',
+            'google_failed' => 'We could not sign you in with Google. Please try again, or sign in with your email and password.',
+            default => null,
+        };
     }
 
     private function page(string $template, array $data, int $status = 200): Response

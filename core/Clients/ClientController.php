@@ -62,7 +62,10 @@ final class ClientController
         // Appended last, as always here: this controller has ~26 dependencies and
         // is built by the container, but the rule is that a new one goes on the
         // end so no existing call site can silently rebind the rest.
-        private readonly \CodeVault\Reseller\ResellerDomainSync $domainSync
+        private readonly \CodeVault\Reseller\ResellerDomainSync $domainSync,
+        // Re-checks an edited email at once, so the Invalid Email Blocker stops
+        // blocking a corrected address without waiting for the next scan.
+        private readonly ?ClientEmailValidationService $emailCheck = null
     ) {
     }
 
@@ -676,6 +679,14 @@ final class ClientController
         }
 
         $this->clients->update($id, $fields);
+
+        if ($existing !== null && isset($fields['email']) && strcasecmp((string) $fields['email'], (string) $existing['email']) !== 0) {
+            try {
+                $this->emailCheck?->recheckClient($id, (string) $fields['email'], ($existing['reseller_id'] ?? null) !== null ? (int) $existing['reseller_id'] : null);
+            } catch (\Throwable) {
+            }
+        }
+
         if (isset($fields['password']) && $fields['password'] !== '') {
             $this->clients->updatePassword($id, $fields['password']);
         }
