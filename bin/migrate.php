@@ -21,6 +21,8 @@ use CodeVault\Database\Schema\SchemaReconciler;
 use CodeVault\Kernel;
 
 $kernel = new Kernel(dirname(__DIR__));
+
+$kernel->boot();
 $now = static fn (): string => date('Y-m-d H:i:s');
 
 /** @var Migrator $migrator */

@@ -210,37 +210,70 @@ class Kernel
 {
     public readonly Container $container;
 
+    private bool $booted = false;
+
     public function __construct(
         private readonly string $basePath
     ) {
         $this->container = new Container();
         $this->registerCoreBindings();
         \CodeVault\Support\App::setContainer($this->container);
-        $this->applyTimezone();
+
+        // APP_TIMEZONE is a config read (a file, no connection), so PHP can be
+        // on the right clock immediately. Everything else about timezones —
+        // the admin's stored setting and the database session's offset —
+        // needs a connection and therefore waits for boot().
+        date_default_timezone_set($this->configuredTimezone(includeSettings: false));
+    }
+
+    /**
+     * Finishes booting: puts PHP on the admin's configured timezone and aligns
+     * the database session with it. Idempotent.
+     *
+     * Deliberately separate from the constructor. The kernel has to be
+     * constructible when no database is reachable: the installer runs before one
+     * exists, CLI tooling (bin/audit-servers.php, bin/check-nocix-config.php)
+     * only reads configuration, and unit tests boot the container, the router
+     * and the middleware stack without a server. handle() calls this as its
+     * first step; the CLI entry points call it themselves, since they never
+     * call handle().
+     */
+    public function boot(): void
+    {
+        if ($this->booted) {
+            return;
+        }
+
+        $this->booted = true;
+
+        date_default_timezone_set($this->configuredTimezone());
+
+        $this->alignDatabaseTimezone();
     }
 
     /**
      * Puts PHP — and the database session — on the admin's timezone.
      *
-     * Nothing set this before, so PHP used its ini default (UTC on most
-     * hosts) while the business runs on local time. Every generated date was
-     * an hour out for a UTC+1 install: the automation screen reported the
-     * wrong "server time", and a daily run time of 10:10 fired at 11:10
-     * locally.
+     * Nothing set this before, so PHP used its ini default (UTC on most hosts)
+     * while the business runs on local time. Every generated date was an hour
+     * out for a UTC+1 install: the automation screen reported the wrong
+     * "server time", and a daily run time of 10:10 fired at 11:10 locally.
      *
-     * The database session is aligned to the same offset because a handful of
-     * queries use MySQL's own NOW() rather than a PHP timestamp — without
-     * that, those few rows would be written an hour apart from every other
-     * date in the system.
+     * The admin's timezone: APP_TIMEZONE if it is set and valid, otherwise the
+     * `general.timezone` setting, otherwise UTC.
+     *
+     * $includeSettings is false while booting the container, because the
+     * settings lookup queries the database and the kernel must survive being
+     * constructed without one.
      */
-    private function applyTimezone(): void
+    private function configuredTimezone(bool $includeSettings = true): string
     {
         $timezone = 'UTC';
 
         try {
             $configured = trim((string) $this->container->make(Config::class)->env('APP_TIMEZONE', ''));
 
-            if ($configured === '') {
+            if ($configured === '' && $includeSettings) {
                 // Settings live in the database, which may not exist yet during
                 // install — hence the try/catch around the whole lookup.
                 $configured = trim((string) ($this->container
@@ -255,12 +288,21 @@ class Kernel
             // No config/database yet — UTC is the safe default.
         }
 
-        date_default_timezone_set($timezone);
+        return $timezone;
+    }
 
+    /**
+     * Aligns the database session with PHP's timezone, because a handful of
+     * queries use MySQL's own NOW() rather than a PHP timestamp — without this
+     * those few rows would be written an hour apart from every other date in
+     * the system.
+     */
+    private function alignDatabaseTimezone(): void
+    {
         try {
             // A named zone would need MySQL's tz tables loaded, which many
             // shared hosts skip; the numeric offset always works.
-            $offset = (new \DateTimeImmutable('now', new \DateTimeZone($timezone)))->format('P');
+            $offset = (new \DateTimeImmutable('now', new \DateTimeZone(date_default_timezone_get())))->format('P');
             $this->container->make(Database::class)->statement('SET time_zone = ?', [$offset]);
         } catch (\Throwable) {
             // Database unavailable, or the session variable is restricted —
@@ -1903,6 +1945,8 @@ class Kernel
 
     public function handle(Request $request): Response
     {
+        $this->boot();
+
         if ($this->needsInstallRedirect($request)) {
             return Response::redirect('/install');
         }

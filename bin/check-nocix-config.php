@@ -18,6 +18,8 @@ use CodeVault\Kernel;
 use CodeVault\Provisioning\NocixDedicatedServerModule;
 
 $kernel = new Kernel(dirname(__DIR__));
+
+$kernel->boot();
 $db = $kernel->container->make(\CodeVault\Database::class);
 $module = $kernel->container->make(NocixDedicatedServerModule::class);
 

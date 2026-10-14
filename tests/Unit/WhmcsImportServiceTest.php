@@ -25,6 +25,7 @@ use CodeVault\Support\DepartmentRepository;
 use CodeVault\Support\TicketReplyRepository;
 use CodeVault\Support\TicketRepository;
 use CodeVault\Tests\Support\DatabaseTestCase;
+use CodeVault\Tests\Support\TestDatabase;
 use PDO;
 
 /**
@@ -36,9 +37,9 @@ use PDO;
  */
 final class WhmcsImportServiceTest extends DatabaseTestCase
 {
-    private const REMOTE_DB = 'codevault_test_whmcs_remote';
-
     private PDO $remote;
+
+    private string $remoteDb;
     private WhmcsImportService $importer;
 
     protected function setUp(): void
@@ -46,11 +47,19 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
         parent::setUp();
         (new Migrator($this->db, dirname(__DIR__, 2) . '/database/migrations'))->run();
 
-        $bootstrap = new PDO('mysql:host=127.0.0.1;port=3306', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $bootstrap->exec('DROP DATABASE IF EXISTS ' . self::REMOTE_DB);
-        $bootstrap->exec('CREATE DATABASE ' . self::REMOTE_DB);
+        // The import source lives beside the test schema, in a second throwaway
+        // database. Same env-driven connection as everything else (DB_HOST and
+        // friends), so CI, Compose and a laptop agree.
+        $this->remoteDb = TestDatabase::schemaName('whmcs_remote');
+        TestDatabase::dropSchema($this->remoteDb);
+        TestDatabase::createSchema($this->remoteDb);
 
-        $this->remote = new PDO('mysql:host=127.0.0.1;port=3306;dbname=' . self::REMOTE_DB, 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $this->remote = new PDO(
+            TestDatabase::dsn($this->remoteDb),
+            TestDatabase::username(),
+            TestDatabase::password(),
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+        );
         $this->remote->exec(
             <<<'SQL'
             CREATE TABLE tblclients (
@@ -109,19 +118,36 @@ final class WhmcsImportServiceTest extends DatabaseTestCase
 
     protected function tearDown(): void
     {
-        $bootstrap = new PDO('mysql:host=127.0.0.1;port=3306', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $bootstrap->exec('DROP DATABASE IF EXISTS ' . self::REMOTE_DB);
+        // Skipped tests never opened the remote schema — nothing to drop.
+        if (isset($this->remoteDb)) {
+            TestDatabase::dropSchema($this->remoteDb);
+        }
+
         parent::tearDown();
     }
 
     private function credentials(): array
     {
-        return ['host' => '127.0.0.1', 'port' => 3306, 'database' => self::REMOTE_DB, 'username' => 'root', 'password' => '', 'prefix' => ''];
+        return [
+            'host' => TestDatabase::host(),
+            'port' => (int) TestDatabase::port(),
+            'database' => $this->remoteDb,
+            'username' => TestDatabase::username(),
+            'password' => TestDatabase::password(),
+            'prefix' => '',
+        ];
     }
 
     public function test_import_fails_gracefully_against_unreachable_credentials(): void
     {
-        $result = $this->importer->import(['host' => '127.0.0.1', 'port' => 3306, 'database' => 'does_not_exist_db', 'username' => 'root', 'password' => '', 'prefix' => '']);
+        $result = $this->importer->import([
+            'host' => TestDatabase::host(),
+            'port' => (int) TestDatabase::port(),
+            'database' => 'does_not_exist_db',
+            'username' => TestDatabase::username(),
+            'password' => TestDatabase::password(),
+            'prefix' => '',
+        ]);
 
         $this->assertFalse($result['success']);
         $this->assertStringContainsString('Failed to connect', $result['message']);

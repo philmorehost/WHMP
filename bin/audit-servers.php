@@ -7,6 +7,8 @@ require __DIR__ . '/../vendor/autoload.php';
 use CodeVault\Kernel;
 
 $kernel = new Kernel(dirname(__DIR__));
+
+$kernel->boot();
 $db = $kernel->container->make(\CodeVault\Database::class);
 
 echo "\n" . str_repeat("=", 100) . "\n";

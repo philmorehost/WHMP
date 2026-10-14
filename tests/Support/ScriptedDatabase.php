@@ -63,6 +63,32 @@ final class ScriptedDatabase extends Database
         return $this->select($sql, $bindings)[0] ?? null;
     }
 
+    /**
+     * Session-level statements (`SET time_zone`, `SET NAMES`, ...) and anything
+     * else that goes straight to PDO are recorded, never executed — this class
+     * exists to prove decisions, and a real connection is exactly what it is
+     * here to avoid.
+     */
+    public function statement(string $sql, array $bindings = []): \PDOStatement
+    {
+        $this->writes[] = ['sql' => $sql, 'bindings' => $bindings];
+
+        return new \PDOStatement();
+    }
+
+    /**
+     * Hard stop. If code under test reaches for the PDO handle, that is a test
+     * design problem (script the query instead) and it should say so loudly
+     * rather than opening a socket to an empty host name.
+     */
+    public function connection(): \PDO
+    {
+        throw new \RuntimeException(
+            'ScriptedDatabase never connects — script the query with on()/select(), '
+            . 'or use DatabaseTestCase if this really needs MariaDB.'
+        );
+    }
+
     public function insert(string $sql, array $bindings = []): string
     {
         $this->writes[] = ['sql' => $sql, 'bindings' => $bindings];

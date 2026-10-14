@@ -10,24 +10,45 @@ use PHPUnit\Framework\TestCase;
 /**
  * Base for tests that need a real MariaDB connection (migrations,
  * licensing, backup/restore) — these exercise actual SQL rather than
- * mocking the database layer. Connects to `codevault_test` on the local
- * XAMPP instance; skips gracefully if that server isn't reachable so the
- * suite still runs somewhere without MariaDB available.
+ * mocking the database layer.
+ *
+ * The connection comes from {@see TestDatabase}, so CI, Docker Compose and a
+ * local checkout all configure it the same way (`DB_HOST`, `DB_PORT`,
+ * `DB_USERNAME`, `DB_PASSWORD`, `DB_TEST_DATABASE`). Every table is dropped
+ * before and after each test, so tests never inherit another run's leftovers —
+ * including the `migrations` bookkeeping table (see the note in
+ * {@see self::dropAllTables()}).
+ *
+ * When no server is reachable the tests skip instead of failing, which keeps the
+ * suite runnable on a machine with no MariaDB at all. The decision is made in
+ * setUpBeforeClass() rather than setUp(): PHPUnit still calls tearDown() after a
+ * test was skipped in setUp(), and a subclass tearDown that touches state its
+ * setUp never created would fail — turning "no database here, skip" into an
+ * error. Skipping the whole class before any of its setUp() runs avoids that
+ * trap for every subclass.
  */
 abstract class DatabaseTestCase extends TestCase
 {
     protected Database $db;
 
-    protected function setUp(): void
+    public static function setUpBeforeClass(): void
     {
-        $this->db = new Database('127.0.0.1', '3306', 'codevault_test', 'root', '');
-
-        try {
-            $this->db->connection();
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('No local test database reachable: ' . $e->getMessage());
+        // Never open a connection we have been told not to open, and never point
+        // destructive tests at a schema that is not clearly a throwaway one.
+        if (($reason = TestDatabase::skipReason()) !== null) {
+            self::markTestSkipped($reason);
         }
 
+        try {
+            TestDatabase::connection()->connection();
+        } catch (\Throwable $e) {
+            self::markTestSkipped('No test database reachable at ' . TestDatabase::dsn() . ': ' . $e->getMessage());
+        }
+    }
+
+    protected function setUp(): void
+    {
+        $this->db = TestDatabase::connection();
         $this->dropAllTables();
     }
 

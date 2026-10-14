@@ -20,6 +20,8 @@ use CodeVault\Queue\Worker;
 
 $kernel = new Kernel(dirname(__DIR__));
 
+$kernel->boot();
+
 /** @var QueueInterface $queue */
 $queue = $kernel->container->make(QueueInterface::class);
 

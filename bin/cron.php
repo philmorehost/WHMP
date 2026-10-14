@@ -54,6 +54,8 @@ use CodeVault\Reseller\ResellerMailboxJob;
 
 $kernel = new Kernel(dirname(__DIR__));
 
+$kernel->boot();
+
 /** @var CronScheduler $scheduler */
 $scheduler = $kernel->container->make(CronScheduler::class);
 
