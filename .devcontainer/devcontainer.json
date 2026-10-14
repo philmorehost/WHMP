@@ -1,0 +1,35 @@
+{
+    "name": "CodeVault",
+    "dockerComposeFile": ["../docker-compose.yml"],
+    "service": "app",
+    "workspaceFolder": "/var/www/html",
+    "forwardPorts": [8080],
+    "portsAttributes": {
+        "8080": {
+            "label": "CodeVault (web)",
+            "onAutoForward": "openPreview"
+        }
+    },
+    "postCreateCommand": "composer install --no-interaction --no-progress",
+    "postStartCommand": "php bin/migrate.php",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "bmewburn.vscode-intelephense-client",
+                "xdebug.php-debug",
+                "michelemelluso.code-beautifier",
+                "eamodio.gitlens",
+                "EditorConfig.EditorConfig"
+            ],
+            "settings": {
+                "php.validate.executablePath": "/usr/local/bin/php",
+                "editor.formatOnSave": false,
+                "editor.insertSpaces": true,
+                "editor.tabSize": 4,
+                "files.eol": "\n",
+                "intelephense.environment.phpVersion": "8.3.0"
+            }
+        }
+    },
+    "remoteUser": "root"
+}

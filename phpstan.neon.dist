@@ -1,0 +1,18 @@
+# Static analysis configuration.
+#
+# Level 5 keeps the signal high without drowning a 180k-LOC, deliberately
+# dynamic codebase in entity/array-type noise: undefined symbols, wrong
+# argument counts, always-true/false conditions and dead code all fail the
+# build. Tighten `level` (and shrink phpstan-baseline.neon) as the baseline
+# gets worked off — see README § Static analysis.
+parameters:
+    level: 5
+    paths:
+        - core
+        - bin
+        - routes
+    # The generated schema snapshot is data, not code (see bin/build-schema.php).
+    excludePaths:
+        - database/schema.php
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false

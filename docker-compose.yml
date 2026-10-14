@@ -1,0 +1,139 @@
+# One command to a running install:
+#
+#     docker compose up -d
+#     open http://localhost:8080        (the web installer runs on first visit)
+#
+# The stack is the whole application: MariaDB, Redis, the web server, the cron
+# entry point and the queue worker. Everything is configured through environment
+# variables, so there is no .env file to hand-edit and nothing to install on the
+# host beyond Docker itself.
+name: codevault
+
+services:
+  app:
+    build: .
+    image: codevault:local
+    ports:
+      - '8080:80'
+    environment:
+      APP_NAME: CodeVault
+      APP_ENV: local
+      APP_DEBUG: 'true'
+      APP_URL: http://localhost:8080
+      APP_TIMEZONE: UTC
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_DATABASE: codevault
+      DB_USERNAME: codevault
+      DB_PASSWORD: codevault
+      DB_TEST_DATABASE: codevault_test
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_DB: '0'
+      SESSION_DRIVER: redis
+      QUEUE_DRIVER: redis
+      CACHE_DRIVER: redis
+      MAIL_QUEUE_DRIVER: redis
+      RUN_MIGRATIONS: '1'
+    volumes:
+      # Live source for development. Delete this mount for a production-like
+      # container that runs exactly what the image was built from.
+      - .:/var/www/html
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: codevault
+      MARIADB_USER: codevault
+      MARIADB_PASSWORD: codevault
+      MARIADB_ROOT_PASSWORD: root
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - db:/var/lib/mysql
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '60', '1', '--loglevel', 'warning']
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The single system cron entry point (bin/cron.php). It decides internally
+  # which jobs are due, so a one-minute tick is all it needs.
+  cron:
+    image: codevault:local
+    command: ['sh', '-c', 'while true; do php bin/cron.php; sleep 60; done']
+    environment:
+      APP_ENV: local
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_DATABASE: codevault
+      DB_USERNAME: codevault
+      DB_PASSWORD: codevault
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      SESSION_DRIVER: redis
+      QUEUE_DRIVER: redis
+      CACHE_DRIVER: redis
+    volumes:
+      - .:/var/www/html
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+  # One worker per queue — 'default' carries order acceptance (domain
+  # registration + provisioning), 'email' drains outbound mail.
+  queue:
+    image: codevault:local
+    command: ['php', 'bin/queue-worker.php', 'default']
+    environment:
+      APP_ENV: local
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_DATABASE: codevault
+      DB_USERNAME: codevault
+      DB_PASSWORD: codevault
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      SESSION_DRIVER: redis
+      QUEUE_DRIVER: redis
+      CACHE_DRIVER: redis
+    volumes:
+      - .:/var/www/html
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  db:
+  redis:
+  storage:

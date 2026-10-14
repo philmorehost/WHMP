@@ -6,12 +6,20 @@
 /storage/cache/*
 /storage/sessions/*
 /storage/system/*
+/storage/logs/*
 /storage/backups/*
 !/storage/cache/.gitkeep
 !/storage/sessions/.gitkeep
 !/storage/system/.gitkeep
+!/storage/logs/.gitkeep
 !/storage/backups/.gitkeep
 /.installed.lock
+
+# CI artifacts
+/build/
+coverage.xml
+.php-cs-fixer.cache
+.phpstan.cache/
 
 # Database dumps — may contain real customer PII, never commit
 *.sql

@@ -1,0 +1,24 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "config:recommended",
+        ":dependencyDashboard"
+    ],
+    "labels": ["dependencies"],
+    "packageRules": [
+        {
+            "description": "The runtime is deliberately dependency-free; only dev tooling and CI images move.",
+            "matchManagers": ["composer"],
+            "matchDepTypes": ["require-dev"],
+            "groupName": "composer dev tooling"
+        },
+        {
+            "description": "PHP version floor is 8.2 — do not propose a bump that drops it.",
+            "matchDatasources": ["docker", "github-actions"],
+            "matchPackageNames": ["php", "shivammathur/setup-php"],
+            "enabled": false
+        }
+    ],
+    "schedule": ["before 6am on monday"],
+    "prConcurrentLimit": 5
+}
