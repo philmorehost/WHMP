@@ -4,10 +4,25 @@
     "type": "project",
     "license": "proprietary",
     "require": {
-        "php": ">=8.2"
+        "php": ">=8.2",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-zip": "*"
     },
     "require-dev": {
+        "ext-pdo_sqlite": "*",
+        "friendsofphp/php-cs-fixer": "^3.64",
+        "phpstan/phpstan": "^2.0",
         "phpunit/phpunit": "^11.0"
+    },
+    "suggest": {
+        "ext-gd": "WebP image derivatives for static assets (core/Media/WebpImageService.php).",
+        "ext-imap": "Mail piping — turns a real mailbox into support tickets (core/Support/ImapMailboxClient.php).",
+        "ext-redis": "Sessions, queue and cache on Redis instead of the file/sync/in-memory fallbacks."
     },
     "autoload": {
         "psr-4": {
@@ -22,7 +37,37 @@
             "CodeVault\\Tests\\": "tests/"
         }
     },
+    "scripts": {
+        "analyse": "phpstan analyse --no-progress",
+        "audit": "composer audit",
+        "lint": "php-cs-fixer fix --dry-run --diff",
+        "lint:fix": "php-cs-fixer fix",
+        "schema": "php bin/build-schema.php --check",
+        "test": "phpunit --no-coverage",
+        "test:coverage": "phpunit --coverage-text",
+        "check": [
+            "@lint",
+            "@analyse",
+            "@schema",
+            "@test"
+        ]
+    },
+    "scripts-descriptions": {
+        "analyse": "Static analysis over core/ (PHPStan).",
+        "audit": "Report known vulnerabilities in the dependency tree.",
+        "lint": "Check coding style without changing files.",
+        "lint:fix": "Apply the coding style.",
+        "schema": "Fail if database/schema.php is out of date with the migrations.",
+        "test": "Run the PHPUnit suite (needs MariaDB; see README).",
+        "test:coverage": "Run the suite with a coverage report.",
+        "check": "Everything CI runs: style, static analysis, schema snapshot, tests."
+    },
     "config": {
+        "allow-plugins": {
+            "phpstan/extension-installer": true
+        },
         "sort-packages": true
-    }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }

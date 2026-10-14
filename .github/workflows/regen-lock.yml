@@ -1,0 +1,40 @@
+name: Regenerate composer.lock
+
+# Temporary maintenance workflow: makes composer.lock match composer.json using
+# a real composer + packagist network, and commits the result. Deleted once the
+# lock is in sync (the local sandbox has no packagist access).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    name: composer update and commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arena/717711e0-whmp
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, mbstring, openssl, pdo_mysql, pdo_sqlite, sqlite3, zip
+          tools: composer:v2
+          coverage: none
+
+      - name: composer update
+        run: composer update --no-interaction --no-progress --no-scripts --prefer-dist
+
+      - name: Commit the lock file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add composer.json composer.lock
+          git commit -m "chore: regenerate composer.lock for the declared dev tooling" || echo "nothing to commit"
+          git push origin HEAD:arena/717711e0-whmp
