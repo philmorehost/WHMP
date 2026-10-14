@@ -5,7 +5,11 @@ name: Regenerate composer.lock
 # lock is in sync (the local sandbox has no packagist access).
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [arena/717711e0-whmp]
+    paths:
+      - '.github/workflows/regen-lock.yml'
+      - 'composer.json'
 
 permissions:
   contents: write
