@@ -62,8 +62,6 @@ final class ContextProcessor
         // Record context wins: a call site that names its own request_id (a job
         // carrying the id of the request that queued it) must not be overwritten
         // by the process-wide one.
-        $record->extra = array_merge($this->context, $record->extra);
-
-        return $record;
+        return $record->with(extra: array_merge($this->context, $record->extra));
     }
 }

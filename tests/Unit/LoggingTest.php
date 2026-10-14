@@ -43,18 +43,24 @@ final class LoggingTest extends TestCase
         return new LogManager(new Config($this->basePath), $this->basePath);
     }
 
+    /** The handler names rotated files `<channel>-YYYY-MM-DD.log`. */
     private function lines(string $channel): array
     {
-        $path = $this->basePath . '/storage/logs/' . $channel . '.log';
+        $files = glob($this->basePath . '/storage/logs/' . $channel . '*.log') ?: [];
+        sort($files);
+        $lines = [];
 
-        if (!is_file($path)) {
-            return [];
+        foreach ($files as $file) {
+            foreach (explode("\n", trim((string) file_get_contents($file))) as $line) {
+                $decoded = json_decode($line, true);
+
+                if (is_array($decoded)) {
+                    $lines[] = $decoded;
+                }
+            }
         }
 
-        return array_values(array_filter(array_map(
-            static fn (string $line): ?array => json_decode($line, true),
-            explode("\n", trim((string) file_get_contents($path)))
-        )));
+        return $lines;
     }
 
     public function test_a_channel_writes_one_json_object_per_line(): void
@@ -66,7 +72,7 @@ final class LoggingTest extends TestCase
 
         $this->assertCount(1, $lines);
         $this->assertSame('payment.captured', $lines[0]['message']);
-        $this->assertSame('info', $lines[0]['level_name']);
+        $this->assertSame('INFO', $lines[0]['level_name']);
         $this->assertSame(41, $lines[0]['context']['invoice']);
         $this->assertSame('payments', $lines[0]['channel']);
     }
@@ -128,6 +134,17 @@ final class LoggingTest extends TestCase
         $this->assertSame('RuntimeException', $line['context']['exception']['class']);
         $this->assertStringContainsString('does not exist', $line['context']['exception']['message']);
         $this->assertNotEmpty($line['context']['exception']['trace']);
+    }
+
+    public function test_stack_traces_can_be_switched_off(): void
+    {
+        $logger = $this->manager(['LOG_TRACES' => '0'])->channel('errors');
+        $logger->error('payment.failed', ['exception' => new \RuntimeException('declined')]);
+
+        $exception = $this->lines('errors')[0]['context']['exception'];
+
+        $this->assertSame('RuntimeException', $exception['class']);
+        $this->assertArrayNotHasKey('trace', $exception);
     }
 
     public function test_the_error_tracker_counts_repeats_of_the_same_failure(): void

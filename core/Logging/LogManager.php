@@ -36,6 +36,7 @@ use Psr\Log\NullLogger;
  *   LOG_HTTP      1 = log every request/response, not just failures
  *   LOG_STDERR    0 = never mirror to STDERR, even in CLI (default: CLI mirrors)
  *   LOG_MAX_FILES days of history to keep (default 14)
+ *   LOG_TRACES    0 = log an exception without its stack trace (default: with)
  *
  * If Monolog is not installed (a checkout that never ran `composer install`),
  * channels degrade to a NullLogger instead of taking the site down. That is the
@@ -111,13 +112,24 @@ final class LogManager
             true,
             0644
         );
-        $handler->setFormatter(new JsonFormatter(JsonFormatter::BATCH_MODE_NEWLINES, true));
+
+        // Stack traces are on by default: a failed queue job or a rejected
+        // webhook without one costs an operator a reproduction attempt, and a
+        // trace is the difference between "a payment failed" and "a payment
+        // failed because the gateway returned a 409 on line 213".
+        $formatter = new JsonFormatter(
+            JsonFormatter::BATCH_MODE_NEWLINES,
+            true,
+            false,
+            (string) $this->config->env('LOG_TRACES', '1') !== '0'
+        );
+        $handler->setFormatter($formatter);
 
         $logger->pushHandler($handler);
 
         if ($this->mirrorsToStderr()) {
             $stderr = new StreamHandler('php://stderr', $level);
-            $stderr->setFormatter(new JsonFormatter(JsonFormatter::BATCH_MODE_NEWLINES, true));
+            $stderr->setFormatter($formatter);
             $logger->pushHandler($stderr);
         }
 
@@ -131,8 +143,17 @@ final class LogManager
     {
         $configured = strtolower(trim((string) $this->config->env('LOG_LEVEL', '')));
 
-        if ($configured !== '' && ($level = Level::tryFromName($configured)) !== null) {
-            return $level;
+        if ($configured !== '') {
+            if (is_numeric($configured) && ($byValue = Level::tryFrom((int) $configured)) !== null) {
+                return $byValue;
+            }
+
+            try {
+                return Level::fromName($configured);
+            } catch (\UnhandledMatchError | \ValueError) {
+                // A typo in .env falls back to the default instead of taking the
+                // request down — the one thing a logger must never do.
+            }
         }
 
         return $this->config->env('APP_DEBUG', false) === true ? Level::Debug : Level::Info;

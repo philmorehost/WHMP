@@ -35,17 +35,22 @@ final class RedactorProcessor
 
     public function __invoke(LogRecord $record): LogRecord
     {
-        $record->context = $this->redactArray($record->context);
-        $record->extra = $this->redactArray($record->extra);
-
-        return $record;
+        // Records are immutable in Monolog 3, so redaction returns a copy.
+        return $record->with(
+            context: $this->redact($record->context),
+            extra: $this->redact($record->extra)
+        );
     }
 
     /**
+     * The same redaction for callers that hold a plain array and not a log
+     * record — the error tracker stores its context in JSON, and it must be
+     * redacted by the same rules without depending on Monolog.
+     *
      * @param array<mixed> $values
      * @return array<mixed>
      */
-    private function redactArray(array $values): array
+    public function redact(array $values): array
     {
         foreach ($values as $key => $value) {
             if (is_string($key) && $this->isSecret($key)) {
@@ -55,19 +60,28 @@ final class RedactorProcessor
             }
 
             if (is_array($value)) {
-                $values[$key] = $this->redactArray($value);
+                $values[$key] = $this->redact($value);
             }
         }
 
         return $values;
     }
 
+    /**
+     * Matched by whole name or by whole word inside it, never by substring:
+     * `shipping_address` has no secret in it, and neither does `author`, but
+     * `authorization`, `api_key` and `card_number` do.
+     */
     private function isSecret(string $key): bool
     {
         $normalised = strtolower(str_replace(['-', ' ', '.'], '_', $key));
 
-        foreach (self::SECRET_KEYS as $secret) {
-            if ($normalised === $secret || str_contains($normalised, $secret)) {
+        if (in_array($normalised, self::SECRET_KEYS, true)) {
+            return true;
+        }
+
+        foreach (explode('_', $normalised) as $word) {
+            if ($word !== '' && in_array($word, self::SECRET_KEYS, true)) {
                 return true;
             }
         }

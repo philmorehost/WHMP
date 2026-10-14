@@ -12,9 +12,9 @@ use Throwable;
  *
  * The structured log is the history; this is the answer to "is anything broken
  * right now?" without grepping it. Same-failure detection is by fingerprint —
- * exception class plus the first line of the message plus the code location —
- * so a loop that throws the same way 5,000 times is one entry with count 5000,
- * not 5,000 entries that push everything else out of the list.
+ * exception class, the first line of the message and the file it came from — so
+ * a loop that throws the same way 5,000 times is one entry with count 5000, not
+ * 5,000 entries that push everything else out of the list.
  *
  * Stored as JSON in storage/system/errors.json (bounded by MAX_RECORDS), written
  * with a lock so two concurrent requests cannot interleave a half-written file.
@@ -46,7 +46,12 @@ final class ErrorTracker
 
         $entry['count']++;
         $entry['last_seen'] = gmdate('c');
-        $entry['context'] = $this->safeContext($context);
+
+        // Keep the last context that actually said something: a later occurrence
+        // reported without one must not wipe out what the operator already has.
+        if ($context !== []) {
+            $entry['context'] = $this->safeContext($context);
+        }
 
         $state[$fingerprint] = $entry;
 
@@ -81,13 +86,18 @@ final class ErrorTracker
         @unlink($this->path);
     }
 
+    /**
+     * Class + message + the file it was raised in. The line is deliberately NOT
+     * part of it: the same broken query thrown from two statements in one file is
+     * one failure an operator should see once, not twice, and a message that
+     * embeds an id is normalised by the caller passing a stable one.
+     */
     public static function fingerprint(Throwable $error): string
     {
         return substr(hash('sha256', implode('|', [
             $error::class,
             self::firstLine($error->getMessage()),
             $error->getFile(),
-            (string) $error->getLine(),
         ])), 0, 16);
     }
 
@@ -107,16 +117,7 @@ final class ErrorTracker
      */
     private function safeContext(array $context): array
     {
-        $processor = new RedactorProcessor();
-        $record = new \Monolog\LogRecord(
-            new \Monolog\DateTimeImmutable(),
-            'errors',
-            \Monolog\Level::Error,
-            '',
-            $context
-        );
-
-        return $processor($record)->context;
+        return (new RedactorProcessor())->redact($context);
     }
 
     /** @return array<string, array<string, mixed>> */
