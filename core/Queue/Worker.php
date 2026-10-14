@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CodeVault\Queue;
 
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
@@ -16,7 +17,8 @@ class Worker
     public function __construct(
         private readonly QueueInterface $queue,
         private readonly string $queueName = 'default',
-        private readonly int $sleepMicroseconds = 200_000
+        private readonly int $sleepMicroseconds = 200_000,
+        private readonly ?LoggerInterface $logger = null
     ) {
     }
 
@@ -41,10 +43,29 @@ class Worker
                 continue;
             }
 
+            $startedAt = microtime(true);
+
             try {
                 $job->handle();
                 $processed++;
+
+                $this->logger?->info('queue.job_processed', [
+                    'event' => 'queue.job_processed',
+                    'queue' => $this->queueName,
+                    'job' => $job::class,
+                    'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                ]);
             } catch (Throwable $e) {
+                // A job that throws is the single most important thing a queue
+                // worker can report: the order it was accepting is now stuck, and
+                // without the class name and the trace nobody can tell which one.
+                $this->logger?->error('queue.job_failed', [
+                    'event' => 'queue.job_failed',
+                    'queue' => $this->queueName,
+                    'job' => $job::class,
+                    'exception' => $e,
+                ]);
+
                 fwrite(STDERR, sprintf("[%s] job failed: %s\n", date('Y-m-d H:i:s'), $e->getMessage()));
             }
         }

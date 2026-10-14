@@ -15,6 +15,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use CodeVault\Kernel;
+use CodeVault\Logging\LogManager;
 use CodeVault\Queue\QueueInterface;
 use CodeVault\Queue\Worker;
 
@@ -27,8 +28,38 @@ $queue = $kernel->container->make(QueueInterface::class);
 
 $queueName = isset($argv[1]) && is_string($argv[1]) && $argv[1] !== '' ? $argv[1] : 'default';
 
-$worker = new Worker($queue, $queueName);
+/** @var LogManager $logs */
+$logs = $kernel->container->make(LogManager::class);
+$logger = $logs->channel('queue');
+$logs->shareContext(['queue' => $queueName]);
+
+$worker = new Worker($queue, $queueName, logger: $logger);
 
 fwrite(STDOUT, sprintf("[%s] queue worker started on '%s'\n", date('Y-m-d H:i:s'), $queueName));
 
-$worker->run();
+// A worker is killed (deploy, OOM, supervisor restart) far more often than it
+// exits cleanly, so record the signal rather than letting the process vanish
+// with jobs in flight and nothing in the log to say why.
+foreach ([SIGTERM, SIGINT] as $signal) {
+    if (function_exists('pcntl_signal')) {
+        pcntl_async_signals(true);
+        pcntl_signal($signal, static function (int $received) use ($logger, $queueName): void {
+            $logger->warning('queue.worker_stopping', [
+                'event' => 'queue.worker_stopping',
+                'queue' => $queueName,
+                'signal' => $received,
+            ]);
+            exit(0);
+        });
+    }
+}
+
+$logger->info('queue.worker_started', ['event' => 'queue.worker_started', 'queue' => $queueName]);
+
+$processed = $worker->run();
+
+$logger->info('queue.worker_stopped', [
+    'event' => 'queue.worker_stopped',
+    'queue' => $queueName,
+    'processed' => $processed,
+]);

@@ -11,6 +11,29 @@ if (!function_exists('e')) {
     }
 }
 
+if (!function_exists('logger')) {
+    /**
+     * The named log channel, for any code that has no logger injected. Returns a
+     * NullLogger when the container is not up yet (the installer, bin/build-schema.php,
+     * a unit test of a view): logging is never worth an exception, and a helper that
+     * throws because "the app is not booted" would make it one.
+     */
+    function logger(string $channel = 'app'): \Psr\Log\LoggerInterface
+    {
+        if (!\CodeVault\Support\App::hasContainer()) {
+            return new \Psr\Log\NullLogger();
+        }
+
+        try {
+            return \CodeVault\Support\App::container()
+                ->make(\CodeVault\Logging\LogManager::class)
+                ->channel($channel);
+        } catch (\Throwable) {
+            return new \Psr\Log\NullLogger();
+        }
+    }
+}
+
 if (!function_exists('csrf_token')) {
     function csrf_token(): string
     {

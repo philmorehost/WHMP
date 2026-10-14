@@ -39,6 +39,8 @@ if ((string) $bootConfig->env('APP_ENV', 'production') === 'local') {
     ini_set('display_errors', '0');
 }
 
+use CodeVault\Logging\LogManager;
+
 $kernel = new Kernel(dirname(__DIR__));
 $kernel->loadRoutes(
     'install.php', 'auth.php', 'web.php', 'security.php', 'staff.php', 'clients.php',
@@ -51,5 +53,65 @@ $kernel->loadRoutes(
     'security-questions.php', 'cpanel-tools.php', 'system.php', 'reseller.php', 'username-changer.php', 'cloudflare.php'
 );
 
-$response = $kernel->handle(Request::capture());
+// A fatal that reaches this point has already escaped the router. Log it as a
+// structured event (channel `errors`, with the request id and the stack trace in
+// the file, never in the response) and record it for the diagnostics page — then
+// show the visitor a plain 500 page. Losing the trace to php-error.log is what
+// this replaces; leaking it to the visitor is what display_errors=Off prevents.
+set_exception_handler(static function (Throwable $e) use ($kernel): void {
+    try {
+        /** @var LogManager $logs */
+        $logs = $kernel->container->make(LogManager::class);
+        $logs->errors()->critical('http.unhandled_exception', [
+            'event' => 'http.unhandled_exception',
+            'exception' => $e,
+        ]);
+        $kernel->container->make(\CodeVault\Logging\ErrorTracker::class)->record($e, [
+            'method' => $_SERVER['REQUEST_METHOD'] ?? 'CLI',
+            'path' => parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/',
+        ]);
+    } catch (Throwable) {
+        // Never let the handler that reports a failure become a second failure.
+        error_log('[CodeVault] unhandled: ' . $e->getMessage());
+    }
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+    }
+
+    echo 'Internal Server Error';
+});
+
+$startedAt = microtime(true);
+$request = Request::capture();
+$response = $kernel->handle($request);
+
+// One line per request only when asked for (LOG_HTTP=1 or LOG_LEVEL=debug):
+// a billing platform's interesting traffic is the failures, and volumes put a
+// ceiling on what a log can usefully hold. Failures are always logged.
+try {
+    /** @var LogManager $logs */
+    $logs = $kernel->container->make(LogManager::class);
+    $status = $response->status();
+    $context = [
+        'event' => 'http.response',
+        'method' => $request->method(),
+        'path' => $request->path(),
+        'status' => $status,
+        'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+    ];
+
+    if ($status >= 500) {
+        $logs->channel('http')->error('http.response', $context);
+    } elseif ($status >= 400) {
+        $logs->channel('http')->warning('http.response', $context);
+    } elseif (in_array(strtolower(trim((string) $bootConfig->env('LOG_HTTP', '0'))), ['1', 'true', 'yes'], true)
+        || strtolower(trim((string) $bootConfig->env('LOG_LEVEL', ''))) === 'debug') {
+        $logs->channel('http')->info('http.response', $context);
+    }
+} catch (Throwable) {
+    // Logging must never be the reason a response fails to send.
+}
+
 $response->send();

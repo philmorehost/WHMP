@@ -36,6 +36,7 @@ use CodeVault\Domains\DomainSyncJob;
 use CodeVault\Gdpr\DataPruningJob;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Kernel;
+use CodeVault\Logging\LogManager;
 use CodeVault\Integrity\IntegrityCheckJob;
 use CodeVault\Integrity\IntegrityManager;
 use CodeVault\Support\MailPipingJob;
@@ -88,13 +89,13 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     // waiting for the reseller to press "Verify" again. Verifies only; it never
     // un-verifies, so a transient DNS failure cannot take a store offline.
     $scheduler->register($kernel->container->make(DomainVerificationJob::class));
-// Registered on its own schedule rather than folded into verification, because a store can
-// become eligible for a mailbox in ways verification does not cover: the domain was approved
-// before provisioning was switched on, an admin added it by hand, or a panel call failed and
-// needs retrying. The job asks "who is eligible?" instead, which handles all of them and is
-// safe to run repeatedly — a record of which domain a mailbox was made for is what stops it
-// doing the same store twice.
-$scheduler->register($kernel->container->make(ResellerMailboxJob::class));
+    // Registered on its own schedule rather than folded into verification, because a store can
+    // become eligible for a mailbox in ways verification does not cover: the domain was approved
+    // before provisioning was switched on, an admin added it by hand, or a panel call failed and
+    // needs retrying. The job asks "who is eligible?" instead, which handles all of them and is
+    // safe to run repeatedly — a record of which domain a mailbox was made for is what stops it
+    // doing the same store twice.
+    $scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     $scheduler->register($kernel->container->make(BackupCronJob::class));
     $scheduler->register($kernel->container->make(CancellationCronJob::class));
     $scheduler->register($kernel->container->make(RenewalReminderJob::class));
@@ -148,12 +149,6 @@ $scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     // key is missing.
     $scheduler->register($kernel->container->make(AiSystemHealthJob::class));
 
-    // Weekly AI-assisted system health scan: gathers cron + PHP errors from
-    // the last 7 days, has the AI analyse them and propose an implementation
-    // plan, and emails the admin. Fails open to the raw error log if the AI
-    // key is missing.
-    $scheduler->register($kernel->container->make(AiSystemHealthJob::class));
-
     // Reporting sink + the admin's configured daily automation time. Both are
     // attached here rather than injected, so the scheduler still works on a
     // system whose schema/settings aren't ready yet.
@@ -167,9 +162,47 @@ $scheduler->register($kernel->container->make(ResellerMailboxJob::class));
     });
 }
 
+/** @var LogManager $logs */
+$logs = $kernel->container->make(LogManager::class);
+$logger = $logs->channel('cron');
+$startedAt = microtime(true);
+
 $results = $scheduler->run($hooks);
 
 $out = defined('STDOUT') ? STDOUT : fopen('php://output', 'w');
+
+// One structured event per job that ran or failed, plus a summary line: the
+// weekly AI health report and anyone reading `docker compose logs cron` both
+// want the same thing, and "which job, how long, what happened" is it.
+$ran = $failed = 0;
+$failures = [];
+
+foreach ($results as $job => $result) {
+    if (!($result['ran'] ?? false)) {
+        continue;
+    }
+
+    if (isset($result['error'])) {
+        $failed++;
+        $failures[$job] = (string) $result['error'];
+        $logger->error('cron.job_failed', [
+            'event' => 'cron.job_failed',
+            'job' => $job,
+            'error' => (string) $result['error'],
+        ]);
+    } else {
+        $ran++;
+        $logger->info('cron.job_ran', ['event' => 'cron.job_ran', 'job' => $job]);
+    }
+}
+
+$logger->info('cron.tick_complete', [
+    'event' => 'cron.tick_complete',
+    'registered' => count($results),
+    'ran' => $ran,
+    'failed' => $failed,
+    'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+]);
 
 foreach ($results as $job => $result) {
     $status = $result['ran'] ? 'ran' : (isset($result['error']) ? 'failed: ' . $result['error'] : 'skipped (not due)');
@@ -191,7 +224,7 @@ if ($kernel->container->make(Config::class)->env('QUEUE_CRON_DRAIN', '0') === '1
     $queue = $kernel->container->make(QueueInterface::class);
 
     if ($queue instanceof RedisQueue) {
-        $drained = (new Worker($queue, 'default'))->run(25);
+        $drained = (new Worker($queue, 'default', logger: $kernel->container->make(LogManager::class)->channel('queue')))->run(25);
         fwrite($out, sprintf("[%s] default queue drained %d job(s)\n", date('Y-m-d H:i:s'), $drained));
     }
 }

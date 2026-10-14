@@ -25,6 +25,12 @@ final class App
         self::$container = $container;
     }
 
+    /** Whether an entry point has booted — lets helpers fail open instead of throwing. */
+    public static function hasContainer(): bool
+    {
+        return self::$container !== null;
+    }
+
     public static function container(): Container
     {
         if (self::$container === null) {

@@ -11,7 +11,8 @@
         "ext-openssl": "*",
         "ext-pdo": "*",
         "ext-pdo_mysql": "*",
-        "ext-zip": "*"
+        "ext-zip": "*",
+        "monolog/monolog": "^3.7"
     },
     "require-dev": {
         "ext-pdo_sqlite": "*",

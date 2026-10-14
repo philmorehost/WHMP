@@ -70,7 +70,10 @@ use CodeVault\CustomFields\CustomFieldValueRepository;
 use CodeVault\Database\Migrator;
 use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Hooks\HookPoints;
+use CodeVault\Logging\ErrorTracker;
+use CodeVault\Logging\LogManager;
 use CodeVault\Integrity\CurlIntegrityHttpClient;
+use Psr\Log\LoggerInterface;
 use CodeVault\Integrity\IntegrityHttpClient;
 use CodeVault\Integrity\IntegrityManager;
 use CodeVault\Integrity\IntegrityTokenCipher;
@@ -248,7 +251,27 @@ class Kernel
 
         date_default_timezone_set($this->configuredTimezone());
 
+        $this->container->make(LogManager::class)->shareContext([
+            'request_id' => self::requestId(),
+            'entrypoint' => PHP_SAPI === 'cli' ? 'cli' : 'http',
+        ]);
+
         $this->alignDatabaseTimezone();
+    }
+
+    /**
+     * The id that ties a web request, the queue jobs it queued and the webhooks
+     * that answered back into one story. Honours an inbound X-Request-Id (so a
+     * proxy or an upstream service can supply it), otherwise mints one.
+     */
+    public static function requestId(): string
+    {
+        if (!empty($_SERVER['HTTP_X_REQUEST_ID']) && is_string($_SERVER['HTTP_X_REQUEST_ID'])) {
+            return substr(preg_replace('/[^A-Za-z0-9_.\-]/', '', $_SERVER['HTTP_X_REQUEST_ID']) ?: '', 0, 64)
+                ?: bin2hex(random_bytes(8));
+        }
+
+        return bin2hex(random_bytes(8));
     }
 
     /**
@@ -317,6 +340,19 @@ class Kernel
         $this->container->instance(Kernel::class, $this);
 
         $this->container->singleton(Config::class, fn () => new Config($basePath));
+
+        // One log pipeline for the whole application: JSON lines per channel in
+        // storage/logs, mirrored to STDERR under CLI. Resolved lazily so the
+        // installer (which has no writable storage yet) still boots, and so a
+        // checkout without vendor/ degrades to a NullLogger rather than dying.
+        $this->container->singleton(LogManager::class, fn (Container $c) => new LogManager($c->make(Config::class), $basePath));
+
+        // Everything that only needs "a logger" gets the default channel.
+        $this->container->singleton(LoggerInterface::class, fn (Container $c) => $c->make(LogManager::class)->channel());
+
+        // The last N distinct failures this install hit — the answer to "is
+        // anything broken right now?" that does not require reading a log file.
+        $this->container->singleton(ErrorTracker::class, fn () => new ErrorTracker($basePath . '/storage/system/errors.json'));
 
         // The reseller storefront this request belongs to, set in handle() from
         // the Host header once it has matched a known store. A singleton so the
@@ -2006,7 +2042,10 @@ class Kernel
                         $migrator->tolerated() !== []
                     );
                 } catch (\Throwable $e) {
-                    error_log('[CodeVault] schema reconcile failed: ' . $e->getMessage());
+                    $this->container->make(LogManager::class)->errors()->error('boot.schema_reconcile_failed', [
+                        'event' => 'boot.schema_reconcile_failed',
+                        'exception' => $e,
+                    ]);
                 }
 
                 $this->container->make(AddonModuleService::class)->bootActiveAddons();
@@ -2018,7 +2057,12 @@ class Kernel
                 // with an error pointing at a query rather than at the migration.
                 // That is exactly how "Unknown column 'i.parent_invoice_id'" reached
                 // production with no trace of the failed 0196 anywhere.
-                error_log('[CodeVault] boot step failed (migrations/addons): ' . $e->getMessage());
+                $this->container->make(LogManager::class)->errors()->error('boot.migrations_failed', [
+                    'event' => 'boot.migrations_failed',
+                    'exception' => $e,
+                    'step' => 'migrations/schema-reconcile/addons',
+                ]);
+                $this->container->make(ErrorTracker::class)->record($e, ['step' => 'boot']);
             }
         }
 
