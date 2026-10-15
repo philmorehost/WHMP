@@ -20,7 +20,12 @@ final class App
 {
     private static ?Container $container = null;
 
-    public static function setContainer(Container $container): void
+    /**
+     * Pass null to clear it again — a long-running process that hands a request
+     * over to another one (or a test asserting what happens before boot) needs
+     * to be able to say "there is no container right now".
+     */
+    public static function setContainer(?Container $container): void
     {
         self::$container = $container;
     }

@@ -42,9 +42,18 @@ final class ResellerNavTest extends TestCase
         parent::tearDown();
     }
 
-    /** @return array{0: string, 1: array<int, string>} */
+    /**
+     * Render the nav as if the current request were $path.
+     *
+     * The path is put back afterwards: leaving it behind made "no request" depend
+     * on which test ran before this one, and a test that only passes in isolation
+     * is worse than no test.
+     *
+     * @return array{0: string, 1: array<int, string>}
+     */
     private function navAt(string $path): array
     {
+        $previous = $_SERVER['REQUEST_URI'] ?? null;
         $_SERVER['REQUEST_URI'] = $path;
 
         $diagnostics = [];
@@ -58,6 +67,12 @@ final class ResellerNavTest extends TestCase
             $html = $this->view->render('partials.reseller-nav');
         } finally {
             restore_error_handler();
+
+            if ($previous === null) {
+                unset($_SERVER['REQUEST_URI']);
+            } else {
+                $_SERVER['REQUEST_URI'] = $previous;
+            }
         }
 
         return [$html, $diagnostics];
@@ -168,10 +183,19 @@ final class ResellerNavTest extends TestCase
             return true;
         });
 
+        // Say what "no request" means instead of inheriting it: a CLI render with
+        // a REQUEST_URI left over from an earlier test is not a CLI render.
+        $previous = $_SERVER['REQUEST_URI'] ?? null;
+        unset($_SERVER['REQUEST_URI']);
+
         try {
             $html = $this->view->render('partials.reseller-nav');
         } finally {
             restore_error_handler();
+
+            if ($previous !== null) {
+                $_SERVER['REQUEST_URI'] = $previous;
+            }
         }
 
         $this->assertSame([], $diagnostics, 'the nav must render without a request');

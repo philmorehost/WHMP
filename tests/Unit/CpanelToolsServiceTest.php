@@ -6,6 +6,11 @@ namespace CodeVault\Tests\Unit;
 
 use CodeVault\Billing\ServiceRepository;
 use CodeVault\CpanelTools\CpanelToolsService;
+use CodeVault\Config;
+use CodeVault\Container;
+use CodeVault\Security\CsrfToken;
+use CodeVault\Session\SessionManager;
+use CodeVault\Support\App;
 use CodeVault\CpanelTools\CpanelUapiClient;
 use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Tests\Fixtures\FakeHttpClient;
@@ -287,6 +292,16 @@ final class CpanelToolsServiceTest extends TestCase
 
     public function test_database_and_dns_views_render_cpanel_listings_and_the_selected_zone(): void
     {
+        // csrf_field() in the rendered forms resolves CsrfToken through App,
+        // so a container holding a session-backed token has to exist before the
+        // view is rendered. Same shape the other view tests use.
+        $configDir = sys_get_temp_dir() . '/codevault-cpanel-view-test-' . uniqid();
+        mkdir($configDir);
+        $_SESSION = [];
+        $container = new Container();
+        $container->instance(CsrfToken::class, new CsrfToken(new SessionManager(new Config($configDir))));
+        App::setContainer($container);
+
         $view = new View(dirname(__DIR__, 2) . '/resources/views');
         $base = [
             'service' => ['id' => self::SERVICE_ID, 'product_name' => 'Shared Hosting', 'domain' => 'example.test'],
@@ -331,10 +346,17 @@ final class CpanelToolsServiceTest extends TestCase
         $this->assertStringContainsString('value="shop.example.test" selected', $dnsHtml);
         $this->assertStringContainsString('name="zone" value="shop.example.test"', $dnsHtml, 'DNS mutations retain the selected zone');
         $this->assertStringContainsString('www.shop.example.test.', $dnsHtml);
-        $this->assertLessThan(
-            strpos($dnsHtml, 'DNS Zone Editor'),
-            strpos($dnsHtml, 'Add DNS Record to'),
-            'the Add DNS Record card appears above the DNS Zone Editor'
+        // 'DNS Zone Editor' is also the name of the tab in the navigation above
+        // both cards, so the bare string matches the tab label first. Anchor on
+        // the card heading to compare the two cards themselves.
+        $addCardAt = strpos($dnsHtml, 'Add DNS Record to');
+        $zoneEditorCardAt = strpos($dnsHtml, '<h2 class="cv-card__title">DNS Zone Editor</h2>');
+
+        $this->assertNotFalse($addCardAt, 'the DNS tab renders an Add DNS Record card');
+        $this->assertNotFalse($zoneEditorCardAt, 'the DNS tab renders the DNS Zone Editor card');
+        $this->assertTrue(
+            $addCardAt < $zoneEditorCardAt,
+            'the Add DNS Record card appears above the DNS Zone Editor card'
         );
     }
 

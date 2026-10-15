@@ -7,6 +7,7 @@ namespace CodeVault\Tests\Unit;
 use CodeVault\Config;
 use CodeVault\Logging\ErrorTracker;
 use CodeVault\Logging\LogManager;
+use CodeVault\Support\App;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -21,6 +22,9 @@ final class LoggingTest extends TestCase
 {
     private string $basePath;
 
+    /** @var array<int, string> env keys this test set, restored in tearDown() */
+    private array $touchedEnv = [];
+
     protected function setUp(): void
     {
         $this->basePath = sys_get_temp_dir() . '/codevault-logging-' . uniqid();
@@ -30,12 +34,27 @@ final class LoggingTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->touchedEnv as $key) {
+            putenv($key);
+            unset($_ENV[$key]);
+        }
+
         $this->removeDirectory($this->basePath);
     }
 
+    /**
+     * A manager over a scratch storage directory. LOG_STDERR is off by default so
+     * the JSON the pipeline writes does not land in the middle of PHPUnit's own
+     * output — the file handler is what these tests read. Env values are restored
+     * in tearDown(), so a level set here cannot leak into the next test.
+     */
     private function manager(array $env = []): LogManager
     {
-        foreach ($env as $key => $value) {
+        foreach ($env + ['LOG_STDERR' => '0'] as $key => $value) {
+            if (!in_array($key, $this->touchedEnv, true)) {
+                $this->touchedEnv[] = $key;
+            }
+
             putenv("{$key}={$value}");
             $_ENV[$key] = $value;
         }
@@ -204,11 +223,19 @@ final class LoggingTest extends TestCase
 
     public function test_the_logger_helper_returns_a_null_logger_before_the_app_boots(): void
     {
-        // tests/bootstrap.php never boots a Kernel, so App has no container: the
-        // helper must hand back a NullLogger rather than throwing at a view that
-        // merely wanted to log a line.
-        $this->assertInstanceOf(NullLogger::class, logger());
-        $this->assertInstanceOf(LoggerInterface::class, logger('mail'));
+        // A view that merely wanted to log a line must not be the reason a page
+        // 500s, so with no container the helper hands back a NullLogger instead
+        // of throwing. The container is cleared explicitly: other tests in the
+        // same process boot one, and this test is about the unbooted state.
+        $previous = App::hasContainer() ? App::container() : null;
+        App::setContainer(null);
+
+        try {
+            $this->assertInstanceOf(NullLogger::class, logger());
+            $this->assertInstanceOf(LoggerInterface::class, logger('mail'));
+        } finally {
+            App::setContainer($previous);
+        }
     }
 
     private function removeDirectory(string $path): void

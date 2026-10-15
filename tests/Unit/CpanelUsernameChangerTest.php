@@ -33,6 +33,7 @@ use CodeVault\Tests\Support\CapturingQueue;
 use CodeVault\UsernameChanger\UsernameChangeNotifier;
 use CodeVault\UsernameChanger\UsernameChangeService;
 use CodeVault\View;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -118,7 +119,7 @@ final class CpanelUsernameChangerTest extends TestCase
         ];
     }
 
-    /** @dataProvider badNames */
+    #[DataProvider('badNames')]
     public function test_local_rules_reject_with_a_reason_code(string $name, string $code): void
     {
         $policy = new UsernamePolicy(5, 16, ['AcmeCorp']);

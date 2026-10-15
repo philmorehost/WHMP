@@ -62,8 +62,26 @@ final class PhpassHasherTest extends TestCase
     public function test_bcrypt_and_argon_hashes_are_not_treated_as_phpass(): void
     {
         $this->assertFalse($this->hasher->isPhpassHash(password_hash('secret', PASSWORD_BCRYPT)));
-        $this->assertFalse($this->hasher->isPhpassHash(password_hash('secret', PASSWORD_ARGON2ID)));
         $this->assertFalse($this->hasher->verify('secret', password_hash('secret', PASSWORD_BCRYPT)));
+
+        // Argon2id is a compile-time choice on the PHP build (--with-password-argon2),
+        // so a build without it has no PASSWORD_ARGON2ID constant at all. Referencing
+        // the bare constant turns that into a fatal-ish Error rather than a skip —
+        // which is how this test reported "Undefined constant" instead of "not
+        // applicable here". The constant existing is not the same as the password
+        // handling code being wrong.
+        if (!defined('PASSWORD_ARGON2ID')) {
+            self::markTestSkipped('This PHP build has no Argon2id support (PASSWORD_ARGON2ID is not defined).');
+        }
+
+        $argon = password_hash('secret', PASSWORD_ARGON2ID);
+
+        if (!is_string($argon)) {
+            self::markTestSkipped('This PHP build could not produce an Argon2id hash.');
+        }
+
+        $this->assertFalse($this->hasher->isPhpassHash($argon));
+        $this->assertFalse($this->hasher->verify('secret', $argon));
     }
 
     public function test_malformed_phpass_hashes_are_rejected(): void

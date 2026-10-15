@@ -39,21 +39,21 @@ final class WebpImagePipelineTest extends BaseTestCase
         $png = imagecreatetruecolor(40, 20);
         imagefill($png, 0, 0, imagecolorallocate($png, 200, 30, 30));
         imagepng($png, $this->sourcePng);
-        imagedestroy($png);
+        unset($png);
 
         // 40x20 JPEG
         $this->sourceJpg = $this->basePath . '/public/assets/testimg/photo.jpg';
         $jpg = imagecreatetruecolor(40, 20);
         imagefill($jpg, 0, 0, imagecolorallocate($jpg, 30, 200, 30));
         imagejpeg($jpg, $this->sourceJpg, 90);
-        imagedestroy($jpg);
+        unset($jpg);
 
         // 40x20 GIF
         $this->sourceGif = $this->basePath . '/public/assets/testimg/photo.gif';
         $gif = imagecreatetruecolor(40, 20);
         imagefill($gif, 0, 0, imagecolorallocate($gif, 30, 30, 200));
         imagegif($gif, $this->sourceGif);
-        imagedestroy($gif);
+        unset($gif);
     }
 
     protected function tearDown(): void
