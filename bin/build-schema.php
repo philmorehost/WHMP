@@ -39,7 +39,7 @@ foreach ($result['errors'] as $error) {
     fwrite(STDERR, "migration problem: {$error}\n");
 }
 
-if (in_array('--check', $argv, true)) {
+if (in_array('--check', $argv ?? [], true)) {
     $current = is_file($target) ? (string) file_get_contents($target) : '';
 
     if ($current !== $result['source']) {

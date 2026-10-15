@@ -57,7 +57,7 @@ final class CheckoutService
      * specifically because this is the one place the real conversion already
      * happened.
      *
-     * @param array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float} $priced
+     * @param array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float, costTotal?: float, store_id?: ?int, upline_store_id?: ?int, uplineCostTotal?: ?float} $priced
      * @param array<string, mixed> $currency
      * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float}
      */

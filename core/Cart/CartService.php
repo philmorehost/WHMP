@@ -51,7 +51,10 @@ final class CartService
      * so a code that expires or hits its redemption cap between page loads
      * stops applying immediately instead of silently over-discounting.
      *
-     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float, costTotal: float, store_id: ?int}
+     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float, costTotal: float, store_id: ?int, upline_store_id: ?int, uplineCostTotal: ?float}
+     */
+    /**
+     * @return array{lines: array<int, array<string, mixed>>, subtotal: float, setupFees: float, domainTotal: float, discount: float, promoCode: ?string, promotionId: ?int, promoError: ?string, total: float, costTotal: float, store_id: ?int, upline_store_id: ?int, uplineCostTotal: ?float}
      */
     public function priced(): array
     {

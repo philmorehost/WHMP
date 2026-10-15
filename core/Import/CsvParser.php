@@ -29,10 +29,10 @@ final class CsvParser
 
         $headers = array_map(
             static fn (string $header) => trim($header),
-            str_getcsv(array_shift($lines)) ?: []
+            str_getcsv(array_shift($lines))
         );
 
-        $rows = array_map(static fn (string $line) => str_getcsv($line) ?: [], $lines);
+        $rows = array_map(static fn (string $line) => str_getcsv($line), $lines);
 
         return ['headers' => $headers, 'rows' => $rows];
     }

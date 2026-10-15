@@ -224,13 +224,13 @@ final class DomainPricingController
             return $denied;
         }
 
-        $config = $this->kernel->config();
-        $whmcsHost = (string) ($config['whmcs_db_host'] ?? '');
-        $whmcsPort = (int) ($config['whmcs_db_port'] ?? 3306);
-        $whmcsDb = (string) ($config['whmcs_db_name'] ?? '');
-        $whmcsUser = (string) ($config['whmcs_db_username'] ?? '');
-        $whmcsPass = (string) ($config['whmcs_db_password'] ?? '');
-        $whmcsPrefix = (string) ($config['whmcs_db_prefix'] ?? 'tbl');
+        $config = $this->kernel->container->make(\CodeVault\Config::class);
+        $whmcsHost = (string) $config->env('WHMCS_DB_HOST', '');
+        $whmcsPort = (int) $config->env('WHMCS_DB_PORT', 3306);
+        $whmcsDb = (string) $config->env('WHMCS_DB_NAME', '');
+        $whmcsUser = (string) $config->env('WHMCS_DB_USERNAME', '');
+        $whmcsPass = (string) $config->env('WHMCS_DB_PASSWORD', '');
+        $whmcsPrefix = (string) $config->env('WHMCS_DB_PREFIX', 'tbl');
 
         if ($whmcsHost === '' || $whmcsDb === '' || $whmcsUser === '') {
             return Response::json([

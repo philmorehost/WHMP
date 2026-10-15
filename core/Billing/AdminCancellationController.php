@@ -30,7 +30,7 @@ final class AdminCancellationController
             return $denied;
         }
 
-        $requests = $this->cancellations->allPending();
+        $requests = $this->cancellations->findPending();
 
         return $this->render('billing.admin-cancellations', [
             'requests' => $requests,
@@ -44,7 +44,7 @@ final class AdminCancellationController
         }
 
         $id = (int) $params['id'];
-        $requestData = $this->cancellations->find($id);
+        $requestData = $this->cancellations->findById($id);
 
         if ($requestData === null) {
             return Response::html('404 Not Found', 404);
@@ -59,7 +59,7 @@ final class AdminCancellationController
         $this->services->cancel($serviceId);
 
         // Mark request as processed
-        $this->cancellations->markProcessed($id);
+        $this->cancellations->markCompleted($id);
 
         // Log admin activity
         $admin = $this->guard->currentAdmin();

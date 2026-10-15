@@ -32,6 +32,18 @@ interface GatewayModule extends Module
     public function chargeToken(array $params): array;
 
     /**
+     * Ask the provider what actually happened to a reference, server-side.
+     *
+     * A callback body is attacker-controlled; only this answer is trusted to
+     * mark an invoice paid. Manual/offline gateways return success=false rather
+     * than pretending, so a stray callback can never settle one.
+     *
+     * @param array<string, mixed> $config
+     * @return array{success: bool, status: string, reference: string, amount: float, metadata: array<string, mixed>}
+     */
+    public function verifyTransaction(string $reference, array $config): array;
+
+    /**
      * Verify + parse an inbound IPN/webhook callback.
      *
      * @return array{valid: bool, event: string, data: array}

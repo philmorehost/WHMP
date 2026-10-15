@@ -68,6 +68,7 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         ];
     }
 
+    /** @return array{success: bool, available: bool, message?: string} */
     public function checkAvailability(array $params): array
     {
         $response = $this->call($params['registrar'], 'checkdomainavailable', [
@@ -905,6 +906,28 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         $timestamp = strtotime((string) $value);
 
         return $timestamp !== false ? date('Y-m-d', $timestamp) : null;
+    }
+
+    /**
+     * @param array<string, mixed> $registrar
+     * @param array<string, mixed> $params
+     */
+    /**
+     * Success/failure of an action that has nothing to return but a message —
+     * "private nameserver registered", "deleted". Uses the same envelope
+     * decoding as every other call, so statusCode 200 is the only thing that
+     * counts as done.
+     *
+     * @param array{status: int, body: string} $response
+     * @return array{success: bool, message: string}
+     */
+    private function toResult(array $response, string $successMessage): array
+    {
+        $decoded = $this->decode($response);
+
+        return $decoded['success']
+            ? ['success' => true, 'message' => $successMessage]
+            : ['success' => false, 'message' => $decoded['message']];
     }
 
     /**

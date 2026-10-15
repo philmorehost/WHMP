@@ -71,7 +71,7 @@ class Config
     {
         $value = $_ENV[$key] ?? getenv($key);
 
-        if ($value === false || $value === null) {
+        if ($value === false) {
             return $default;
         }
 

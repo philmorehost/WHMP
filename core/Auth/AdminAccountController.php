@@ -20,8 +20,6 @@ use CodeVault\View;
  */
 final class AdminAccountController
 {
-    private const RECOVERY_CODES_FLASH_KEY = 'new_recovery_codes';
-
     public function __construct(
         private readonly AuthGuard $guard,
         private readonly View $view,

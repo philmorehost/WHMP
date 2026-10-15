@@ -45,9 +45,14 @@ class Container
     }
 
     /**
-     * @template T
-     * @param class-string<T>|string $abstract
-     * @return T|mixed
+     * Resolve a service: an instance bound with singleton()/bind(), a class the
+     * container can construct, or one it has already built. Typing the argument
+     * as class-string<T> is what makes `make(Foo::class)` return a Foo at every
+     * call site instead of `mixed`.
+     *
+     * @template T of object
+     * @param class-string<T> $abstract
+     * @return T
      */
     public function make(string $abstract, array $parameters = []): mixed
     {
@@ -115,7 +120,9 @@ class Container
             $type = $param->getType();
 
             if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
-                $dependencies[] = $this->make($type->getName());
+                /** @var class-string $dependency */
+                $dependency = $type->getName();
+                $dependencies[] = $this->make($dependency);
                 continue;
             }
 

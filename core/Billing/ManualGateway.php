@@ -39,6 +39,25 @@ final class ManualGateway implements GatewayModule
         return false;
     }
 
+    /**
+     * Nothing to verify against: a manual payment is real when an administrator
+     * confirms it against the bank statement. Returning a failure is what stops
+     * a stray callback (or a guessed reference) from settling an invoice.
+     *
+     * @param array<string, mixed> $config
+     * @return array{success: bool, status: string, reference: string, amount: float, metadata: array<string, mixed>}
+     */
+    public function verifyTransaction(string $reference, array $config): array
+    {
+        return [
+            'success' => false,
+            'status' => 'manual',
+            'reference' => $reference,
+            'amount' => 0.0,
+            'metadata' => [],
+        ];
+    }
+
     public function capture(array $params): array
     {
         return ['success' => false, 'message' => 'Awaiting manual confirmation from an admin after bank transfer.'];

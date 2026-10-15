@@ -125,7 +125,9 @@ final class ServiceRepository
             $bindings = array_merge($bindings, $filterBindings);
         }
 
-        $where = $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions);
+        // Always at least one condition (the platform/reseller clause), so the
+        // WHERE keyword is never emitted on its own.
+        $where = 'WHERE ' . implode(' AND ', $conditions);
 
         $sortable = [
             'client'  => 'c.last_name',

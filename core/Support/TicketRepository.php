@@ -72,7 +72,8 @@ final class TicketRepository
             $bindings[] = $filters['assignedAdminId'];
         }
 
-        $whereSql = $where !== [] ? 'WHERE ' . implode(' AND ', $where) : '';
+        // Always at least one condition (the platform/reseller clause).
+        $whereSql = 'WHERE ' . implode(' AND ', $where);
 
         return $this->db->select(
             <<<SQL

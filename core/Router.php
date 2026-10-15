@@ -136,6 +136,14 @@ class Router
 
         if (is_array($handler) && count($handler) === 2) {
             [$class, $method] = $handler;
+
+            // Handlers are registered as [Controller::class, 'method']. Anything
+            // else is a broken route: fail loudly here rather than handing a
+            // non-class to the container.
+            if (!is_string($class) || !class_exists($class) || !is_string($method)) {
+                throw new RuntimeException('Route handler must be [class, method], got a malformed pair.');
+            }
+
             $instance = $this->container->make($class);
 
             if (!method_exists($instance, $method)) {

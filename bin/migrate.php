@@ -30,7 +30,7 @@ $migrator = $kernel->container->make(Migrator::class);
 /** @var SchemaReconciler $reconciler */
 $reconciler = $kernel->container->make(SchemaReconciler::class);
 
-if (in_array('--check', $argv, true)) {
+if (in_array('--check', $argv ?? [], true)) {
     $pending = $migrator->pending();
     fwrite(STDOUT, sprintf("[%s] pending migrations: %d%s\n", $now(), count($pending), $pending === [] ? '' : ' (' . implode(', ', $pending) . ')'));
 

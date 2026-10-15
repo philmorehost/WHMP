@@ -217,7 +217,7 @@ final class CloudflareRules
     /** @return array<int,string>|null */
     private static function list(string $value, ?string $pattern, int $max, bool $upper): ?array
     {
-        $items = array_values(array_unique(array_filter(array_map('trim', preg_split('/[\s,]+/', $value) ?: []), 'strlen')));
+        $items = array_values(array_unique(array_filter(array_map('trim', preg_split('/[\s,]+/', $value) ?: []), static fn (string $item): bool => $item !== '')));
         if ($items === [] || count($items) > $max) { return null; }
         if ($upper) { $items = array_map('strtoupper', $items); }
         if ($pattern !== null) { foreach ($items as $item) { if (preg_match($pattern, $item) !== 1) { return null; } } }
