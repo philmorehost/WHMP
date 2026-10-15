@@ -78,7 +78,30 @@ jobs:
         run: php bin/build-schema.php --check
 
       - name: Run the test suite
-        run: vendor/bin/phpunit --no-coverage
+        id: phpunit
+        continue-on-error: true
+        run: |
+          set +e
+          vendor/bin/phpunit --no-coverage 2>&1 | tee /tmp/phpunit.txt
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      # A failed suite whose output nobody can retrieve is only marginally better
+      # than no suite at all. Every failure is echoed as a check annotation, so the
+      # reason is visible on the PR itself.
+      - name: Annotate test failures
+        if: steps.phpunit.outputs.exit != '0'
+        run: |
+          # One annotation per failure block (PHPUnit separates them with blank
+          # lines), newlines encoded so the whole block shows on the PR.
+          awk 'BEGIN { RS = "" } /^[0-9]+\) / { gsub(/\r/, ""); gsub(/%/, "%25"); gsub(/\n/, "%0A"); print substr($0, 1, 1200) }' \
+            /tmp/phpunit.txt | head -40 | while IFS= read -r block; do
+              echo "::error title=PHPUnit failure::${block}"
+            done
+          tail -n 5 /tmp/phpunit.txt
+
+      - name: Fail the job if the suite failed
+        if: steps.phpunit.outputs.exit != '0'
+        run: exit 1
 
       - name: Dump the PHP error log if a step failed
         if: failure()
@@ -124,9 +147,26 @@ jobs:
             --execute="CREATE DATABASE IF NOT EXISTS codevault_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
       - name: Run the suite with coverage
+        id: phpunit
+        continue-on-error: true
         run: |
+          set +e
           vendor/bin/phpunit --coverage-clover=build/coverage/clover.xml \
-            --coverage-text --only-summary-for-coverage-text
+            --coverage-text --only-summary-for-coverage-text 2>&1 | tee /tmp/phpunit.txt
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Annotate test failures
+        if: steps.phpunit.outputs.exit != '0'
+        run: |
+          awk 'BEGIN { RS = "" } /^[0-9]+\) / { gsub(/\r/, ""); gsub(/%/, "%25"); gsub(/\n/, "%0A"); print substr($0, 1, 1200) }' \
+            /tmp/phpunit.txt | head -40 | while IFS= read -r block; do
+              echo "::error title=PHPUnit failure::${block}"
+            done
+          tail -n 5 /tmp/phpunit.txt
+
+      - name: Fail the job if the suite failed
+        if: steps.phpunit.outputs.exit != '0'
+        run: exit 1
 
       - name: Upload the coverage report
         if: always()
