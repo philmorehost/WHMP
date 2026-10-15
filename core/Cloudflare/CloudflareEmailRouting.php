@@ -953,15 +953,34 @@ final class CloudflareEmailRouting
         return $row;
     }
 
-    /** @param array<string,mixed> $owner @return array<string,mixed>|null */
+    /**
+     * The stored row for one local part, joined to the destination it points at.
+     *
+     * The join is the whole point, not a convenience. `destination_email` lives
+     * on cloudflare_email_destinations, so a plain `SELECT *` returns a row whose
+     * `destination_email` is null — and every caller that compares the stored
+     * destination with what Cloudflare reports (the "was this changed outside
+     * WHMP?" guard, remoteRuleMatches, remoteCatchAllMatches) then compares
+     * against the empty string and declares a rule WHMP itself wrote to be
+     * foreign. That is exactly what stopped a managed catch-all from ever being
+     * turned off: the first enable (no local row) worked, and every change after
+     * it was refused.
+     *
+     * @param array<string,mixed> $owner
+     * @return array<string,mixed>|null
+     */
     private function routeByLocalPart(int $zoneId, string $localPart, array $owner): ?array
     {
-        $where = self::resellerWhere($owner['reseller_id']);
+        $where = str_replace('reseller_id', 'r.reseller_id', self::resellerWhere($owner['reseller_id']));
         $bindings = [$zoneId, $localPart, $owner['client_id']];
         $bindings = array_merge($bindings, self::resellerBindings($owner['reseller_id']));
 
         return $this->db->selectOne(
-            'SELECT * FROM cloudflare_email_routes WHERE zone_id = ? AND local_part = ? AND client_id = ? AND ' . $where . ' LIMIT 1',
+            'SELECT r.*, d.email AS destination_email, d.cf_destination_id AS cf_destination_id FROM cloudflare_email_routes r
+             JOIN cloudflare_email_destinations d ON d.id = r.destination_id
+             WHERE r.zone_id = ? AND r.local_part = ? AND r.client_id = ? AND ' . $where . '
+               AND d.client_id = r.client_id AND ((d.reseller_id = r.reseller_id) OR (d.reseller_id IS NULL AND r.reseller_id IS NULL))
+             LIMIT 1',
             $bindings
         );
     }
