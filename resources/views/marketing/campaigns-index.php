@@ -14,6 +14,16 @@
     </div>
 <?php endif; ?>
 
+<?php if (($_GET['deleted'] ?? '') !== ''): ?>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <div class="cv-alert cv-alert--success">Campaign deleted, along with its recipient history.</div>
+    </div>
+<?php elseif (($_GET['delete_error'] ?? '') !== ''): ?>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <div class="cv-alert cv-alert--danger">Could not delete — pause the campaign first if it is still sending.</div>
+    </div>
+<?php endif; ?>
+
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <div class="cv-datatable__toolbar">
         <?= $view->partial('partials.table-search', ['target' => '#campaigns-table', 'placeholder' => 'Search campaigns...']) ?>
@@ -46,11 +56,19 @@
                         <span class="cv-badge cv-badge--neutral">Draft</span>
                     <?php endif; ?>
                 </td>
-                <td title="Opened is a minimum — many mail clients block the tracking image by default"><?= (int) $campaign['recipient_count'] ?> / <?= (int) $campaign['opened_count'] ?></td>
-                <td>
+                <td title="Opened is a minimum — many mail clients block the tracking image by default. Counts are for this campaign's most recent send; resends open a new round.">
+                    <?= (int) $campaign['recipient_count'] ?> / <?= (int) $campaign['opened_count'] ?><?= (int) ($campaign['round'] ?? 1) > 1 ? ' <span class="cv-badge cv-badge--neutral" title="Sent ' . (int) $campaign['round'] . ' times">R' . (int) $campaign['round'] . '</span>' : '' ?>
+                </td>
+                <td style="white-space:nowrap;">
                     <?php if ($campaign['status'] === 'draft'): ?>
-                        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/send" data-confirm="Send this campaign now?"><?= csrf_field() ?>
-                            <button class="cv-btn" type="submit">Send Now</button>
+                        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/send" data-confirm="Send this campaign now?" style="display:inline;"><?= csrf_field() ?>
+                            <button class="cv-btn cv-btn--sm" type="submit">Send Now</button>
+                        </form>
+                    <?php endif; ?>
+                    <?php if (in_array($campaign['status'], ['draft', 'paused', 'sent'], true)): ?>
+                        <a class="cv-btn cv-btn--secondary cv-btn--sm" href="/admin/campaigns/<?= (int) $campaign['id'] ?>#edit">Edit</a>
+                        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/delete" data-confirm="Delete this campaign and ALL of its recipient history? This cannot be undone." style="display:inline;"><?= csrf_field() ?>
+                            <button class="cv-btn cv-btn--danger cv-btn--sm" type="submit">Delete</button>
                         </form>
                     <?php endif; ?>
                 </td>

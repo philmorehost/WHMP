@@ -35,8 +35,8 @@ final class MailCampaignRepository
             <<<'SQL'
             SELECT c.*, g.name AS group_name,
                 cl.first_name AS client_first_name, cl.last_name AS client_last_name, cl.email AS client_email,
-                (SELECT COUNT(*) FROM mail_campaign_recipients r WHERE r.campaign_id = c.id) AS recipient_count,
-                (SELECT COUNT(*) FROM mail_campaign_recipients r WHERE r.campaign_id = c.id AND r.opened_at IS NOT NULL) AS opened_count
+                (SELECT COUNT(*) FROM mail_campaign_recipients r WHERE r.campaign_id = c.id AND r.round = c.round) AS recipient_count,
+                (SELECT COUNT(*) FROM mail_campaign_recipients r WHERE r.campaign_id = c.id AND r.round = c.round AND r.opened_at IS NOT NULL) AS opened_count
             FROM mail_campaigns c
             LEFT JOIN client_groups g ON g.id = c.client_group_id
             LEFT JOIN clients cl ON cl.id = c.client_id
@@ -111,17 +111,115 @@ final class MailCampaignRepository
     }
 
     /**
-     * Edits a campaign's subject/body — the "review, edit" half of pause →
-     * review → edit → resume. Restricted to 'draft' and 'paused': a 'sending'
-     * campaign has to be paused first, so there is no window where the cron
-     * could read half-edited content mid-batch, and a 'sent' campaign's
-     * content is history, not editable.
+     * Edits a campaign's subject/body — the "review, edit" step of pause →
+     * review → edit → resume. Restricted to 'draft', 'paused' and 'sent': a
+     * 'sending' campaign has to be paused first, so there is no window where
+     * the cron could read half-edited content mid-batch. A 'sent' campaign is
+     * editable so an old campaign can be corrected and then sent again — see
+     * beginRound().
      */
     public function update(int $id, string $subject, string $body): bool
     {
         return $this->db->update(
-            "UPDATE mail_campaigns SET subject = ?, body = ?, updated_at = ? WHERE id = ? AND status IN ('draft', 'paused')",
+            "UPDATE mail_campaigns SET subject = ?, body = ?, updated_at = ? WHERE id = ? AND status IN ('draft', 'paused', 'sent')",
             [$subject, $body, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        ) > 0;
+    }
+
+    /**
+     * Edits a campaign's audience targeting. All five columns are written
+     * together so switching target types clears whatever the previous type
+     * stored — the same normalisation create() applies at insert time.
+     *
+     * Restricted to 'draft' and 'sent'. A 'paused' campaign is mid-send: its
+     * pending recipients were resolved when it was queued, so an audience
+     * change there would silently not affect the people already waiting, and
+     * pretending otherwise would be misleading. For a 'sent' campaign the
+     * change simply takes effect the next time it is sent (see resend()).
+     */
+    public function updateAudience(
+        int $id,
+        ?int $clientGroupId,
+        ?int $clientId,
+        ?string $externalEmails,
+        bool $onlyInactive
+    ): bool {
+        return $this->db->update(
+            "UPDATE mail_campaigns
+             SET client_group_id = ?, client_id = ?, external_emails = ?, only_inactive = ?, updated_at = ?
+             WHERE id = ? AND status IN ('draft', 'sent')",
+            [$clientGroupId, $clientId, $externalEmails, $onlyInactive ? 1 : 0, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        ) > 0;
+    }
+
+    /**
+     * Opens a new send round for a sent campaign being resent: bumps the
+     * round counter and puts the campaign back in front of the cron
+     * ('sending'). The old round's recipient rows are untouched — they are
+     * the record of who received the earlier send and whether they opened it.
+     *
+     * Returns the new round number, or 0 when the campaign is not in the
+     * 'sent' state (resending a draft is what the normal send is for; a
+     * sending/paused campaign is already mid-flight).
+     */
+    public function beginRound(int $id): int
+    {
+        $updated = $this->db->update(
+            "UPDATE mail_campaigns SET round = round + 1, status = 'sending', updated_at = ? WHERE id = ? AND status = 'sent'",
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+        );
+
+        if ($updated === 0) {
+            return 0;
+        }
+
+        $row = $this->db->selectOne('SELECT round FROM mail_campaigns WHERE id = ?', [$id]);
+
+        return (int) ($row['round'] ?? 0);
+    }
+
+    /**
+     * Everyone this campaign already has a recipient row for, split by the
+     * two kinds of recipient: client rows (address read from the clients
+     * table at send time, so the client id is the stable key) and external
+     * rows (address stored on the row). Used by resend()'s "only people who
+     * haven't received this yet" filter.
+     *
+     * @return array{clientIds: array<int, int>, emails: array<int, string>}
+     */
+    public function existingRecipientKeys(int $campaignId): array
+    {
+        $rows = $this->db->select(
+            'SELECT client_id, email FROM mail_campaign_recipients WHERE campaign_id = ?',
+            [$campaignId]
+        );
+
+        $clientIds = [];
+        $emails = [];
+
+        foreach ($rows as $row) {
+            if ($row['client_id'] !== null) {
+                $clientIds[(int) $row['client_id']] = true;
+            } elseif ((string) ($row['email'] ?? '') !== '') {
+                $emails[strtolower(trim((string) $row['email']))] = true;
+            }
+        }
+
+        return ['clientIds' => array_map('intval', array_keys($clientIds)), 'emails' => array_keys($emails)];
+    }
+
+    /**
+     * Deletes a campaign and (via the FK's ON DELETE CASCADE) its recipient
+     * history. Blocked for 'sending' — pause it first, otherwise the cron
+     * could be draining this campaign's recipients while the rows vanish
+     * under it. Returns false when nothing was deleted (wrong id, or it was
+     * sending).
+     */
+    public function delete(int $id): bool
+    {
+        return $this->db->delete(
+            "DELETE FROM mail_campaigns WHERE id = ? AND status IN ('draft', 'paused', 'sent')",
+            [$id]
         ) > 0;
     }
 
@@ -182,14 +280,16 @@ final class MailCampaignRepository
      * @param bool $pending true queues the recipient for the cron to send
      *                      later (sent_at stays NULL); false stamps it as
      *                      already sent, for callers that send inline.
+     * @param int $round the send round this row belongs to — resend() opens a
+     *                   new round rather than touching the previous rounds' rows.
      */
-    public function addRecipient(int $campaignId, ?int $clientId, string $openToken, ?string $email = null, bool $pending = false): void
+    public function addRecipient(int $campaignId, ?int $clientId, string $openToken, ?string $email = null, bool $pending = false, int $round = 1): void
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         $this->db->insert(
-            'INSERT INTO mail_campaign_recipients (campaign_id, client_id, email, open_token, sent_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            [$campaignId, $clientId, $email, $openToken, $pending ? null : $now, $now]
+            'INSERT INTO mail_campaign_recipients (campaign_id, round, client_id, email, open_token, sent_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$campaignId, max(1, $round), $clientId, $email, $openToken, $pending ? null : $now, $now]
         );
     }
 
@@ -323,7 +423,14 @@ final class MailCampaignRepository
         );
     }
 
-    /** @return array<int, array<string, mixed>> */
+    /**
+     * Every recipient across every send round, newest round first. Old
+     * rounds are kept (and labelled in the UI) on purpose: who received an
+     * earlier send of a resent campaign, and whether they opened it, is
+     * part of the campaign's record.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     public function recipients(int $campaignId): array
     {
         return $this->db->select(
@@ -335,7 +442,7 @@ final class MailCampaignRepository
             FROM mail_campaign_recipients r
             LEFT JOIN clients c ON c.id = r.client_id
             WHERE r.campaign_id = ?
-            ORDER BY r.id ASC
+            ORDER BY r.round DESC, r.id ASC
             SQL,
             [$campaignId]
         );

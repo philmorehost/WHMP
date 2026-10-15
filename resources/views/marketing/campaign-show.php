@@ -1,6 +1,23 @@
 <?php
 /** @var array<string, mixed> $campaign */
 /** @var array<int, array<string, mixed>> $recipients */
+/** @var array<int, array<string, mixed>> $groups */
+/** @var array<int, array<string, mixed>> $clients */
+$id = (int) $campaign['id'];
+// The send round this campaign is currently on (1 until it has been resent).
+// Resending keeps the old round's recipient rows as history and opens a new
+// one, so "delivered/failed/progress" below describe the current round while
+// the recipients table at the bottom lists every round.
+$currentRound = max(1, (int) ($campaign['round'] ?? 1));
+$currentRecipients = array_values(array_filter(
+    $recipients,
+    static fn (array $r): bool => max(1, (int) ($r['round'] ?? 1)) === $currentRound
+));
+$hasOldRounds = count(array_filter($recipients, static fn (array $r): bool => max(1, (int) ($r['round'] ?? 1)) < $currentRound)) > 0;
+// Audience can be rewritten on drafts and sent campaigns — not while paused
+// (pending recipients were already resolved) or sending.
+$audienceEditable = in_array($campaign['status'], ['draft', 'sent'], true);
+$deletable = in_array($campaign['status'], ['draft', 'paused', 'sent'], true);
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title"><?= e($campaign['subject']) ?></h1>
@@ -8,13 +25,13 @@
 </div>
 
 <?php
-// Feedback for the pause/resume/edit actions below — each redirects back
-// here with one of these query params rather than a session flash, matching
-// how queuedCount already works on this page.
+// Feedback for the pause/resume/edit/resend/delete actions below — each
+// redirects back here or to the list with one of these query params rather
+// than a session flash, matching how queuedCount already works on this page.
 $feedback = [
     'paused' => ['ok', 'Campaign paused. The cron will not send it any further until you resume it.'],
     'resumed' => ['ok', 'Campaign resumed — the cron will continue sending to the remaining recipients.'],
-    'updated' => ['ok', 'Campaign updated. Recipients still pending will get this version when sending resumes.'],
+    'updated' => ['ok', 'Campaign updated.'],
     'pause_error' => ['error', 'Could not pause — it may not be sending right now.'],
     'resume_error' => ['error', 'Could not resume — it may not be paused right now.'],
 ];
@@ -28,16 +45,41 @@ $feedback = [
     <div class="cv-alert cv-alert--danger" style="margin-bottom:var(--cv-space-3);"><?= e((string) $_GET['edit_error']) ?></div>
 <?php endif; ?>
 
+<?php if (($queuedCount ?? null) !== null): ?>
+    <?php if ($queuedCount > 0): ?>
+        <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+            <?= (int) $queuedCount ?> recipient(s) queued for sending.<?php if (($skippedInvalid ?? 0) > 0): ?> <?= (int) $skippedInvalid ?> invalid address(es) left out by the Invalid Email Blocker.<?php endif; ?>
+            The cron sends them in small batches — progress appears below.
+        </div>
+    <?php elseif (($_GET['resend_none'] ?? '') !== ''): ?>
+        <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+            Nothing to resend — everyone the audience targeting resolves to has already received this campaign.
+            Use 🎯 Edit audience to widen the targeting, or untick "only people who haven't received it" to send
+            everyone another copy.
+        </div>
+    <?php else: ?>
+        <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+            Nothing was queued — the audience resolved to no recipients.
+        </div>
+    <?php endif; ?>
+<?php elseif (($skippedInvalid ?? 0) > 0): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $skippedInvalid ?> invalid address(es) were left out by the Invalid Email Blocker.
+    </div>
+<?php endif; ?>
+
 <?= $view->partial('marketing.campaign-merge-fields') ?>
 
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <p><strong>Status:</strong> <?= e(ucfirst($campaign['status'])) ?></p>
+    <p><strong>Status:</strong> <?= e(ucfirst($campaign['status'])) ?><?= $currentRound > 1 ? ' <span class="cv-badge cv-badge--neutral" title="This campaign has been sent ' . (int) $currentRound . ' times">Round ' . (int) $currentRound . '</span>' : '' ?></p>
     <p>
         <strong>Audience:</strong>
         <?php if (!empty($campaign['client_id'])): ?>
             👤 Individual client
         <?php elseif (!empty($campaign['only_inactive'])): ?>
             📭 Accounts with no active product/domain
+        <?php elseif (trim((string) ($campaign['external_emails'] ?? '')) !== '' && empty($campaign['client_group_id'])): ?>
+            ✉️ External email addresses
         <?php elseif (!empty($campaign['client_group_id'])): ?>
             📁 Client group
         <?php else: ?>
@@ -47,11 +89,12 @@ $feedback = [
 
     <?php
     // Sending is now queued and drained by the cron, so the admin needs to see
-    // progress rather than a page that looks stuck.
-    $totalRecipients = count($recipients);
+    // progress rather than a page that looks stuck. Counts are for the CURRENT
+    // round (the one being sent / just sent), not the campaign's whole history.
+    $totalRecipients = count($currentRecipients);
     $sentCount = 0;
     $failedCount = 0;
-    foreach ($recipients as $r) {
+    foreach ($currentRecipients as $r) {
         // A recipient with send_error set has failed even if sent_at is also
         // set — sent_at means "attempted", not "delivered"; the real outcome
         // is only known once email_log confirms it, and send_error is where
@@ -77,18 +120,13 @@ $feedback = [
                 <?= (int) $sentCount ?> of <?= (int) $totalRecipients ?> sent (<?= $percent ?>%) &nbsp;&bull;&nbsp;
                 <?= (int) $remaining ?> remaining. The cron sends a batch each minute — you can safely leave this page.
             </div>
-            <?php if (($skippedInvalid ?? 0) > 0): ?>
-                <div style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin-top:6px;">
-                    🚫 <?= (int) $skippedInvalid ?> invalid address(es) were left out by the Invalid Email Blocker.
-                </div>
-            <?php endif; ?>
             <?php if ($failedCount > 0): ?>
                 <div style="font-size:var(--cv-text-sm);color:#ef4444;margin-top:6px;">
                     ⚠️ <?= (int) $failedCount ?> recipient(s) failed to send — see the Sent column below for the reason.
                     The campaign auto-pauses once 5 failures are confirmed.
                 </div>
             <?php endif; ?>
-            <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/pause"
+            <form method="post" action="/admin/campaigns/<?= $id ?>/pause"
                   data-confirm="Pause this campaign? Nobody still pending will be sent to until you resume it."
                   style="margin-top:var(--cv-space-2);">
                 <?= csrf_field() ?>
@@ -102,44 +140,65 @@ $feedback = [
                 Review the subject/body below, edit if needed, then resume — the remaining recipients get whatever
                 version is saved at that point. Anyone already sent to keeps what they got; they are not re-sent.
             </div>
-            <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/resume" style="margin-top:var(--cv-space-2);">
+            <form method="post" action="/admin/campaigns/<?= $id ?>/resume" style="margin-top:var(--cv-space-2);">
                 <?= csrf_field() ?>
                 <button class="cv-btn" type="submit">▶️ Resume Sending</button>
             </form>
         </div>
-
-        <details style="margin-bottom:var(--cv-space-3);">
-            <summary style="cursor:pointer;font-weight:600;">✏️ Edit subject/body</summary>
-            <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/update" style="margin-top:var(--cv-space-2);">
-                <?= csrf_field() ?>
-                <div class="cv-field">
-                    <label class="cv-label">Subject</label>
-                    <input class="cv-input" name="subject" value="<?= e((string) $campaign['subject']) ?>" required>
-                </div>
-                <div class="cv-field">
-                    <label class="cv-label">Body (Plain Text or HTML)</label>
-                    <textarea class="cv-input" name="body" rows="8" required><?= e((string) $campaign['body']) ?></textarea>
-                </div>
-                <button class="cv-btn" type="submit">Save Changes</button>
-            </form>
-        </details>
     <?php elseif ($campaign['status'] === 'draft'): ?>
-        <?php if (($queuedCount ?? null) !== null): ?>
-            <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
-                <?= (int) $queuedCount ?> recipient(s) queued.<?php if (($skippedInvalid ?? 0) > 0): ?> <?= (int) $skippedInvalid ?> invalid address(es) left out by the Invalid Email Blocker.<?php endif; ?>
-            </div>
-        <?php endif; ?>
-        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/send" data-confirm="Queue this campaign for sending?"><?= csrf_field() ?>
+        <form method="post" action="/admin/campaigns/<?= $id ?>/send" data-confirm="Queue this campaign for sending?" style="margin-bottom:var(--cv-space-3);">
+            <?= csrf_field() ?>
             <button class="cv-btn" type="submit">Send Now</button>
             <span style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin-left:var(--cv-space-2);">
                 Queues the campaign — the cron then sends it in small batches so the mail server isn't overloaded.
             </span>
         </form>
     <?php elseif ($campaign['status'] === 'sent'): ?>
-        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
-            Delivered to <?= (int) $sentCount ?> recipient(s).
-        </p>
+        <div style="border:1px solid var(--cv-border-default);border-radius:10px;padding:var(--cv-space-3);background:var(--cv-bg-surface-sunken);margin-bottom:var(--cv-space-3);">
+            <strong>Delivered to <?= (int) $sentCount ?> recipient(s)</strong> in this round<?= $failedCount > 0 ? ' · ' . (int) $failedCount . ' failed' : '' ?>.
+            <div style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin-top:6px;">
+                Send it again below — the audience is resolved fresh at send time, and this send's recipients are
+                tracked as a new round alongside the earlier ones.
+            </div>
+            <form method="post" action="/admin/campaigns/<?= $id ?>/resend" style="margin-top:var(--cv-space-2);">
+                <?= csrf_field() ?>
+                <label style="display:flex;align-items:center;gap:8px;font-size:var(--cv-text-sm);margin-bottom:var(--cv-space-2);">
+                    <input type="checkbox" name="skip_existing" value="1" checked>
+                    Only send to people who haven't received this campaign yet
+                </label>
+                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-bottom:var(--cv-space-2);">
+                    Untick to send everyone in the audience another copy, including those who already received it.
+                </div>
+                <button class="cv-btn" type="submit"
+                        data-confirm="Queue this campaign for sending again?"><?= $hasOldRounds ? '🔁 Send Again (Round ' . ($currentRound + 1) . ')' : '🔁 Send Again' ?></button>
+            </form>
+        </div>
     <?php endif; ?>
+
+    <?php if (in_array($campaign['status'], ['draft', 'paused', 'sent'], true)): ?>
+        <?= $view->partial('marketing.campaign-edit-form', [
+            'campaign' => $campaign,
+            'groups' => $groups,
+            'clients' => $clients,
+            'audienceEditable' => $audienceEditable,
+        ]) ?>
+    <?php endif; ?>
+
+    <?php if ($deletable): ?>
+        <details style="margin-bottom:var(--cv-space-1);">
+            <summary style="cursor:pointer;font-weight:600;color:#b91c1c;">🗑️ Delete campaign</summary>
+            <div style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin:var(--cv-space-2) 0;">
+                Deletes this campaign and its entire recipient history (sent, opened and failed records for every
+                round). This cannot be undone.
+            </div>
+            <form method="post" action="/admin/campaigns/<?= $id ?>/delete"
+                  data-confirm="Delete this campaign and ALL of its recipient history? This cannot be undone.">
+                <?= csrf_field() ?>
+                <button class="cv-btn cv-btn--danger" type="submit">Delete permanently</button>
+            </form>
+        </details>
+    <?php endif; ?>
+
     <h3>Preview</h3>
     <?php
     // Run the body through the same normaliser the mailer uses, so a body
@@ -176,13 +235,24 @@ $feedback = [
     <p style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:-8px;margin-bottom:var(--cv-space-2);">
         "Opened" is recorded only if the recipient's email client loads remote images — many clients block this by
         default until the recipient allows it. Treat these counts as a minimum, not an exact figure.
+        <?= $hasOldRounds ? 'Rows from earlier send rounds of this campaign are kept below.' : '' ?>
     </p>
     <table class="cv-table">
-        <thead><tr><th>Client</th><th>Sent</th><th>Opened</th></tr></thead>
+        <thead><tr><th>Client</th><?php if ($hasOldRounds): ?><th>Round</th><?php endif; ?><th>Sent</th><th>Opened</th></tr></thead>
         <tbody>
         <?php foreach ($recipients as $recipient): ?>
-            <tr>
+            <?php $recipientRound = max(1, (int) ($recipient['round'] ?? 1)); ?>
+            <tr<?= $recipientRound < $currentRound ? ' style="opacity:.65;"' : '' ?>>
                 <td><?= e($recipient['first_name'] . ' ' . $recipient['last_name']) ?> (<?= e($recipient['email']) ?>)</td>
+                <?php if ($hasOldRounds): ?>
+                    <td>
+                        <?php if ($recipientRound < $currentRound): ?>
+                            <span style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">#<?= $recipientRound ?></span>
+                        <?php else: ?>
+                            <span class="cv-badge cv-badge--neutral">Current</span>
+                        <?php endif; ?>
+                    </td>
+                <?php endif; ?>
                 <td>
                     <?php if (!empty($recipient['send_error'])): ?>
                         <span style="color:#ef4444;font-weight:600;">Failed</span>
@@ -205,7 +275,7 @@ $feedback = [
             </tr>
         <?php endforeach; ?>
         <?php if ($recipients === []): ?>
-            <tr><td colspan="3" style="color:var(--cv-text-secondary);">Not sent yet — no recipients recorded.</td></tr>
+            <tr><td colspan="<?= $hasOldRounds ? 4 : 3 ?>" style="color:var(--cv-text-secondary);">Not sent yet — no recipients recorded.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

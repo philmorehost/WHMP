@@ -108,6 +108,9 @@ final class MailCampaignController
         return $this->render('marketing.campaign-show', [
             'campaign' => $campaign,
             'recipients' => $this->campaigns->recipients((int) $campaign['id']),
+            // For the edit form's audience pickers (same lists the create form uses).
+            'groups' => $this->groups->all(),
+            'clients' => $this->clients->all(),
             // Shown in the preview's header bar so it mirrors the real email.
             'brandName' => trim((string) ($this->settings->get('theme.brand_name', '') ?? '')) ?: 'Email preview',
             'queuedCount' => $request->query('queued') !== null ? max(0, (int) $request->query('queued')) : null,
@@ -160,9 +163,44 @@ final class MailCampaignController
     }
 
     /**
-     * Edits a draft or paused campaign's subject/body — the "review, edit"
-     * step of pause → review → edit → resend. See
-     * MailCampaignRepository::update() for why 'sending' itself is excluded.
+     * Re-sends a SENT campaign: opens a new round for the same content and
+     * targeting. `skip_existing` (the checkbox on the campaign page) narrows
+     * it to people who have no recipient row yet; without it, everyone the
+     * targeting resolves to now gets another copy.
+     */
+    public function resend(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $id = (int) $params['id'];
+        $queued = $this->service->resend($id, $request->input('skip_existing') !== null);
+        $skipped = $this->service->skippedInvalid();
+
+        $suffix = $queued === 0 ? '&resend_none=1' : '';
+
+        return Response::redirect("/admin/campaigns/{$id}?queued={$queued}" . ($skipped > 0 ? "&skipped={$skipped}" : '') . $suffix);
+    }
+
+    /** Deletes a draft, paused or sent campaign — blocked while sending (pause first). */
+    public function destroy(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $deleted = $this->service->delete((int) $params['id']);
+
+        return Response::redirect('/admin/campaigns' . ($deleted ? '?deleted=1' : '?delete_error=1'));
+    }
+
+    /**
+     * Edits a draft, paused or sent campaign's subject/body — and, for drafts
+     * and sent campaigns, its audience targeting. Sending campaigns must be
+     * paused first (the cron must never read half-edited content mid-batch);
+     * paused campaigns are content-only because their pending recipients were
+     * already resolved.
      */
     public function update(Request $request, array $params): Response
     {
@@ -178,9 +216,65 @@ final class MailCampaignController
             return Response::redirect("/admin/campaigns/{$id}?edit_error=" . urlencode('Subject and body are required.'));
         }
 
-        $updated = $this->service->update($id, $subject, $body);
+        $audience = null;
+
+        if ($request->input('edit_audience') !== null) {
+            $campaign = $this->campaigns->find($id);
+
+            if ($campaign === null || !in_array($campaign['status'], ['draft', 'sent'], true)) {
+                return Response::redirect("/admin/campaigns/{$id}?edit_error=" . urlencode('The audience can only be changed on a draft or a sent campaign.'));
+            }
+
+            $parsed = $this->parseAudienceInput($request);
+
+            if (is_string($parsed)) {
+                return Response::redirect("/admin/campaigns/{$id}?edit_error=" . urlencode($parsed));
+            }
+
+            $audience = $parsed;
+        }
+
+        $updated = $this->service->update($id, $subject, $body, $audience);
 
         return Response::redirect("/admin/campaigns/{$id}?" . ($updated ? 'updated=1' : 'edit_error=' . urlencode('This campaign cannot be edited right now — pause it first if it is sending, or it may already have been sent.')));
+    }
+
+    /**
+     * Reads the campaign targeting fields off a request — the same five-way
+     * choice the create form offers, normalised into the repository's column
+     * shape. Returns the audience array, or an error message string when the
+     * external list has no valid address to send to.
+     *
+     * @return array{client_group_id: ?int, client_id: ?int, external_emails: ?string, only_inactive: bool}|string
+     */
+    private function parseAudienceInput(Request $request): array|string
+    {
+        $targetType = (string) $request->input('target_type', 'all');
+
+        $groupId = null;
+        $clientId = null;
+        $externalEmails = null;
+        $onlyInactive = false;
+
+        if ($targetType === 'group' && (string) $request->input('client_group_id', '') !== '') {
+            $groupId = (int) $request->input('client_group_id');
+        } elseif ($targetType === 'individual' && (string) $request->input('client_id', '') !== '') {
+            $clientId = (int) $request->input('client_id');
+        } elseif ($targetType === 'external') {
+            // Normalise exactly as store() does, so the stored list is what
+            // will be sent and the edit form round-trips losslessly.
+            $parsed = MailCampaignService::parseExternalEmails((string) $request->input('external_emails', ''));
+
+            if ($parsed === []) {
+                return 'Enter at least one valid email address for an external campaign.';
+            }
+
+            $externalEmails = implode("\n", $parsed);
+        } elseif ($targetType === 'inactive') {
+            $onlyInactive = true;
+        }
+
+        return ['client_group_id' => $groupId, 'client_id' => $clientId, 'external_emails' => $externalEmails, 'only_inactive' => $onlyInactive];
     }
 
     private function requirePermission(): ?Response
