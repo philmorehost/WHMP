@@ -23,7 +23,7 @@ return [
             size_bytes INT UNSIGNED NULL,
             caption VARCHAR(255) NULL,
             sort_order INT UNSIGNED NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_article (article_id),
             CONSTRAINT fk_kbimg_article FOREIGN KEY (article_id) REFERENCES kb_articles(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

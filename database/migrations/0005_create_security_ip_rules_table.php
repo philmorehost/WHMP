@@ -20,8 +20,8 @@ return [
             admin_id INT UNSIGNED NULL,
             clean_session_count INT UNSIGNED NOT NULL DEFAULT 0,
             block_count INT UNSIGNED NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             expires_at DATETIME NULL,
             INDEX idx_policy (policy)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

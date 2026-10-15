@@ -15,8 +15,8 @@ return [
             grace_period_days INT UNSIGNED DEFAULT 30,
             redemption_period_days INT UNSIGNED DEFAULT 30,
             redemption_fee DECIMAL(10,2) DEFAULT 0.00,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
         // Seed default TLDs with standard pricing

@@ -11,8 +11,8 @@ return [
             type ENUM('immediate', 'end_of_period') NOT NULL,
             reason TEXT NULL,
             status ENUM('pending', 'processed') NOT NULL DEFAULT 'pending',
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_service_pending (service_id, status),
             CONSTRAINT fk_cancellation_requests_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

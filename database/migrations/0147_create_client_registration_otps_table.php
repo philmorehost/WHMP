@@ -19,7 +19,7 @@ return [
             code_hash VARCHAR(255) NOT NULL,
             attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
             expires_at DATETIME NOT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_email (email)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

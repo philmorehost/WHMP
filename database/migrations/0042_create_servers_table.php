@@ -22,8 +22,8 @@ return [
             api_port INT UNSIGNED NULL,
             use_ssl TINYINT(1) NOT NULL DEFAULT 1,
             active TINYINT(1) NOT NULL DEFAULT 1,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_group (server_group_id),
             CONSTRAINT fk_servers_group FOREIGN KEY (server_group_id) REFERENCES server_groups(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

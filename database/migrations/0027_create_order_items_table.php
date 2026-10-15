@@ -19,7 +19,7 @@ return [
             unit_price DECIMAL(10,2) NOT NULL,
             setup_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             configurable_options JSON NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_order (order_id),
             CONSTRAINT fk_order_items_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             CONSTRAINT fk_order_items_product FOREIGN KEY (product_id) REFERENCES products(id)

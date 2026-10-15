@@ -12,8 +12,8 @@ return [
             status ENUM('investigating', 'identified', 'monitoring', 'resolved') NOT NULL DEFAULT 'investigating',
             started_at DATETIME NOT NULL,
             resolved_at DATETIME NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
     ],

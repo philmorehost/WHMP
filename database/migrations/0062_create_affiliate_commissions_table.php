@@ -16,7 +16,7 @@ return [
             invoice_id INT UNSIGNED NOT NULL,
             amount DECIMAL(10,2) NOT NULL,
             status ENUM('pending', 'paid') NOT NULL DEFAULT 'pending',
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_affiliate_commissions_affiliate (affiliate_id),
             CONSTRAINT fk_affiliate_commissions_affiliate FOREIGN KEY (affiliate_id) REFERENCES affiliates(id) ON DELETE CASCADE,
             CONSTRAINT fk_affiliate_commissions_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE

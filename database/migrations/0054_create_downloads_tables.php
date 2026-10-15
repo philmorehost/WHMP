@@ -14,8 +14,8 @@ return [
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(191) NOT NULL,
             sort_order INT UNSIGNED NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
         <<<'SQL'
@@ -27,8 +27,8 @@ return [
             file_path VARCHAR(255) NOT NULL,
             file_size INT UNSIGNED NULL,
             download_count INT UNSIGNED NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_category (category_id),
             CONSTRAINT fk_downloads_category FOREIGN KEY (category_id) REFERENCES download_categories(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

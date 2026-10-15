@@ -16,7 +16,7 @@ return [
             country_code CHAR(2) NULL,
             successful TINYINT(1) NOT NULL DEFAULT 0,
             user_agent VARCHAR(255) NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_ip_created (ip_address, created_at),
             INDEX idx_username_created (username, created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

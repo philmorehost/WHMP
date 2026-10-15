@@ -61,7 +61,7 @@ return [
             ip_address VARCHAR(45) NULL,
             expires_at DATETIME NOT NULL,
             used_at DATETIME NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_client_impersonation_token (token_hash),
             INDEX idx_client_impersonation_client (client_id, created_at),
             CONSTRAINT fk_client_impersonation_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE

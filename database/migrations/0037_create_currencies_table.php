@@ -16,8 +16,8 @@ return [
             symbol VARCHAR(5) NOT NULL,
             exchange_rate DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
             is_default TINYINT(1) NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
         "INSERT INTO currencies (code, symbol, exchange_rate, is_default, created_at, updated_at) VALUES ('USD', '$', 1.0000, 1, NOW(), NOW())",

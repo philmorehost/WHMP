@@ -21,7 +21,7 @@ return [
             imported_count INT UNSIGNED NOT NULL,
             skipped_count INT UNSIGNED NOT NULL,
             errors TEXT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_created (created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

@@ -29,8 +29,8 @@ return [
                     scopes JSON NOT NULL,
                     active TINYINT(1) NOT NULL DEFAULT 1,
                     created_by INT UNSIGNED NULL,
-                    created_at DATETIME NOT NULL,
-                    updated_at DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     last_used_at DATETIME NULL,
                     UNIQUE KEY uq_api_key (api_key),
                     INDEX idx_active (active)

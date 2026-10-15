@@ -13,7 +13,7 @@ return [
         CREATE TABLE IF NOT EXISTS settings (
             `key` VARCHAR(191) NOT NULL PRIMARY KEY,
             `value` TEXT NULL,
-            updated_at DATETIME NOT NULL
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
     ],

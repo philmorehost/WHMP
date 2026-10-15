@@ -23,8 +23,8 @@ return [
             card_exp_year VARCHAR(4) NULL,
             is_default TINYINT(1) NOT NULL DEFAULT 0,
             status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_client (client_id),
             UNIQUE KEY uniq_client_gateway_token (client_id, gateway_slug, token),
             CONSTRAINT fk_cpm_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE

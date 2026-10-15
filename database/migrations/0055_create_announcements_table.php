@@ -13,8 +13,8 @@ return [
             title VARCHAR(255) NOT NULL,
             body TEXT NOT NULL,
             published_at DATETIME NOT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_published (published_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

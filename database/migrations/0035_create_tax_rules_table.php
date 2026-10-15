@@ -15,8 +15,8 @@ return [
             state VARCHAR(100) NULL,
             name VARCHAR(100) NOT NULL DEFAULT 'Tax',
             rate DECIMAL(5,2) NOT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_country_state (country_code, state)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

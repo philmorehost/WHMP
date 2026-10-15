@@ -18,8 +18,8 @@ return [
             required TINYINT(1) NOT NULL DEFAULT 0,
             admin_only TINYINT(1) NOT NULL DEFAULT 0,
             sort_order INT UNSIGNED NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_field_for (field_for)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

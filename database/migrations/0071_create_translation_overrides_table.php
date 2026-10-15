@@ -15,8 +15,8 @@ return [
             language_id INT UNSIGNED NOT NULL,
             `key` VARCHAR(191) NOT NULL,
             `value` TEXT NOT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_language_key (language_id, `key`),
             CONSTRAINT fk_translation_overrides_language FOREIGN KEY (language_id) REFERENCES languages(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

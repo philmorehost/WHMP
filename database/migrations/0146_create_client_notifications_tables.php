@@ -21,7 +21,7 @@ return [
             source ENUM('admin', 'system_email') NOT NULL DEFAULT 'admin',
             email_log_id BIGINT UNSIGNED NULL,
             created_by_admin_id INT UNSIGNED NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_notifications_email_log FOREIGN KEY (email_log_id) REFERENCES email_log(id) ON DELETE SET NULL,
             CONSTRAINT fk_notifications_admin FOREIGN KEY (created_by_admin_id) REFERENCES admins(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -33,7 +33,7 @@ return [
             client_id INT UNSIGNED NOT NULL,
             read_at DATETIME NULL,
             reply_ticket_id INT UNSIGNED NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_client_unread (client_id, read_at),
             INDEX idx_notification (notification_id),
             CONSTRAINT fk_notification_recipients_notification FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,

@@ -18,7 +18,7 @@ return [
             author_name VARCHAR(191) NOT NULL,
             message TEXT NOT NULL,
             is_private TINYINT(1) NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_ticket (ticket_id),
             CONSTRAINT fk_ticket_replies_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

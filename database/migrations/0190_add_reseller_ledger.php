@@ -73,7 +73,7 @@ return [
                     payout_id INT UNSIGNED NULL,
                     description VARCHAR(255) NULL,
                     admin_id INT UNSIGNED NULL,
-                    created_at DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE KEY uq_reseller_ledger_invoice_kind (kind, invoice_id),
                     INDEX idx_reseller_ledger_account (reseller_id, created_at),
                     INDEX idx_reseller_ledger_order (order_id),

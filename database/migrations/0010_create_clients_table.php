@@ -26,8 +26,8 @@ return [
             phone VARCHAR(40) NULL,
             status ENUM('active', 'inactive', 'closed') NOT NULL DEFAULT 'active',
             notes TEXT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_status (status),
             CONSTRAINT fk_clients_group FOREIGN KEY (client_group_id) REFERENCES client_groups(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

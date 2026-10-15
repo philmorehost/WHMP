@@ -23,8 +23,8 @@ return [
             admin_notes VARCHAR(500) NULL,
             processed_by_admin_id INT UNSIGNED NULL,
             processed_at DATETIME NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_client (client_id),
             INDEX idx_status (status),
             FOREIGN KEY (client_id) REFERENCES clients(id)

@@ -12,7 +12,7 @@ return [
             amount DECIMAL(10,2) NOT NULL,
             status ENUM('completed', 'refunded', 'failed') NOT NULL DEFAULT 'completed',
             gateway_transaction_id VARCHAR(191) NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_invoice (invoice_id),
             CONSTRAINT fk_transactions_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

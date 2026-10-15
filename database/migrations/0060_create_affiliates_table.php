@@ -17,8 +17,8 @@ return [
             status ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
             commission_rate DECIMAL(5,2) NOT NULL DEFAULT 10.00,
             balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_affiliates_client (client_id),
             UNIQUE KEY uniq_affiliates_code (code),
             CONSTRAINT fk_affiliates_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE

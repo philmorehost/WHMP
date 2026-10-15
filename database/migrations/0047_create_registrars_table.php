@@ -16,8 +16,8 @@ return [
             config JSON NULL,
             is_enabled TINYINT(1) NOT NULL DEFAULT 1,
             sort_order INT UNSIGNED NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
         "INSERT INTO registrars (slug, name, config, is_enabled, sort_order, created_at, updated_at) VALUES ('local', 'Local (no external registry)', NULL, 1, 0, NOW(), NOW())",

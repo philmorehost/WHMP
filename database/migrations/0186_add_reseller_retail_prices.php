@@ -42,8 +42,8 @@ return [
             product_id INT UNSIGNED NOT NULL,
             billing_cycle ENUM('one_time', 'monthly', 'quarterly', 'semi_annually', 'annually', 'biennially', 'triennially') NOT NULL,
             price DECIMAL(10,2) NOT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_reseller_product_cycle (reseller_id, product_id, billing_cycle),
             CONSTRAINT fk_reseller_prices_store FOREIGN KEY (reseller_id) REFERENCES resellers(id) ON DELETE CASCADE,
             CONSTRAINT fk_reseller_prices_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
@@ -58,8 +58,8 @@ return [
             register_price DECIMAL(10,2) NULL,
             transfer_price DECIMAL(10,2) NULL,
             renew_price DECIMAL(10,2) NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_reseller_tld (reseller_id, tld),
             CONSTRAINT fk_reseller_domain_prices_store FOREIGN KEY (reseller_id) REFERENCES resellers(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

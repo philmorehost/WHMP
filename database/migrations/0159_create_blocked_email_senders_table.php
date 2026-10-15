@@ -20,8 +20,8 @@ return [
             reason VARCHAR(255) NULL,
             created_by INT UNSIGNED NULL,
             source_ticket_id INT UNSIGNED NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_blocked_email_senders_pattern (pattern)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

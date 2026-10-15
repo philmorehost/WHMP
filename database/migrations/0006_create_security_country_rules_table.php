@@ -13,7 +13,7 @@ return [
         CREATE TABLE IF NOT EXISTS security_country_rules (
             country_code CHAR(2) NOT NULL PRIMARY KEY,
             policy ENUM('whitelisted', 'not_specified', 'blacklisted') NOT NULL DEFAULT 'not_specified',
-            updated_at DATETIME NOT NULL
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
     ],

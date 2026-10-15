@@ -75,8 +75,8 @@ return [
             requested_by_type VARCHAR(10) NOT NULL,
             requested_by_id INT UNSIGNED NULL,
             ip VARCHAR(45) NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             completed_at DATETIME NULL,
             UNIQUE KEY uniq_ucr_token (confirm_token_hash),
             INDEX idx_ucr_status (status, next_attempt_at),
@@ -98,7 +98,7 @@ return [
             actor_id INT UNSIGNED NULL,
             ip VARCHAR(45) NULL,
             detail TEXT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_uce_request (request_id, id),
             INDEX idx_uce_created (created_at),
             CONSTRAINT fk_uce_request FOREIGN KEY (request_id) REFERENCES username_change_requests(id) ON DELETE CASCADE
@@ -119,7 +119,7 @@ return [
             extra_changes SMALLINT UNSIGNED NULL,
             fee DECIMAL(12,2) NULL,
             note VARCHAR(255) NULL,
-            updated_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_ucp_scope (scope, scope_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
@@ -153,7 +153,7 @@ return [
             account_count INT UNSIGNED NOT NULL DEFAULT 0,
             accounts_synced_at DATETIME NULL,
             last_error VARCHAR(255) NULL,
-            updated_at DATETIME NOT NULL
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
 

@@ -17,7 +17,7 @@ return [
             client_id INT UNSIGNED NULL,
             status ENUM('queued', 'sent', 'failed') NOT NULL DEFAULT 'queued',
             error TEXT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             sent_at DATETIME NULL,
             INDEX idx_client (client_id),
             INDEX idx_status (status)

@@ -24,8 +24,8 @@ return [
             starts_at DATE NULL,
             expires_at DATE NULL,
             status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
     ],

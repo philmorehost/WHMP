@@ -18,7 +18,7 @@ return [
             account_id INT UNSIGNED NOT NULL,
             token_hash CHAR(64) NOT NULL,
             expires_at DATETIME NOT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_account (account_type, account_id),
             INDEX idx_token_hash (token_hash)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

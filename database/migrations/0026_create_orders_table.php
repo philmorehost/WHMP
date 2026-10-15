@@ -14,8 +14,8 @@ return [
             client_id INT UNSIGNED NOT NULL,
             status ENUM('pending', 'active', 'cancelled', 'fraud') NOT NULL DEFAULT 'pending',
             total DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_client (client_id),
             INDEX idx_status (status),
             CONSTRAINT fk_orders_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE

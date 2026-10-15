@@ -15,7 +15,7 @@ return [
             open_token CHAR(64) NOT NULL UNIQUE,
             sent_at DATETIME NULL,
             opened_at DATETIME NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_campaign (campaign_id),
             CONSTRAINT fk_mail_campaign_recipients_campaign FOREIGN KEY (campaign_id) REFERENCES mail_campaigns(id) ON DELETE CASCADE,
             CONSTRAINT fk_mail_campaign_recipients_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE

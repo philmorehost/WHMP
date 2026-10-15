@@ -17,7 +17,7 @@ return [
             reason VARCHAR(255) NOT NULL,
             invoice_id INT UNSIGNED NULL,
             admin_id INT UNSIGNED NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_client (client_id),
             CONSTRAINT fk_credit_ledger_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
             CONSTRAINT fk_credit_ledger_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL

@@ -45,8 +45,8 @@ return [
                     billing_cycle ENUM('one_time', 'monthly', 'quarterly', 'semi_annually', 'annually', 'biennially', 'triennially') NULL,
                     sort_order INT UNSIGNED NOT NULL DEFAULT 0,
                     status ENUM('active', 'hidden') NOT NULL DEFAULT 'active',
-                    created_at DATETIME NOT NULL,
-                    updated_at DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uq_product_addon (parent_product_id, addon_product_id, billing_cycle),
                     CONSTRAINT fk_addons_parent_product FOREIGN KEY (parent_product_id) REFERENCES products(id) ON DELETE CASCADE,
                     CONSTRAINT fk_addons_addon_product FOREIGN KEY (addon_product_id) REFERENCES products(id) ON DELETE CASCADE

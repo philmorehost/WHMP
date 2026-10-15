@@ -19,8 +19,8 @@ return [
             invoice_id INT UNSIGNED NULL,
             source_type VARCHAR(50) NULL,
             source_id INT UNSIGNED NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_client (client_id),
             CONSTRAINT fk_billable_items_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
             CONSTRAINT fk_billable_items_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL

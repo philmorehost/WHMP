@@ -23,7 +23,7 @@ return [
         CREATE TABLE IF NOT EXISTS cron_job_state (
             job_name VARCHAR(191) NOT NULL PRIMARY KEY,
             last_run_at INT UNSIGNED NOT NULL DEFAULT 0,
-            updated_at DATETIME NOT NULL
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
 

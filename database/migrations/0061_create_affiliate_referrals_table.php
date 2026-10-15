@@ -13,7 +13,7 @@ return [
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             affiliate_id INT UNSIGNED NOT NULL,
             referred_client_id INT UNSIGNED NOT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_affiliate_referrals_client (referred_client_id),
             INDEX idx_affiliate_referrals_affiliate (affiliate_id),
             CONSTRAINT fk_affiliate_referrals_affiliate FOREIGN KEY (affiliate_id) REFERENCES affiliates(id) ON DELETE CASCADE,

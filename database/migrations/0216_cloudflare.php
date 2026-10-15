@@ -50,8 +50,8 @@ return [
             last_checked_at DATETIME NULL,
             last_synced_at DATETIME NULL,
             deleted_at DATETIME NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_cf_zone (cf_zone_id),
             KEY idx_cf_service (service_id),
             KEY idx_cf_client (client_id),
@@ -67,7 +67,7 @@ return [
             actor_id INT UNSIGNED NULL,
             action VARCHAR(60) NOT NULL,
             summary VARCHAR(255) NOT NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             KEY idx_cfa_zone (zone_id, id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,

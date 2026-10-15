@@ -48,8 +48,8 @@ return [
                     currency_id INT UNSIGNED NULL COMMENT 'NULL = the base currency',
                     verified_at DATETIME NULL,
                     verified_by INT UNSIGNED NULL,
-                    created_at DATETIME NOT NULL,
-                    updated_at DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uq_reseller_payout_dest_store (reseller_id),
                     INDEX idx_reseller_payout_dest_client (client_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

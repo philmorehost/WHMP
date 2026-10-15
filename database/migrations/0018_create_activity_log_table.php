@@ -18,7 +18,7 @@ return [
             subject_id INT UNSIGNED NULL,
             description VARCHAR(500) NOT NULL,
             ip_address VARCHAR(45) NULL,
-            created_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_actor (actor_type, actor_id),
             INDEX idx_subject (subject_type, subject_id),
             INDEX idx_created (created_at)

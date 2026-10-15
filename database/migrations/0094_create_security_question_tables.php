@@ -20,8 +20,8 @@ return [
             enabled TINYINT(1) NOT NULL DEFAULT 0,
             config TEXT NULL,
             activated_at DATETIME NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
         <<<'SQL'
@@ -29,8 +29,8 @@ return [
             client_id INT UNSIGNED NOT NULL PRIMARY KEY,
             module_slug VARCHAR(64) NOT NULL,
             answer_hash VARCHAR(255) NOT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             CONSTRAINT fk_client_security_answers_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         SQL,
