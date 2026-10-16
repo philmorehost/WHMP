@@ -33,30 +33,88 @@ final class BackupService
 
     public function run(): int
     {
-        $runId = $this->runs->start();
+        // One backup at a time, enforced here and not just by the cron's
+        // overlap lock: the cron lock stops two cron ticks from overlapping,
+        // but this also covers a manual "Backup Now" racing an automated run.
+        // Without it, two concurrent runs each write a full DB dump plus a
+        // zip of the whole install — doubled CPU, disk and I/O for no extra
+        // safety — and their pruners can race each other's files.
+        $lock = $this->acquireRunLock();
 
-        try {
-            $result = $this->backups->createBackup($this->rootPath, $this->backupDir, ['storage/backups']);
-            $sizeBytes = (is_file($result['sqlFile']) ? filesize($result['sqlFile']) : 0)
-                + (is_file($result['filesZip']) ? filesize($result['filesZip']) : 0);
-
-            $this->runs->complete($runId, $this->backupDir, (int) $sizeBytes);
-
-            // Only prune backup FILES after a backup succeeds — never delete
-            // old copies because a new one failed.
-            $this->pruneOldBackups();
-        } catch (Throwable $e) {
-            $this->runs->fail($runId, $e->getMessage());
+        // null = another backup holds the lock right now: skip quietly. The
+        // caller's schedule (or the admin's button) can try again later; two
+        // simultaneous copies of the same backup protect nothing.
+        if ($lock === null) {
+            return 0;
         }
 
-        // Unlike the backup files above, log rows carry no data worth
-        // protecting — they're just a history of past runs — so this prunes
-        // unconditionally, on both the success and failure paths. Without
-        // it backup_runs grew forever with no way to trim it, especially on
-        // an hourly schedule.
-        $this->pruneOldRunLogs();
+        try {
+            $runId = $this->runs->start();
 
-        return $runId;
+            try {
+                $result = $this->backups->createBackup($this->rootPath, $this->backupDir, ['storage/backups']);
+                $sizeBytes = (is_file($result['sqlFile']) ? filesize($result['sqlFile']) : 0)
+                    + (is_file($result['filesZip']) ? filesize($result['filesZip']) : 0);
+
+                $this->runs->complete($runId, $this->backupDir, (int) $sizeBytes);
+
+                // Only prune backup FILES after a backup succeeds — never delete
+                // old copies because a new one failed.
+                $this->pruneOldBackups();
+            } catch (Throwable $e) {
+                $this->runs->fail($runId, $e->getMessage());
+            }
+
+            // Unlike the backup files above, log rows carry no data worth
+            // protecting — they're just a history of past runs — so this prunes
+            // unconditionally, on both the success and failure paths. Without
+            // it backup_runs grew forever with no way to trim it, especially on
+            // an hourly schedule.
+            $this->pruneOldRunLogs();
+
+            return $runId;
+        } finally {
+            // Always released — including on the failure paths — so one
+            // crashed backup can't wedge every future run. (false = we never
+            // got a lock file; nothing to release.)
+            if (is_resource($lock)) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+    }
+
+    /**
+     * Takes the exclusive run lock (storage/backups/.backup.lock) without
+     * blocking.
+     *
+     * @return resource|false|null the open lock handle to release, false when
+     *         the lock file could not be created (run unlocked), null when
+     *         another run holds the lock
+     */
+    private function acquireRunLock()
+    {
+        if (!is_dir($this->backupDir)) {
+            @mkdir($this->backupDir, 0755, true);
+        }
+
+        $handle = @fopen($this->backupDir . '/.backup.lock', 'c');
+
+        if ($handle === false) {
+            // Unwritable backup dir — the backup itself would fail anyway;
+            // run unlocked rather than not at all.
+            error_log("BackupService: cannot open {$this->backupDir}/.backup.lock — running without the concurrency lock.");
+
+            return false;
+        }
+
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+
+            return null;
+        }
+
+        return $handle;
     }
 
     /** @return int rows deleted */
@@ -109,7 +167,16 @@ final class BackupService
         // Group both artefacts of a run under its timestamp.
         $sets = [];
 
-        foreach ((array) glob($this->backupDir . '/{db_backup_*.sql,files_backup_*.zip}', GLOB_BRACE) as $path) {
+        // Two plain globs instead of one GLOB_BRACE pattern: GLOB_BRACE is a
+        // non-portable flag — musl/Alpine PHP builds are compiled without it
+        // and throw "undefined constant" on use, so pruning would fatal (and
+        // take the whole backup down with it) exactly there.
+        $artefacts = array_merge(
+            (array) glob($this->backupDir . '/db_backup_*.sql'),
+            (array) glob($this->backupDir . '/files_backup_*.zip'),
+        );
+
+        foreach ($artefacts as $path) {
             if (!is_file($path)) {
                 continue;
             }

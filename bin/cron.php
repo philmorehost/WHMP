@@ -139,11 +139,17 @@ if (is_file($kernel->basePath('.installed.lock'))) {
     $scheduler->registerLazy('reseller-mailbox-provisioning', 1440, fn () => $c->make(ResellerMailboxJob::class));
 
     // The one eager registration: daily-backup's cadence is settings-driven
-    // (backup.frequency_hours, floored at one hour), so the scheduler must
-    // ask the real job for its frequencyMinutes() on every gate instead of
-    // guessing a constant here. Construction is cheap; handle() only runs
-    // when the job is due.
-    $scheduler->register($c->make(BackupCronJob::class));
+    // (backup.frequency_hours, floored at one DAY — the 1-hour floor is how
+    // the backup system once ate a server), so the scheduler must ask the
+    // real job for its frequencyMinutes() on every gate instead of guessing
+    // a constant here. Construction is cheap; handle() only runs when the
+    // job is due. With the backup system disabled, the job isn't registered
+    // at all — that tick builds nothing and runs nothing for it.
+    $backupJob = $c->make(BackupCronJob::class);
+
+    if ($backupJob->isEnabled()) {
+        $scheduler->register($backupJob);
+    }
 
     $scheduler->registerLazy('cancellation-processor', 60, fn () => $c->make(CancellationCronJob::class));
     $scheduler->registerLazy('service-renewal-reminder', 1440, fn () => $c->make(RenewalReminderJob::class));

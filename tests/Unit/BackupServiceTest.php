@@ -39,6 +39,38 @@ final class BackupServiceTest extends DatabaseTestCase
         parent::tearDown();
     }
 
+    public function test_run_is_skipped_while_another_backup_holds_the_lock(): void
+    {
+        mkdir($this->backupDir, 0755, true);
+        $handle = fopen($this->backupDir . '/.backup.lock', 'c');
+        $this->assertNotFalse($handle);
+        $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB), 'test could not take the lock it just created');
+
+        $runId = $this->service->run();
+
+        $this->assertSame(0, $runId, 'a concurrent run must be skipped, not started');
+        $this->assertSame([], $this->runs->all(), 'the skipped run must not leave a history row');
+
+        // Releasing the lock lets the next run through — a held lock can only
+        // ever delay a backup, never wedge the system.
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        $this->assertGreaterThan(0, $this->service->run());
+    }
+
+    public function test_run_releases_its_lock_when_it_finishes(): void
+    {
+        // Back-to-back runs in one process: the second must not be treated as
+        // an overlap of the first. (This is exactly how the old every-minute
+        // schedule stacked copies — a run that never let go of the lock, or
+        // worse, never checked it.)
+        $first = $this->service->run();
+        $second = $this->service->run();
+
+        $this->assertGreaterThan(0, $first);
+        $this->assertGreaterThan($first, $second, 'the second run executed and recorded its own history row');
+    }
+
     public function test_run_records_a_successful_backup_with_a_positive_size(): void
     {
         $runId = $this->service->run();

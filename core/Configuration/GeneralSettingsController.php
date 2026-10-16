@@ -47,6 +47,7 @@ final class GeneralSettingsController
             'autoCancelUnpaidDays' => $this->settings->get('billing.auto_cancel_unpaid_days', '0'),
             'timezone' => $this->settings->get('general.timezone', 'UTC'),
             'timezones' => \DateTimeZone::listIdentifiers(),
+            'backupEnabled' => $this->settings->get('backup.enabled', '1') !== '0',
             'backupFrequencyHours' => $this->settings->get('backup.frequency_hours', '24'),
             'backupKeepCount' => $this->settings->get('backup.keep_count', '7'),
             'backupLogRetentionDays' => $this->settings->get('backup.log_retention_days', '1'),
@@ -111,9 +112,12 @@ final class GeneralSettingsController
         $this->settings->set('billing.late_fee_grace_days', (string) max(0, (int) $request->input('late_fee_grace_days', 0)));
         $this->settings->set('billing.auto_cancel_unpaid_days', (string) max(0, (int) $request->input('auto_cancel_unpaid_days', 0)));
 
-        // Floors of 1 are deliberate: 0 hours would make the backup job due on
-        // every cron tick, and 0 retained copies would delete every backup on
-        // the next successful run.
+        // The backup schedule is floored at 24 HOURS: the job writes a full
+        // database dump plus a zip of the whole install, and a smaller value
+        // here is how the backup system once ran almost every minute and
+        // piled concurrent copies on top of each other. 0 retained copies
+        // would still delete every backup on the next successful run, so the
+        // keep/retention floors stay at 1.
         // Validated against PHP's own list so an invalid zone can't be stored —
         // date_default_timezone_set() would reject it and silently leave the
         // app on UTC, which is the confusing state this setting exists to fix.
@@ -123,7 +127,8 @@ final class GeneralSettingsController
             $this->settings->set('general.timezone', $timezone);
         }
 
-        $this->settings->set('backup.frequency_hours', (string) max(1, (int) $request->input('backup_frequency_hours', 24)));
+        $this->settings->set('backup.enabled', $request->input('backup_enabled') ? '1' : '0');
+        $this->settings->set('backup.frequency_hours', (string) max(24, (int) $request->input('backup_frequency_hours', 24)));
         $this->settings->set('backup.keep_count', (string) max(1, (int) $request->input('backup_keep_count', 7)));
         $this->settings->set('backup.log_retention_days', (string) max(1, (int) $request->input('backup_log_retention_days', 1)));
         $this->settings->set('automation.run_log_retention_days', (string) max(1, (int) $request->input('cron_log_retention_days', 30)));

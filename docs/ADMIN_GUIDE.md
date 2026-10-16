@@ -41,7 +41,7 @@ Lifecycle emails run automatically via cron — currently just the service renew
 
 ## Backups
 
-**Admin → Backups.** "Run Backup Now" triggers an immediate full DB dump (plain SQL, no `mysqldump` dependency) + a zip of the application files, saved to `storage/backups/`. Also runs automatically once a day via cron. The history table shows status/size/duration for every run, including failures with the error message.
+**Admin → Backups.** "Run Backup Now" triggers an immediate full DB dump (plain SQL, no `mysqldump` dependency) + a zip of the application files, saved to `storage/backups/`. The automated schedule runs **at most once per day** (General Settings — the frequency field is floored at 24 hours; higher values such as 168 = weekly work too) at the configured daily automation time. **General Settings → "Enable automated backups"** switches the scheduled backup system off entirely while leaving the manual button working. Only one backup can ever run at a time — a run started while another is still going is skipped, not queued on top. The history table shows status/size/duration for every run, including failures with the error message.
 
 ## API credentials & the external API
 
