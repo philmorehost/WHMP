@@ -6,6 +6,7 @@ namespace CodeVault\Marketing;
 
 use CodeVault\Auth\AuthGuard;
 use CodeVault\Clients\ClientGroupRepository;
+use CodeVault\Catalog\ProductRepository;
 use CodeVault\Request;
 use CodeVault\Response;
 use CodeVault\Staff\PermissionRegistry;
@@ -20,7 +21,8 @@ final class MailCampaignController
         private readonly ClientGroupRepository $groups,
         private readonly MailCampaignService $service,
         private readonly \CodeVault\Clients\ClientRepository $clients,
-        private readonly \CodeVault\Settings\SettingsRepository $settings
+        private readonly \CodeVault\Settings\SettingsRepository $settings,
+        private readonly ProductRepository $products
     ) {
     }
 
@@ -34,6 +36,7 @@ final class MailCampaignController
             'campaigns' => $this->campaigns->all(),
             'groups' => $this->groups->all(),
             'clients' => $this->clients->all(),
+            'products' => $this->products->all(),
             'error' => null
         ]);
     }
@@ -52,6 +55,7 @@ final class MailCampaignController
         $clientId = null;
         $externalEmails = null;
         $onlyInactive = false;
+        $productIds = null;
         if ($targetType === 'group' && (string) $request->input('client_group_id', '') !== '') {
             $groupId = (int) $request->input('client_group_id');
         } elseif ($targetType === 'individual' && (string) $request->input('client_id', '') !== '') {
@@ -67,6 +71,7 @@ final class MailCampaignController
                     'campaigns' => $this->campaigns->all(),
                     'groups' => $this->groups->all(),
                     'clients' => $this->clients->all(),
+                    'products' => $this->products->all(),
                     'error' => 'Enter at least one valid email address for an external campaign.'
                 ]);
             }
@@ -77,6 +82,22 @@ final class MailCampaignController
             // re-engagement audience. Stored as a flag, resolved at send time
             // so the list is always current.
             $onlyInactive = true;
+        } elseif ($targetType === 'products') {
+            // WHMCS-style product audience: clients holding an active or
+            // suspended service of any selected product. Normalised to a
+            // canonical CSV at save time; at least one product is required
+            // (an empty product list must never silently mean "everyone").
+            $productIds = MailCampaignService::parseProductIds($request->input('product_ids'));
+
+            if ($productIds === '') {
+                return $this->render('marketing.campaigns-index', [
+                    'campaigns' => $this->campaigns->all(),
+                    'groups' => $this->groups->all(),
+                    'clients' => $this->clients->all(),
+                    'products' => $this->products->all(),
+                    'error' => 'Select at least one product for a product-targeted campaign.'
+                ]);
+            }
         }
 
         if ($subject === '' || $body === '') {
@@ -84,11 +105,12 @@ final class MailCampaignController
                 'campaigns' => $this->campaigns->all(),
                 'groups' => $this->groups->all(),
                 'clients' => $this->clients->all(),
+                'products' => $this->products->all(),
                 'error' => 'Subject and body are required.'
             ]);
         }
 
-        $this->campaigns->create($subject, $body, $groupId, $clientId, $externalEmails, $onlyInactive);
+        $this->campaigns->create($subject, $body, $groupId, $clientId, $externalEmails, $onlyInactive, $productIds);
 
         return Response::redirect('/admin/campaigns');
     }
@@ -111,6 +133,7 @@ final class MailCampaignController
             // For the edit form's audience pickers (same lists the create form uses).
             'groups' => $this->groups->all(),
             'clients' => $this->clients->all(),
+            'products' => $this->products->all(),
             // Shown in the preview's header bar so it mirrors the real email.
             'brandName' => trim((string) ($this->settings->get('theme.brand_name', '') ?? '')) ?: 'Email preview',
             'queuedCount' => $request->query('queued') !== null ? max(0, (int) $request->query('queued')) : null,
@@ -240,12 +263,13 @@ final class MailCampaignController
     }
 
     /**
-     * Reads the campaign targeting fields off a request — the same five-way
+     * Reads the campaign targeting fields off a request — the same six-way
      * choice the create form offers, normalised into the repository's column
      * shape. Returns the audience array, or an error message string when the
-     * external list has no valid address to send to.
+     * external list has no valid address, or a product-targeted campaign has
+     * no product selected.
      *
-     * @return array{client_group_id: ?int, client_id: ?int, external_emails: ?string, only_inactive: bool}|string
+     * @return array{client_group_id: ?int, client_id: ?int, external_emails: ?string, only_inactive: bool, product_ids: ?string}|string
      */
     private function parseAudienceInput(Request $request): array|string
     {
@@ -272,9 +296,17 @@ final class MailCampaignController
             $externalEmails = implode("\n", $parsed);
         } elseif ($targetType === 'inactive') {
             $onlyInactive = true;
+        } elseif ($targetType === 'products') {
+            // Normalised exactly as store() does; the form must select at
+            // least one product (empty must never mean "everyone").
+            $productIds = MailCampaignService::parseProductIds($request->input('product_ids'));
+
+            if ($productIds === '') {
+                return 'Select at least one product for a product-targeted campaign.';
+            }
         }
 
-        return ['client_group_id' => $groupId, 'client_id' => $clientId, 'external_emails' => $externalEmails, 'only_inactive' => $onlyInactive];
+        return ['client_group_id' => $groupId, 'client_id' => $clientId, 'external_emails' => $externalEmails, 'only_inactive' => $onlyInactive, 'product_ids' => $productIds];
     }
 
     private function requirePermission(): ?Response

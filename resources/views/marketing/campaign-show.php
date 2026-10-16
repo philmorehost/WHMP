@@ -3,6 +3,7 @@
 /** @var array<int, array<string, mixed>> $recipients */
 /** @var array<int, array<string, mixed>> $groups */
 /** @var array<int, array<string, mixed>> $clients */
+/** @var array<int, array<string, mixed>> $products */
 $id = (int) $campaign['id'];
 // The send round this campaign is currently on (1 until it has been resent).
 // Resending keeps the old round's recipient rows as history and opens a new
@@ -78,6 +79,18 @@ $feedback = [
             👤 Individual client
         <?php elseif (!empty($campaign['only_inactive'])): ?>
             📭 Accounts with no active product/domain
+        <?php elseif (trim((string) ($campaign['product_ids'] ?? '')) !== ''): ?>
+            <?php
+            // Show the selected products by name — the ids alone say nothing.
+            $targetProductIds = array_map('intval', explode(',', (string) $campaign['product_ids']));
+            $productNames = [];
+            foreach ($products as $p) {
+                if (in_array((int) $p['id'], $targetProductIds, true)) {
+                    $productNames[] = (string) $p['name'];
+                }
+            }
+            ?>
+            📦 Clients with: <?= e($productNames !== [] ? implode(', ', $productNames) : (string) $campaign['product_ids']) ?>
         <?php elseif (trim((string) ($campaign['external_emails'] ?? '')) !== '' && empty($campaign['client_group_id'])): ?>
             ✉️ External email addresses
         <?php elseif (!empty($campaign['client_group_id'])): ?>
@@ -180,6 +193,7 @@ $feedback = [
             'campaign' => $campaign,
             'groups' => $groups,
             'clients' => $clients,
+            'products' => $products,
             'audienceEditable' => $audienceEditable,
         ]) ?>
     <?php endif; ?>

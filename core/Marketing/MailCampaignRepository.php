@@ -51,7 +51,7 @@ final class MailCampaignRepository
         return $this->db->selectOne('SELECT * FROM mail_campaigns WHERE id = ?', [$id]);
     }
 
-    public function create(string $subject, string $body, ?int $clientGroupId, ?int $clientId = null, ?string $externalEmails = null, bool $onlyInactive = false): int
+    public function create(string $subject, string $body, ?int $clientGroupId, ?int $clientId = null, ?string $externalEmails = null, bool $onlyInactive = false, ?string $productIds = null): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
@@ -64,9 +64,13 @@ final class MailCampaignRepository
         // only_inactive (migration 0161) is a flag that narrows the "all
         // active clients" audience to accounts with no active service or
         // domain; see MailCampaignService::resolveRecipients().
+        //
+        // product_ids (migration 0220) is the WHMCS-style product audience: a
+        // comma-separated list of product ids, resolved to the clients who
+        // hold them at send time.
         return (int) $this->db->insert(
-            'INSERT INTO mail_campaigns (subject, body, client_group_id, client_id, external_emails, only_inactive, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$subject, $body, $clientGroupId, $clientId, $externalEmails, $onlyInactive ? 1 : 0, 'draft', $now, $now]
+            'INSERT INTO mail_campaigns (subject, body, client_group_id, client_id, external_emails, only_inactive, product_ids, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$subject, $body, $clientGroupId, $clientId, $externalEmails, $onlyInactive ? 1 : 0, $productIds, 'draft', $now, $now]
         );
     }
 
@@ -127,7 +131,7 @@ final class MailCampaignRepository
     }
 
     /**
-     * Edits a campaign's audience targeting. All five columns are written
+     * Edits a campaign's audience targeting. All six columns are written
      * together so switching target types clears whatever the previous type
      * stored — the same normalisation create() applies at insert time.
      *
@@ -142,13 +146,14 @@ final class MailCampaignRepository
         ?int $clientGroupId,
         ?int $clientId,
         ?string $externalEmails,
-        bool $onlyInactive
+        bool $onlyInactive,
+        ?string $productIds = null
     ): bool {
         return $this->db->update(
             "UPDATE mail_campaigns
-             SET client_group_id = ?, client_id = ?, external_emails = ?, only_inactive = ?, updated_at = ?
+             SET client_group_id = ?, client_id = ?, external_emails = ?, only_inactive = ?, product_ids = ?, updated_at = ?
              WHERE id = ? AND status IN ('draft', 'sent')",
-            [$clientGroupId, $clientId, $externalEmails, $onlyInactive ? 1 : 0, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
+            [$clientGroupId, $clientId, $externalEmails, $onlyInactive ? 1 : 0, $productIds, (new DateTimeImmutable())->format('Y-m-d H:i:s'), $id]
         ) > 0;
     }
 

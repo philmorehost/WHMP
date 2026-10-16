@@ -399,4 +399,137 @@ final class MailCampaignLifecycleTest extends DatabaseTestCase
         $this->assertTrue($this->service->delete($campaignId));
         $this->assertNull($this->campaigns->find($campaignId));
     }
+
+    /**
+     * Seeds one product (in its own group) and returns its id.
+     */
+    private function createProduct(string $name): int
+    {
+        $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        $groupId = (int) $this->db->insert(
+            'INSERT INTO product_groups (name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            [$name . ' group', 0, $now, $now]
+        );
+
+        return (int) $this->db->insert(
+            'INSERT INTO products (product_group_id, name, status, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+            [$groupId, $name, 'active', 0, $now, $now]
+        );
+    }
+
+    /**
+     * Gives $clientId a service of $productId in the given status.
+     */
+    private function attachService(int $clientId, int $productId, string $status = 'active'): void
+    {
+        $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        $this->db->insert(
+            'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$clientId, $productId, 'Seeded service', 'monthly', 9.99, $status, (new \DateTimeImmutable('+1 month'))->format('Y-m-d'), $now, $now]
+        );
+    }
+
+    public function test_products_target_queues_only_clients_who_hold_the_product(): void
+    {
+        $webId = $this->createProduct('Web Hosting');
+        $vpsId = $this->createProduct('VPS');
+
+        $holder = $this->createActiveClient('holder@example.test');
+        $this->attachService($holder, $webId, 'active');
+
+        $suspended = $this->createActiveClient('suspended@example.test');
+        $this->attachService($suspended, $webId, 'suspended');
+
+        $cancelled = $this->createActiveClient('cancelled@example.test');
+        $this->attachService($cancelled, $webId, 'cancelled');
+
+        $pending = $this->createActiveClient('pending@example.test');
+        $this->attachService($pending, $webId, 'pending');
+
+        $otherProduct = $this->createActiveClient('other@example.test');
+        $this->attachService($otherProduct, $vpsId, 'active');
+
+        $noService = $this->createActiveClient('noservice@example.test');
+
+        // Holds the product but the ACCOUNT is inactive — not mailable.
+        $this->clients->create([
+            'email' => 'inactiveacct@example.test',
+            'password' => 'secret123',
+            'first_name' => 'Test',
+            'last_name' => 'Client',
+            'status' => 'inactive',
+        ]);
+        $inactiveAccountId = (int) $this->db->selectOne(
+            "SELECT id FROM clients WHERE email = 'inactiveacct@example.test'"
+        )['id'];
+        $this->attachService($inactiveAccountId, $webId, 'active');
+
+        $campaignId = $this->campaigns->create('Product news', '<p>Hi</p>', null, null, null, false, (string) $webId);
+
+        $this->assertSame(2, $this->service->queue($campaignId), 'only the active and suspended holders qualify');
+
+        $queuedEmails = array_map(
+            static fn (array $r): string => (string) $r['email'],
+            $this->campaigns->recipients($campaignId)
+        );
+        sort($queuedEmails);
+        $this->assertSame(
+            ['holder@example.test', 'suspended@example.test'],
+            $queuedEmails,
+            'cancelled/pending services, other products, no service and inactive accounts are all excluded'
+        );
+    }
+
+    public function test_products_target_accepts_multiple_products_and_resolves_fresh_on_resend(): void
+    {
+        $webId = $this->createProduct('Web Hosting');
+        $vpsId = $this->createProduct('VPS');
+
+        $webClient = $this->createActiveClient('web@example.test');
+        $this->attachService($webClient, $webId, 'active');
+
+        $mailer = $this->captureCampaignMailer();
+
+        // Multi-product targeting, normalised the way the controller stores it.
+        $campaignId = $this->campaigns->create('Bundle news', '<p>Hi</p>', null, null, null, false, $webId . ',' . $vpsId);
+        $this->assertSame(1, $this->service->queue($campaignId), 'only the web holder exists so far');
+        $this->service->dispatchQueued(100);
+        $this->assertSame('sent', $this->campaigns->find($campaignId)['status']);
+
+        // Later, a new client buys the VPS. The audience is resolved at send
+        // time, so a resend reaches them without editing anything.
+        $vpsClient = $this->createActiveClient('vps@example.test');
+        $this->attachService($vpsClient, $vpsId, 'active');
+
+        $this->assertSame(1, $this->service->resend($campaignId), 'resend resolves the product audience fresh');
+        $this->assertCount(1, $mailer->sent);
+        $this->assertSame('vps@example.test', $mailer->sent[0]['to']);
+    }
+
+    public function test_audience_edit_can_switch_to_and_from_products_targeting(): void
+    {
+        $webId = $this->createProduct('Web Hosting');
+        $groupId = $this->groups->create('VIP');
+
+        $campaignId = $this->campaigns->create('Group campaign', '<p>Hi</p>', $groupId);
+
+        // Switch the audience to products.
+        $this->assertTrue($this->service->update($campaignId, 'Group campaign', '<p>Hi</p>', [
+            'client_group_id' => null,
+            'product_ids' => (string) $webId,
+        ]));
+
+        $campaign = $this->campaigns->find($campaignId);
+        $this->assertSame((string) $webId, $campaign['product_ids']);
+        $this->assertNull($campaign['client_group_id'], 'switching target types clears the previous one');
+
+        // And back to a group — the product list must be cleared, not linger.
+        $this->assertTrue($this->service->update($campaignId, 'Group campaign', '<p>Hi</p>', [
+            'client_group_id' => $groupId,
+        ]));
+
+        $campaign = $this->campaigns->find($campaignId);
+        $this->assertSame($groupId, (int) $campaign['client_group_id']);
+        $this->assertSame('', (string) ($campaign['product_ids'] ?? ''), 'the product list is cleared with the rest of the old targeting');
+    }
 }

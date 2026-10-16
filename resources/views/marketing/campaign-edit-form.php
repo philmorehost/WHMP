@@ -6,6 +6,7 @@
  * @var array<string, mixed> $campaign
  * @var array<int, array<string, mixed>> $groups
  * @var array<int, array<string, mixed>> $clients
+ * @var array<int, array<string, mixed>> $products
  * @var bool $audienceEditable true when targeting can be rewritten here —
  *      drafts and sent campaigns. A paused campaign is mid-send: its pending
  *      recipients were resolved when it was queued, so an audience change
@@ -15,11 +16,13 @@
 $id = (int) $campaign['id'];
 
 // Which targeting the campaign currently stores, as the create form's
-// five-way select expresses it.
+// six-way select expresses it.
 if (!empty($campaign['only_inactive'])) {
     $targetType = 'inactive';
 } elseif (!empty($campaign['client_id'])) {
     $targetType = 'individual';
+} elseif (trim((string) ($campaign['product_ids'] ?? '')) !== '') {
+    $targetType = 'products';
 } elseif (trim((string) ($campaign['external_emails'] ?? '')) !== '' && empty($campaign['client_group_id'])) {
     $targetType = 'external';
 } elseif (!empty($campaign['client_group_id'])) {
@@ -28,6 +31,7 @@ if (!empty($campaign['only_inactive'])) {
     $targetType = 'all';
 }
 
+$selectedProductIds = array_map('intval', explode(',', (string) ($campaign['product_ids'] ?? '')));
 $fieldStyle = static fn (string $type): string => $targetType === $type ? 'display:block;' : 'display:none;';
 ?>
 <details id="edit" style="margin-bottom:var(--cv-space-3);">
@@ -76,8 +80,27 @@ $fieldStyle = static fn (string $type): string => $targetType === $type ? 'displ
                 <option value="inactive"<?= $targetType === 'inactive' ? ' selected' : '' ?>>📭 Accounts with no active product/domain</option>
                 <option value="group"<?= $targetType === 'group' ? ' selected' : '' ?>>📁 Client Group</option>
                 <option value="individual"<?= $targetType === 'individual' ? ' selected' : '' ?>>👤 Individual Client</option>
+                <option value="products"<?= $targetType === 'products' ? ' selected' : '' ?>>📦 Clients with specific products</option>
                 <option value="external"<?= $targetType === 'external' ? ' selected' : '' ?>>✉️ External email addresses</option>
             </select>
+        </div>
+        <div class="cv-field" id="target-products-field" style="<?= $fieldStyle('products') ?>">
+            <label class="cv-label">Products (select one or more — ctrl/cmd-click for multiple)</label>
+            <?php if (!empty($products)): ?>
+                <select class="cv-select" name="product_ids[]" multiple size="<?= min(8, max(3, count($products))) ?>">
+                    <?php foreach ($products as $product): ?>
+                        <option value="<?= (int) $product['id'] ?>"<?= in_array((int) $product['id'], $selectedProductIds, true) ? ' selected' : '' ?>>
+                            <?= e(trim((string) ($product['group_name'] ?? '')) !== '' ? $product['group_name'] . ' — ' . $product['name'] : $product['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else: ?>
+                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">No products exist yet — create one under Products first.</div>
+            <?php endif; ?>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
+                Emails every active client who currently holds an active or suspended service of any selected product.
+                The recipient list is resolved at send time, so it stays current.
+            </div>
         </div>
         <div class="cv-field" id="target-inactive-field" style="<?= $fieldStyle('inactive') ?>">
             <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">

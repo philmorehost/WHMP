@@ -1,6 +1,7 @@
 <?php
 /** @var array<int, array<string, mixed>> $campaigns */
 /** @var array<int, array<string, mixed>> $groups */
+/** @var array<int, array<string, mixed>> $products */
 /** @var string|null $error */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
@@ -91,8 +92,28 @@
                 <option value="inactive">📭 Accounts with no active product/domain</option>
                 <option value="group">📁 Client Group</option>
                 <option value="individual">👤 Individual Client</option>
+                <option value="products">📦 Clients with specific products</option>
                 <option value="external">✉️ External email addresses</option>
             </select>
+        </div>
+        <div class="cv-field" id="target-products-field" style="display:none;">
+            <label class="cv-label">Products (select one or more — ctrl/cmd-click for multiple)</label>
+            <?php if (!empty($products)): ?>
+                <select class="cv-select" name="product_ids[]" multiple size="<?= min(8, max(3, count($products))) ?>">
+                    <?php foreach ($products as $product): ?>
+                        <option value="<?= (int) $product['id'] ?>">
+                            <?= e(trim((string) ($product['group_name'] ?? '')) !== '' ? $product['group_name'] . ' — ' . $product['name'] : $product['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else: ?>
+                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">No products exist yet — create one under Products first.</div>
+            <?php endif; ?>
+            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
+                Emails every active client who currently holds an active or suspended service of any selected product
+                (clients with the product cancelled or terminated, and pending orders, are not included).
+                The recipient list is resolved at send time, so it stays current.
+            </div>
         </div>
         <div class="cv-field" id="target-inactive-field" style="display:none;">
             <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">

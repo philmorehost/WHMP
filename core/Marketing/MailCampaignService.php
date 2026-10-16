@@ -12,8 +12,10 @@ use Throwable;
 
 /**
  * Mass-mail campaigns (blueprint §4.4/§5 marketing automation): sends an
- * admin-composed subject/body to every active client in a group (or every
- * active client, if no group is set), with recipient-specific client, domain,
+ * admin-composed subject/body to a resolved audience — every active client
+ * in a group, one individual client, clients holding selected products
+ * (active/suspended services), accounts with no active product or domain,
+ * and/or pasted external addresses — with recipient-specific client, domain,
  * billing and support merge fields substituted at send time and a unique
  * open-tracking pixel appended to each message.
  */
@@ -79,6 +81,44 @@ final class MailCampaignService
         }
 
         return array_keys($emails);
+    }
+
+    /**
+     * Normalises the admin's product selection into the canonical stored
+     * form: a comma-separated list of unique, sorted, positive product ids
+     * ("3,7,12"), or '' when nothing valid was selected.
+     *
+     * Accepts the multi-select's array (`product_ids[]` POST values), a
+     * pre-normalised comma string (edit-form round-trip) or null.
+     *
+     * @param mixed $raw array<int, mixed>|string|null
+     */
+    public static function parseProductIds(mixed $raw): string
+    {
+        $values = is_array($raw) ? $raw : (is_string($raw) && $raw !== '' ? explode(',', $raw) : []);
+
+        $ids = [];
+
+        foreach ($values as $value) {
+            $id = (int) $value;
+
+            if ($id > 0) {
+                $ids[$id] = true;
+            }
+        }
+
+        $ids = array_keys($ids);
+        sort($ids);
+
+        return implode(',', $ids);
+    }
+
+    /** @return array<int, int> */
+    public static function productIdsFromStored(?string $stored): array
+    {
+        $ids = array_map('intval', explode(',', (string) $stored));
+
+        return array_values(array_filter($ids, static fn (int $id): bool => $id > 0));
     }
 
     /**
@@ -297,13 +337,13 @@ final class MailCampaignService
      * were sent; anyone still pending gets the edited version once the
      * campaign resumes.
      *
-     * $audience, when provided, also rewrites the targeting (all five
+     * $audience, when provided, also rewrites the targeting (all six
      * columns, so switching target type clears the old one) — the repository
      * only applies it to 'draft' and 'sent' campaigns, where nothing is
      * mid-flight. It is the audience rules that change; a sent campaign's
      * existing recipient rows are history and stay as they are.
      *
-     * @param array{client_group_id?: ?int, client_id?: ?int, external_emails?: ?string, only_inactive?: bool}|null $audience
+     * @param array{client_group_id?: ?int, client_id?: ?int, external_emails?: ?string, only_inactive?: bool, product_ids?: ?string}|null $audience
      */
     public function update(int $campaignId, string $subject, string $body, ?array $audience = null): bool
     {
@@ -318,7 +358,8 @@ final class MailCampaignService
                 $audience['client_group_id'] ?? null,
                 $audience['client_id'] ?? null,
                 $audience['external_emails'] ?? null,
-                (bool) ($audience['only_inactive'] ?? false)
+                (bool) ($audience['only_inactive'] ?? false),
+                array_key_exists('product_ids', $audience) ? $audience['product_ids'] : null
             ) || $updated;
         }
 
@@ -342,6 +383,11 @@ final class MailCampaignService
             // Accounts with no active service or domain — the re-engagement
             // audience (see ClientRepository::activeWithoutProductsOrDomains).
             $clients = $this->clients->activeWithoutProductsOrDomains();
+        } elseif (trim((string) ($campaign['product_ids'] ?? '')) !== '') {
+            // Active clients holding an active/suspended service of one of the
+            // selected products — the WHMCS-style product audience, resolved
+            // at send time so it always reflects who currently holds them.
+            $clients = $this->clients->activeForProducts(self::productIdsFromStored((string) $campaign['product_ids']));
         } elseif ($externalEmails !== [] && $campaign['client_group_id'] === null) {
             // External-only: must not fan out to the whole client base.
             $clients = [];
@@ -417,6 +463,9 @@ final class MailCampaignService
         } elseif (!empty($campaign['only_inactive'])) {
             // Accounts with no active service or domain — see resolveRecipients().
             $recipients = $this->clients->activeWithoutProductsOrDomains();
+        } elseif (trim((string) ($campaign['product_ids'] ?? '')) !== '') {
+            // Product audience — see resolveRecipients().
+            $recipients = $this->clients->activeForProducts(self::productIdsFromStored((string) $campaign['product_ids']));
         } elseif ($externalEmails !== [] && $campaign['client_group_id'] === null) {
             // An external-only campaign must not silently fan out to every
             // active client — that's the difference between mailing 20

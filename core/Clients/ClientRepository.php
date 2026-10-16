@@ -229,6 +229,51 @@ final class ClientRepository
         );
     }
 
+    /**
+     * Active clients holding at least one ACTIVE OR SUSPENDED service of any
+     * of the given products — the WHMCS-style "email everyone who has product
+     * X" campaign audience.
+     *
+     * "Has the product" means the service still exists on the server:
+     * `active` obviously, but `suspended` too (the client still uses it and
+     * is exactly the person an upsell or back-up-your-account nudge is for).
+     * `pending` (nothing provisioned yet), `cancelled` and `terminated` do
+     * not count. The client's own account must be active, and resellers are
+     * excluded like every other campaign audience.
+     *
+     * An empty product list resolves to an EMPTY audience on purpose: it can
+     * only be stored by a bug or hand-editing, and fanning out to the whole
+     * client base would then be the worst possible failure mode.
+     *
+     * @param array<int, int> $productIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function activeForProducts(array $productIds): array
+    {
+        $productIds = array_values(array_filter(array_map('intval', $productIds), static fn (int $id): bool => $id > 0));
+
+        if ($productIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+
+        return $this->db->select(
+            "SELECT DISTINCT c.*
+             FROM clients c
+             WHERE c.status = 'active'
+               AND " . self::PLATFORM_ONLY . '
+               AND EXISTS (
+                   SELECT 1 FROM services s
+                   WHERE s.client_id = c.id
+                     AND s.product_id IN (' . $placeholders . ")
+                     AND s.status IN ('active', 'suspended')
+               )
+             ORDER BY c.last_name ASC, c.first_name ASC",
+            $productIds
+        );
+    }
+
     /** @return array<string, mixed>|null */
     public function findByEmail(string $email): ?array
     {
