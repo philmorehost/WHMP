@@ -3030,6 +3030,71 @@
         }
     });
 
+    // Campaign product picker (audience target "📦 Clients with specific
+    // products"): a filter box + select-all over a checkbox list, scoped to
+    // [data-product-picker] so the create form and the edit form can each
+    // carry one instance without ids colliding.
+    //
+    // "Select all" only ticks the rows currently VISIBLE in the filtered
+    // list — that's what makes search + select-all compose ("VPS" → select
+    // all → just the VPS products). Rows hidden by the filter keep their
+    // state and still submit: hiding is a viewing choice, not an unselect.
+    function campaignProductPickerSync(picker) {
+        if (!picker) { return; }
+        var rows = picker.querySelectorAll('[data-product-row]');
+        var selectAll = picker.querySelector('[data-product-select-all]');
+        var count = picker.querySelector('[data-product-count]');
+        var checked = 0;
+        rows.forEach(function(row) {
+            var box = row.querySelector('[data-product-checkbox]');
+            if (box && box.checked) { checked++; }
+        });
+        if (count) { count.textContent = checked + ' of ' + rows.length + ' selected'; }
+        if (selectAll) {
+            selectAll.checked = rows.length > 0 && checked === rows.length;
+            selectAll.indeterminate = checked > 0 && checked < rows.length;
+        }
+    }
+
+    // Auto-search: the list filters as the admin types — no button, no reload.
+    document.addEventListener('input', function(event) {
+        if (!event.target.matches('[data-product-filter]')) { return; }
+        var picker = event.target.closest('[data-product-picker]');
+        if (!picker) { return; }
+        var needle = event.target.value.trim().toLowerCase();
+        var visible = 0;
+        picker.querySelectorAll('[data-product-row]').forEach(function(row) {
+            var label = row.querySelector('[data-product-label]');
+            var text = label ? label.textContent.toLowerCase() : '';
+            var show = needle === '' || text.indexOf(needle) !== -1;
+            row.style.display = show ? 'block' : 'none';
+            if (show) { visible++; }
+        });
+        var empty = picker.querySelector('[data-product-empty]');
+        if (empty) { empty.style.display = visible === 0 ? 'block' : 'none'; }
+        campaignProductPickerSync(picker);
+    });
+
+    document.addEventListener('change', function(event) {
+        if (event.target.matches('[data-product-select-all]')) {
+            var picker = event.target.closest('[data-product-picker]');
+            if (!picker) { return; }
+            var on = event.target.checked;
+            picker.querySelectorAll('[data-product-row]').forEach(function(row) {
+                if (row.style.display === 'none') { return; }
+                var box = row.querySelector('[data-product-checkbox]');
+                if (box) { box.checked = on; }
+            });
+            campaignProductPickerSync(picker);
+        } else if (event.target.matches('[data-product-checkbox]')) {
+            campaignProductPickerSync(event.target.closest('[data-product-picker]'));
+        }
+    });
+
+    // Initial counter / select-all state (the edit form renders with the
+    // stored selection already ticked).
+    document.querySelectorAll('[data-product-picker]').forEach(campaignProductPickerSync);
+
     // Client notification compose form (notifications/client-notifications-index.php)
     // — target type switcher (Individual vs Selected vs All) and a client-side
     // filter over the "Selected Clients" checkbox list, same shape as the

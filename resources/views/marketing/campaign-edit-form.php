@@ -85,21 +85,38 @@ $fieldStyle = static fn (string $type): string => $targetType === $type ? 'displ
             </select>
         </div>
         <div class="cv-field" id="target-products-field" style="<?= $fieldStyle('products') ?>">
-            <label class="cv-label">Products (select one or more — ctrl/cmd-click for multiple)</label>
-            <?php if (!empty($products)): ?>
-                <select class="cv-select" name="product_ids[]" multiple size="<?= min(8, max(3, count($products))) ?>">
-                    <?php foreach ($products as $product): ?>
-                        <option value="<?= (int) $product['id'] ?>"<?= in_array((int) $product['id'], $selectedProductIds, true) ? ' selected' : '' ?>>
-                            <?= e(trim((string) ($product['group_name'] ?? '')) !== '' ? $product['group_name'] . ' — ' . $product['name'] : $product['name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            <?php else: ?>
-                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">No products exist yet — create one under Products first.</div>
-            <?php endif; ?>
-            <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
-                Emails every active client who currently holds an active or suspended service of any selected product.
-                The recipient list is resolved at send time, so it stays current.
+            <div data-product-picker>
+                <label class="cv-label">Products the clients hold</label>
+                <?php if (!empty($products)): ?>
+                    <input type="search" class="cv-input" data-product-filter
+                           placeholder="Filter products…"
+                           aria-label="Filter products" style="max-width:20rem;">
+                    <div style="display:flex;align-items:center;gap:10px;margin:var(--cv-space-2) 0;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:var(--cv-text-sm);cursor:pointer;">
+                            <input type="checkbox" data-product-select-all>
+                            Select all
+                        </label>
+                        <span data-product-count style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"></span>
+                    </div>
+                    <div style="max-height:16rem;overflow-y:auto;border:1px solid var(--cv-border-default);border-radius:8px;padding:var(--cv-space-2);">
+                        <?php foreach ($products as $product): ?>
+                            <label data-product-row style="display:block;padding:4px 0;cursor:pointer;">
+                                <input type="checkbox" name="product_ids[]" value="<?= (int) $product['id'] ?>" data-product-checkbox<?= in_array((int) $product['id'], $selectedProductIds, true) ? ' checked' : '' ?>>
+                                <span data-product-label><?= e(trim((string) ($product['group_name'] ?? '')) !== '' ? $product['group_name'] . ' — ' . $product['name'] : $product['name']) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                        <span data-product-empty style="display:none;color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                            No products match that filter.
+                        </span>
+                    </div>
+                <?php else: ?>
+                    <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">No products exist yet — create one under Products first.</div>
+                <?php endif; ?>
+                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
+                    Emails every active client who currently holds an active or suspended service of any ticked product.
+                    The recipient list is resolved at send time, so it stays current. "Select all" ticks only the
+                    products currently visible in the filtered list.
+                </div>
             </div>
         </div>
         <div class="cv-field" id="target-inactive-field" style="<?= $fieldStyle('inactive') ?>">
