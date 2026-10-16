@@ -20,6 +20,37 @@ final class BackupRunRepository
         return $this->db->select('SELECT * FROM backup_runs ORDER BY id DESC LIMIT 50');
     }
 
+    /**
+     * Every run still marked "running". A live backup flips its row to
+     * success/failed when it finishes, so a row stuck in running is either a
+     * process executing right now or a leftover of one that was killed
+     * mid-dump — the Terminate button cleans out both.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function allRunning(): array
+    {
+        return $this->db->select("SELECT * FROM backup_runs WHERE status = 'running' ORDER BY id DESC");
+    }
+
+    /**
+     * Deletes exact rows by id (not by status) — the id list is captured from
+     * a prior allRunning() read, so a run that legitimately starts in between
+     * cannot have its fresh row swept up by accident.
+     *
+     * @param array<int, int> $ids
+     */
+    public function deleteByIds(array $ids): int
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0));
+
+        if ($ids === []) {
+            return 0;
+        }
+
+        return $this->db->delete('DELETE FROM backup_runs WHERE id IN (' . implode(',', $ids) . ')');
+    }
+
     public function start(): int
     {
         return (int) $this->db->insert(

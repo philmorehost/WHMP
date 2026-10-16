@@ -71,6 +71,77 @@ final class BackupServiceTest extends DatabaseTestCase
         $this->assertGreaterThan($first, $second, 'the second run executed and recorded its own history row');
     }
 
+    public function test_terminate_deletes_stuck_running_rows_and_their_partial_files(): void
+    {
+        // A completed backup first — terminate must never touch it.
+        $this->assertGreaterThan(0, $this->service->run());
+        $goodFiles = glob($this->backupDir . '/*backup_*');
+        $this->assertCount(2, $goodFiles);
+
+        // Now the mess: a run killed mid-dump leaves its row in 'running'
+        // plus half-written artefacts stamped after started_at. The row is
+        // shifted +5min so its cleanup window provably cannot overlap the
+        // just-finished healthy run's files even within the same second.
+        $this->runs->start();
+        $running = $this->runs->allRunning();
+        $this->assertCount(1, $running);
+
+        $shifted = (new \DateTimeImmutable((string) $running[0]['started_at']))
+            ->modify('+5 minutes')
+            ->format('Y-m-d H:i:s');
+        $this->db->update("UPDATE backup_runs SET started_at = ? WHERE status = 'running'", [$shifted]);
+
+        $ts = str_replace([' ', ':'], ['_', '-'], $shifted);
+        file_put_contents($this->backupDir . "/db_backup_{$ts}.sql", 'partial dump');
+        file_put_contents($this->backupDir . "/files_backup_{$ts}.zip", 'partial zip');
+
+        $result = $this->service->terminateRunning();
+
+        $this->assertSame(1, $result['terminated']);
+        $this->assertSame(2, $result['files']);
+        $this->assertFalse($result['live'], 'nothing holds the run lock in this test');
+        $this->assertSame([], $this->runs->allRunning());
+
+        // The completed run's row and files survive untouched.
+        $this->assertCount(1, $this->runs->all());
+        $this->assertSame('success', $this->runs->all()[0]['status']);
+        foreach ($goodFiles as $file) {
+            $this->assertFileExists($file);
+        }
+    }
+
+    public function test_terminate_reports_a_live_backup_and_still_cleans_its_row(): void
+    {
+        mkdir($this->backupDir, 0755, true);
+        $handle = fopen($this->backupDir . '/.backup.lock', 'c');
+        $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB), 'test could not take the lock it just created');
+
+        $this->runs->start();
+
+        $result = $this->service->terminateRunning();
+
+        $this->assertTrue($result['live'], 'a held run lock must be reported as a live backup');
+        $this->assertSame(1, $result['terminated'], 'the stuck row is still closed out');
+        $this->assertSame([], $this->runs->allRunning());
+
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+
+    public function test_terminate_with_nothing_running_is_a_noop(): void
+    {
+        $this->assertGreaterThan(0, $this->service->run());
+        $filesBefore = glob($this->backupDir . '/*backup_*');
+
+        $result = $this->service->terminateRunning();
+
+        $this->assertSame(0, $result['terminated']);
+        $this->assertSame(0, $result['files']);
+        $this->assertFalse($result['live']);
+        $this->assertSame($filesBefore, glob($this->backupDir . '/*backup_*'));
+        $this->assertCount(1, $this->runs->all());
+    }
+
     public function test_run_records_a_successful_backup_with_a_positive_size(): void
     {
         $runId = $this->service->run();

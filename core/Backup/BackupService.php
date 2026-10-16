@@ -117,6 +117,109 @@ final class BackupService
         return $handle;
     }
 
+    /**
+     * Emergency cleanup behind the admin's "Terminate running backups"
+     * button: closes out every backup_runs row still marked "running" and
+     * deletes the half-written dump/zip files such runs leave behind.
+     *
+     * Why rows can be stuck at all: a run marks its row complete/fail at the
+     * END of its work, so a process killed mid-dump (OOM, reboot, the old
+     * every-minute pile-up) leaves its row in running forever, plus partial
+     * db_backup_*.sql / files_backup_*.zip files wasting disk.
+     *
+     * What "terminate" honestly means for a process that is executing right
+     * now: PHP cannot signal another process portably, so the run itself is
+     * not killed — but its history row is removed and its partial files are
+     * deleted, and the caller is told via the returned "live" flag so the UI
+     * can say the leftover process will simply finish on its own.
+     *
+     * @return array{terminated: int, files: int, live: bool} rows closed out,
+     *         partial files deleted, and whether a live process was holding
+     *         the run lock at the moment of the call
+     */
+    public function terminateRunning(): array
+    {
+        // Probe the run lock purely to detect a live process: acquiring it
+        // means nothing is executing and every running row is a stale
+        // leftover. When the probe LOSES the race, someone is mid-backup.
+        // If we win it, we must let go again immediately or we'd block the
+        // next real run.
+        $lock = $this->acquireRunLock();
+        $live = $lock === null;
+
+        if (is_resource($lock)) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        // The lock FILE itself is deliberately never deleted here. While a
+        // live process holds its flock, unlinking the file would make the
+        // next run lock a fresh inode and two backups could then run at
+        // once — the exact pile-up this lock exists to prevent. A stale
+        // file with no holder is harmless: the next run simply locks it.
+
+        $rows = $this->runs->allRunning();
+
+        $filesDeleted = 0;
+        foreach ($rows as $row) {
+            foreach ($this->partialArtefacts((string) ($row['started_at'] ?? '')) as $file) {
+                if (@unlink($file)) {
+                    $filesDeleted++;
+                }
+            }
+        }
+
+        $terminated = $this->runs->deleteByIds(array_column($rows, 'id'));
+
+        return ['terminated' => $terminated, 'files' => $filesDeleted, 'live' => $live];
+    }
+
+    /**
+     * Artefact files belonging to the run that started at $startedAt. A run
+     * writes db_backup_<ts>.sql / files_backup_<ts>.zip where <ts> is set
+     * moments AFTER the row's started_at, so the window below catches the
+     * normal second-level skew — and never touches files from other, older
+     * runs (whose history rows may already be pruned; file retention is
+     * counted in copies, log retention in days).
+     *
+     * @return array<int, string>
+     */
+    private function partialArtefacts(string $startedAt): array
+    {
+        $start = strtotime($startedAt);
+
+        if ($start === false) {
+            return [];
+        }
+
+        $found = [];
+
+        foreach (array_merge(
+            (array) glob($this->backupDir . '/db_backup_*.sql'),
+            (array) glob($this->backupDir . '/files_backup_*.zip'),
+        ) as $path) {
+            $basename = (string) basename((string) $path);
+
+            if (preg_match('/(?:db|files)_backup_(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\./', $basename, $m) !== 1) {
+                continue;
+            }
+
+            $fileTime = ($dt = \DateTimeImmutable::createFromFormat('Y-m-d_H-i-s', $m[1])) === false
+                ? false
+                : $dt->getTimestamp();
+
+            // Window opens exactly AT started_at, never earlier: the run
+            // stamps its files after the row exists, and a lookback would
+            // reach the files of a healthy backup that finished just before
+            // this run started — exactly what terminate must not delete.
+            if ($fileTime !== false && $fileTime >= $start && $fileTime <= $start + 3600) {
+                $found[] = (string) $path;
+            }
+        }
+
+        return $found;
+    }
+
     /** @return int rows deleted */
     public function pruneOldRunLogs(): int
     {

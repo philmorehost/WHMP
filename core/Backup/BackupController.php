@@ -40,6 +40,29 @@ final class BackupController
         return Response::redirect('/admin/backups');
     }
 
+    /**
+     * "Terminate running backups" — closes out every stuck running entry and
+     * deletes its partial files (see BackupService::terminateRunning()).
+     * The outcome rides the redirect as query flags, same pattern as the
+     * campaign delete notices, because the render has no session flash.
+     */
+    public function terminate(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $result = $this->backups->terminateRunning();
+
+        $params = ['terminated' => $result['terminated'], 'files' => $result['files']];
+
+        if ($result['live']) {
+            $params['live'] = '1';
+        }
+
+        return Response::redirect('/admin/backups?' . http_build_query($params));
+    }
+
     private function requirePermission(): ?Response
     {
         if (!$this->guard->check()) {
