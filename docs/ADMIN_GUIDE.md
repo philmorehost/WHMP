@@ -10,6 +10,12 @@ A day-to-day operations reference for whoever runs the admin panel (`/admin`). F
 - **Tax Rules** — country/state-specific rates; a client's tax is resolved by their billing address, `tax_exempt` clients are never taxed regardless of a matching rule.
 - **Payment Gateways** — the built-in Manual gateway (bank transfer, staff mark-paid) always works with zero configuration; add real gateway modules by implementing the `GatewayModule` SDK interface.
 - **Fraud Protection** — every order is scored on placement by all registered `FraudModule`s (max score wins, not average); a hold routes it to the fraud review queue instead of the normal pending queue.
+- **cPanel client tools & Imunify360 WebShield** — the client-area cPanel tool (email/FTP/database/DNS management and quick-login SSO) talks to WHM's JSON API from this billing server. If the hosting server runs Imunify360 with **cPanel account protection** (WebShield "Splash Screen", `WEBSHIELD.panel_protection`), WebShield answers panel-port requests with a JavaScript challenge: real browsers pass it once and get a 24h cookie, but server-to-server API automation cannot run JavaScript, so every tool call and SSO mint fails with an HTML challenge page instead of JSON. The tool detects this and reports it explicitly. Resolution on the WHM server, in order of preference:
+  1. **Whitelist this billing server's IP** — `imunify360-agent whitelist ip add <IP>` (Imunify360 → Firewall → WhiteList). This is CloudLinux's documented answer for legitimate automation; the tool's error message includes the resolved outbound IP. Check `/var/log/imunify360-webshield/` if unsure.
+  2. **Update WebShield** — builds before 1.31.4 have a bug where the Splash Screen loops forever ("Please wait while your request is being verified") even for real browsers, so clients cannot log in to cPanel at all. `bash imunify-force-update.sh` from the repo.
+  3. **Turn off cPanel account protection** — `imunify360-agent config update '{"WEBSHIELD":{"panel_protection":false}}'` or untick it in Imunify360 → WebShield. This restores plain panel logins/SSO but removes the anti-bot challenge on ports 2082/2083 — prefer options 1–2.
+
+  Clients whose IP is greylisted may see the challenge once; after passing it they are cookied for 24h and quick-login works normally.
 
 ## Multi-currency
 

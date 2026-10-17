@@ -484,6 +484,48 @@ final class CpanelUapiClientTest extends TestCase
         $this->assertCount(0, $this->http->requests);
     }
 
+    public function test_imunify360_webshield_challenge_gets_the_actionable_whitelist_message(): void
+    {
+        // What WebShield's Splash Screen actually returns to an API caller:
+        // HTTP 200 with an HTML challenge a JSON parser chokes on.
+        $splash = '<!doctype html><html><head><title>Imunify360 WebShield</title></head><body>'
+            . '<div>Please wait while your request is being verified...</div>'
+            . '<div>Protected by Imunify360</div></body></html>';
+        $this->http->respondWith(200, $splash);
+
+        $result = $this->client->callWhm($this->server, 'create_user_session', ['user' => 'cvuser1', 'service' => 'cpaneld']);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Imunify360 WebShield answered instead of the panel API', $result['message']);
+        $this->assertStringContainsString('imunify360-agent whitelist ip add', $result['message'], 'the message names the exact fix');
+        $this->assertStringContainsString('panel_protection', $result['message'], 'the alternative (disabling panel protection) is named too');
+        $this->assertStringContainsString('Please wait while your request is being verified', $result['message'], 'the challenge text is preserved for diagnosis');
+    }
+
+    public function test_webshield_detection_also_fires_on_the_uapi_path(): void
+    {
+        $this->http->respondWith(200, '<html>Checking your browser before accessing whm.example.test</html>');
+
+        $result = $this->client->call($this->server, 'cvuser1', 'Email', 'list_pops_with_disk');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('WebShield answered instead of the panel API', $result['message']);
+    }
+
+    public function test_plain_non_json_panel_errors_keep_the_generic_message(): void
+    {
+        // A missing Perl module compile error is NOT a WebShield challenge and
+        // must keep the generic wording — the API 2 fallback logic sniffs this
+        // text, and admins diagnosing it need the panel's words, not ours.
+        $this->http->respondWith(200, 'Failed to load module "AddonDomain": Can\'t locate Cpanel/API/AddonDomain.pm in @INC');
+
+        $result = $this->client->call($this->server, 'cvuser1', 'AddonDomain', 'listaddondomains');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Unexpected response', $result['message']);
+        $this->assertStringNotContainsString('WebShield', $result['message']);
+    }
+
     /** @param array<string, mixed> $body */
     private function json(int $status, array $body): array
     {
