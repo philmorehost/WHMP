@@ -370,6 +370,44 @@ $totalPages = max(1, (int) ceil($results['total'] / $results['perPage']));
     </div>
 <?php endif; ?>
 
+<?php if (($deadCancelledCount ?? null) !== null): ?>
+    <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);">
+        <?= (int) $deadCancelledCount === 0
+            ? 'No unpaid invoices for cancelled/terminated services were found — nothing to cancel.'
+            : (int) $deadCancelledCount . ' unpaid invoice(s) for cancelled/terminated services cancelled.' ?>
+    </div>
+<?php endif; ?>
+
+<?php if ((int) ($deadServiceCount ?? 0) > 0): ?>
+    <?php
+    // The debt the admin is here for: services that are gone (cancelled or
+    // terminated) but whose renewal invoices are still sitting in the unpaid
+    // list, inflating the overdue totals and dunning clients for services
+    // that no longer exist. One action clears all of them, across every
+    // page, because a checkbox selection can only reach the current page.
+    ?>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--cv-space-3);flex-wrap:wrap;
+                border:1px solid var(--cv-border-default);border-left:4px solid var(--cv-color-danger-500);
+                border-radius:10px;padding:var(--cv-space-3);margin-bottom:var(--cv-space-3);
+                background:var(--cv-bg-surface-sunken);">
+        <div>
+            <strong><?= number_format((int) $deadServiceCount) ?> unpaid invoice(s) belong to cancelled/terminated services.</strong>
+            <div style="font-size:var(--cv-text-sm);color:var(--cv-text-secondary);margin-top:4px;">
+                These services no longer exist, so their invoices can never be paid — cancelling stops reminders,
+                dunning and overdue totals chasing money that will never arrive. Only UNPAID invoices linked to a
+                cancelled or terminated service are affected: paid, refunded and already-cancelled invoices, and
+                invoices with no service, are never touched.
+            </div>
+        </div>
+        <form method="post" action="/admin/invoices/cancel-dead-services"
+              data-confirm="Cancel all <?= number_format((int) $deadServiceCount) ?> unpaid invoice(s) for cancelled/terminated services? This affects every page, not just this one."><?= csrf_field() ?>
+            <button type="submit" class="cv-btn cv-btn--danger" style="white-space:nowrap;">
+                Cancel <?= number_format((int) $deadServiceCount) ?> Invoice(s)
+            </button>
+        </form>
+    </div>
+<?php endif; ?>
+
 <?php if ((int) ($zeroValueCount ?? 0) > 0): ?>
     <?php
     // These can never be paid — there is nothing to charge — so they sit in

@@ -38,6 +38,7 @@ $router->post('/admin/invoices/bulk-cancel', [AdminInvoiceController::class, 'bu
 $router->get('/admin/recurring-invoices', [RecurringInvoiceController::class, 'index']);
 $router->post('/admin/recurring-invoices/{id}/status', [RecurringInvoiceController::class, 'setStatus']);
 $router->post('/admin/invoices/mark-zero-paid', [AdminInvoiceController::class, 'markZeroValuePaid']);
+$router->post('/admin/invoices/cancel-dead-services', [AdminInvoiceController::class, 'cancelForDeadServices']);
 $router->post('/admin/invoices/bulk-remind', [AdminInvoiceController::class, 'bulkSendReminders']);
 $router->post('/admin/invoices/remind-all-unpaid', [AdminInvoiceController::class, 'remindAllUnpaid']);
 $router->get('/admin/invoices/{id}', [AdminInvoiceController::class, 'show']);

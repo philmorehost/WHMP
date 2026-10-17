@@ -107,6 +107,8 @@ final class AdminInvoiceController
             'zeroPaidCount' => $request->query('zero_paid') !== null ? max(0, (int) $request->query('zero_paid')) : null,
             'remindedCount' => $request->query('reminded') !== null ? max(0, (int) $request->query('reminded')) : null,
             'reminderSkipped' => max(0, (int) $request->query('reminder_skipped', 0)),
+            'deadServiceCount' => $this->invoices->countUnpaidForDeadServices(),
+            'deadCancelledCount' => $request->query('dead_cancelled') !== null ? max(0, (int) $request->query('dead_cancelled')) : null,
         ]);
     }
 
@@ -522,6 +524,39 @@ final class AdminInvoiceController
         }
 
         return Response::redirect('/admin/invoices?zero_paid=' . $marked);
+    }
+
+    /**
+     * Cancels every UNPAID invoice whose service is cancelled or terminated,
+     * in one action.
+     *
+     * Same reasoning as markZeroValuePaid() above for not using the row
+     * checkboxes: the dead-service debt spans clients and pages, and the
+     * point is to clear it all at once. The repository's WHERE clause is the
+     * safety net — only unpaid invoices linked to a dead service are touched,
+     * never paid, refunded or unlinked ones.
+     */
+    public function cancelForDeadServices(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $cancelled = $this->invoices->cancelUnpaidForDeadServices();
+
+        if ($cancelled > 0) {
+            $this->activity->log(
+                'admin',
+                (int) $this->guard->currentAdmin()['id'],
+                'invoice.dead_service_cancelled',
+                'invoice',
+                null,
+                "Cancelled {$cancelled} unpaid invoice(s) for cancelled/terminated services",
+                $request->ip()
+            );
+        }
+
+        return Response::redirect('/admin/invoices?dead_cancelled=' . $cancelled);
     }
 
     /**
