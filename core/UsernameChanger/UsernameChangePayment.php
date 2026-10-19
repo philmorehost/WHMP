@@ -92,7 +92,7 @@ final class UsernameChangePayment
                 'short_label' => $balance < $due ? $money(round($due - $balance, 2)) : null,
                 'add_funds_url' => '/client/wallet/add-funds',
             ],
-            'gateways' => $parent === null ? $this->usableGateways() : [],
+            'gateways' => $parent === null ? $this->usableGateways($client) : [],
         ];
     }
 
@@ -178,14 +178,16 @@ final class UsernameChangePayment
      * Enabled gateways a client can actually use: configured ones (a gateway
      * without keys would only show an error) and manual bank transfer.
      *
+     * @param array<string, mixed> $client
      * @return array<int, array{slug: string, name: string, manual: bool, inline: bool, details: string}>
      */
-    private function usableGateways(): array
+    private function usableGateways(array $client): array
     {
         $out = [];
 
         try {
-            $rows = $this->gateways->allEnabled();
+            // Reseller customers only see gateways the admin left enabled for resellers.
+            $rows = $this->gateways->allEnabledForClient($client);
         } catch (Throwable) {
             return [];
         }

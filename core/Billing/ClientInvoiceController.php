@@ -139,7 +139,9 @@ final class ClientInvoiceController
             'client' => $client,
             'items' => $this->invoices->items((int) $invoice['id']),
             'transactions' => $this->transactions->forInvoice((int) $invoice['id']),
-            'gateways' => $this->gateways->allEnabled(),
+            // Reseller customers only see gateways the admin left enabled for resellers;
+            // the platform's own clients see every enabled gateway.
+            'gateways' => $this->gateways->allEnabledForClient($client),
             'creditBalance' => $this->credit->balance((int) $client['id']),
             // An invoice that locked a currency displays in it. One that never
             // locked (imported, or created before locking existed) is shown in

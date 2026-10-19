@@ -244,6 +244,19 @@ final class PaymentCallbackController
             return $fail('disabled', $reason);
         }
 
+        // A gateway the admin switched off for reseller customers is not a
+        // payment option on reseller storefronts — and a hand-crafted URL
+        // must not resurrect it here. This is the single choke point both
+        // the redirect and the inline initiators go through, so the check
+        // covers every start-a-payment path. (A payment already in flight
+        // still completes: its callback is verified against the gateway,
+        // not re-authorised against the visibility flag.)
+        if ((int) ($gatewayRow['reseller_enabled'] ?? 1) !== 1 && PaymentGatewayRepository::isResellerClient($client)) {
+            $reason = "Gateway '{$slug}' is not available to reseller customers.";
+            $this->writeGatewayLog($slug, $invoiceId, $clientId, 'DISABLED', $reason);
+            return $fail('disabled', $reason);
+        }
+
         $remaining = round((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice($invoiceId), 2);
 
         if ($remaining <= 0) {
