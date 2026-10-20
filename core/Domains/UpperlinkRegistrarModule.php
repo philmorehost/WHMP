@@ -11,6 +11,15 @@ use CodeVault\Provisioning\HttpClient;
  * Upperlink domain reseller module, built directly from the API spec
  * provided (endpoint, action list, and the exact HMAC auth algorithm).
  *
+ * LIVE FINDING (registration flow): the addon rejects a registration with
+ * "The domain does not have an assigned registrant" unless the request's
+ * `contacts` array is ROLE-KEYED — contacts[registrant][firstname] etc. —
+ * which is the documented contract of the WHMCS "Domains Reseller" addon
+ * Upperlink runs (same shape published by HostAfrica, RouteAfrica and
+ * Hostraha, who run the same addon). The flat contact list the original
+ * spec implied was read as no contacts at all; register()/transfer() now
+ * send the full role-keyed structure.
+ *
  * CONFIDENCE NOTE — read before trusting this in production: the spec
  * given fully documents every REQUEST (endpoint path, HTTP method, param
  * names) and the auth scheme, so those are implemented exactly as
@@ -37,7 +46,7 @@ final class UpperlinkRegistrarModule implements RegistrarModule
         return [
             'name' => 'Upperlink',
             'description' => 'Domain registration/transfer/renewal via the Upperlink reseller API.',
-            'version' => '1.0.0',
+            'version' => '1.1.0',
             'author' => 'CodeVault',
         ];
     }
@@ -52,11 +61,19 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function register(array $params): array
     {
+        // Upperlink runs the WHMCS "Domains Reseller" addon. Its register
+        // action only sees the registrant inside a ROLE-KEYED contacts array
+        // (contacts[registrant][firstname], contacts[registrant][phonenumber],
+        // ...) — the flat field list this module used to send was read as "no
+        // contacts at all", and the API answered every registration with
+        // "The domain does not have an assigned registrant". Same contract is
+        // documented verbatim by other hosts running this addon (HostAfrica,
+        // RouteAfrica, Hostraha).
         $response = $this->post($params['registrar'], '/order/domains/register', [
             'domain' => $params['domain'],
             'regperiod' => (string) ($params['years'] ?? 1),
             'nameservers' => $this->nameserverPayload($params['nameservers'] ?? []),
-            'contacts' => $params['contacts'] ?? [],
+            'contacts' => $this->roleContacts((array) ($params['contacts'] ?? [])),
             'addons' => [
                 'dnsmanagement' => 0,
                 'emailforwarding' => 0,
@@ -69,12 +86,14 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function transfer(array $params): array
     {
+        // A transfer order is assigned a registrant the same way a
+        // registration is — same role-keyed contacts, same field names.
         $response = $this->post($params['registrar'], '/order/domains/transfer', [
             'domain' => $params['domain'],
             'eppcode' => $params['eppCode'] ?? '',
             'regperiod' => (string) ($params['years'] ?? 1),
             'nameservers' => $this->nameserverPayload($params['nameservers'] ?? []),
-            'contacts' => $params['contacts'] ?? [],
+            'contacts' => $this->roleContacts((array) ($params['contacts'] ?? [])),
         ]);
 
         return $this->toResult($response, 'Domain transfer initiated.');
@@ -626,6 +645,77 @@ final class UpperlinkRegistrarModule implements RegistrarModule
         return [
             'username' => $email,
             'token' => base64_encode(hash_hmac('sha256', $apiKey, "{$email}:{$hourKey}")),
+        ];
+    }
+
+    /**
+     * The one registrant contact, in the WHMCS "Domains Reseller" addon's
+     * documented field set: firstname/lastname/fullname/companyname/email/
+     * address1/address2/city/state/postcode/country/phonenumber. DomainService
+     * expands what it passes here so every key exists, but empty profile
+     * fields still arrive as '' — the addon's server-side validators name any
+     * field they reject, which now surfaces verbatim on the domain page
+     * instead of the blanket "no assigned registrant".
+     *
+     * `state` falls back to the city: the addon's validators commonly require
+     * a non-empty state, and Nigerian registrants often only record a city
+     * (e.g. Aba) — leaving state empty would fail a required-text check.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, string>
+     */
+    private function registrantPayload(array $contact): array
+    {
+        $fullName = trim((string) ($contact['name'] ?? ''));
+        $first = trim((string) ($contact['first_name'] ?? ''));
+        $last = trim((string) ($contact['last_name'] ?? ''));
+
+        if ($fullName === '') {
+            $fullName = trim($first . ' ' . $last);
+        }
+
+        if ($fullName !== '' && ($first === '' || $last === '')) {
+            $parts = preg_split('/\s+/', $fullName, 2) ?: [];
+            $first = $parts[0] ?? '';
+            $last = $parts[1] ?? $last;
+        }
+
+        $city = trim((string) ($contact['city'] ?? ''));
+
+        return [
+            'firstname' => $first,
+            'lastname' => $last,
+            'fullname' => $fullName,
+            'companyname' => trim((string) ($contact['company_name'] ?? '')),
+            'email' => trim((string) ($contact['email'] ?? '')),
+            'address1' => trim((string) ($contact['address1'] ?? '')),
+            'address2' => trim((string) ($contact['address2'] ?? '')),
+            'city' => $city,
+            'state' => trim((string) ($contact['state'] ?? '')) !== '' ? trim((string) $contact['state']) : $city,
+            'postcode' => trim((string) ($contact['postcode'] ?? '')),
+            'country' => strtoupper(trim((string) ($contact['country'] ?? ''))),
+            'phonenumber' => trim((string) ($contact['phone'] ?? '')),
+        ];
+    }
+
+    /**
+     * contacts payload in the addon's role-keyed shape. The registrant's own
+     * details fill all four roles — the addon can default admin/tech/billing
+     * from the reseller's WHMCS client, but explicit is deterministic and
+     * matches what the other registrar modules here do.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, array<string, string>>
+     */
+    private function roleContacts(array $contact): array
+    {
+        $registrant = $this->registrantPayload($contact);
+
+        return [
+            'registrant' => $registrant,
+            'admin' => $registrant,
+            'tech' => $registrant,
+            'billing' => $registrant,
         ];
     }
 

@@ -224,4 +224,93 @@ final class UpperlinkRegistrarModuleTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertArrayNotHasKey('status', $result, 'a missing status field must not default to "active"');
     }
+
+    public function test_register_sends_role_keyed_contacts_in_the_addons_documented_field_names(): void
+    {
+        // Live finding: the WHMCS Domains Reseller addon Upperlink runs only
+        // recognises a registrant inside contacts[registrant][...] — the flat
+        // contact list this module used to send was read as none, and the API
+        // answered "The domain does not have an assigned registrant".
+        $this->http->respondWith(200, '{"status":"success"}');
+
+        $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'nameservers' => ['ns1.test', 'ns2.test'],
+            'id_protection' => true,
+            'contacts' => [
+                'name' => 'Chiemela Onugha',
+                'first_name' => 'Chiemela',
+                'last_name' => 'Onugha',
+                'company_name' => '',
+                'email' => 'chiemelaonugha6@gmail.com',
+                'address1' => 'Umuonyengwa Village, Obingwa LGA',
+                'city' => 'Aba',
+                'state' => '',
+                'postcode' => '451011',
+                'country' => 'ng',
+                'phone' => '07031448647',
+            ],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertStringContainsString('/order/domains/register', $this->http->lastRequest()['url']);
+        parse_str((string) $this->http->lastRequest()['body'], $fields);
+
+        foreach (['registrant', 'admin', 'tech', 'billing'] as $role) {
+            $this->assertSame('Chiemela', $fields['contacts'][$role]['firstname'], "{$role} role carries firstname");
+            $this->assertSame('Onugha', $fields['contacts'][$role]['lastname'], "{$role} role carries lastname");
+            $this->assertSame('Chiemela Onugha', $fields['contacts'][$role]['fullname'], "{$role} role carries fullname");
+            $this->assertSame('chiemelaonugha6@gmail.com', $fields['contacts'][$role]['email']);
+            $this->assertSame('Umuonyengwa Village, Obingwa LGA', $fields['contacts'][$role]['address1']);
+            $this->assertSame('Aba', $fields['contacts'][$role]['city']);
+            $this->assertSame('Aba', $fields['contacts'][$role]['state'], 'empty state falls back to the city — the addon validators commonly require one');
+            $this->assertSame('451011', $fields['contacts'][$role]['postcode']);
+            $this->assertSame('NG', $fields['contacts'][$role]['country'], 'country is upper-cased to the ISO alpha-2 the addon expects');
+            $this->assertSame('07031448647', $fields['contacts'][$role]['phonenumber']);
+        }
+
+        $this->assertSame('1', $fields['regperiod']);
+        $this->assertSame('ns1.test', $fields['nameservers']['ns1']);
+        $this->assertSame('ns2.test', $fields['nameservers']['ns2']);
+        $this->assertSame('1', $fields['addons']['idprotection']);
+    }
+
+    public function test_register_derives_first_and_last_name_from_a_combined_name(): void
+    {
+        $this->http->respondWith(200, '{"status":"success"}');
+
+        $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'contacts' => ['name' => 'Ada Lovelace', 'email' => 'ada@example.test'],
+            'registrar' => $this->registrar,
+        ]);
+
+        parse_str((string) $this->http->lastRequest()['body'], $fields);
+        $this->assertSame('Ada', $fields['contacts']['registrant']['firstname']);
+        $this->assertSame('Lovelace', $fields['contacts']['registrant']['lastname']);
+        $this->assertSame('Ada Lovelace', $fields['contacts']['registrant']['fullname']);
+        $this->assertSame('ada@example.test', $fields['contacts']['registrant']['email']);
+    }
+
+    public function test_transfer_carries_the_same_role_keyed_contacts(): void
+    {
+        $this->http->respondWith(200, '{"status":"success"}');
+
+        $this->module->transfer([
+            'domain' => 'movemydomain.com',
+            'eppCode' => 'secret',
+            'years' => 1,
+            'contacts' => ['name' => 'Ada Lovelace', 'email' => 'ada@example.test', 'city' => 'London'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertStringContainsString('/order/domains/transfer', $this->http->lastRequest()['url']);
+        parse_str((string) $this->http->lastRequest()['body'], $fields);
+        $this->assertSame('secret', $fields['eppcode']);
+        $this->assertSame('Ada', $fields['contacts']['registrant']['firstname']);
+        $this->assertSame('billing', array_key_last($fields['contacts']));
+        $this->assertSame('Lovelace', $fields['contacts']['billing']['lastname']);
+    }
 }
