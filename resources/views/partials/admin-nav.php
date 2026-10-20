@@ -42,11 +42,13 @@ $groups = [
         '/admin/products/groups' => 'Product Groups',
         '/admin/products/addons' => 'Product Add-ons',
         '/admin/configurable-options' => 'Configurable Options',
+        '/admin/bulk-pricing' => 'Bulk Price Updates',
         '/admin/import-resellerclub' => 'ResellerClub Import',
     ]],
     'Domains' => ['icon' => 'globe', 'links' => [
         '/admin/domains' => 'Domains',
         '/admin/domain-pricing' => 'Domain Pricing',
+        '/admin/bulk-pricing' => 'Bulk Price Updates',
         '/admin/registrars' => 'Registrars',
     ]],
     'Support' => ['icon' => 'support', 'links' => [
