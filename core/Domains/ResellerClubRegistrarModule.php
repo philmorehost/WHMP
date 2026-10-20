@@ -16,6 +16,12 @@ use CodeVault\Provisioning\HttpClient;
  * (auth-userid/api-key) on every request rather than a signed header,
  * which is genuinely how this API works — not a simplification.
  *
+ * Registration/transfer need a ResellerClub CONTACT id (reg/admin/tech/
+ * billing-contact-id are all mandatory on register.json) — ensureContactId()
+ * reuses a known one, else finds the client's by email, else creates it via
+ * contacts/add.json, so a first-time registration no longer goes out with
+ * empty contact ids the API was guaranteed to reject.
+ *
  * One real gap versus the interface: ResellerClub's API only accepts
  * order-id (its own internal id for a purchased domain), not the domain
  * name, for most account-management calls (nameservers, lock, contacts).
@@ -56,7 +62,14 @@ final class ResellerClubRegistrarModule implements RegistrarModule
     {
         $registrar = $params['registrar'];
         $ns = $this->nameserverPayload($params['nameservers'] ?? []);
-        $contactId = (string) ($params['contacts']['contact_id'] ?? '');
+
+        $contact = $this->ensureContactId($registrar, $params);
+
+        if (!$contact['success']) {
+            return ['success' => false, 'message' => "Could not assign a registrant contact at ResellerClub: {$contact['message']}"];
+        }
+
+        $contactId = $contact['id'];
 
         $query = array_merge([
             'domain-name' => $params['domain'],
@@ -72,13 +85,20 @@ final class ResellerClubRegistrarModule implements RegistrarModule
 
         $response = $this->call($registrar, 'POST', '/domains/register.json', $query);
 
-        return $this->toResult($response, 'Domain registered.');
+        return $this->withContactId($this->toResult($response, 'Domain registered.'), $contact, $params);
     }
 
     public function transfer(array $params): array
     {
         $registrar = $params['registrar'];
-        $contactId = (string) ($params['contacts']['contact_id'] ?? '');
+
+        $contact = $this->ensureContactId($registrar, $params);
+
+        if (!$contact['success']) {
+            return ['success' => false, 'message' => "Could not assign a registrant contact at ResellerClub: {$contact['message']}"];
+        }
+
+        $contactId = $contact['id'];
 
         $response = $this->call($registrar, 'POST', '/domains/transfer.json', [
             'domain-name' => $params['domain'],
@@ -91,7 +111,7 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             'invoice-option' => 'NoInvoice',
         ]);
 
-        return $this->toResult($response, 'Domain transfer initiated.');
+        return $this->withContactId($this->toResult($response, 'Domain transfer initiated.'), $contact, $params);
     }
 
     public function renew(array $params): array
@@ -110,6 +130,145 @@ final class ResellerClubRegistrarModule implements RegistrarModule
         ]);
 
         return $this->toResult($response, 'Domain renewed.');
+    }
+
+    /**
+     * Resolves (reusing first, creating only if needed) the ResellerClub
+     * contact a registration/transfer order must carry as its registrant,
+     * admin, tech and billing contact. ResellerClub's register.json rejects
+     * an order whose contact ids are empty, and there is no way to register
+     * with raw WHOIS fields instead — a contact record under the configured
+     * customer is mandatory.
+     *
+     * Order of preference:
+     *  1. an explicitly supplied `contacts.contact_id` / `registrarContactId`
+     *     (a contact the admin already picked or this module created before);
+     *  2. the client's existing contact at ResellerClub, found by email via
+     *     contacts/search.json (stops a duplicate contact per order);
+     *  3. a fresh contact from the supplied registrant details via
+     *     contacts/add.json — its documented response IS the new contact id.
+     *
+     * @param array<string, mixed> $registrar
+     * @param array<string, mixed> $params
+     * @return array{success: bool, id: string, created: bool, message: string}
+     */
+    private function ensureContactId(array $registrar, array $params): array
+    {
+        $known = trim((string) ($params['registrarContactId'] ?? ($params['contacts']['contact_id'] ?? '')));
+
+        if ($known !== '') {
+            return ['success' => true, 'id' => $known, 'created' => false, 'message' => ''];
+        }
+
+        $customerId = trim((string) ($registrar['customer_id'] ?? ''));
+
+        if ($customerId === '') {
+            return ['success' => false, 'id' => '', 'created' => false, 'message' => 'no Default Customer ID is configured for this registrar — set it under Registrars → ResellerClub → Configure.'];
+        }
+
+        $contact = (array) ($params['contacts'] ?? []);
+        $email = trim((string) ($contact['email'] ?? ''));
+
+        if ($email === '') {
+            return ['success' => false, 'id' => '', 'created' => false, 'message' => 'no registrant contact details (email) were supplied to find or create a contact with.'];
+        }
+
+        $search = $this->decode($this->call($registrar, 'GET', '/contacts/search.json', [
+            'customer-id' => $customerId,
+            'email' => $email,
+            'type' => 'Contact',
+            'no-of-records' => '1',
+            'page-no' => '1',
+        ]));
+
+        if ($search['success']) {
+            $found = $this->firstEntityIdFrom($search['data']);
+
+            if ($found !== null) {
+                return ['success' => true, 'id' => $found, 'created' => true, 'message' => ''];
+            }
+        }
+
+        $phone = preg_replace('/[^0-9]/', '', (string) ($contact['phone'] ?? ''));
+
+        $added = $this->decode($this->call($registrar, 'POST', '/contacts/add.json', array_filter([
+            'name' => (string) ($contact['name'] ?? ''),
+            'company' => (string) ($contact['company_name'] ?? '') ?: 'N/A',
+            'email' => $email,
+            'address-line-1' => (string) ($contact['address1'] ?? ''),
+            'city' => (string) ($contact['city'] ?? ''),
+            'state' => (string) ($contact['state'] ?? '') ?: null,
+            'country' => strtoupper((string) ($contact['country'] ?? '')),
+            'zipcode' => (string) ($contact['postcode'] ?? ''),
+            'phone-cc' => (string) ($contact['phone_cc'] ?? '1'),
+            'phone' => $phone,
+            'customer-id' => $customerId,
+            'type' => 'Contact',
+        ], static fn ($v) => $v !== null)));
+
+        if (!$added['success']) {
+            return ['success' => false, 'id' => '', 'created' => false, 'message' => $added['message']];
+        }
+
+        // contacts/add.json's documented response is the new contact id
+        // itself (a bare integer), not an envelope.
+        $id = $added['data'];
+
+        if (is_array($id)) {
+            $id = reset($id);
+        }
+
+        if (!is_numeric((string) $id) || (string) $id === '') {
+            return ['success' => false, 'id' => '', 'created' => false, 'message' => 'the contact was created but ResellerClub did not return a numeric contact id.'];
+        }
+
+        return ['success' => true, 'id' => (string) $id, 'created' => true, 'message' => ''];
+    }
+
+    /**
+     * First numeric id under an `entityid`-style key in a LogicBoxes search
+     * response — rows are keyed by index and carry dotted keys like
+     * `entity.entityid`, so a shallow look misses it.
+     */
+    private function firstEntityIdFrom(mixed $data): ?string
+    {
+        if (!is_array($data)) {
+            return null;
+        }
+
+        foreach ($data as $key => $value) {
+            if (is_string($key) && str_ends_with($key, 'entityid') && is_numeric($value)) {
+                return (string) $value;
+            }
+
+            if (is_array($value)) {
+                $found = $this->firstEntityIdFrom($value);
+
+                if ($found !== null) {
+                    return $found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Report a newly learned contact id back on a successful result so
+     * DomainService can persist it (domains.registrar_contact_id) and every
+     * later order/contact action reuses the same contact.
+     *
+     * @param array<string, mixed> $result
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function withContactId(array $result, array $contact, array $params): array
+    {
+        if (($result['success'] ?? false) && $contact['id'] !== '' && (string) ($params['registrarContactId'] ?? '') !== $contact['id']) {
+            $result['registrarContactId'] = $contact['id'];
+        }
+
+        return $result;
     }
 
     public function getNameservers(array $params): array

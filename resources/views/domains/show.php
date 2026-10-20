@@ -59,15 +59,66 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
 
 <?php if (!empty($registered)): ?>
     <div class="cv-card" style="background:rgba(16,185,129,0.1);border-color:#10b981;color:#10b981;margin-bottom:var(--cv-space-4);">
-        ✔ Registration submitted to the registrar successfully.
+        ✔ Registration submitted to the registrar successfully — the domain is now active (refresh for the registrar's dates and nameservers).
     </div>
 <?php endif; ?>
 
+<?php $isPendingRegistration = ($domain['status'] ?? '') === 'pending'; ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
-    <h2 class="cv-card__title">Register Domain at Registrar</h2>
-    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);">
-        Re-submit this domain for registration at the selected registrar. Use this when the customer paid but the domain failed to register (see the error above). The optional registrar selection re-points the domain before submitting, so a domain stuck on the wrong registrar can be corrected in one step.
-    </p>
+    <h2 class="cv-card__title"><?= $isPendingRegistration ? '✅ Approve &amp; Register Domain' : 'Register Domain at Registrar' ?></h2>
+    <?php if ($isPendingRegistration): ?>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);">
+            This domain is <strong>pending registration</strong>. Submitting it here sends the order to the registrar's API
+            and activates it immediately (registration &amp; expiry dates, nameservers, renewal billing). This is the same
+            action accepting the domain's order performs — use this page when the order is already paid and you want the
+            domain live now, or to retry after a failed attempt.
+        </p>
+        <?php if (!empty($domain['order_id'])): ?>
+            <p style="font-size:var(--cv-text-xs);">
+                Belongs to order
+                <a href="/admin/orders/<?= (int) $domain['order_id'] ?>"><strong>ORD-<?= (int) $domain['order_id'] ?></strong></a>
+                — accepting that order registers this domain automatically.
+            </p>
+        <?php endif; ?>
+    <?php else: ?>
+        <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);">
+            Re-submit this domain for registration at the selected registrar. Use this when the customer paid but the domain failed to register (see the error above). The optional registrar selection re-points the domain before submitting, so a domain stuck on the wrong registrar can be corrected in one step.
+        </p>
+    <?php endif; ?>
+
+    <?php if (!empty($domain['provisioning_error'])): ?>
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:6px;padding:var(--cv-space-2) var(--cv-space-3);margin-bottom:var(--cv-space-3);font-size:var(--cv-text-xs);color:#ef4444;">
+            <strong>Last registration error:</strong> <?= e((string) $domain['provisioning_error']) ?>
+        </div>
+    <?php endif; ?>
+
+    <div style="background:var(--cv-bg-secondary, rgba(127,127,127,0.06));border:1px solid var(--cv-border-color, rgba(127,127,127,0.25));border-radius:6px;padding:var(--cv-space-2) var(--cv-space-3);margin-bottom:var(--cv-space-3);font-size:var(--cv-text-xs);">
+        <strong>Registrant on file</strong> (submitted to the registrar with the order):<br>
+        <?php $registrantName = trim((string) ($registrant['name'] ?? '')); ?>
+        <?php if ($registrantName === '' && trim((string) ($registrant['email'] ?? '')) === ''): ?>
+            <span style="color:var(--cv-text-secondary);">Nothing on file yet — it will be taken from the client's profile.</span>
+        <?php else: ?>
+            <?= e($registrantName) ?>
+            <?php if (trim((string) ($registrant['company_name'] ?? '')) !== ''): ?> · <?= e((string) $registrant['company_name']) ?><?php endif; ?>
+            &lt;<?= e((string) ($registrant['email'] ?? '')) ?>&gt;<br>
+            <?= e(trim((string) ($registrant['address1'] ?? ''))) ?>
+            <?php if (trim((string) ($registrant['city'] ?? '')) !== ''): ?>, <?= e((string) $registrant['city']) ?><?php endif; ?>
+            <?php if (trim((string) ($registrant['state'] ?? '')) !== ''): ?>, <?= e((string) $registrant['state']) ?><?php endif; ?>
+            <?php if (trim((string) ($registrant['postcode'] ?? '')) !== ''): ?> <?= e((string) $registrant['postcode']) ?><?php endif; ?>
+            <?php if (trim((string) ($registrant['country'] ?? '')) !== ''): ?> · <?= e((string) $registrant['country']) ?><?php endif; ?>
+            <?php if (trim((string) ($registrant['phone'] ?? '')) !== ''): ?> · <?= e((string) $registrant['phone']) ?><?php endif; ?>
+            &middot;
+            <a href="/admin/domains/<?= $id ?>/contact">edit on the Contact page</a>
+        <?php endif; ?>
+        <?php if (!empty($registrantMissing)): ?>
+            <div style="color:#ef4444;margin-top:6px;">
+                <strong>Cannot be submitted yet:</strong> the registrant is missing
+                <?= e(implode(', ', $registrantMissing)) ?>. Fill them in (Contact page or the client's profile) —
+                registrars reject orders whose registrant contact is incomplete or unassigned.
+            </div>
+        <?php endif; ?>
+    </div>
+
     <form method="post" action="/admin/domains/<?= $id ?>/register"><?= csrf_field() ?>
         <div style="display:flex;gap:var(--cv-space-3);align-items:flex-end;flex-wrap:wrap;">
             <div class="cv-field" style="margin:0;flex:1;min-width:240px;">
@@ -88,7 +139,7 @@ $ns = json_decode((string) ($domain['nameservers'] ?? '[]'), true) ?: [];
                     <?php endfor; ?>
                 </select>
             </div>
-            <button class="cv-btn" type="submit" onclick="return confirm('Submit this domain for registration at the selected registrar now?')">Register Domain</button>
+            <button class="cv-btn" type="submit" onclick="return confirm('Submit this domain for registration at the selected registrar now?')"><?= $isPendingRegistration ? 'Approve &amp; Register' : 'Register Domain' ?></button>
         </div>
     </form>
 </div>

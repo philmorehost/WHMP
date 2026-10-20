@@ -300,6 +300,14 @@ $money = static fn (float $amount): string => $currency['symbol'] . number_forma
                 <span>Back to Invoices</span>
             </a>
             <h1 class="admin-invoice-hero__title">Invoice INV-<?= (int) $invoice['id'] ?></h1>
+            <?php if (!empty($invoice['order_id'])): ?>
+                <?php // The invoice lives on an order: after paying, provisioning/registration happens when that ORDER is accepted — make the next step one click away. ?>
+                <p style="margin:4px 0 0;font-size:.85rem;color:var(--cv-text-secondary);">
+                    Order:
+                    <a href="/admin/orders/<?= (int) $invoice['order_id'] ?>" style="color:inherit;text-decoration:underline;"><strong>ORD-<?= (int) $invoice['order_id'] ?></strong></a>
+                    — accept the order (Orders → Pending) to provision services and register pending domains.
+                </p>
+            <?php endif; ?>
             <p style="margin:8px 0 0 0; color:rgba(255,255,255,.7);">
                 Status:
                 <?php

@@ -185,6 +185,11 @@ final class DomainService
             'registrar' => $config,
             'client' => $client ?? [],
             'registrarClientId' => $client['registrar_client_id'] ?? null,
+            // The registrant-contact id this domain already has at the
+            // registrar (null on a first registration) — modules reuse it
+            // instead of creating a duplicate contact, and report a newly
+            // resolved one back for persistence below.
+            'registrarContactId' => $domain['registrar_contact_id'] ?? null,
             'nameservers' => $nameservers,
             'contacts' => $contact,
         ]);
@@ -201,6 +206,13 @@ final class DomainService
         // reuses it instead of creating a duplicate customer.
         if (isset($result['registrarClientId']) && $client !== null) {
             $this->clients->updateRegistrarClientId((int) $client['id'], (string) $result['registrarClientId']);
+        }
+
+        // A contact id the module resolved (looked up or created while
+        // assigning the registrant) is persisted the same way, so the next
+        // registration/save/edit for this domain reuses that exact contact.
+        if (isset($result['registrarContactId'])) {
+            $this->domains->updateContactId($domainId, (string) $result['registrarContactId']);
         }
 
         $registrationDate = $result['registrationDate'] ?? date('Y-m-d');
@@ -544,6 +556,52 @@ final class DomainService
      *        to use as the registrant ("on behalf of"), or null for a custom
      *        contact carried in $contact.
      */
+    /**
+     * The registrant a register() call would actually submit for this domain
+     * (saved contact_data, else the owning client's own details), plus the
+     * required fields that are empty. Admin surfaces use this to warn BEFORE
+     * the registrar rejects the order for an incomplete registrant — the
+     * failure mode every registrar has, phrased differently each time.
+     *
+     * @return array{contact: array<string, string>, missing: array<int, string>}
+     */
+    public function registrantForDomain(int $domainId): array
+    {
+        [$domain, , , $error] = $this->context($domainId);
+
+        if ($error !== null) {
+            return ['contact' => [], 'missing' => []];
+        }
+
+        $client = $this->clients->find((int) $domain['client_id']);
+        $contact = $this->decodeContact($domain['contact_data'] ?? null);
+
+        if ($contact === []) {
+            $contact = $this->contactFromClient($client ?? []);
+        }
+
+        $contact = $this->expandContactForRegistrar($contact);
+
+        $missing = [];
+        $labels = [
+            'name' => 'name',
+            'email' => 'email address',
+            'address1' => 'address',
+            'city' => 'city',
+            'postcode' => 'ZIP/postal code',
+            'country' => 'country',
+            'phone' => 'phone number',
+        ];
+
+        foreach ($labels as $key => $label) {
+            if (trim((string) ($contact[$key] ?? '')) === '') {
+                $missing[] = $label;
+            }
+        }
+
+        return ['contact' => $contact, 'missing' => $missing];
+    }
+
     public function saveContactInfo(int $domainId, array $contact, ?int $contactId = null): array
     {
         [$domain, $module, $config, $error] = $this->context($domainId);

@@ -557,4 +557,141 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertArrayNotHasKey('status', $result, 'a missing Status field (momentary API hiccup) must not be treated as "pending"');
     }
+
+    public function test_register_assigns_the_clients_existing_registrant_contact_found_by_email(): void
+    {
+        // One body serves all three calls: registrantsearchlist reads
+        // records[0].registrantContactId, domainorder reads creationDate/
+        // expiryDate, ViewDomain reads domainNameId.
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"records":[{"registrantContactId":9001}],"creationDate":"2026-01-01","expiryDate":"2028-01-01","domainNameId":555}}');
+
+        $result = $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'client' => ['email' => 'buyer@example.test'],
+            'registrarClientId' => '42',
+            'contacts' => ['name' => 'Buyer Person', 'email' => 'buyer@example.test', 'address1' => '1 Street', 'city' => 'Lagos', 'state' => 'Lagos', 'postcode' => '100001', 'country' => 'NG', 'phone' => '08012345678'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertCount(3, $this->http->requests, 'registrantsearchlist, domainorder, ViewDomain');
+
+        $search = $this->http->requests[0]['url'];
+        $this->assertStringContainsString('/registrantsearchlist?', $search);
+        $this->assertStringContainsString('clientId=42', $search);
+        $this->assertStringContainsString('searchQuery=buyer%40example.test', $search);
+
+        $order = $this->http->requests[1]['url'];
+        $this->assertStringContainsString('/domainorder?', $order);
+        $this->assertStringContainsString('Id=42', $order);
+        $this->assertStringContainsString('RegistrantContactId=9001', $order, 'the order must carry the registrant contact — without it the registrar answers "The domain does not have assigned registrant"');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('9001', $result['registrarContactId']);
+    }
+
+    public function test_register_creates_a_registrant_contact_when_the_client_has_none_yet(): void
+    {
+        $hit = '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"records":[{"registrantContactId":9002}],"creationDate":"2026-01-01","expiryDate":"2028-01-01","domainNameId":555}}';
+
+        $this->http->respondInSequence([
+            // registrantsearchlist — no contact for this email yet.
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"records":[]}}'],
+            // AddRegistrantContact — never returns the ID it created.
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":null}'],
+            // registrantsearchlist — read the new ID back.
+            ['status' => 200, 'body' => $hit],
+            // domainorder, then ViewDomain.
+            ['status' => 200, 'body' => $hit],
+            ['status' => 200, 'body' => $hit],
+        ]);
+
+        $result = $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'client' => ['email' => 'buyer@example.test'],
+            'registrarClientId' => '42',
+            'contacts' => ['name' => 'Buyer Person', 'email' => 'buyer@example.test', 'address1' => '1 Street', 'city' => 'Lagos', 'state' => 'Lagos', 'postcode' => '100001', 'country' => 'NG', 'phone' => '08012345678'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertCount(5, $this->http->requests, 'search (miss), AddRegistrantContact, search (hit), domainorder, ViewDomain');
+
+        $add = $this->http->requests[1]['url'];
+        $this->assertStringContainsString('/AddRegistrantContact?', $add);
+        $this->assertStringContainsString('Id=42', $add);
+        $this->assertStringContainsString('EmailAddress=buyer%40example.test', $add);
+        $this->assertStringContainsString('Name=Buyer+Person', $add);
+
+        $this->assertStringContainsString('RegistrantContactId=9002', $this->http->requests[3]['url']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('9002', $result['registrarContactId'], 'the newly created contact id is reported back so the domain row can be linked');
+    }
+
+    public function test_register_fails_without_placing_the_order_when_the_registrant_contact_cannot_be_created(): void
+    {
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"records":[]}}'],
+            ['status' => 200, 'body' => '{"responseMsg":{"message":"Invalid address","statusCode":400},"responseData":null}'],
+        ]);
+
+        $result = $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'client' => ['email' => 'buyer@example.test'],
+            'registrarClientId' => '42',
+            'contacts' => ['name' => 'Buyer Person', 'email' => 'buyer@example.test'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Could not assign a registrant contact', $result['message']);
+        $this->assertStringContainsString('Invalid address', $result['message']);
+
+        $urls = array_column($this->http->requests, 'url');
+        $this->assertSame([], array_values(array_filter($urls, static fn (string $u): bool => str_contains($u, '/domainorder?'))), 'a rejected registrant must stop the order before it is placed');
+    }
+
+    public function test_register_reuses_a_saved_registrant_contact_id_without_searching_or_creating(): void
+    {
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"creationDate":"2026-01-01","expiryDate":"2028-01-01","domainNameId":555}}');
+
+        $result = $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'client' => ['email' => 'buyer@example.test'],
+            'registrarClientId' => '42',
+            'registrarContactId' => '9003',
+            'contacts' => ['name' => 'Buyer Person', 'email' => 'buyer@example.test'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertCount(2, $this->http->requests, 'domainorder + ViewDomain only — no search, no create');
+        $this->assertStringContainsString('RegistrantContactId=9003', $this->http->requests[0]['url']);
+        $this->assertTrue($result['success']);
+        $this->assertSame('9003', $result['registrarContactId']);
+    }
+
+    public function test_transfer_assigns_the_registrant_contact_to_the_transfer_order(): void
+    {
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Success","statusCode":200},"responseData":{"records":[{"registrantContactId":9001}]}}');
+
+        $result = $this->module->transfer([
+            'domain' => 'movemydomain.com',
+            'eppCode' => 'secret',
+            'id_protection' => false,
+            'client' => ['email' => 'buyer@example.test'],
+            'registrarClientId' => '42',
+            'contacts' => ['name' => 'Buyer Person', 'email' => 'buyer@example.test'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertCount(2, $this->http->requests, 'registrantsearchlist, TransferOrder');
+        $this->assertStringContainsString('/TransferOrder?', $this->http->requests[1]['url']);
+        $this->assertStringContainsString('Id=42', $this->http->requests[1]['url']);
+        $this->assertStringContainsString('RegistrantContactId=9001', $this->http->requests[1]['url']);
+        $this->assertTrue($result['success']);
+        $this->assertSame('9001', $result['registrarContactId']);
+    }
 }

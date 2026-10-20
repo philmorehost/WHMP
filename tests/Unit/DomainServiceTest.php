@@ -536,4 +536,56 @@ final class DomainServiceTest extends DatabaseTestCase
         $this->assertSame('Owner', $contacts['last_name']);
         $this->assertSame('domainowner@example.test', $contacts['email']);
     }
+
+    public function test_register_passes_the_saved_registrar_contact_id_and_persists_a_newly_learned_one(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('register', ['success' => true, 'message' => 'ok', 'registrarContactId' => '4242']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('fakecontact.test');
+
+        $service->register($domainId, 1);
+
+        // First registration: no contact id known yet, and the module's
+        // answer is persisted onto the domain row (same treatment as the
+        // registrar's customer id).
+        $this->assertNull($fake->lastCall('register')['registrarContactId']);
+        $this->assertSame('4242', $this->domains->find($domainId)['registrar_contact_id']);
+
+        // A later registration passes the saved id back so the module reuses
+        // that exact contact instead of creating a duplicate.
+        $service->register($domainId, 1);
+        $this->assertSame('4242', $fake->lastCall('register')['registrarContactId']);
+    }
+
+    public function test_registrant_for_domain_reports_the_effective_registrant_and_its_missing_fields(): void
+    {
+        $domainId = $this->createPendingDomain('regcheck.test');
+
+        // The setUp client has only names + email — the profile fields a
+        // registrar needs are empty and must be reported as missing.
+        $result = $this->service->registrantForDomain($domainId);
+        $this->assertSame('Domain Owner', $result['contact']['name']);
+        $this->assertSame('domainowner@example.test', $result['contact']['email']);
+        $this->assertContains('address', $result['missing']);
+        $this->assertContains('city', $result['missing']);
+        $this->assertContains('ZIP/postal code', $result['missing']);
+        $this->assertContains('country', $result['missing']);
+        $this->assertContains('phone number', $result['missing']);
+
+        // A saved per-domain contact wins over the client profile and leaves
+        // nothing missing.
+        $this->domains->updateContactData($domainId, [
+            'name' => 'Ada Lovelace',
+            'email' => 'ada@example.test',
+            'address1' => '1 Analytical Way',
+            'city' => 'London',
+            'postcode' => 'W1',
+            'country' => 'GB',
+            'phone' => '+442012345678',
+        ]);
+
+        $result = $this->service->registrantForDomain($domainId);
+        $this->assertSame('Ada Lovelace', $result['contact']['name']);
+        $this->assertSame([], $result['missing']);
+    }
 }

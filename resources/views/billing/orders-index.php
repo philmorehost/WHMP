@@ -353,6 +353,12 @@
                                 <span class="admin-orders-badge admin-orders-badge--fraud">Fraud</span>
                             <?php else: ?>
                                 <span class="admin-orders-badge admin-orders-badge--pending">Pending</span>
+                                <?php $pendingDomains = (int) ($pendingDomainsByOrder[(int) $order['id']] ?? 0); ?>
+                                <?php if ($pendingDomains > 0): ?>
+                                    <div style="margin-top:6px;font-size:.72rem;color:var(--cv-text-secondary);">
+                                        🌐 <?= $pendingDomains ?> domain registration<?= $pendingDomains > 1 ? 's' : '' ?> — approving registers <?= $pendingDomains > 1 ? 'them' : 'it' ?> at the registrar
+                                    </div>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </td>
                         <td>
