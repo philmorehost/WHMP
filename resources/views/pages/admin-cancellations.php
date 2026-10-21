@@ -113,6 +113,13 @@ $tabs = ['pending' => '⏳ Pending', 'approved' => '✓ Approved', 'rejected' =>
                                     <button type="submit" class="cv-btn" style="background:#22c55e;color:#fff;border:none;padding:6px 12px;font-size:.75rem;">✓ Approve</button>
                                 </form>
 
+                                <?php if (($req['cancellation_type'] ?? '') === 'due_date'): ?>
+                                    <form method="post" action="/admin/cancellations/<?= (int) $req['id'] ?>/switch-immediate" style="display:inline;margin-right:6px;">
+                                        <?= csrf_field() ?>
+                                        <button type="submit" class="cv-btn" style="background:#d97706;color:#fff;border:none;padding:6px 12px;font-size:.75rem;" data-confirm="Change this cancellation to IMMEDIATE? The service will be cancelled right now instead of at the end of the billing period.">⚡ Cancel Immediately Instead</button>
+                                    </form>
+                                <?php endif; ?>
+
                                 <details style="display:inline-block;vertical-align:middle;">
                                     <summary style="display:inline-block;cursor:pointer;padding:6px 12px;background:#ef4444;color:#fff;border-radius:6px;font-weight:600;font-size:.75rem;border:none;list-style:none;">✕ Reject</summary>
                                     <form method="post" action="/admin/cancellations/<?= (int) $req['id'] ?>/reject" style="margin-top:8px;padding:12px;border:1px solid var(--cv-border-default);border-radius:8px;background:var(--cv-bg-surface-sunken);max-width:280px;">
@@ -126,6 +133,12 @@ $tabs = ['pending' => '⏳ Pending', 'approved' => '✓ Approved', 'rejected' =>
                                 <form method="post" action="/admin/cancellations/<?= (int) $req['id'] ?>/complete" style="display:inline;">
                                     <?= csrf_field() ?>
                                     <button type="submit" class="cv-btn" style="background:#8b5cf6;color:#fff;border:none;padding:6px 12px;font-size:.75rem;" data-confirm="Mark this cancellation request as completed?">✔ Mark Completed</button>
+                                </form>
+                            <?php elseif (($req['status'] ?? '') === 'approved' && ($req['cancellation_type'] ?? '') === 'due_date'): ?>
+                                <?php // Approved and still waiting for its scheduled date — the admin can still retiming it to NOW. ?>
+                                <form method="post" action="/admin/cancellations/<?= (int) $req['id'] ?>/switch-immediate" style="display:inline;">
+                                    <?= csrf_field() ?>
+                                    <button type="submit" class="cv-btn" style="background:#d97706;color:#fff;border:none;padding:6px 12px;font-size:.75rem;" data-confirm="Change this approved cancellation to IMMEDIATE? The service will be cancelled right now instead of on its scheduled date.">⚡ Cancel Immediately Instead</button>
                                 </form>
                             <?php else: ?>
                                 <span style="color:var(--cv-text-tertiary);font-size:var(--cv-text-xs);">—</span>

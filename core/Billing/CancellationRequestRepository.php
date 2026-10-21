@@ -124,6 +124,23 @@ final class CancellationRequestRepository
         return (int) ($result['count'] ?? 0);
     }
 
+    /**
+     * Change a request's cancellation mode after it was recorded — the
+     * storage half of the admin's "switch between immediate and end of
+     * billing period" control. Both type columns are kept in step exactly
+     * the way create() normalises them.
+     */
+    public function updateType(int $id, string $type): void
+    {
+        $cancellationType = $type === 'immediate' ? 'immediate' : 'due_date';
+        $typeColumn = $type === 'immediate' ? 'immediate' : 'end_of_period';
+
+        $this->db->update(
+            'UPDATE cancellation_requests SET cancellation_type = ?, type = ?, updated_at = NOW() WHERE id = ?',
+            [$cancellationType, $typeColumn, $id]
+        );
+    }
+
     public function approve(int $id, int $adminId, ?string $notes = null): void
     {
         $this->db->update(

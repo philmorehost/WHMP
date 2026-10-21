@@ -204,4 +204,95 @@ final class CancellationApprovalTest extends DatabaseTestCase
         $this->assertSame('cancelled', $invoice['status']);
         $this->assertSame('active', $this->services->find($serviceId)['status']);
     }
+
+    public function test_switching_a_pending_request_to_immediate_cancels_now_and_completes(): void
+    {
+        $nextDue = (new DateTimeImmutable('+30 days'))->format('Y-m-d');
+        $serviceId = $this->createService('active', $nextDue);
+        $invoiceId = $this->createUnpaidInvoice($serviceId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'Moving on', $this->clientId, $nextDue);
+
+        $result = $this->service->switchToImmediate($requestId, $this->adminId, 'Client asked to end it now');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('completed', $result['status']);
+        $this->assertSame('cancelled', $this->services->find($serviceId)['status'], 'the service ends NOW, not at the scheduled date');
+
+        $request = $this->cancellations->findById($requestId);
+        $this->assertSame('completed', $request['status']);
+        $this->assertSame('immediate', $request['cancellation_type'], 'the stored option is flipped to immediate');
+        $this->assertSame($this->adminId, (int) $request['reviewed_by'], 'the switching admin is recorded as the reviewer');
+        $this->assertSame('Client asked to end it now', $request['admin_notes']);
+
+        $invoice = (new InvoiceRepository($this->db))->find($invoiceId);
+        $this->assertSame('cancelled', $invoice['status'], 'billing stops on the switched cancellation');
+    }
+
+    public function test_switching_an_approved_request_to_immediate_cancels_before_its_date(): void
+    {
+        $future = (new DateTimeImmutable('+45 days'))->format('Y-m-d');
+        $serviceId = $this->createService('active', $future);
+        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'End of contract', $this->clientId, $future);
+        $this->cancellations->approve($requestId, $this->adminId, 'Ok');
+
+        $result = $this->service->switchToImmediate($requestId, $this->adminId);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('completed', $result['status']);
+        $this->assertSame('cancelled', $this->services->find($serviceId)['status'], 'approved but not yet due — the switch cancels it now');
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+    }
+
+    public function test_a_completed_request_cannot_be_switched(): void
+    {
+        $serviceId = $this->createService('cancelled');
+        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'Done');
+        $this->cancellations->approve($requestId, $this->adminId);
+        $this->cancellations->markCompleted($requestId);
+
+        $result = $this->service->switchToImmediate($requestId, $this->adminId);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('completed', $result['status']);
+        $this->assertStringContainsString('already been carried out or withdrawn', $result['message']);
+    }
+
+    public function test_switching_marks_completed_when_the_service_is_already_cancelled(): void
+    {
+        $nextDue = (new DateTimeImmutable('+30 days'))->format('Y-m-d');
+        $serviceId = $this->createService('cancelled', $nextDue);
+        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'Pending', $this->clientId, $nextDue);
+
+        $result = $this->service->switchToImmediate($requestId, $this->adminId);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('completed', $result['status']);
+        $this->assertStringContainsString('already cancelled', $result['message']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+    }
+
+    public function test_switching_an_immediate_request_is_refused_as_a_no_op(): void
+    {
+        $serviceId = $this->createService('active');
+        $requestId = $this->cancellations->createRequest($serviceId, 'immediate', 'Leaving');
+
+        $result = $this->service->switchToImmediate($requestId, $this->adminId);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('already set to cancel immediately', $result['message']);
+        $this->assertSame('active', $this->services->find($serviceId)['status'], 'a refused switch must not touch the service');
+    }
+
+    public function test_client_immediate_option_via_the_request_endpoint_cancels_without_a_pending_record(): void
+    {
+        $serviceId = $this->createService('active');
+        $invoiceId = $this->createUnpaidInvoice($serviceId);
+
+        $requestId = $this->service->clientRequestsCancellation($serviceId, $this->clientId, 'immediate', 'Ending now');
+
+        $this->assertSame(0, $requestId, 'an immediate client cancel completes instantly — no pending request to approve');
+        $this->assertSame('cancelled', $this->services->find($serviceId)['status']);
+        $this->assertSame('cancelled', (new InvoiceRepository($this->db))->find($invoiceId)['status']);
+        $this->assertNull($this->cancellations->findPendingForService($serviceId));
+    }
 }

@@ -29,6 +29,7 @@ $router->get('/admin/cancellations', [CancellationRequestsController::class, 'ad
 $router->post('/admin/cancellations/{id}/approve', [CancellationRequestsController::class, 'adminApprove']);
 $router->post('/admin/cancellations/{id}/complete', [CancellationRequestsController::class, 'adminComplete']);
 $router->post('/admin/cancellations/{id}/reject', [CancellationRequestsController::class, 'adminReject']);
+$router->post('/admin/cancellations/{id}/switch-immediate', [CancellationRequestsController::class, 'adminSwitchImmediate']);
 
 $router->post('/client/services/{id}/cancel-request', [CancellationRequestsController::class, 'clientCreate']);
 

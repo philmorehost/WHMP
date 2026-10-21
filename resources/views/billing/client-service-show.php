@@ -537,12 +537,27 @@ $cpanelTabs = [
                     <?php endif; ?>
 
                     <?php if (!in_array($service['status'], ['cancelled', 'terminated'], true) && $pendingCancellation === null): ?>
-                        <form method="post" action="/client/services/<?= $id ?>/cancel-request" style="margin:0;" data-confirm="Are you sure you want to request cancellation for this service?">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="type" value="end_of_period">
-                            <input type="hidden" name="reason" value="Requested from client portal">
-                            <button class="svc-btn svc-btn--danger" type="submit">❌ Request Cancellation</button>
-                        </form>
+                        <details style="display:inline-block;vertical-align:middle;">
+                            <summary class="svc-btn svc-btn--danger" style="display:inline-block;list-style:none;cursor:pointer;">❌ Cancel Service</summary>
+                            <div style="margin-top:10px;padding:14px;border:1px solid rgba(239,68,68,.35);border-radius:10px;background:rgba(239,68,68,.06);max-width:420px;text-align:left;">
+                                <p style="margin:0 0 10px 0;font-size:.8rem;font-weight:700;">Choose how you want to cancel:</p>
+                                <form method="post" action="/client/services/<?= $id ?>/cancel-request" id="inline-cancel-form" data-confirm="Are you sure you want to request cancellation for this service?">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="reason" value="Requested from client portal">
+                                    <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-bottom:8px;font-size:.82rem;">
+                                        <input type="radio" name="type" value="immediate" style="margin-top:2px;">
+                                        <span><strong>⚡ Cancel immediately</strong><br>
+                                        <span style="color:var(--cv-text-secondary);font-size:.75rem;">The service ends right now and is removed from your account. Any unused time is not refunded.</span></span>
+                                    </label>
+                                    <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-bottom:10px;font-size:.82rem;">
+                                        <input type="radio" name="type" value="end_of_period" checked style="margin-top:2px;">
+                                        <span><strong>📅 Cancel at the end of the billing period</strong><?php if (!empty($service['next_due_date'])): ?> (<?= e((string) $service['next_due_date']) ?>)<?php endif; ?><br>
+                                        <span style="color:var(--cv-text-secondary);font-size:.75rem;">Keep the service you've already paid for until the period ends — it will not renew afterwards.</span></span>
+                                    </label>
+                                    <button class="svc-btn svc-btn--danger" type="submit" style="width:100%;">Confirm Cancellation</button>
+                                </form>
+                            </div>
+                        </details>
                     <?php endif; ?>
 
                     <a class="svc-btn svc-btn--secondary" href="/client/services">← Back to My Services</a>

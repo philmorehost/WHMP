@@ -160,6 +160,72 @@ final class CancellationRequestService
         ];
     }
 
+    /**
+     * Change a cancellation's option to take effect IMMEDIATELY instead of
+     * at the end of the billing period — the admin-side switch, usable both
+     * BEFORE approval (a pending end-of-period request) and AFTER it (an
+     * approved request still waiting for its scheduled date). The service is
+     * cancelled now, the request is marked completed, and client + admins
+     * are notified exactly as an approved immediate cancellation is.
+     *
+     * A completed or rejected request is not switchable — the cancellation
+     * has already been carried out (or withdrawn), so there is nothing left
+     * to retime.
+     *
+     * @return array{success: bool, message: string, status: string}
+     */
+    public function switchToImmediate(int $requestId, int $adminId, ?string $notes = null): array
+    {
+        $request = $this->cancellations->findById($requestId);
+
+        if ($request === null) {
+            return ['success' => false, 'message' => 'Cancellation request not found.', 'status' => 'unknown'];
+        }
+
+        $status = (string) ($request['status'] ?? '');
+
+        if (!in_array($status, ['pending', 'approved'], true)) {
+            return ['success' => false, 'message' => "A {$status} cancellation cannot be switched — it has already been carried out or withdrawn.", 'status' => $status];
+        }
+
+        if (($request['cancellation_type'] ?? '') === 'immediate') {
+            return ['success' => false, 'message' => 'This request is already set to cancel immediately.', 'status' => $status];
+        }
+
+        $serviceId = (int) $request['service_id'];
+        $service = $this->services->findById($serviceId);
+
+        if ($service !== null && in_array((string) $service['status'], ['cancelled', 'terminated'], true)) {
+            // The service is already gone — just finish the record honestly.
+            $this->cancellations->approve($requestId, $adminId, $notes);
+            $this->cancellations->markCompleted($requestId);
+
+            return ['success' => true, 'message' => 'The service was already cancelled — the request was marked completed.', 'status' => 'completed'];
+        }
+
+        // Flip the stored option, approve if it was still pending (records
+        // reviewer + notes), then run the same path an approved immediate
+        // cancellation takes: cancel now, complete, notify.
+        $this->cancellations->updateType($requestId, 'immediate');
+
+        if ($status === 'pending') {
+            $this->cancellations->approve($requestId, $adminId, $notes);
+        }
+
+        $cancelled = $this->cancelService($serviceId);
+        $this->cancellations->markCompleted($requestId);
+        $this->notifyClientOfApproval((int) ($request['client_id'] ?? 0), $serviceId);
+        $this->notifyAdminsOfCancellationCompleted($serviceId, 'Immediate', 'completed', (string) ($request['reason'] ?? ''));
+
+        return [
+            'success' => true,
+            'message' => $cancelled
+                ? 'Changed to immediate — the service was cancelled now and the request completed.'
+                : 'Changed to immediate, but the service could not be cancelled automatically — please review it from the service page.',
+            'status' => 'completed',
+        ];
+    }
+
     public function rejectCancellation(int $requestId, int $adminId, string $notes): void
     {
         $request = $this->cancellations->findById($requestId);
