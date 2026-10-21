@@ -18,6 +18,7 @@ use CodeVault\Hooks\HookDispatcher;
 use CodeVault\Mail\Mailer;
 use CodeVault\Modules\ModuleManager;
 use CodeVault\Modules\ProvisioningModule;
+use CodeVault\Provisioning\LinksRemoteServices;
 use CodeVault\Provisioning\LocalProvisioningModule;
 use CodeVault\Provisioning\ProvisioningService;
 use CodeVault\Provisioning\ServerRepository;
@@ -39,6 +40,7 @@ final class CancellationApprovalTest extends DatabaseTestCase
     private int $clientId;
     private int $adminId;
     private int $productId;
+    private FakeRemoteCancellationModule $remote;
     /** @var array<int, array{to: string, subject: string, html: string}> */
     private array $sentMails = [];
 
@@ -71,6 +73,9 @@ final class CancellationApprovalTest extends DatabaseTestCase
         $hooks = new HookDispatcher();
         $modules = new ModuleManager($hooks);
         $modules->register(ProvisioningModule::class, 'local', $localModule);
+        $this->remote = new FakeRemoteCancellationModule();
+        $modules->register(ProvisioningModule::class, 'interserver-vps', $this->remote);
+        $modules->register(ProvisioningModule::class, 'interserver-dedicated', $this->remote);
         $provisioning = new ProvisioningService($this->services, new ProductRepository($this->db), $servers, $modules, $hooks);
 
         $this->service = new CancellationRequestService(
@@ -98,14 +103,24 @@ final class CancellationApprovalTest extends DatabaseTestCase
         ]);
     }
 
-    private function createService(string $status, ?string $nextDueDate = '2026-12-31'): int
+    private function createService(string $status, ?string $nextDueDate = '2026-12-31', ?int $serverId = null): int
     {
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
 
         return (int) $this->db->insert(
-            'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$this->clientId, $this->productId, 'Hosting Plan', 'monthly', 10.00, $status, $nextDueDate, $now, $now]
+            'INSERT INTO services (client_id, product_id, product_name, billing_cycle, amount, status, next_due_date, server_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$this->clientId, $this->productId, 'Hosting Plan', 'monthly', 10.00, $status, $nextDueDate, $serverId, $now, $now]
         );
+    }
+
+    private function createServer(string $slug): int
+    {
+        return (new ServerRepository($this->db))->create([
+            'name' => 'Remote ' . $slug,
+            'hostname' => 'remote.example.test',
+            'module_slug' => $slug,
+            'api_token' => 'KEY',
+        ]);
     }
 
     private function createUnpaidInvoice(int $serviceId, float $amount = 10.0): int
@@ -294,5 +309,161 @@ final class CancellationApprovalTest extends DatabaseTestCase
         $this->assertSame('cancelled', $this->services->find($serviceId)['status']);
         $this->assertSame('cancelled', (new InvoiceRepository($this->db))->find($invoiceId)['status']);
         $this->assertNull($this->cancellations->findPendingForService($serviceId));
+    }
+
+    public function test_approving_a_vps_cancellation_cancels_it_through_the_provider_api(): void
+    {
+        $serverId = $this->createServer('interserver-vps');
+        $serviceId = $this->createService('active', '2026-12-31', $serverId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'immediate', 'Leaving');
+
+        $result = $this->service->approveCancellation($requestId, $this->adminId);
+
+        $this->assertTrue($result['success']);
+        $this->assertCount(1, $this->remote->terminateCalls);
+        $this->assertSame('KEY', $this->remote->terminateCalls[0]['server']['api_token']);
+        $this->assertSame('terminated', $this->services->find($serviceId)['status']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+    }
+
+    public function test_scheduled_vps_cancellation_is_sent_to_the_api_when_its_date_arrives(): void
+    {
+        $serverId = $this->createServer('interserver-vps');
+        $serviceId = $this->createService('active', '2026-12-31', $serverId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'End of contract', $this->clientId, '2026-12-31');
+
+        $this->service->approveCancellation($requestId, $this->adminId);
+        $this->assertCount(0, $this->remote->terminateCalls);
+        $this->assertSame('active', $this->services->find($serviceId)['status']);
+
+        $this->db->update('UPDATE cancellation_requests SET cancel_date = ? WHERE id = ?', ['2026-01-01', $requestId]);
+        $this->service->processDueCancellations();
+
+        $this->assertCount(1, $this->remote->terminateCalls);
+        $this->assertSame('terminated', $this->services->find($serviceId)['status']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+    }
+
+    public function test_a_failed_provider_cancellation_completes_but_alerts_the_admins(): void
+    {
+        $this->remote->terminateSucceeds = false;
+        $serverId = $this->createServer('interserver-vps');
+        $serviceId = $this->createService('active', '2026-12-31', $serverId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'immediate', 'Leaving');
+
+        $result = $this->service->approveCancellation($requestId, $this->adminId);
+
+        $this->assertTrue($result['success']);
+        $this->assertStringContainsString('could not be cancelled automatically', $result['message']);
+        $this->assertSame('active', $this->services->find($serviceId)['status']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+        $failures = array_values(array_filter(
+            $this->sentMails,
+            fn (array $m): bool => $m['subject'] === 'Service Termination Failed'
+        ));
+        $this->assertNotEmpty($failures);
+    }
+
+    public function test_switching_a_dedicated_server_cancellation_to_immediate_goes_through_the_api(): void
+    {
+        $serverId = $this->createServer('interserver-dedicated');
+        $serviceId = $this->createService('active', '2026-12-31', $serverId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'end_of_period', 'Moving on', $this->clientId, '2026-12-31');
+
+        $result = $this->service->switchToImmediate($requestId, $this->adminId, 'Client asked to end it now');
+
+        $this->assertTrue($result['success']);
+        $this->assertCount(1, $this->remote->terminateCalls);
+        $this->assertSame('terminated', $this->services->find($serviceId)['status']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+    }
+
+    public function test_a_nocix_dedicated_cancellation_is_marked_cancelled_locally_without_an_api_call(): void
+    {
+        $serverId = $this->createServer('nocix-dedicated');
+        $serviceId = $this->createService('active', '2026-12-31', $serverId);
+        $requestId = $this->cancellations->createRequest($serviceId, 'immediate', 'Leaving');
+
+        $result = $this->service->approveCancellation($requestId, $this->adminId);
+
+        $this->assertTrue($result['success']);
+        $this->assertCount(0, $this->remote->terminateCalls);
+        $this->assertSame('cancelled', $this->services->find($serviceId)['status']);
+        $this->assertSame('completed', $this->cancellations->findById($requestId)['status']);
+    }
+}
+
+/**
+ * Stands in for the InterServer VPS / dedicated modules: records every
+ * terminate() call (the provider cancellation API) and can be told to fail,
+ * so the cancellation flow is tested without any real HTTP.
+ */
+final class FakeRemoteCancellationModule implements ProvisioningModule, LinksRemoteServices
+{
+    /** @var array<int, array<string, mixed>> */
+    public array $terminateCalls = [];
+
+    public bool $terminateSucceeds = true;
+
+    public function create(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok'];
+    }
+
+    public function suspend(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok'];
+    }
+
+    public function unsuspend(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok'];
+    }
+
+    public function terminate(array $params): array
+    {
+        $this->terminateCalls[] = $params;
+
+        return $this->terminateSucceeds
+            ? ['success' => true, 'message' => 'Cancelled with the provider.']
+            : ['success' => false, 'message' => 'This VPS is not linked to a VPS on the provider account yet.'];
+    }
+
+    public function changePassword(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok'];
+    }
+
+    public function changePackage(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok'];
+    }
+
+    public function singleSignOn(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok', 'url' => 'https://panel.example.test/sso'];
+    }
+
+    public function usage(array $params): array
+    {
+        return [];
+    }
+
+    public function testConnection(array $params): array
+    {
+        return ['success' => true, 'message' => 'ok'];
+    }
+
+    public function remoteServices(array $server): array
+    {
+        return ['success' => true, 'message' => 'ok', 'services' => []];
+    }
+
+    public function resolveRemote(array $params): array
+    {
+        return [
+            'ref' => isset($params['remote_id']) ? (string) $params['remote_id'] : null,
+            'via' => isset($params['remote_id']) ? 'linked' : 'none',
+        ];
     }
 }
