@@ -837,7 +837,7 @@ $cpanelTabs = [
                                 <?= csrf_field() ?>
                                 <button type="submit" class="svc-btn svc-btn--secondary" style="width:100%;">🔑 Show login details</button>
                             </form>
-                            <p style="font-size:0.72rem;margin-top:6px;">The login Nocix set during the reload. If you've changed the password since, use yours.</p>
+                            <p style="font-size:0.72rem;margin-top:6px;">The login set during the reload. If you've changed the password since, use yours.</p>
                         <?php endif; ?>
                     </div>
                 </div>
