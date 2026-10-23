@@ -110,7 +110,11 @@ Three screens, all under **Admin → Resellers** (Marketing group):
   ("API Docs") for quick access, in BOTH website designs — the classic chrome
   and the premium storefront chrome (Website design), desktop and mobile menus
   alike. Reseller stores never show the link: the platform's API is not theirs
-  to advertise.
+  to advertise. The API itself is rate-limited — 429 with a Retry-After header
+  once a source IP passes 300 requests a minute — and its responses are
+  sanitized: password hashes, two-factor secrets, recovery codes, security-PIN
+  hashes and hosting account passwords are stripped before anything leaves
+  through /api, so a leaked API key can never be traded for credential data.
 - **Store Cost Billing** (`/admin/resellers/billing`) — what the stores owe us, and how it is billed.
   A customer buying at a store pays **us** at retail; the order records what it cost us (catalogue price
   less the reseller discount) and that is what we invoice the reseller for, as an ordinary invoice on

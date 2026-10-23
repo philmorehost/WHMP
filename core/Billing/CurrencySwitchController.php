@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Billing;
 
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Security\LocalRedirect;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -154,6 +155,8 @@ final class CurrencySwitchController
      */
     private function safeRedirect(string $target): string
     {
-        return str_starts_with($target, '/') && !str_starts_with($target, '//') ? $target : '/cart';
+        // The shared validator also rejects the backslash twin ('/\evil.com')
+        // and control characters, which the old inline check let through.
+        return LocalRedirect::sanitize($target, '/cart');
     }
 }
