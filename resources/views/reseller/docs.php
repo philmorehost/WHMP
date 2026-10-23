@@ -1,8 +1,9 @@
 <?php
-/** @var array<string, mixed>|null $credential */
+/** @var array<string, mixed>|null $credential set ONLY when the viewer may see the key (signed in + approved) */
+/** @var string $keyState guest|none|pending|active|admin — why the key is or is not shown */
 /** @var string $backUrl */
 /** @var string $backLabel */
-/** @var string $baseUrl */
+/** @var string $baseUrl absolute — scheme + billing portal domain + /api */
 /** @var string $authHeader */
 /** @var array<int, array<string, string>> $endpoints */
 /** @var array<int, array{scope: string, description: string, reseller: bool}> $scopes */
@@ -12,19 +13,42 @@
     <h1 class="cv-card__title">API Documentation</h1>
     <p><a href="<?= e($backUrl) ?>">&larr; <?= e($backLabel) ?></a></p>
 
-    <?php if (is_array($credential)): ?>
-        <?php $isActive = (int) ($credential['active'] ?? 0) === 1; ?>
-        <div class="cv-alert <?= $isActive ? 'cv-alert--success' : 'cv-alert--warning' ?>">
+    <?php if ($keyState === 'active' && is_array($credential)): ?>
+        <div class="cv-alert cv-alert--success">
             <strong>Your key:</strong> <code><?= e((string) ($credential['api_key'] ?? '')) ?></code>
-            — <?= $isActive ? 'active' : 'disabled (submit your reselling domain to activate it)' ?>
+            — active
             <?php if (($credential['reseller_domain'] ?? null) !== null): ?>
                 for <strong><?= e((string) $credential['reseller_domain']) ?></strong>
             <?php endif; ?>
         </div>
+    <?php elseif ($keyState === 'pending'): ?>
+        <div class="cv-alert cv-alert--warning">
+            <strong>Your API key is hidden.</strong> Your reseller account is still being reviewed and
+            has not been approved yet. Submit the domain you resell from in the
+            <a href="<?= e($backUrl) ?>">Reseller Area</a> — once your account is approved and the key
+            is active, the key appears here when you are signed in.
+        </div>
+    <?php elseif ($keyState === 'none'): ?>
+        <div class="cv-alert cv-alert--neutral">
+            You don't have an API key yet. Request one from the
+            <a href="<?= e($backUrl) ?>">Reseller Area</a> — it appears on this page once your
+            reseller account is reviewed and approved.
+        </div>
+    <?php elseif ($keyState === 'guest'): ?>
+        <div class="cv-alert cv-alert--neutral">
+            This documentation is public, but API keys are not. <a href="<?= e($backUrl) ?>">Sign in</a>
+            to view your API key — it is shown here only while you are logged in and your reseller
+            account has been reviewed and approved.
+        </div>
+    <?php elseif ($keyState === 'admin'): ?>
+        <div class="cv-alert cv-alert--neutral">
+            Resellers see their own key on this page when they are signed in and their account has
+            been approved. Staff keys are managed under <a href="<?= e($backUrl) ?>">API Credentials</a>.
+        </div>
     <?php endif; ?>
 
-    <p>Everything below is the same API this platform uses for its own integrations. Requests are
-        authenticated with a key/secret pair, and every response is JSON.</p>
+    <p>This page is public — everything below is the same API this platform uses for its own
+        integrations. Requests are authenticated with a key/secret pair, and every response is JSON.</p>
 </div>
 
 <div class="cv-card" style="max-width:64rem;margin:0 auto;margin-bottom:var(--cv-space-4);">
@@ -35,7 +59,9 @@
         key is created (or rotated) and is stored only as a hash — if it is lost, rotate the key to get a new one.</p>
     <p>A key is <strong>disabled until you submit the domain you resell from</strong>. Requests made with a
         disabled key are rejected with <code>401</code>, exactly as if the credentials were wrong.</p>
-    <p><strong>Base URL:</strong> <code><?= e($baseUrl) ?></code> — all paths below are relative to it.</p>
+    <p><strong>Base URL:</strong> <code><?= e($baseUrl) ?></code> — endpoint paths are listed relative
+        to it, and every curl example below is already written against the full URL, so you can copy
+        and run them as they are.</p>
 </div>
 
 <div class="cv-card" style="max-width:64rem;margin:0 auto;margin-bottom:var(--cv-space-4);">

@@ -101,7 +101,12 @@ Three screens, all under **Admin → Resellers** (Marketing group):
 - **Resellers** (`/admin/resellers`) — the discount resellers get off list price (services and domains,
   clamped to 0–100), and the API keys issued to them. A reseller key is created **disabled** and is only
   switched on once the reseller submits the domain they sell from, so a key that never completes that
-  step cannot authenticate at all.
+  step cannot authenticate at all. The API documentation (`/client/reseller/docs`) is **public** — a
+  prospective reseller can read the whole surface before signing up — but the key itself is printed
+  there only for a signed-in reseller whose account has been approved; everyone else (guests, and
+  signed-in resellers still awaiting their domain approval) sees the docs without it. The base URL and
+  every curl example on that page use the portal's own full domain, so examples can be copy-pasted
+  straight into a terminal.
 - **Store Cost Billing** (`/admin/resellers/billing`) — what the stores owe us, and how it is billed.
   A customer buying at a store pays **us** at retail; the order records what it cost us (catalogue price
   less the reseller discount) and that is what we invoice the reseller for, as an ordinary invoice on

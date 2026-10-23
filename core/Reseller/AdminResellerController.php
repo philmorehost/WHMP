@@ -345,13 +345,19 @@ final class AdminResellerController
             return $denied;
         }
 
+        // The same absolute base URL the public/client docs page shows — the
+        // billing portal's own domain — so examples read the same on both.
+        // Staff see no key block at all: keys belong to the reseller's login.
+        $baseUrl = ApiDocumentation::absoluteBaseUrl($this->locator->platformScheme(), $this->locator->platformHost());
+
         $content = $this->view->render('reseller.docs', [
             'credential' => null,
+            'keyState' => 'admin',
             'backUrl' => '/admin/resellers',
             'backLabel' => 'Back to resellers',
-            'baseUrl' => ApiDocumentation::BASE_URL,
+            'baseUrl' => $baseUrl,
             'authHeader' => ApiDocumentation::AUTH_HEADER,
-            'endpoints' => ApiDocumentation::endpoints(),
+            'endpoints' => ApiDocumentation::endpoints($baseUrl),
             'scopes' => ApiDocumentation::scopes(),
             'errorCodes' => ApiDocumentation::errorCodes(),
         ]);

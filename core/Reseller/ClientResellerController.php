@@ -306,19 +306,32 @@ final class ClientResellerController
         return Response::redirect('/client/reseller');
     }
 
-    /** The API reference, in the reseller area where a reseller will look for it. */
+    /**
+     * The API reference — a PUBLIC page.
+     *
+     * A prospective reseller must be able to read the whole API surface
+     * (endpoints, scopes, errors, the runnable examples) before signing up,
+     * so this page renders for guests too. What is never public is a key:
+     * the key block appears only for a signed-in client whose reseller
+     * account has been reviewed and approved (the domain gate that switches
+     * the key on). Guests are pointed at the sign-in form, and a signed-in
+     * client whose key is still unactivated is told the key is hidden until
+     * approval — the key itself is not printed in either state.
+     */
     public function docs(Request $request): Response
     {
         $client = $this->guard->currentClient();
 
-        if ($client === null) {
-            return Response::redirect('/client/login');
-        }
+        $credential = $client === null ? null : $this->credentials->credentialFor((int) $client['id']);
+        $approved = $credential !== null && (int) ($credential['active'] ?? 0) === 1;
 
         return $this->docsPage(
-            $this->credentials->credentialFor((int) $client['id']),
-            '/client/reseller',
-            'Back to the reseller area'
+            $approved ? $credential : null,
+            $client === null ? '/client/login' : '/client/reseller',
+            $client === null ? 'Sign in to view your API key' : 'Back to the reseller area',
+            $client === null
+                ? 'guest'
+                : ($credential === null ? 'none' : ($approved ? 'active' : 'pending'))
         );
     }
 
@@ -1019,17 +1032,28 @@ final class ClientResellerController
      * about what the API does — and so the test that checks every documented
      * path against routes/api.php covers both.
      *
+     * The base URL is the platform's own absolute address — scheme, billing
+     * portal domain and /api — from the same APP_URL every other platform
+     * link is built on, and the curl examples are rewritten against it, so
+     * the page never shows a bare relative path a reader would have to
+     * complete by hand. $credential is passed only when the viewer may see
+     * the key (signed in AND approved); $keyState explains to everyone else
+     * why they cannot.
+     *
      * @param array<string, mixed>|null $credential
      */
-    private function docsPage(?array $credential, string $backUrl, string $backLabel): Response
+    private function docsPage(?array $credential, string $backUrl, string $backLabel, string $keyState): Response
     {
+        $baseUrl = ApiDocumentation::absoluteBaseUrl($this->locator->platformScheme(), $this->locator->platformHost());
+
         $content = $this->view->render('reseller.docs', [
             'credential' => $credential,
+            'keyState' => $keyState,
             'backUrl' => $backUrl,
             'backLabel' => $backLabel,
-            'baseUrl' => ApiDocumentation::BASE_URL,
+            'baseUrl' => $baseUrl,
             'authHeader' => ApiDocumentation::AUTH_HEADER,
-            'endpoints' => ApiDocumentation::endpoints(),
+            'endpoints' => ApiDocumentation::endpoints($baseUrl),
             'scopes' => ApiDocumentation::scopes(),
             'errorCodes' => ApiDocumentation::errorCodes(),
         ]);
