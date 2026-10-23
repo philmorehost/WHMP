@@ -14,8 +14,9 @@
  * @var array<string, string>|null $contact                injectable for tests (platform mode)
  *
  * Platform mode is the MAIN website wearing this footer: the company's own
- * contact details and its extra pages (Knowledgebase, network status, Affiliates,
- * Free Reseller, terms). Never set on a store's host.
+ * contact details and its extra pages (Knowledgebase, the public API
+ * documentation, network status, Affiliates, Free Reseller, terms). Never set
+ * on a store's host.
  */
 use CodeVault\Reseller\StorefrontIcons as Icon;
 
@@ -121,6 +122,7 @@ if ($platform) {
                         <?php endif; ?>
                         <li><a href="/client/affiliate">Affiliates</a></li>
                         <li><a href="/kb">Knowledgebase</a></li>
+                        <li><a href="/client/reseller/docs">API Documentation</a></li>
                         <li><a href="/status">Network status</a></li>
                         <li><a href="<?= e($termsUrl) ?>">Terms of service</a></li>
                     </ul>

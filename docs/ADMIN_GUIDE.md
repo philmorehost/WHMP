@@ -107,7 +107,10 @@ Three screens, all under **Admin → Resellers** (Marketing group):
   signed-in resellers still awaiting their domain approval) sees the docs without it. The base URL and
   every curl example on that page use the portal's own full domain, so examples can be copy-pasted
   straight into a terminal. The page is linked from the main menu ("API") and the site footer
-  ("API Docs") for quick access.
+  ("API Docs") for quick access, in BOTH website designs — the classic chrome
+  and the premium storefront chrome (Website design), desktop and mobile menus
+  alike. Reseller stores never show the link: the platform's API is not theirs
+  to advertise.
 - **Store Cost Billing** (`/admin/resellers/billing`) — what the stores owe us, and how it is billed.
   A customer buying at a store pays **us** at retail; the order records what it cost us (catalogue price
   less the reseller discount) and that is what we invoice the reseller for, as an ordinary invoice on

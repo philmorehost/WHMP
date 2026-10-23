@@ -90,4 +90,97 @@ final class SiteNavTest extends TestCase
 
         $this->assertSame([], $diagnostics);
     }
+
+    // --- the premium chrome (the main website's default look) --------------
+
+    /**
+     * layouts/client.php has TWO chromes: the classic header/footer above, and
+     * the premium storefront chrome (Admin → Theme → Website design, ON by
+     * default) — which is the pair the main website actually wears. The API
+     * link must live in BOTH chromes; the first two tests alone let it vanish
+     * from the site the moment the premium chrome is on.
+     *
+     * @return array<string, mixed>
+     */
+    private function storefrontHeaderData(bool $platform): array
+    {
+        return [
+            'store' => [],
+            'home' => false,
+            'currencies' => [],
+            'selectedCurrency' => null,
+            't' => null,
+            'languages' => null,
+            'theme' => ['brandName' => 'TestBrand'],
+            'categories' => [],
+            'client' => null,
+            'cartCount' => 0,
+            'money' => null,
+            'platform' => $platform,
+            'contact' => ['email' => 'help@example.test', 'whatsapp' => '', 'phone' => ''],
+            'unreadNotifications' => 0,
+            'freeResellerNav' => false,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function storefrontFooterData(bool $platform): array
+    {
+        return [
+            'store' => [],
+            'theme' => ['brandName' => 'TestBrand'],
+            't' => null,
+            'categories' => [],
+            'platform' => $platform,
+            'contact' => ['email' => 'help@example.test', 'whatsapp' => '', 'phone' => '', 'address' => ''],
+        ];
+    }
+
+    public function test_the_premium_main_menu_links_the_api_documentation(): void
+    {
+        [$html, $diagnostics] = $this->renderStorefrontHeader(true);
+
+        // Desktop nav AND the mobile drawer — same both-places rule as above.
+        $this->assertSame(2, substr_count($html, 'href="/client/reseller/docs"'));
+        $this->assertSame([], $diagnostics);
+    }
+
+    public function test_the_premium_chrome_hides_the_api_link_on_a_reseller_store(): void
+    {
+        // A store's website is the reseller's own brand: the platform's API is
+        // not theirs to advertise (the standing white-label rule), so with
+        // platform => false the link must not render AT ALL.
+        [$header, $headerDiagnostics] = $this->renderStorefrontHeader(false);
+        [$footer, $footerDiagnostics] = $this->renderStorefrontFooter(false);
+
+        $this->assertStringNotContainsString('/client/reseller/docs', $header);
+        $this->assertStringNotContainsString('/client/reseller/docs', $footer);
+        $this->assertSame([], $headerDiagnostics);
+        $this->assertSame([], $footerDiagnostics);
+    }
+
+    public function test_the_premium_footer_links_the_api_documentation(): void
+    {
+        [$html, $diagnostics] = $this->renderStorefrontFooter(true);
+
+        $this->assertStringContainsString('href="/client/reseller/docs"', $html);
+        $this->assertStringContainsString('API Documentation', $html);
+        $this->assertSame([], $diagnostics);
+    }
+
+    /** @return array{0: string, 1: array<int, string>} */
+    private function renderStorefrontHeader(bool $platform): array
+    {
+        $html = $this->view->render('partials.storefront-header', $this->storefrontHeaderData($platform));
+
+        return [$html, []];
+    }
+
+    /** @return array{0: string, 1: array<int, string>} */
+    private function renderStorefrontFooter(bool $platform): array
+    {
+        $html = $this->view->render('partials.storefront-footer', $this->storefrontFooterData($platform));
+
+        return [$html, []];
+    }
 }
