@@ -104,8 +104,10 @@ Three screens, all under **Admin → Resellers** (Marketing group):
   step cannot authenticate at all. Authentication is a PAIR — every call sends
   `Authorization: Bearer {API Key}.{Secret Key}`. The Secret Key is revealed exactly once, when the
   key is created or rotated, and only its hash is stored: support cannot re-display it. A reseller
-  who has lost theirs clicks Rotate in the Reseller Area (new key + secret shown once) and re-submits
-  their domain to switch the key back on. The Reseller Area's credentials table and the docs page both
+  who has lost theirs (or wants a fresh pair any time) clicks Regenerate in the Reseller Area: the old
+  pair dies the instant the new one is issued, and an already-ACTIVE key stays active for its verified
+  domain — the reseller just swaps the two values in their integration. A key that never passed the
+  domain gate stays disabled after regeneration. The Reseller Area's credentials table and the docs page both
   name the Secret Key and explain this, so a vendor integrating the API is never left looking for a
   field that does not re-appear. The API documentation (`/client/reseller/docs`) is **public** — a
   prospective reseller can read the whole surface before signing up — but the key itself is printed

@@ -285,13 +285,27 @@ final class ClientResellerController
             'secret' => $result['secret'],
             'rotated' => true,
         ]);
-        // Rotation returns the key to inactive, so say why and what to do —
-        // otherwise a working integration breaks and the reseller has no idea
-        // the domain step is what re-armed it.
-        $this->session->flash(
-            'reseller_notice',
-            'A new secret has been issued and the OLD ONE NO LONGER WORKS. The key is inactive again until you re-submit your reselling domain.'
-        );
+
+        // Say what actually happened, which depends on the key's state before
+        // regeneration: an active key carries its verified domain over (the
+        // integration just swaps the two values), while an unactivated one
+        // still has to pass the domain gate — otherwise a working integration
+        // appears broken, or a pending one looks live when it is not.
+        if ($result['active']) {
+            $this->session->flash(
+                'reseller_notice',
+                'A new API Key and Secret Key have been issued above, and the OLD pair stopped working immediately. '
+                . 'Your key is still active for ' . $result['domain'] . ' — swap the two values in your integration and you are done.'
+            );
+            $logDetail = 'Regenerated the reseller API key (new credential, still active for ' . $result['domain'] . ')';
+        } else {
+            $this->session->flash(
+                'reseller_notice',
+                'A new API Key and Secret Key have been issued above, and the OLD pair stopped working immediately. '
+                . 'The key is inactive until you submit your reselling domain.'
+            );
+            $logDetail = 'Regenerated the reseller API key (new credential, inactive until re-activated)';
+        }
 
         $this->activity->log(
             'client',
@@ -299,7 +313,7 @@ final class ClientResellerController
             'reseller.key.rotated',
             'api_credential',
             null,
-            'Rotated the reseller API key (new credential, inactive until re-activated)',
+            $logDetail,
             $request->ip()
         );
 

@@ -69,22 +69,50 @@ final class ResellerCredentialService
     }
 
     /**
-     * Replaces the client's key with a fresh inactive one, for when the secret
-     * was lost or leaked. The old key stops working immediately.
+     * Regenerates the client's credentials: a brand-new API Key + Secret Key,
+     * with the old pair dying the instant the new one is minted. The remedy
+     * for a lost secret, a departed developer, or a suspected leak — available
+     * any time, from the Reseller Area.
      *
-     * @return array{key: string, secret: string}
+     * An ALREADY-ACTIVE key stays active for its verified domain. The domain
+     * gate exists to protect the INITIAL declaration — an admin can always see
+     * which storefront a key was issued against, and a signup that abandoned
+     * step 2 never arms a key. Regeneration re-keys an existing, already-
+     * declared relationship: forcing the reseller to re-submit the same
+     * verified domain would add no security (they would click through it
+     * immediately) while breaking their live integration between rotate and
+     * re-activate. A key that was never activated stays inactive — the gate
+     * still applies to it.
+     *
+     * @return array{key: string, secret: string, domain: ?string, active: bool}
      */
     public function rotateKey(int $clientId, string $label): array
     {
         $existing = $this->credentialFor($clientId);
 
+        $domain = null;
+        $wasActive = false;
+
         if ($existing !== null) {
+            $domain = $existing['reseller_domain'] !== null ? (string) $existing['reseller_domain'] : null;
+            $wasActive = (int) ($existing['active'] ?? 0) === 1 && $domain !== null;
             $this->credentials->delete((int) $existing['id']);
         }
 
         $created = $this->credentials->createForClient($clientId, $label, self::SCOPES);
 
-        return ['key' => $created['key'], 'secret' => $created['secret']];
+        $active = false;
+
+        if ($wasActive) {
+            $active = $this->credentials->activateForClient((int) $created['id'], $clientId, (string) $domain);
+        }
+
+        return [
+            'key' => $created['key'],
+            'secret' => $created['secret'],
+            'domain' => $active ? $domain : null,
+            'active' => $active,
+        ];
     }
 
     /**

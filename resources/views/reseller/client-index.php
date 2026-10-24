@@ -302,14 +302,24 @@ $apiState = match ($state) {
             <button class="cv-btn" type="submit"><?= $state === 'active' ? 'Update domain' : 'Activate API key' ?></button>
         </form>
 
-        <h3>Lost the secret?</h3>
-        <p>Rotating issues a new key and secret immediately. <strong>The old secret stops working at once</strong>,
-            and the new key starts out disabled until you re-submit your domain.</p>
+        <h3>Regenerate your API Key &amp; Secret Key</h3>
+        <p>Regenerate both credentials any time — if you think the secret leaked, a developer left, or you simply
+            want a fresh pair. The new credentials are shown once above the moment they are issued, and
+            <strong>the old pair stops working that instant</strong>.
+        <?php if ($state === 'active'): ?>
+            Your key stays active for
+            <strong><?= e((string) ($credential['reseller_domain'] ?? '')) ?></strong> — swap the two values in
+            your integration and you are done.</p>
+        <?php else: ?>
+            The regenerated key starts out disabled until you submit your reselling domain.</p>
+        <?php endif; ?>
+        <?php // The confirm rides app.js's delegated data-confirm handler: inline onsubmit
+              // attributes are dead under the strict CSP (no unsafe-inline handlers). ?>
         <form method="post" action="/client/reseller/rotate"
-              onsubmit="return confirm('Rotate the key? Your existing secret will stop working immediately.');">
+              data-confirm="Regenerate your API credentials? The current API Key and Secret Key stop working the moment the new pair is issued.">
             <?= csrf_field() ?>
             <input type="hidden" name="label" value="<?= e((string) ($credential['label'] ?? 'Reseller key')) ?>">
-            <button class="cv-btn" type="submit">Rotate key &amp; secret</button>
+            <button class="cv-btn cv-btn--danger" type="submit">Regenerate API Key &amp; Secret Key</button>
         </form>
     <?php endif; ?>
 </div>

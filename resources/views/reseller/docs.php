@@ -21,8 +21,8 @@
                 for <strong><?= e((string) $credential['reseller_domain']) ?></strong>
             <?php endif; ?>
             <br><small>Your Secret Key was shown only once, when the key was created or rotated &mdash; API calls
-            need BOTH, sent as <code><?= e($authHeader) ?></code>. Lost the secret? Rotate the key from the
-            <a href="<?= e($backUrl) ?>">Reseller Area</a> to issue a new key and secret.</small>
+            need BOTH, sent as <code><?= e($authHeader) ?></code>. You can regenerate both credentials any time from the
+            <a href="<?= e($backUrl) ?>">Reseller Area</a> — an active key stays active for its verified domain.</small>
         </div>
     <?php elseif ($keyState === 'pending'): ?>
         <div class="cv-alert cv-alert--warning">

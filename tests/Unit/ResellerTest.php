@@ -271,7 +271,7 @@ final class ResellerTest extends DatabaseTestCase
         $this->assertSame([], $this->credentials->allResellers());
     }
 
-    public function test_rotating_issues_a_new_secret_and_returns_the_key_to_disabled(): void
+    public function test_regenerating_an_active_key_keeps_it_active_for_its_verified_domain(): void
     {
         $first = $this->service->requestKey($this->clientId, 'My storefront');
         $this->service->activate($this->clientId, 'reseller.example.com');
@@ -279,28 +279,54 @@ final class ResellerTest extends DatabaseTestCase
         $rotated = $this->service->rotateKey($this->clientId, 'My storefront');
 
         $this->assertNotSame($first['secret'], $rotated['secret']);
+        $this->assertSame('reseller.example.com', $rotated['domain']);
+        $this->assertTrue($rotated['active']);
 
         $auth = new ApiAuthenticator($this->credentials);
 
         // The old pair is dead...
         try {
             $auth->authenticate($this->apiRequest($first['key'], $first['secret']));
-            $this->fail('The rotated-away key must stop working.');
+            $this->fail('The rotated-away pair must stop working.');
         } catch (ApiAuthException $e) {
             $this->assertStringContainsString('Invalid API credentials', $e->getMessage());
         }
 
-        // ...and the new one is disabled until the domain is submitted again,
-        // so rotation can never leave a live key the reseller did not re-arm.
+        // ...and the new pair WORKS immediately: regeneration re-keys an
+        // already-declared storefront rather than breaking a live integration
+        // until the same domain is re-submitted (which would add no security).
+        $credential = $auth->authenticate($this->apiRequest($rotated['key'], $rotated['secret']));
+        $this->assertInstanceOf(\CodeVault\Api\ApiCredential::class, $credential);
+        $this->assertTrue($credential->active);
+
+        $row = $this->credentials->forClient($this->clientId);
+
+        $this->assertSame(1, (int) $row['active']);
+        $this->assertSame('reseller.example.com', $row['reseller_domain']);
+    }
+
+    public function test_regenerating_a_never_activated_key_leaves_the_domain_gate_closed(): void
+    {
+        $first = $this->service->requestKey($this->clientId, 'My storefront');
+
+        $rotated = $this->service->rotateKey($this->clientId, 'My storefront');
+
+        // No verified domain to carry over: the gate still applies.
+        $this->assertFalse($rotated['active']);
+        $this->assertNull($rotated['domain']);
+
+        $auth = new ApiAuthenticator($this->credentials);
+
         try {
             $auth->authenticate($this->apiRequest($rotated['key'], $rotated['secret']));
-            $this->fail('A newly rotated key must start disabled.');
+            $this->fail('A regenerated key that never passed the gate must stay disabled.');
         } catch (ApiAuthException $e) {
             $this->assertStringContainsString('Invalid API credentials', $e->getMessage());
         }
 
         $row = $this->credentials->forClient($this->clientId);
 
+        $this->assertSame(0, (int) $row['active']);
         $this->assertNull($row['reseller_domain']);
     }
 
@@ -717,7 +743,7 @@ final class ResellerTest extends DatabaseTestCase
 
         $this->assertStringContainsString('Secret Key</th>', $later);
         $this->assertStringContainsString('shown only ONCE', $later);
-        $this->assertStringContainsString('Rotate', $later);
+        $this->assertStringContainsString('Regenerate', $later);
         $this->assertStringNotContainsString($issued['secret'], $later, 'the secret re-appeared outside its one-time reveal');
     }
 
