@@ -101,7 +101,13 @@ Three screens, all under **Admin → Resellers** (Marketing group):
 - **Resellers** (`/admin/resellers`) — the discount resellers get off list price (services and domains,
   clamped to 0–100), and the API keys issued to them. A reseller key is created **disabled** and is only
   switched on once the reseller submits the domain they sell from, so a key that never completes that
-  step cannot authenticate at all. The API documentation (`/client/reseller/docs`) is **public** — a
+  step cannot authenticate at all. Authentication is a PAIR — every call sends
+  `Authorization: Bearer {API Key}.{Secret Key}`. The Secret Key is revealed exactly once, when the
+  key is created or rotated, and only its hash is stored: support cannot re-display it. A reseller
+  who has lost theirs clicks Rotate in the Reseller Area (new key + secret shown once) and re-submits
+  their domain to switch the key back on. The Reseller Area's credentials table and the docs page both
+  name the Secret Key and explain this, so a vendor integrating the API is never left looking for a
+  field that does not re-appear. The API documentation (`/client/reseller/docs`) is **public** — a
   prospective reseller can read the whole surface before signing up — but the key itself is printed
   there only for a signed-in reseller whose account has been approved; everyone else (guests, and
   signed-in resellers still awaiting their domain approval) sees the docs without it. The base URL and

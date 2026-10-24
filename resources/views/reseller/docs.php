@@ -20,6 +20,9 @@
             <?php if (($credential['reseller_domain'] ?? null) !== null): ?>
                 for <strong><?= e((string) $credential['reseller_domain']) ?></strong>
             <?php endif; ?>
+            <br><small>Your Secret Key was shown only once, when the key was created or rotated &mdash; API calls
+            need BOTH, sent as <code><?= e($authHeader) ?></code>. Lost the secret? Rotate the key from the
+            <a href="<?= e($backUrl) ?>">Reseller Area</a> to issue a new key and secret.</small>
         </div>
     <?php elseif ($keyState === 'pending'): ?>
         <div class="cv-alert cv-alert--warning">

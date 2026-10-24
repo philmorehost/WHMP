@@ -668,6 +668,11 @@ final class ResellerTest extends DatabaseTestCase
             $this->assertStringContainsString('Your key:', $approved);
             $this->assertStringContainsString($issued['key'], $approved);
             $this->assertStringContainsString('reseller.example.com', $approved);
+            // The docs must also explain where the secret lives — the exact
+            // confusion a vendor hit: building for a key+secret pair, then
+            // finding only the key on the reseller pages.
+            $this->assertStringContainsString('Secret Key was shown only once', $approved);
+            $this->assertStringContainsString('Bearer', $approved);
         });
     }
 
@@ -679,6 +684,41 @@ final class ResellerTest extends DatabaseTestCase
             $this->assertStringContainsString("don't have an API key yet", $body);
             $this->assertStringNotContainsString('Your key:', $body);
         });
+    }
+
+    public function test_the_secret_key_is_shown_once_and_then_named_where_the_reseller_looks_for_it(): void
+    {
+        // The vendor's report, reproduced: the API is integrated against a
+        // key/secret PAIR, but the reseller area's persistent table used to
+        // show the API key with no mention of the secret at all — so a
+        // developer looking for the secret key found nothing.
+        $issued = $this->service->requestKey($this->clientId, 'Docs key');
+        $this->assertTrue($issued['created']);
+
+        // 1. The one-time reveal right after creation: BOTH credentials,
+        //    clearly labelled, with the copy-it-now warning.
+        $this->session->flash('reseller_issued', [
+            'key' => $issued['key'],
+            'secret' => $issued['secret'],
+            'rotated' => false,
+        ]);
+        $reveal = (string) $this->controller->index($this->getRequest())->body();
+
+        $this->assertStringContainsString('Copy the secret now', $reveal);
+        $this->assertStringContainsString('Secret Key:', $reveal);
+        $this->assertStringContainsString($issued['key'], $reveal);
+        $this->assertStringContainsString($issued['secret'], $reveal);
+        $this->assertStringContainsString('Bearer ' . $issued['key'] . '.' . $issued['secret'], $reveal);
+
+        // 2. Every page AFTER that (the flash is consumed): the secret value
+        //    must never come back, but the table must NAME the Secret Key,
+        //    say why it is hidden, and point at the rotation remedy.
+        $later = (string) $this->controller->index($this->getRequest())->body();
+
+        $this->assertStringContainsString('Secret Key</th>', $later);
+        $this->assertStringContainsString('shown only ONCE', $later);
+        $this->assertStringContainsString('Rotate', $later);
+        $this->assertStringNotContainsString($issued['secret'], $later, 'the secret re-appeared outside its one-time reveal');
     }
 
     public function test_documented_examples_are_rewritten_against_the_absolute_base_url(): void
