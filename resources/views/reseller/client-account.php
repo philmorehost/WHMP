@@ -145,30 +145,53 @@ $kindLabels = [
         </p>
     <?php endif; ?>
 
+    <?php
+    // Resellers operate from anywhere in the world, so the destination can be
+    // a bank account, a USDT (TRC-20) wallet, or a Bybit account. The method
+    // select swaps which fields matter (app.js delegated handler — inline
+    // scripts are dead under the strict CSP); the server validates the shape
+    // of whatever the reseller submits.
+    $currentMethod = (string) ($destination['method'] ?? 'bank_transfer');
+    ?>
     <form method="post" action="/client/reseller/account/payout-method" style="margin:0;">
         <?= csrf_field() ?>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
             <label style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-weight:600;">Account name</span>
+                <span style="font-weight:600;">Pay out via</span>
+                <select class="cv-select" name="method" data-payout-method style="padding:8px 10px;border-radius:8px;">
+                    <?php foreach (\CodeVault\Reseller\ResellerPayoutDestinationRepository::METHODS as $methodValue => $methodLabel): ?>
+                        <option value="<?= e($methodValue) ?>" <?= $currentMethod === $methodValue ? 'selected' : '' ?>><?= e($methodLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-weight:600;">Name on the account</span>
                 <input type="text" name="account_name" required maxlength="191"
                        value="<?= e((string) ($destination['account_name'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
             </label>
             <label style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-weight:600;">Account number</span>
+                <span style="font-weight:600;" data-payout-number-label>Account number</span>
                 <input type="text" name="account_number" required maxlength="64"
                        value="<?= e((string) ($destination['account_number'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+                <small style="color:var(--cv-text-secondary);" data-payout-number-hint>Sort code, IBAN or local account number.</small>
             </label>
-            <label style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-weight:600;">Bank</span>
-                <input type="text" name="bank_name" maxlength="191"
-                       value="<?= e((string) ($destination['bank_name'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-weight:600;">Bank code (optional)</span>
-                <input type="text" name="bank_code" maxlength="32"
-                       value="<?= e((string) ($destination['bank_code'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
-            </label>
+            <div data-payout-bank-fields style="display:flex;gap:12px;flex-wrap:wrap;<?= $currentMethod !== 'bank_transfer' ? 'display:none;' : '' ?>">
+                <label style="display:flex;flex-direction:column;gap:4px;">
+                    <span style="font-weight:600;">Bank</span>
+                    <input type="text" name="bank_name" maxlength="191"
+                           value="<?= e((string) ($destination['bank_name'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;">
+                    <span style="font-weight:600;">Bank code (optional)</span>
+                    <input type="text" name="bank_code" maxlength="32"
+                           value="<?= e((string) ($destination['bank_code'] ?? '')) ?>" style="padding:8px 10px;border-radius:8px;">
+                </label>
+            </div>
         </div>
+        <p style="margin:var(--cv-space-2) 0 0;color:var(--cv-text-secondary);">
+            Crypto and Bybit payouts let you operate from anywhere in the world. Double-check your wallet address —
+            a TRC-20 payment cannot be recalled once sent.
+        </p>
         <p style="margin:var(--cv-space-2) 0 0;">
             <button type="submit" class="cv-btn cv-btn--secondary" style="padding:8px 16px;">
                 <?= ($destinationText !== null && $destinationText !== '') ? 'Save new details' : 'Save payout destination' ?>

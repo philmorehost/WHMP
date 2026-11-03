@@ -156,6 +156,32 @@ final class DomainPricingRepository
     }
 
     /**
+     * Delete many TLD pricing rows at once — the bulk-select action on the
+     * pricing table. Ids are int-cleaned and de-duplicated before they ever
+     * touch SQL; unknown ids simply match nothing. Returns how many rows went.
+     *
+     * @param array<int, int|string> $ids
+     */
+    public function deleteMany(array $ids): int
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $ids),
+            static fn (int $id): bool => $id > 0
+        )));
+
+        if ($ids === []) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        return $this->db->update(
+            "DELETE FROM domain_pricing WHERE id IN ({$placeholders})",
+            $ids
+        );
+    }
+
+    /**
      * Applies a new sort_order to many TLDs at once, from the admin's
      * per-row "Order" numbers on the pricing table.
      *

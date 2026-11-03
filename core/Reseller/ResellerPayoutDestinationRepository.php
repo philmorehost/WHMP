@@ -23,6 +23,19 @@ final class ResellerPayoutDestinationRepository
 {
     public const METHOD_BANK_TRANSFER = 'bank_transfer';
 
+    /** Payout in USDT to a TRON (TRC-20) wallet address — pays out worldwide. */
+    public const METHOD_CRYPTO_TRC20 = 'crypto_trc20';
+
+    /** Payout to the reseller's Bybit account (UID or account email). */
+    public const METHOD_BYBIT = 'bybit';
+
+    /** Every payout method a reseller may choose from, with display names. */
+    public const METHODS = [
+        self::METHOD_BANK_TRANSFER => 'Bank transfer',
+        self::METHOD_CRYPTO_TRC20 => 'Crypto — USDT (TRC-20)',
+        self::METHOD_BYBIT => 'Bybit account',
+    ];
+
     public function __construct(
         private readonly Database $db
     ) {
@@ -139,6 +152,29 @@ final class ResellerPayoutDestinationRepository
         $number = trim((string) ($destination['account_number'] ?? ''));
         $bank = trim((string) ($destination['bank_name'] ?? ''));
         $code = trim((string) ($destination['bank_code'] ?? ''));
+        $method = (string) ($destination['method'] ?? self::METHOD_BANK_TRANSFER);
+
+        // Crypto and Bybit destinations word differently: the "account number"
+        // column carries a wallet address or a UID/email there, and bank
+        // fields mean nothing. The frozen payout snapshot and the account
+        // page both go through here, so they can never disagree.
+        if ($method === self::METHOD_CRYPTO_TRC20) {
+            $parts = array_filter([
+                $name === '' ? null : $name,
+                $number === '' ? null : 'USDT (TRC-20) ' . $number,
+            ]);
+
+            return $parts === [] ? null : implode(' · ', $parts);
+        }
+
+        if ($method === self::METHOD_BYBIT) {
+            $parts = array_filter([
+                $name === '' ? null : $name,
+                $number === '' ? null : 'Bybit account ' . $number,
+            ]);
+
+            return $parts === [] ? null : implode(' · ', $parts);
+        }
 
         $parts = array_filter([
             $name === '' ? null : $name,
@@ -148,5 +184,24 @@ final class ResellerPayoutDestinationRepository
         ]);
 
         return $parts === [] ? null : implode(' · ', $parts);
+    }
+
+    /**
+     * Whether $number is a well-formed credential for $method — shape only:
+     * nothing here can prove a wallet or account exists (verification stays a
+     * human's attestation, exactly as for bank details).
+     */
+    public static function isValidDetail(string $method, string $number): bool
+    {
+        return match ($method) {
+            // TRC-20 addresses: base58check, always start with T, 34 chars.
+            self::METHOD_CRYPTO_TRC20 => preg_match('/^T[1-9A-HJ-NP-Za-km-z]{33}$/', $number) === 1,
+            // A Bybit account is identified by its UID (8-12 digits) or the
+            // account's email address — either reaches the same wallet.
+            self::METHOD_BYBIT => preg_match('/^\d{8,12}$/', $number) === 1
+                || filter_var($number, FILTER_VALIDATE_EMAIL) !== false,
+            self::METHOD_BANK_TRANSFER => mb_strlen($number) <= 64,
+            default => false,
+        };
     }
 }

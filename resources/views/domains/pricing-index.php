@@ -2,7 +2,9 @@
 /** @var array<int, array<string, mixed>> $pricingList */
 /** @var array<int, array<string, mixed>> $registrars */
 /** @var string|null $error */
+/** @var string|null $notice */
 /** @var int $spinnerEnabledCount */
+$notice ??= null;
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <h1 class="cv-card__title">Domain TLD Pricing</h1>
@@ -12,6 +14,9 @@
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
     <?php if (!empty($error)): ?>
         <div class="cv-field-error" style="margin-bottom:var(--cv-space-3);"><?= e($error) ?></div>
+    <?php endif; ?>
+    <?php if ($notice !== null && $notice !== ''): ?>
+        <div class="cv-alert cv-alert--success" style="margin-bottom:var(--cv-space-3);"><?= e($notice) ?></div>
     <?php endif; ?>
 
     <div style="display:flex;gap:var(--cv-space-2);margin-bottom:var(--cv-space-3);flex-wrap:wrap;">
@@ -422,6 +427,12 @@
 
             <div style="display:flex;gap:var(--cv-space-2);">
                 <button type="submit" class="cv-btn cv-btn--primary">Apply to selected</button>
+                <?php // Same checkboxes, different action: formaction sends THIS button's
+                      // submit to the bulk-delete endpoint, so one tick-set drives both
+                      // bulk edit and bulk delete with no duplicated checkbox column. ?>
+                <button type="submit" class="cv-btn cv-btn--danger"
+                        formaction="/admin/domain-pricing/bulk-delete"
+                        data-confirm="Delete the selected TLD pricing rows? This cannot be undone — clients will not be able to order these extensions until they are added back.">Delete selected</button>
                 <button type="button" class="cv-btn cv-btn--secondary" data-tld-bulk-clear>Clear</button>
             </div>
         </div>

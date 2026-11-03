@@ -615,6 +615,100 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         return (int) ($this->db->selectOne('SELECT COUNT(*) AS c FROM reseller_payouts')['c'] ?? 0);
     }
 
+    // ------------------------------------------------- crypto payout methods
+
+    public function test_a_reseller_can_be_paid_to_a_trc20_wallet_address(): void
+    {
+        $this->signInAsClient();
+
+        $address = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+        $response = $this->client->savePayoutMethod($this->request([
+            'method' => 'crypto_trc20',
+            'account_name' => 'Acme Ltd',
+            'account_number' => $address,
+        ]));
+
+        $this->assertSame(302, $response->status());
+
+        $row = $this->destinationRepo->find($this->storeId);
+
+        $this->assertSame('crypto_trc20', $row['method']);
+        $this->assertSame($address, $row['account_number']);
+        // Bank fields mean nothing on a crypto destination and stay empty.
+        $this->assertNull($row['bank_name']);
+
+        $this->assertSame(
+            'Acme Ltd · USDT (TRC-20) ' . $address,
+            $this->destinationRepo::describe($row)
+        );
+    }
+
+    public function test_a_malformed_wallet_address_is_rejected_and_changes_nothing(): void
+    {
+        $this->signInAsClient();
+
+        $before = $this->destinationRepo->find($this->storeId);
+
+        $response = $this->client->savePayoutMethod($this->request([
+            'method' => 'crypto_trc20',
+            'account_name' => 'Acme Ltd',
+            // A typo'd address is money sent into the void — rejected on shape.
+            'account_number' => '0x89205A3A3b2A69De6DBf7f01b13Ef4E07740aF1f',
+        ]));
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringContainsString(
+            'does not look like a USDT (TRC-20) address',
+            (string) $this->session->pullFlash('reseller_error')
+        );
+
+        $after = $this->destinationRepo->find($this->storeId);
+
+        $this->assertSame($before['method'], $after['method']);
+        $this->assertSame($before['account_number'], $after['account_number']);
+    }
+
+    public function test_a_reseller_can_be_paid_to_their_bybit_account(): void
+    {
+        $this->signInAsClient();
+
+        $this->client->savePayoutMethod($this->request([
+            'method' => 'bybit',
+            'account_name' => 'Acme Ltd',
+            'account_number' => '12345678',
+        ]));
+
+        $row = $this->destinationRepo->find($this->storeId);
+
+        $this->assertSame('bybit', $row['method']);
+        $this->assertSame(
+            'Acme Ltd · Bybit account 12345678',
+            $this->destinationRepo::describe($row)
+        );
+
+        // An email identifies a Bybit account just as well as a UID does.
+        $this->client->savePayoutMethod($this->request([
+            'method' => 'bybit',
+            'account_name' => 'Acme Ltd',
+            'account_number' => 'payouts@acme.test',
+        ]));
+
+        $this->assertSame(
+            'payouts@acme.test',
+            $this->destinationRepo->find($this->storeId)['account_number']
+        );
+    }
+
+    public function test_the_bank_destination_wording_is_unchanged_for_legacy_rows(): void
+    {
+        $row = $this->destinationRepo->find($this->storeId);
+
+        $this->assertSame(
+            'Acme Ltd · account 0123456789 · Test Bank · code 000',
+            $this->destinationRepo::describe($row)
+        );
+    }
+
     /** @param array<string, mixed> $body */
     private function request(array $body = []): Request
     {

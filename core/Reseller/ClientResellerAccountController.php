@@ -262,23 +262,52 @@ final class ClientResellerAccountController
             return Response::redirect('/client/reseller');
         }
 
-        $name = trim((string) $request->input('account_name', ''));
-        $number = trim((string) $request->input('account_number', ''));
+        $method = trim((string) $request->input('method', ResellerPayoutDestinationRepository::METHOD_BANK_TRANSFER));
 
-        if ($name === '' || $number === '') {
-            $this->session->flash('reseller_error', 'An account name and account number are both required.');
+        if (!isset(ResellerPayoutDestinationRepository::METHODS[$method])) {
+            $this->session->flash('reseller_error', 'Choose a valid payout method.');
 
             return Response::redirect('/client/reseller/account');
         }
 
+        $name = trim((string) $request->input('account_name', ''));
+        $number = trim((string) $request->input('account_number', ''));
+
+        if ($name === '' || $number === '') {
+            $this->session->flash(
+                'reseller_error',
+                'An account name and your ' . ResellerPayoutDestinationRepository::METHODS[$method] . ' details are both required.'
+            );
+
+            return Response::redirect('/client/reseller/account');
+        }
+
+        // Shape-check the credential before it is stored: a typo'd wallet
+        // address is money sent into the void with no bank to recall it from.
+        if (!ResellerPayoutDestinationRepository::isValidDetail($method, $number)) {
+            $this->session->flash('reseller_error', match ($method) {
+                ResellerPayoutDestinationRepository::METHOD_CRYPTO_TRC20
+                    => 'That does not look like a USDT (TRC-20) address — it starts with T and is 34 characters long, with no 0, O, I or l.',
+                ResellerPayoutDestinationRepository::METHOD_BYBIT
+                    => 'Enter your Bybit UID (8-12 digits) or your Bybit account email address.',
+                default => 'Enter a valid account number.',
+            });
+
+            return Response::redirect('/client/reseller/account');
+        }
+
+        // Bank fields belong to bank transfers only — a crypto destination
+        // stores nothing in them, so the describe() wording stays clean.
+        $isBank = $method === ResellerPayoutDestinationRepository::METHOD_BANK_TRANSFER;
+
         $this->destinations->save((int) $store['id'], (int) $client['id'], [
-            'method' => ResellerPayoutDestinationRepository::METHOD_BANK_TRANSFER,
+            'method' => $method,
             'account_name' => $name,
             'account_number' => $number,
-            'bank_name' => trim((string) $request->input('bank_name', '')),
-            'bank_code' => trim((string) $request->input('bank_code', '')),
+            'bank_name' => $isBank ? trim((string) $request->input('bank_name', '')) : '',
+            'bank_code' => $isBank ? trim((string) $request->input('bank_code', '')) : '',
             // The destination is not denominated: the payout decides the currency
-            // and the rate at request time, and a bank account is not a currency.
+            // and the rate at request time, and a destination is not a currency.
             'currency_id' => null,
         ]);
 
@@ -288,13 +317,14 @@ final class ClientResellerAccountController
             'reseller.payout_method.saved',
             null,
             null,
-            'Updated the reseller payout destination for store #' . (int) $store['id'],
+            'Updated the reseller payout destination for store #' . (int) $store['id']
+                . ' (' . ResellerPayoutDestinationRepository::METHODS[$method] . ')',
             $request->ip()
         );
 
         $this->session->flash(
             'reseller_notice',
-            'Payout destination saved. Any earlier confirmation of your bank details no longer applies, so it will be checked again before the next payout.'
+            'Payout destination saved. Any earlier confirmation of your details no longer applies, so it will be checked again before the next payout.'
         );
 
         return Response::redirect('/client/reseller/account');

@@ -1669,6 +1669,53 @@
         syncTldBulkForm();
     });
 
+    // Payout destination form: the method select swaps which fields matter —
+    // bank fields only exist for a bank transfer, and the shared "account
+    // number" input relabels to a wallet address or Bybit UID/email. The
+    // server still validates the shape of whatever is submitted; this only
+    // keeps the form honest while the reseller types.
+    document.addEventListener('change', function (event) {
+        var select = event.target.closest ? event.target.closest('[data-payout-method]') : null;
+        if (!select) {
+            return;
+        }
+
+        var form = select.closest('form');
+        if (!form) {
+            return;
+        }
+
+        var method = select.value;
+
+        var bankFields = form.querySelector('[data-payout-bank-fields]');
+        if (bankFields) {
+            bankFields.hidden = method !== 'bank_transfer';
+            bankFields.style.display = method === 'bank_transfer' ? '' : 'none';
+        }
+
+        var labels = {
+            bank_transfer: 'Account number',
+            crypto_trc20: 'USDT (TRC-20) wallet address',
+            bybit: 'Bybit UID or account email'
+        };
+
+        var label = form.querySelector('[data-payout-number-label]');
+        if (label && labels[method]) {
+            label.textContent = labels[method];
+        }
+
+        var hints = {
+            bank_transfer: 'Sort code, IBAN or local account number.',
+            crypto_trc20: 'Starts with T, 34 characters. Double-check every character — crypto cannot be recalled.',
+            bybit: 'Your Bybit UID (8-12 digits) or the account email.'
+        };
+
+        var hint = form.querySelector('[data-payout-number-hint]');
+        if (hint && hints[method]) {
+            hint.textContent = hints[method];
+        }
+    });
+
     // WHMCS extension import: fetch the TLD list from the configured WHMCS
     // database, let the admin tick the ones they want, then push them through
     // the same bulk-add endpoint the manual form uses.
