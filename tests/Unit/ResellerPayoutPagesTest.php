@@ -709,6 +709,126 @@ final class ResellerPayoutPagesTest extends DatabaseTestCase
         );
     }
 
+    // --------------------------------------------- USD denomination for crypto
+
+    /**
+     * Give the reseller a NON-dollar display currency. The account is held in
+     * the base currency (USD); their page shows naira at the live rate —
+     * which must NOT change the unit their crypto payout is requested in.
+     */
+    private function displayIn(string $code, float $rate): int
+    {
+        $currencyId = (int) $this->db->insert(
+            'INSERT INTO currencies (code, symbol, exchange_rate, is_default, created_at, updated_at) VALUES (?, ?, ?, 0, NOW(), NOW())',
+            [$code, 'X', $rate]
+        );
+
+        $this->db->update('UPDATE clients SET currency_id = ? WHERE id = ?', [$currencyId, $this->resellerClientId]);
+
+        return $currencyId;
+    }
+
+    public function test_a_naira_resellers_crypto_payout_is_requested_in_usd(): void
+    {
+        $ngn = $this->displayIn('NGN', 1500.0);
+        $this->signInAsClient();
+        $this->client->savePayoutMethod($this->request([
+            'method' => 'crypto_trc20',
+            'account_name' => 'Acme Ltd',
+            'account_number' => 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        ]));
+        $this->earn(100.0, 61);
+
+        $response = $this->client->requestPayout($this->request());
+
+        $this->assertSame(302, $response->status());
+
+        $open = $this->payouts->openForReseller($this->storeId);
+
+        $this->assertNotNull($open);
+        // USDT IS a dollar token: the payout is denominated in USD — the BASE
+        // figure, at rate 1 — no matter that the page displays naira. A 100 USD
+        // payout recorded as "150000" in the reseller's display currency would
+        // be a figure in a unit the money never existed in.
+        $this->assertEqualsWithDelta(100.0, (float) $open['amount'], 0.001);
+        $this->assertEqualsWithDelta(100.0, (float) $open['amount_base'], 0.001);
+        $this->assertNull($open['currency_id']);
+        $this->assertEqualsWithDelta(1.0, (float) $open['currency_rate'], 0.0001);
+        $this->assertSame('crypto_trc20', $open['method']);
+        $this->assertStringContainsString('to be paid in USDT (USD)', (string) $open['destination_snapshot']);
+        $this->assertStringContainsString('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', (string) $open['destination_snapshot']);
+    }
+
+    public function test_a_bybit_payout_is_also_denominated_in_usd(): void
+    {
+        $this->displayIn('NGN', 1500.0);
+        $this->signInAsClient();
+        $this->client->savePayoutMethod($this->request([
+            'method' => 'bybit',
+            'account_name' => 'Acme Ltd',
+            'account_number' => '12345678',
+        ]));
+        $this->earn(100.0, 61);
+
+        $this->client->requestPayout($this->request());
+
+        $open = $this->payouts->openForReseller($this->storeId);
+
+        $this->assertNotNull($open);
+        $this->assertEqualsWithDelta(100.0, (float) $open['amount'], 0.001);
+        $this->assertNull($open['currency_id']);
+        $this->assertSame('bybit', $open['method']);
+        $this->assertStringContainsString('to be paid in USD', (string) $open['destination_snapshot']);
+    }
+
+    public function test_a_bank_payout_keeps_the_resellers_own_currency(): void
+    {
+        $ngn = $this->displayIn('NGN', 1500.0);
+        $this->signInAsClient();
+        // The fixture destination is a bank transfer.
+        $this->earn(100.0, 61);
+
+        $this->client->requestPayout($this->request());
+
+        $open = $this->payouts->openForReseller($this->storeId);
+
+        $this->assertNotNull($open);
+        // A bank account IS denominated: naira in, at the rate locked now.
+        $this->assertEqualsWithDelta(150000.0, (float) $open['amount'], 0.001);
+        $this->assertSame($ngn, (int) $open['currency_id']);
+        $this->assertEqualsWithDelta(1500.0, (float) $open['currency_rate'], 0.0001);
+        $this->assertSame('bank_transfer', $open['method']);
+    }
+
+    public function test_switching_display_currency_never_relabels_a_usd_payout(): void
+    {
+        $this->displayIn('NGN', 1500.0);
+        $this->signInAsClient();
+        $this->client->savePayoutMethod($this->request([
+            'method' => 'crypto_trc20',
+            'account_name' => 'Acme Ltd',
+            'account_number' => 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        ]));
+        $this->earn(100.0, 61);
+        $this->client->requestPayout($this->request());
+
+        // The reseller switches their display currency to euros — every LOCAL
+        // figure on the page re-renders, and the USD payout must not move with it.
+        $eur = $this->displayIn('EUR', 0.92);
+        $this->signInAsClient();
+
+        $page = (string) $this->client->index($this->request())->body();
+
+        // The open request is labelled in the unit it was REQUESTED in.
+        $this->assertStringContainsString('100.00 USD', $page);
+        // The exact mis-conversion a regression would produce: the 100 USD
+        // request re-expressed at the euro rate. (The balance panel legitimately
+        // shows "92.00 EUR" — that local conversion is supposed to move.)
+        $this->assertStringNotContainsString('100.00 EUR', $page);
+        // The destination panel still explains the USD rule.
+        $this->assertStringContainsString('USDT (TRC-20)', $page);
+    }
+
     /** @param array<string, mixed> $body */
     private function request(array $body = []): Request
     {

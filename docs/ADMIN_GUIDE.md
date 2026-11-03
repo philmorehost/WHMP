@@ -136,8 +136,13 @@ Three screens, all under **Admin → Resellers** (Marketing group):
 - **Reseller payout destinations** — a store chooses where its money is sent from its own account page:
   a **bank transfer**, **crypto — USDT (TRC-20)** (a TRON wallet address, validated for shape before it
   is stored), or a **Bybit account** (UID or account email). Crypto and Bybit let resellers operate from
-  anywhere in the world. The payout queue shows the frozen wording of whatever destination a payout was
-  requested with; saving new details clears any earlier verification, exactly as with bank details.
+  anywhere in the world. **Crypto and Bybit payouts are always denominated in USD**: whatever currency a
+  reseller's account displays (naira included), the request converts their balance to USD at the rate
+  locked the moment they asked, the payout row records USD, and the frozen queue wording says "to be
+  paid in USDT (USD)" or "to be paid in USD" — so the admin settles it in USD without doing any
+  conversion math. Bank payouts keep the reseller's own currency and rate, as before. A reseller can
+  switch their display currency freely: local figures re-render, the USD payout figure does not move.
+  Saving new details clears any earlier verification, exactly as with bank details.
 - **Per-store page** (`/admin/resellers/{clientId}/store`) — branding, the custom domain and the
   go-live checklist, the store's markup and price overrides, and the store's status. Suspending a store
   makes its domain return **503** rather than showing our shop at our prices.

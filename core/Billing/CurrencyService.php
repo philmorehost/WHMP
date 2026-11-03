@@ -125,6 +125,20 @@ final class CurrencyService
         return $currency !== null ? $this->rateFor($currency) : 1.0;
     }
 
+    /** The id of the currency row with this ISO code, or null when there is none. */
+    public function currencyIdForCode(string $code): ?int
+    {
+        $code = strtoupper(trim($code));
+
+        if ($code === '') {
+            return null;
+        }
+
+        $currency = $this->currencies->findByCode($code);
+
+        return $currency === null ? null : (int) $currency['id'];
+    }
+
     /** The ISO code a document denominated in $currencyId is expressed in (NULL = base). */
     public function codeFor(?int $currencyId): string
     {

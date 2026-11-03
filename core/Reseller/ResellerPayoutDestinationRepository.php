@@ -36,6 +36,18 @@ final class ResellerPayoutDestinationRepository
         self::METHOD_BYBIT => 'Bybit account',
     ];
 
+    /**
+     * The methods that are ALWAYS paid in USD, whatever currency the reseller's
+     * account page displays. A TRC-20 transfer moves USDT and a Bybit transfer
+     * settles in USD — neither has a "naira sort code", so denominating them in
+     * the reseller's display currency would record a figure in a unit the money
+     * never existed in.
+     */
+    public const USD_METHODS = [
+        self::METHOD_CRYPTO_TRC20,
+        self::METHOD_BYBIT,
+    ];
+
     public function __construct(
         private readonly Database $db
     ) {
@@ -184,6 +196,12 @@ final class ResellerPayoutDestinationRepository
         ]);
 
         return $parts === [] ? null : implode(' · ', $parts);
+    }
+
+    /** Whether this payout method settles in USD rather than a bank currency. */
+    public static function paysInUsd(string $method): bool
+    {
+        return in_array($method, self::USD_METHODS, true);
     }
 
     /**

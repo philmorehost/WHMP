@@ -18,6 +18,10 @@
 
 $money = static fn (float $amount, string $code): string => number_format($amount, 2) . ($code === '' ? '' : ' ' . $code);
 
+// Set ONLY when the payout destination settles in USD (crypto / Bybit) —
+// see ClientResellerAccountController::index().
+$payoutInUsd ??= null;
+
 $theirCode = (string) ($account['currency_code'] ?? '');
 $holdingDays = (int) ($account['holding_days'] ?? 0);
 $inArrears = ($account['in_arrears'] ?? false) === true;
@@ -213,7 +217,11 @@ $kindLabels = [
     <?php if ($openRequest !== null): ?>
         <?php
         $reqAmount = (float) $openRequest['amount'];
-        $reqCode = $theirCode !== '' ? $theirCode : $baseCode;
+        // The unit the payout was REQUESTED in, recorded on the row — never the
+        // currency the page happens to display today. A crypto payout stays
+        // "100.00 USD" even after the reseller switches their display currency.
+        $reqCode = trim((string) ($openRequest['amount_code'] ?? ''))
+            ?: ($theirCode !== '' ? $theirCode : $baseCode);
         ?>
         <p style="color:var(--cv-text-secondary);">
             You have a payout request awaiting payment. <strong>The funds have already been set aside</strong>, so
@@ -248,8 +256,16 @@ $kindLabels = [
         <?php if (($account['can_withdraw'] ?? false) === true): ?>
             <p style="color:var(--cv-text-secondary);">
                 <?= e($money((float) $account['withdrawable'], $theirCode)) ?> is ready to be paid out.
-                Payouts are sent by bank transfer, so they are reviewed by hand before the money moves.
+                Payouts are reviewed by hand before the money moves.
             </p>
+            <?php if ($payoutInUsd !== null): ?>
+                <div class="cv-alert cv-alert--success" style="margin:var(--cv-space-2) 0;">
+                    <strong>Your payout will be sent in USD.</strong> Your destination is a crypto/Bybit account, so
+                    about <strong><?= e($money((float) $payoutInUsd['amount'], $baseCode)) ?></strong> will be requested —
+                    your figure in <?= e($theirCode !== '' ? $theirCode : $baseCode) ?> is a conversion for display only.
+                    The USD amount is locked the moment you request and never moves with the exchange rate afterwards.
+                </div>
+            <?php endif; ?>
             <form method="post" action="/client/reseller/account/payouts">
                 <?= csrf_field() ?>
                 <button class="cv-btn" type="submit">Request a payout</button>

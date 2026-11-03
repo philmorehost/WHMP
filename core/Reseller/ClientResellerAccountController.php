@@ -81,12 +81,27 @@ final class ClientResellerAccountController
 
         $destination = $this->destinations->find((int) $store['id']);
 
+        // Crypto and Bybit payouts settle in USD no matter what currency the
+        // page displays, so the page says so — with the USD equivalent worked
+        // out from the BASE balance. That direction is what makes the figure
+        // immune to the display-currency switcher: base -> USD never passes
+        // through the reseller's chosen currency, so switching naira for
+        // dollars (or anything else) re-renders every LOCAL number on this
+        // page while the USD figure stays exactly what will be requested.
+        $paysInUsd = $destination !== null
+            && ResellerPayoutDestinationRepository::paysInUsd((string) ($destination['method'] ?? ''));
+        $usdRate = $this->currency->rateForCode('USD');
+
         return $this->page('reseller.client-account', [
             'account' => $account,
             'baseCode' => strtoupper(trim($this->currency->codeFor(null))),
             'payout' => $this->withAmountCodes($this->payouts->summaryFor((int) $store['id'])),
             'destination' => $destination,
             'destinationText' => ResellerPayoutDestinationRepository::describe($destination),
+            'payoutInUsd' => $paysInUsd ? [
+                'amount' => $this->currency->convert((float) ($account['withdrawable_base'] ?? 0.0), $usdRate),
+                'rate' => $usdRate,
+            ] : null,
             'labels' => ResellerPayoutService::STATUS_LABELS,
             'notice' => $this->session->pullFlash('reseller_notice'),
             'error' => $this->session->pullFlash('reseller_error'),
