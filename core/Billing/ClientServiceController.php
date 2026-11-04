@@ -11,6 +11,7 @@ use CodeVault\Catalog\ProductRepository;
 use CodeVault\Database;
 use CodeVault\Modules\AddonModuleRepository;
 use CodeVault\Provisioning\ProvisioningService;
+use CodeVault\Provisioning\WhiteLabel;
 use CodeVault\Provisioning\ServerRepository;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -736,9 +737,9 @@ final class ClientServiceController
             "OS reload request for service #{$id} ({$service['product_name']})",
             fn () => $this->provisioning->reinstall($id, $template),
             fn (array $result) => "The client asked to reload the OS of dedicated server #{$id} ({$service['product_name']}) with {$template}, "
-                . "but it could not be run through the Nocix API ({$result['message']}).\n\n"
+                . "but it could not be run through the server provider's API ({$result['message']}).\n\n"
                 . 'Primary IP: ' . ((string) ($service['dedicated_ip'] ?? '') ?: 'not set') . "\n"
-                . 'This erases the server. Confirm with the client, reload it in the Nocix portal, then send them the new login.',
+                . 'This erases the server. Confirm with the client, reload it in the provider\'s portal, then send them the new login.',
             fn (array $result) => "OS reload started ({$template}). It can take a while to finish. "
                 . 'When the status below says Completed, use Show login details to get the new login.'
         );
@@ -843,7 +844,7 @@ final class ClientServiceController
                 "The client has requested a reverse DNS change on service #{$service['id']} ({$service['product_name']}).\n\n"
                     . 'IP address: ' . ($ip !== '' ? $ip : 'not specified') . "\n"
                     . "Requested PTR hostname: {$rdns}\n\n"
-                    . 'Nocix publishes no reverse DNS endpoint, so this needs to be set manually.',
+                    . "This server's provider has no reverse DNS API endpoint, so our team sets PTR records for it manually — we'll confirm on this ticket once the record is updated.",
                 'Reverse DNS request submitted. Our team will update the PTR record and reply on your ticket.'
             );
         }
@@ -1009,6 +1010,12 @@ final class ClientServiceController
             return $this->back((int) $service['id'], null, 'No support department is configured — please contact us directly.');
         }
 
+        // The body below becomes the CLIENT's own ticket opening post — the
+        // client reads every word, and module/API failure messages routinely
+        // name the upstream provider. Reseller stores are white-labelled, so
+        // scrub provider names here regardless of which action built $body.
+        $body = WhiteLabel::text($body);
+
         $ticketId = $this->tickets->open(
             (int) $client['id'],
             (string) $client['email'],
@@ -1078,7 +1085,7 @@ final class ClientServiceController
         if ($result['success']) {
             return $this->back(
                 (int) $service['id'],
-                $successMessage !== null ? $successMessage($result) : (string) $result['message']
+                $successMessage !== null ? $successMessage($result) : WhiteLabel::text((string) $result['message'])
             );
         }
 
@@ -1091,7 +1098,7 @@ final class ClientServiceController
             return $this->back(
                 (int) $service['id'],
                 null,
-                'The server could not do this right now: ' . trim((string) $result['providerMessage'])
+                'The server could not do this right now: ' . WhiteLabel::text(trim((string) $result['providerMessage']))
             );
         }
 
@@ -1295,6 +1302,11 @@ final class ClientServiceController
 
     private function back(int $serviceId, ?string $message = null, ?string $error = null): Response
     {
+        // Toasts are read by the client; module messages interpolated into
+        // them ("Nocix has no stored login…") must come out white-labelled.
+        $message = $message !== null ? WhiteLabel::text($message) : null;
+        $error = $error !== null ? WhiteLabel::text($error) : null;
+
         $query = $message !== null
             ? '?msg=' . urlencode($message)
             : ($error !== null ? '?err=' . urlencode($error) : '');

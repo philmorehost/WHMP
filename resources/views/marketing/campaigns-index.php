@@ -1,6 +1,7 @@
 <?php
 /** @var array<int, array<string, mixed>> $campaigns */
 /** @var array<int, array<string, mixed>> $groups */
+/** @var array<int, array<string, mixed>> $products */
 /** @var string|null $error */
 ?>
 <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
@@ -11,6 +12,16 @@
 <?php if ($error !== null): ?>
     <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
         <div class="cv-field-error"><?= e($error) ?></div>
+    </div>
+<?php endif; ?>
+
+<?php if (($_GET['deleted'] ?? '') !== ''): ?>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <div class="cv-alert cv-alert--success">Campaign deleted, along with its recipient history.</div>
+    </div>
+<?php elseif (($_GET['delete_error'] ?? '') !== ''): ?>
+    <div class="cv-card" style="margin-bottom:var(--cv-space-4);">
+        <div class="cv-alert cv-alert--danger">Could not delete — pause the campaign first if it is still sending.</div>
     </div>
 <?php endif; ?>
 
@@ -46,11 +57,19 @@
                         <span class="cv-badge cv-badge--neutral">Draft</span>
                     <?php endif; ?>
                 </td>
-                <td title="Opened is a minimum — many mail clients block the tracking image by default"><?= (int) $campaign['recipient_count'] ?> / <?= (int) $campaign['opened_count'] ?></td>
-                <td>
+                <td title="Opened is a minimum — many mail clients block the tracking image by default. Counts are for this campaign's most recent send; resends open a new round.">
+                    <?= (int) $campaign['recipient_count'] ?> / <?= (int) $campaign['opened_count'] ?><?= (int) ($campaign['round'] ?? 1) > 1 ? ' <span class="cv-badge cv-badge--neutral" title="Sent ' . (int) $campaign['round'] . ' times">R' . (int) $campaign['round'] . '</span>' : '' ?>
+                </td>
+                <td style="white-space:nowrap;">
                     <?php if ($campaign['status'] === 'draft'): ?>
-                        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/send" data-confirm="Send this campaign now?"><?= csrf_field() ?>
-                            <button class="cv-btn" type="submit">Send Now</button>
+                        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/send" data-confirm="Send this campaign now?" style="display:inline;"><?= csrf_field() ?>
+                            <button class="cv-btn cv-btn--sm" type="submit">Send Now</button>
+                        </form>
+                    <?php endif; ?>
+                    <?php if (in_array($campaign['status'], ['draft', 'paused', 'sent'], true)): ?>
+                        <a class="cv-btn cv-btn--secondary cv-btn--sm" href="/admin/campaigns/<?= (int) $campaign['id'] ?>#edit">Edit</a>
+                        <form method="post" action="/admin/campaigns/<?= (int) $campaign['id'] ?>/delete" data-confirm="Delete this campaign and ALL of its recipient history? This cannot be undone." style="display:inline;"><?= csrf_field() ?>
+                            <button class="cv-btn cv-btn--danger cv-btn--sm" type="submit">Delete</button>
                         </form>
                     <?php endif; ?>
                 </td>
@@ -73,8 +92,45 @@
                 <option value="inactive">📭 Accounts with no active product/domain</option>
                 <option value="group">📁 Client Group</option>
                 <option value="individual">👤 Individual Client</option>
+                <option value="products">📦 Clients with specific products</option>
                 <option value="external">✉️ External email addresses</option>
             </select>
+        </div>
+        <div class="cv-field" id="target-products-field" style="display:none;">
+            <div data-product-picker>
+                <label class="cv-label">Products the clients hold</label>
+                <?php if (!empty($products)): ?>
+                    <input type="search" class="cv-input" data-product-filter
+                           placeholder="Filter products…"
+                           aria-label="Filter products" style="max-width:20rem;">
+                    <div style="display:flex;align-items:center;gap:10px;margin:var(--cv-space-2) 0;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:var(--cv-text-sm);cursor:pointer;">
+                            <input type="checkbox" data-product-select-all>
+                            Select all
+                        </label>
+                        <span data-product-count style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);"></span>
+                    </div>
+                    <div style="max-height:16rem;overflow-y:auto;border:1px solid var(--cv-border-default);border-radius:8px;padding:var(--cv-space-2);">
+                        <?php foreach ($products as $product): ?>
+                            <label data-product-row style="display:block;padding:4px 0;cursor:pointer;">
+                                <input type="checkbox" name="product_ids[]" value="<?= (int) $product['id'] ?>" data-product-checkbox>
+                                <span data-product-label><?= e(trim((string) ($product['group_name'] ?? '')) !== '' ? $product['group_name'] . ' — ' . $product['name'] : $product['name']) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                        <span data-product-empty style="display:none;color:var(--cv-text-secondary);font-size:var(--cv-text-sm);">
+                            No products match that filter.
+                        </span>
+                    </div>
+                <?php else: ?>
+                    <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);">No products exist yet — create one under Products first.</div>
+                <?php endif; ?>
+                <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">
+                    Emails every active client who currently holds an active or suspended service of any ticked product
+                    (clients with the product cancelled or terminated, and pending orders, are not included).
+                    The recipient list is resolved at send time, so it stays current. "Select all" ticks only the
+                    products currently visible in the filtered list.
+                </div>
+            </div>
         </div>
         <div class="cv-field" id="target-inactive-field" style="display:none;">
             <div style="font-size:var(--cv-text-xs);color:var(--cv-text-secondary);margin-top:var(--cv-space-1);">

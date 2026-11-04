@@ -8,4 +8,5 @@ use CodeVault\Billing\GatewayController;
 
 $router->get('/admin/gateways', [GatewayController::class, 'index']);
 $router->post('/admin/gateways/{slug}/toggle', [GatewayController::class, 'toggle']);
+$router->post('/admin/gateways/{slug}/toggle-reseller', [GatewayController::class, 'toggleReseller']);
 $router->post('/admin/gateways/{slug}/config', [GatewayController::class, 'updateConfig']);

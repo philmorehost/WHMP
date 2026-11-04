@@ -21,6 +21,8 @@ $router->post('/admin/campaigns/{id}/send', [MailCampaignController::class, 'sen
 $router->post('/admin/campaigns/{id}/pause', [MailCampaignController::class, 'pause']);
 $router->post('/admin/campaigns/{id}/resume', [MailCampaignController::class, 'resume']);
 $router->post('/admin/campaigns/{id}/update', [MailCampaignController::class, 'update']);
+$router->post('/admin/campaigns/{id}/resend', [MailCampaignController::class, 'resend']);
+$router->post('/admin/campaigns/{id}/delete', [MailCampaignController::class, 'destroy']);
 
 $router->get('/campaigns/track/{token}', [CampaignTrackingController::class, 'pixel']);
 

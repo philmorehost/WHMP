@@ -543,6 +543,58 @@ final class InvoiceRepository
     }
 
     /**
+     * How many UNPAID invoices are attached to a service that is already
+     * 'cancelled' or 'terminated' — the "dead service, still billing" debt
+     * the admin's one-click cleanup targets.
+     *
+     * Unlike cancelStaleUnpaid() above, this counts only invoices actually
+     * LINKED to a dead service: an invoice with no service at all may be
+     * perfectly collectable (a manual or domain invoice), so it is never
+     * touched by this rule.
+     */
+    public function countUnpaidForDeadServices(): int
+    {
+        $row = $this->db->selectOne(
+            "SELECT COUNT(*) AS c
+             FROM invoices i
+             INNER JOIN services s ON s.id = i.service_id
+             WHERE i.status = 'unpaid'
+               AND s.status IN ('cancelled', 'terminated')"
+        );
+
+        return (int) ($row['c'] ?? 0);
+    }
+
+    /**
+     * Cancels every unpaid invoice whose linked service is cancelled or
+     * terminated, regardless of due date — an admin action meant to clean up
+     * NOW, where cancelStaleUnpaid() is the slower cron variant that also
+     * waits out a grace period and sweeps unlinked invoices.
+     *
+     * The unpaid guard is in the WHERE clause, so a payment landing mid-request
+     * can never be flipped to cancelled (same race-safety as
+     * cancelManyUnpaid()). Paid and refunded invoices are never touched, and
+     * consolidation children can't be affected either — an invoice absorbed by
+     * a consolidation is settled, i.e. not 'unpaid', so there is no need to
+     * releaseChildren() here.
+     *
+     * @return int invoices actually cancelled
+     */
+    public function cancelUnpaidForDeadServices(): int
+    {
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $this->db->update(
+            "UPDATE invoices i
+             INNER JOIN services s ON s.id = i.service_id
+             SET i.status = 'cancelled', i.is_cancelled = 1, i.cancelled_at = ?, i.updated_at = ?
+             WHERE i.status = 'unpaid'
+               AND s.status IN ('cancelled', 'terminated')",
+            [$now, $now]
+        );
+    }
+
+    /**
      * Replaces an invoice's line items and recalculates its totals.
      *
      * The amounts entered are in whatever currency the invoice is already

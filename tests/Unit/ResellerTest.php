@@ -271,7 +271,7 @@ final class ResellerTest extends DatabaseTestCase
         $this->assertSame([], $this->credentials->allResellers());
     }
 
-    public function test_rotating_issues_a_new_secret_and_returns_the_key_to_disabled(): void
+    public function test_regenerating_an_active_key_keeps_it_active_for_its_verified_domain(): void
     {
         $first = $this->service->requestKey($this->clientId, 'My storefront');
         $this->service->activate($this->clientId, 'reseller.example.com');
@@ -279,28 +279,54 @@ final class ResellerTest extends DatabaseTestCase
         $rotated = $this->service->rotateKey($this->clientId, 'My storefront');
 
         $this->assertNotSame($first['secret'], $rotated['secret']);
+        $this->assertSame('reseller.example.com', $rotated['domain']);
+        $this->assertTrue($rotated['active']);
 
         $auth = new ApiAuthenticator($this->credentials);
 
         // The old pair is dead...
         try {
             $auth->authenticate($this->apiRequest($first['key'], $first['secret']));
-            $this->fail('The rotated-away key must stop working.');
+            $this->fail('The rotated-away pair must stop working.');
         } catch (ApiAuthException $e) {
             $this->assertStringContainsString('Invalid API credentials', $e->getMessage());
         }
 
-        // ...and the new one is disabled until the domain is submitted again,
-        // so rotation can never leave a live key the reseller did not re-arm.
+        // ...and the new pair WORKS immediately: regeneration re-keys an
+        // already-declared storefront rather than breaking a live integration
+        // until the same domain is re-submitted (which would add no security).
+        $credential = $auth->authenticate($this->apiRequest($rotated['key'], $rotated['secret']));
+        $this->assertInstanceOf(\CodeVault\Api\ApiCredential::class, $credential);
+        $this->assertTrue($credential->active);
+
+        $row = $this->credentials->forClient($this->clientId);
+
+        $this->assertSame(1, (int) $row['active']);
+        $this->assertSame('reseller.example.com', $row['reseller_domain']);
+    }
+
+    public function test_regenerating_a_never_activated_key_leaves_the_domain_gate_closed(): void
+    {
+        $first = $this->service->requestKey($this->clientId, 'My storefront');
+
+        $rotated = $this->service->rotateKey($this->clientId, 'My storefront');
+
+        // No verified domain to carry over: the gate still applies.
+        $this->assertFalse($rotated['active']);
+        $this->assertNull($rotated['domain']);
+
+        $auth = new ApiAuthenticator($this->credentials);
+
         try {
             $auth->authenticate($this->apiRequest($rotated['key'], $rotated['secret']));
-            $this->fail('A newly rotated key must start disabled.');
+            $this->fail('A regenerated key that never passed the gate must stay disabled.');
         } catch (ApiAuthException $e) {
             $this->assertStringContainsString('Invalid API credentials', $e->getMessage());
         }
 
         $row = $this->credentials->forClient($this->clientId);
 
+        $this->assertSame(0, (int) $row['active']);
         $this->assertNull($row['reseller_domain']);
     }
 
@@ -598,6 +624,148 @@ final class ResellerTest extends DatabaseTestCase
 
         $this->assertCount(1, $resellerScopes);
         $this->assertSame('reseller.read', $resellerScopes[0]['scope']);
+    }
+
+    // --- the public API documentation page ---------------------------------
+
+    /** A Request for the docs page, the way the router would build one. */
+    private function docsRequest(): Request
+    {
+        return new Request([], [], [
+            'REQUEST_METHOD' => 'GET',
+            'REMOTE_ADDR' => '127.0.0.1',
+            'REQUEST_URI' => '/client/reseller/docs',
+        ], []);
+    }
+
+    /** Point APP_URL at a realistic portal domain for the duration of $fn. */
+    private function withPortalUrl(callable $fn): void
+    {
+        $original = $_ENV['APP_URL'] ?? null;
+        $_ENV['APP_URL'] = 'https://billing.example.test';
+
+        try {
+            $fn();
+        } finally {
+            if ($original === null) {
+                unset($_ENV['APP_URL']);
+            } else {
+                $_ENV['APP_URL'] = $original;
+            }
+        }
+    }
+
+    public function test_api_documentation_page_is_public_and_shows_the_full_portal_base_url(): void
+    {
+        $this->withPortalUrl(function (): void {
+            unset($_SESSION['client_id']);
+
+            $response = $this->controller->docs($this->docsRequest());
+
+            $this->assertSame(200, $response->status());
+
+            $body = $response->body();
+            $this->assertStringContainsString('API Documentation', $body);
+            // The full URL, billing portal domain included — never a bare /api.
+            $this->assertStringContainsString('https://billing.example.test/api', $body);
+            $this->assertStringContainsString('curl -s https://billing.example.test/api/ping', $body);
+            // A guest is told how to get a key, and is NOT shown one.
+            $this->assertStringContainsString('/client/login', $body);
+            $this->assertStringNotContainsString('Your key:', $body);
+        });
+    }
+
+    public function test_api_docs_hide_the_key_until_the_reseller_account_is_reviewed_and_approved(): void
+    {
+        $this->withPortalUrl(function (): void {
+            $issued = $this->service->requestKey($this->clientId, 'Docs key');
+            $this->assertTrue($issued['created']);
+
+            // Requested but not yet approved (no domain submitted): no key.
+            $pending = $this->controller->docs($this->docsRequest())->body();
+            $this->assertStringContainsString('reviewed', $pending);
+            $this->assertStringNotContainsString($issued['key'], $pending);
+            $this->assertStringNotContainsString('Your key:', $pending);
+
+            // Approval (the domain gate) + being signed in is what reveals it.
+            $this->assertTrue($this->service->activate($this->clientId, 'reseller.example.com')['success']);
+
+            $approved = $this->controller->docs($this->docsRequest())->body();
+            $this->assertStringContainsString('Your key:', $approved);
+            $this->assertStringContainsString($issued['key'], $approved);
+            $this->assertStringContainsString('reseller.example.com', $approved);
+            // The docs must also explain where the secret lives — the exact
+            // confusion a vendor hit: building for a key+secret pair, then
+            // finding only the key on the reseller pages.
+            $this->assertStringContainsString('Secret Key was shown only once', $approved);
+            $this->assertStringContainsString('Bearer', $approved);
+        });
+    }
+
+    public function test_api_docs_prompt_for_a_key_when_the_signed_in_client_has_none(): void
+    {
+        $this->withPortalUrl(function (): void {
+            $body = $this->controller->docs($this->docsRequest())->body();
+
+            $this->assertStringContainsString("don't have an API key yet", $body);
+            $this->assertStringNotContainsString('Your key:', $body);
+        });
+    }
+
+    public function test_the_secret_key_is_shown_once_and_then_named_where_the_reseller_looks_for_it(): void
+    {
+        // The vendor's report, reproduced: the API is integrated against a
+        // key/secret PAIR, but the reseller area's persistent table used to
+        // show the API key with no mention of the secret at all — so a
+        // developer looking for the secret key found nothing.
+        $issued = $this->service->requestKey($this->clientId, 'Docs key');
+        $this->assertTrue($issued['created']);
+
+        // 1. The one-time reveal right after creation: BOTH credentials,
+        //    clearly labelled, with the copy-it-now warning.
+        $this->session->flash('reseller_issued', [
+            'key' => $issued['key'],
+            'secret' => $issued['secret'],
+            'rotated' => false,
+        ]);
+        $reveal = (string) $this->controller->index($this->getRequest())->body();
+
+        $this->assertStringContainsString('Copy the secret now', $reveal);
+        $this->assertStringContainsString('Secret Key:', $reveal);
+        $this->assertStringContainsString($issued['key'], $reveal);
+        $this->assertStringContainsString($issued['secret'], $reveal);
+        $this->assertStringContainsString('Bearer ' . $issued['key'] . '.' . $issued['secret'], $reveal);
+
+        // 2. Every page AFTER that (the flash is consumed): the secret value
+        //    must never come back, but the table must NAME the Secret Key,
+        //    say why it is hidden, and point at the rotation remedy.
+        $later = (string) $this->controller->index($this->getRequest())->body();
+
+        $this->assertStringContainsString('Secret Key</th>', $later);
+        $this->assertStringContainsString('shown only ONCE', $later);
+        $this->assertStringContainsString('Regenerate', $later);
+        $this->assertStringNotContainsString($issued['secret'], $later, 'the secret re-appeared outside its one-time reveal');
+    }
+
+    public function test_documented_examples_are_rewritten_against_the_absolute_base_url(): void
+    {
+        $this->assertSame(
+            'https://billing.example.test/api',
+            ApiDocumentation::absoluteBaseUrl('https', 'billing.example.test')
+        );
+
+        foreach (ApiDocumentation::endpoints('https://billing.example.test/api') as $endpoint) {
+            $this->assertStringContainsString(
+                'https://billing.example.test/api',
+                $endpoint['example'],
+                $endpoint['path'] . ' was not rewritten to the absolute base URL'
+            );
+        }
+
+        // The default stays site-relative, exactly as the docs table has always shown.
+        foreach (ApiDocumentation::endpoints() as $endpoint) {
+            $this->assertStringNotContainsString('://', $endpoint['example']);
+        }
     }
 
     // --- helpers -----------------------------------------------------------

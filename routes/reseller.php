@@ -29,6 +29,10 @@ $router->get('/client/reseller', [ClientResellerController::class, 'index']);
 $router->post('/client/reseller/key', [ClientResellerController::class, 'requestKey']);
 $router->post('/client/reseller/activate', [ClientResellerController::class, 'activate']);
 $router->post('/client/reseller/rotate', [ClientResellerController::class, 'rotate']);
+// PUBLIC: the API reference itself needs no account — a prospective reseller
+// reads the full surface before signing up. The reseller's key, however, is
+// printed only for a signed-in client whose key is active (reviewed + approved);
+// guests and still-pending clients get the docs without it.
 $router->get('/client/reseller/docs', [ClientResellerController::class, 'docs']);
 
 // What the reseller has earned. Registered as a literal path before the store

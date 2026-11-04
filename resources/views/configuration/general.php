@@ -1,4 +1,5 @@
 <?php
+/** @var bool $backupEnabled */
 /** @var string $lateFeePercentage */
 /** @var string $newOrderDueDays */
 /** @var bool $allowCheckoutNotes */
@@ -103,14 +104,27 @@
         <div class="cv-card">
             <h2 class="cv-card__title" style="margin-bottom:var(--cv-space-3);">Automated Backups</h2>
             <p style="font-size:0.8rem;color:var(--cv-text-secondary);margin-top:0;">
-                Each backup writes a full database dump plus a zip of the install, so these are large.
+                Each backup writes a full database dump plus a zip of the install, so these are large —
+                the automated schedule therefore runs <strong>at most once per day</strong>, at the daily
+                automation time set above, and only one backup can ever run at a time.
                 The schedule is enforced by the cron — your server cron should still run every minute.
             </p>
 
             <div class="cv-field">
+                <label style="display:flex;align-items:center;gap:8px;font-size:var(--cv-text-sm);">
+                    <input type="checkbox" name="backup_enabled" value="1" <?= $backupEnabled ? 'checked' : '' ?>>
+                    Enable automated backups
+                </label>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);display:block;margin-top:4px;">
+                    Untick to switch the scheduled backup system off entirely — nothing runs and nothing is written.
+                    "Run Backup Now" on the Backups page keeps working either way.
+                </span>
+            </div>
+
+            <div class="cv-field">
                 <label class="cv-label">Run a Backup Every (hours)</label>
-                <input class="cv-input" type="number" min="1" name="backup_frequency_hours" value="<?= e($backupFrequencyHours) ?>" required>
-                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">24 = once a day, 168 = weekly. Minimum 1 hour.</span>
+                <input class="cv-input" type="number" min="24" name="backup_frequency_hours" value="<?= e($backupFrequencyHours) ?>" required>
+                <span style="font-size:0.75rem;color:var(--cv-text-secondary);">24 = once a day, 168 = weekly. Values below 24 are saved as 24 — daily is the fastest the backup runs.</span>
             </div>
 
             <div class="cv-field">

@@ -4,12 +4,37 @@ A day-to-day operations reference for whoever runs the admin panel (`/admin`). F
 
 ## Core billing
 
-- **Orders / Invoices / Services** — orders land `pending`; accept them from the Orders queue. Invoices generate automatically ahead of a service's due date (recurring billing cron) or on-demand (billable items, upgrade/downgrade proration).
+- **Cancellations** — a client cancelling a service chooses the option themselves: **⚡ Cancel immediately** (the service ends right away, unused time is not refunded) or **📅 Cancel at the end of the billing period** (keeps what they paid for; it does not renew). Every end-of-period request lands in **Admin → Cancellations** for review, where the admin can switch the option either way: **⚡ Cancel Immediately Instead** is available both on pending requests (before approval) and on approved ones still waiting for their scheduled date (after approval) — it cancels the service right then, marks the request completed, and notifies the client. Cancelling a service cancels its unpaid invoices; cPanel/CyberPanel accounts are terminated on the server, and InterServer VPS/dedicated servers are cancelled through the provider's API — immediately on approval, or by the cron on the scheduled date. A failed API cancellation emails the admins for manual review (the request still completes, so billing stops). Nocix publishes no cancellation endpoint, so those servers are only marked cancelled here — cancel them in the Nocix portal.
+- **Orders / Invoices / Services** — orders land `pending`; accept them from the Orders queue. Invoices generate automatically ahead of a service's due date (recurring billing cron) or on-demand (billable items, upgrade/downgrade proration). **Admin → Invoices** also offers one-click cleanups above the list: zero-value unpaid invoices can be settled in bulk, and a red callout appears whenever unpaid invoices are attached to **cancelled or terminated services** ("Cancel N Invoice(s)") — those debts can never be collected, so cancelling them stops reminders and overdue totals from chasing money that will never arrive. Only unpaid invoices linked to a dead service are touched; paid, refunded and unlinked invoices are never affected.
 - **Products** — organized into Product Groups, each product has per-billing-cycle pricing (Products → a product → Pricing) and optional Configurable Options. A product flagged `is_upsell` shows as a cart add-on suggestion.
 - **Product Add-ons** (Admin → Products → Product Add-ons) — link any product as a recurring add-on to a parent product (optionally pin it to one billing cycle, or leave it available on any). Clients then see an **Add-ons** button on that service and can add/remove the linked add-ons themselves. Each add-on is billed as its own child service: setup fee + first period are invoiced immediately, and the recurring billing engine handles every later period on the parent's cycle. Removing an add-on stops it renewing; the parent service is never touched.
 - **Tax Rules** — country/state-specific rates; a client's tax is resolved by their billing address, `tax_exempt` clients are never taxed regardless of a matching rule.
-- **Payment Gateways** — the built-in Manual gateway (bank transfer, staff mark-paid) always works with zero configuration; add real gateway modules by implementing the `GatewayModule` SDK interface.
+- **Bulk Price Updates** (Admin → Bulk Price Updates, under Provisioning and Domains) — reprice many items in one pass: pick **products by their category** (with per-product narrowing) and choose which billing cycles to touch (setup fees optional), and/or pick **domain extensions by TLD** with the register/transfer/renew fields, then apply a percentage or flat increase/decrease (never below zero). Only existing price rows are adjusted — a cycle a product doesn't offer is never created here. After applying, every client who **subscribes to an affected product at one of the changed cycles or holds a domain under an affected extension** is emailed a `price_update_notice` price review listing only the lines that affect them (one email per client even when both product and domain prices moved); subscribers whose own cycle/extension didn't change get nothing. Delivery is queued like every outbound email. Both halves are permission-split (`products.manage` / `domains.manage`).
+- **Payment Gateways** — the built-in Manual gateway (bank transfer, staff mark-paid) always works with zero configuration; add real gateway modules by implementing the `GatewayModule` SDK interface. Each gateway card also carries a **Resellers: On/Off** toggle: switching a gateway off for resellers hides it from clients of reseller storefronts only (their invoice and payment pages) and rejects their payment attempts, while the platform's own site keeps offering it. The flag is independent of the global enable toggle — a globally disabled gateway is hidden from everyone regardless.
 - **Fraud Protection** — every order is scored on placement by all registered `FraudModule`s (max score wins, not average); a hold routes it to the fraud review queue instead of the normal pending queue.
+- **Domain TLD pricing** (`/admin/domain-pricing`) — tick the checkboxes (or **select all**) on the TLD
+  table and press **Delete selected** to remove many extensions at once; one confirmation covers the
+  whole selection and the page reports how many rows went. Clients can no longer order a deleted
+  extension until it is added back, so the confirm says so.
+- **Domain registration & approval flow** — a bought domain lands `pending` on its order (the order page lists it in its own table, and pending rows on the Orders list are tagged "🌐 N domain registration(s) — approving registers it"). **Accepting the order sends every pending domain on it to its registrar and activates it** (dates, nameservers, renewal billing) in the background job; you get a completion/failure email per domain. The paid invoice links straight to its order. For a domain stuck pending (order already accepted, or a previous attempt failed), **Admin → Domains → the domain → "Approve & Register"** submits it to the registrar immediately — same path, immediate activation. Registrars require an assigned, complete registrant: the page shows the registrant on file and blocks submission with the exact missing fields (name/email/address/city/ZIP/country/phone) instead of letting the API reject the order with an opaque error. ConnectReseller and ResellerClub orders carry a registrant contact resolved automatically — the client's existing contact at the registrar is reused (found by email), or one is created from the domain/client details and linked (`domains.registrar_contact_id`) so later actions never duplicate it. ResellerClub additionally needs a **Default Customer ID** in its registrar config before it can register anything. Upperlink (WHMCS Domains Reseller API) needs no contact record — but its register/transfer calls only recognise a registrant in the role-keyed `contacts[registrant][…]` structure, which the module now sends (it used to send a flat list the API read as "no registrant", failing every registration).
+- **Domain renewals at the registrar** — the renewal invoice generating ahead of expiry is payment-gated:
+  the registrar is only asked to renew once the invoice is **paid**, and on success the new expiry date is
+  **fetched from the registrar**, not computed locally (Upperlink is re-read right after the renewal;
+  ResellerClub's renew answer carries the new `endtime`; Namecheap's carries `ExpirationDate`), so the date
+  the client renews against is the registrar's own. When a registrar answers success but carries no date
+  yet (registry not propagated), the local date extends the **current** expiry by the renewed years — the
+  same arithmetic the registrar itself uses. Responses are parsed tolerantly: a WHMCS-host quirk that wraps
+  the addon's success JSON in PHP notices/BOM/HTML no longer records a successful renewal as an error (the
+  live symptom was "Unexpected response (HTTP 200)" with the domain actually renewed at Upperlink and the
+  local date never moving). A body with no JSON in it at all still fails, but the failure message now quotes
+  the actual body. **Fixing already-affected domains:** a domain renewed at the registrar but not dated
+  locally needs no second renewal — press **Sync with Registrar** on its page to pull the true expiry.
+- **cPanel client tools & Imunify360 WebShield** — the client-area cPanel tool (email/FTP/database/DNS management and quick-login SSO) talks to WHM's JSON API from this billing server. If the hosting server runs Imunify360 with **cPanel account protection** (WebShield "Splash Screen", `WEBSHIELD.panel_protection`), WebShield answers panel-port requests with a JavaScript challenge: real browsers pass it once and get a 24h cookie, but server-to-server API automation cannot run JavaScript, so every tool call and SSO mint fails with an HTML challenge page instead of JSON. The tool detects this and reports it explicitly. Resolution on the WHM server, in order of preference:
+  1. **Whitelist this billing server's IP** — `imunify360-agent whitelist ip add <IP>` (Imunify360 → Firewall → WhiteList). This is CloudLinux's documented answer for legitimate automation; the tool's error message includes the resolved outbound IP. Check `/var/log/imunify360-webshield/` if unsure.
+  2. **Update WebShield** — builds before 1.31.4 have a bug where the Splash Screen loops forever ("Please wait while your request is being verified") even for real browsers, so clients cannot log in to cPanel at all. `bash imunify-force-update.sh` from the repo.
+  3. **Turn off cPanel account protection** — `imunify360-agent config update '{"WEBSHIELD":{"panel_protection":false}}'` or untick it in Imunify360 → WebShield. This restores plain panel logins/SSO but removes the anti-bot challenge on ports 2082/2083 — prefer options 1–2.
+
+  Clients whose IP is greylisted may see the challenge once; after passing it they are cookied for 24h and quick-login works normally.
 
 ## Multi-currency
 
@@ -31,7 +56,9 @@ Scope note: the translation catalogs cover the public storefront, cart/checkout,
 
 ## Marketing campaigns
 
-**Admin → Campaigns.** Compose a subject + HTML body, target either every active client or one client group, and send. Each recipient gets a unique open-tracking pixel; the campaign's detail page shows send/open status per recipient. Campaigns go through the same async email pipeline (queue + `email_log`) as every other outbound email — check **Admin → Email Log** (via a client's profile, or the raw `email_log` table) if a send looks stuck.
+**Admin → Campaigns.** Compose a subject + HTML body and pick an audience target: every active client, accounts with no active product/domain (re-engagement), one client group, one individual client, **clients with specific products** (WHMCS-style — tick products in a searchable checkbox list with filter-as-you-type and "Select all" over the filtered rows), or external email addresses. Each recipient gets a unique open-tracking pixel; the campaign's detail page shows send/open status per recipient. Campaigns go through the same async email pipeline (queue + `email_log`) as every other outbound email — check **Admin → Email Log** (via a client's profile, or the raw `email_log` table) if a send looks stuck.
+
+Old campaigns stay usable after sending: **Edit** rewrites a draft's or sent campaign's subject/body (and its audience, which takes effect the next time it sends — paused campaigns are content-only because their remaining recipients are already resolved); **Send Again** re-queues a sent campaign as a new *round* — the audience is resolved fresh at send time, earlier rounds' recipient/open history is kept, and the "only people who haven't received this campaign yet" checkbox limits the resend to new sign-ups (untick it to send everyone another copy); **Delete** removes a draft, paused or sent campaign together with its entire recipient history (a sending campaign must be paused first). The lists' Sent/Opened counts always describe the most recent round; older rounds stay visible on the campaign page.
 
 Lifecycle emails run automatically via cron — currently just the service renewal reminder (7 days before `next_due_date`, once per billing cycle). Dunning (overdue-invoice reminders) is a separate, older engine — see the Billing section.
 
@@ -39,7 +66,7 @@ Lifecycle emails run automatically via cron — currently just the service renew
 
 ## Backups
 
-**Admin → Backups.** "Run Backup Now" triggers an immediate full DB dump (plain SQL, no `mysqldump` dependency) + a zip of the application files, saved to `storage/backups/`. Also runs automatically once a day via cron. The history table shows status/size/duration for every run, including failures with the error message.
+**Admin → Backups.** "Run Backup Now" triggers an immediate full DB dump (plain SQL, no `mysqldump` dependency) + a zip of the application files, saved to `storage/backups/`. The automated schedule runs **at most once per day** (General Settings — the frequency field is floored at 24 hours; higher values such as 168 = weekly work too) at the configured daily automation time. **General Settings → "Enable automated backups"** switches the scheduled backup system off entirely while leaving the manual button working. Only one backup can ever run at a time — a run started while another is still going is skipped, not queued on top. **Terminate running backups** (the red button on the Backups page) cleans up after trouble: it closes out every "Running" history entry and deletes its half-written files — the leftovers of a crashed or previously piled-up run. If a backup is genuinely executing at that moment, its entry is removed and its partial files deleted, but the process itself cannot be force-killed from the browser (the page tells you); it simply finishes and the lock frees itself. Completed backups are never touched. The history table shows status/size/duration for every run, including failures with the error message.
 
 ## API credentials & the external API
 
@@ -90,13 +117,44 @@ Three screens, all under **Admin → Resellers** (Marketing group):
 - **Resellers** (`/admin/resellers`) — the discount resellers get off list price (services and domains,
   clamped to 0–100), and the API keys issued to them. A reseller key is created **disabled** and is only
   switched on once the reseller submits the domain they sell from, so a key that never completes that
-  step cannot authenticate at all.
+  step cannot authenticate at all. Authentication is a PAIR — every call sends
+  `Authorization: Bearer {API Key}.{Secret Key}`. The Secret Key is revealed exactly once, when the
+  key is created or rotated, and only its hash is stored: support cannot re-display it. A reseller
+  who has lost theirs (or wants a fresh pair any time) clicks Regenerate in the Reseller Area: the old
+  pair dies the instant the new one is issued, and an already-ACTIVE key stays active for its verified
+  domain — the reseller just swaps the two values in their integration. A key that never passed the
+  domain gate stays disabled after regeneration. The Reseller Area's credentials table and the docs page both
+  name the Secret Key and explain this, so a vendor integrating the API is never left looking for a
+  field that does not re-appear. The API documentation (`/client/reseller/docs`) is **public** — a
+  prospective reseller can read the whole surface before signing up — but the key itself is printed
+  there only for a signed-in reseller whose account has been approved; everyone else (guests, and
+  signed-in resellers still awaiting their domain approval) sees the docs without it. The base URL and
+  every curl example on that page use the portal's own full domain, so examples can be copy-pasted
+  straight into a terminal. The page is linked from the main menu ("API") and the site footer
+  ("API Docs") for quick access, in BOTH website designs — the classic chrome
+  and the premium storefront chrome (Website design), desktop and mobile menus
+  alike. Reseller stores never show the link: the platform's API is not theirs
+  to advertise. The API itself is rate-limited — 429 with a Retry-After header
+  once a source IP passes 300 requests a minute — and its responses are
+  sanitized: password hashes, two-factor secrets, recovery codes, security-PIN
+  hashes and hosting account passwords are stripped before anything leaves
+  through /api, so a leaked API key can never be traded for credential data.
 - **Store Cost Billing** (`/admin/resellers/billing`) — what the stores owe us, and how it is billed.
   A customer buying at a store pays **us** at retail; the order records what it cost us (catalogue price
   less the reseller discount) and that is what we invoice the reseller for, as an ordinary invoice on
   their own client account. One invoice per store per closed calendar month. Totals are shown **per
   currency** and never added across currencies. "Bill now" is safe to press twice — each order carries
   the id of the invoice that billed it, so a second press raises nothing.
+- **Reseller payout destinations** — a store chooses where its money is sent from its own account page:
+  a **bank transfer**, **crypto — USDT (TRC-20)** (a TRON wallet address, validated for shape before it
+  is stored), or a **Bybit account** (UID or account email). Crypto and Bybit let resellers operate from
+  anywhere in the world. **Crypto and Bybit payouts are always denominated in USD**: whatever currency a
+  reseller's account displays (naira included), the request converts their balance to USD at the rate
+  locked the moment they asked, the payout row records USD, and the frozen queue wording says "to be
+  paid in USDT (USD)" or "to be paid in USD" — so the admin settles it in USD without doing any
+  conversion math. Bank payouts keep the reseller's own currency and rate, as before. A reseller can
+  switch their display currency freely: local figures re-render, the USD payout figure does not move.
+  Saving new details clears any earlier verification, exactly as with bank details.
 - **Per-store page** (`/admin/resellers/{clientId}/store`) — branding, the custom domain and the
   go-live checklist, the store's markup and price overrides, and the store's status. Suspending a store
   makes its domain return **503** rather than showing our shop at our prices.

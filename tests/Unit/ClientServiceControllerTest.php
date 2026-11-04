@@ -139,6 +139,45 @@ final class ClientServiceControllerTest extends DatabaseTestCase
         return $serviceId;
     }
 
+    /**
+     * A dedicated server rides a server record whose module slug carries
+     * "nocix"/"dedicated" — that slug is what kindOf() keys on, so the rDNS
+     * form takes the ticket path exactly as it does in production. No module
+     * call happens on that path, so no real Nocix module is needed here.
+     */
+    private function createDedicatedService(): int
+    {
+        $sgId = $this->serverGroups->create('Dedicated Group');
+        $serverId = $this->servers->create([
+            'server_group_id' => $sgId,
+            'name' => 'Dedicated Node 1',
+            'hostname' => 'https://my.nocix.net/',
+            'module_slug' => 'nocix-dedicated',
+            'api_username' => 'reseller',
+            'api_token' => 'TOKEN',
+            'active' => 1,
+        ]);
+        $groupId = (new ProductGroupRepository($this->db))->create('Dedicated', null);
+        $productId = $this->products->create([
+            'product_group_id' => $groupId,
+            'server_group_id' => $sgId,
+            'name' => 'IDS-1',
+        ]);
+
+        $serviceId = $this->services->create([
+            'client_id' => $this->clientId,
+            'product_id' => $productId,
+            'product_name' => 'IDS-1',
+            'billing_cycle' => 'monthly',
+            'amount' => 120.00,
+            'status' => 'active',
+            'next_due_date' => (new DateTimeImmutable('+1 month'))->format('Y-m-d'),
+        ]);
+        $this->services->assignServer($serviceId, $serverId, '');
+
+        return $serviceId;
+    }
+
     private function request(array $body = [], string $uri = '/'): Request
     {
         return new Request([], $body, [
@@ -268,6 +307,62 @@ final class ClientServiceControllerTest extends DatabaseTestCase
         $this->assertCount(1, $tickets);
         $this->assertStringContainsString('reverse DNS', (string) $tickets[0]['subject']);
         $this->assertStringContainsString('PTR for 10.0.0.7', (string) $this->repliesFor((int) $tickets[0]['id'])[0]['message']);
+    }
+
+    public function test_rdns_ticket_on_a_dedicated_server_never_names_the_provider(): void
+    {
+        // The reported leak: the client saw "Nocix publishes no reverse DNS
+        // endpoint, so this needs to be set manually." — the body becomes the
+        // CLIENT's own ticket opening post, so it must read client-facing and
+        // name no upstream provider.
+        $serviceId = $this->createDedicatedService();
+
+        $response = $this->controller->rdns(
+            $this->request(['ip' => '69.197.183.10', 'rdns' => 'porocirema.net']),
+            ['id' => $serviceId]
+        );
+
+        $this->assertSame(302, $response->status());
+        $this->assertStringNotContainsString('err=', $response->headers()['Location']);
+
+        $tickets = $this->tickets();
+        $this->assertCount(1, $tickets);
+
+        $body = (string) $this->repliesFor((int) $tickets[0]['id'])[0]['message'];
+        $this->assertStringContainsString('69.197.183.10', $body);
+        $this->assertStringContainsString('porocirema.net', $body);
+        $this->assertStringContainsString('reverse DNS', (string) $tickets[0]['subject']);
+        $this->assertStringNotContainsStringIgnoringCase('nocix', $body, 'the upstream provider name must never appear in a client-visible ticket');
+        $this->assertStringNotContainsStringIgnoringCase('interserver', $body);
+        $this->assertStringContainsString('sets PTR records for it manually', $body);
+    }
+
+    public function test_vps_rdns_failure_ticket_scrubs_provider_names_from_module_messages(): void
+    {
+        // The module's failure message for an HTTP 500 is InterServer-branded
+        // (ProviderHttpError::explain embeds the provider name) — the ticket
+        // body interpolates it, so the white-label scrubber must clean it.
+        $this->http->respondInSequence([
+            ['status' => 200, 'body' => json_encode(['0' => ['vps_id' => '12', 'vps_hostname' => 'vps200.example.com']])],
+            ['status' => 500, 'body' => 'upstream exploded'],
+        ]);
+
+        $serviceId = $this->createProvisionedVpsService();
+
+        $response = $this->controller->rdns(
+            $this->request(['ip' => '10.0.0.7', 'rdns' => 'ptr.example.com']),
+            ['id' => $serviceId]
+        );
+
+        $this->assertSame(302, $response->status());
+
+        $tickets = $this->tickets();
+        $this->assertCount(1, $tickets);
+
+        $body = (string) $this->repliesFor((int) $tickets[0]['id'])[0]['message'];
+        $this->assertStringContainsString('PTR for 10.0.0.7', $body);
+        $this->assertStringNotContainsStringIgnoringCase('interserver', $body, 'a provider-branded module message must be scrubbed before it reaches the ticket');
+        $this->assertStringNotContainsStringIgnoringCase('nocix', $body);
     }
 
     public function test_action_on_another_clients_service_is_denied(): void

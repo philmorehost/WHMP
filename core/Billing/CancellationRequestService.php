@@ -19,16 +19,25 @@ use CodeVault\Provisioning\ServerRepository;
  *  - Shared-hosting control panels (cPanel/CyberPanel) are terminated on the
  *    server via the provisioning module — immediately for an immediate
  *    cancel, or when the end-of-period date arrives.
- *  - VPS / dedicated servers have no API termination for now: the service is
- *    marked cancelled per the mode and the client immediately stops seeing
- *    its IPs/management in the portal.
+ *  - InterServer VPS / dedicated servers are cancelled through the provider's
+ *    API the same way (DELETE /vps/{id} · DELETE /dedicated/{id}) — on
+ *    approval for an immediate cancel, or by the cron on the scheduled date.
+ *    Nocix publishes no cancellation endpoint, so those services are only
+ *    marked cancelled here (cancel them in the Nocix portal manually).
  *  - Every completed cancellation emails the admin a full report with the
  *    service details.
  */
 final class CancellationRequestService
 {
-    /** Control-panel modules that support real server-side termination. */
-    private const TERMINATABLE_MODULES = ['cpanel', 'cyberpanel'];
+    /** Modules that support real server-side termination/cancellation:
+     *  cPanel/CyberPanel account termination, plus InterServer's VPS and
+     *  dedicated DELETE endpoints (the provider's cancellation API).
+     *  nocix-dedicated is excluded — Nocix exposes no cancellation endpoint. */
+    private const TERMINATABLE_MODULES = [
+        'cpanel', 'cyberpanel',
+        'interserver-vps', 'interserver_vps',
+        'interserver-dedicated', 'interserver_dedicated',
+    ];
 
     public function __construct(
         private readonly CancellationRequestRepository $cancellations,
@@ -160,6 +169,72 @@ final class CancellationRequestService
         ];
     }
 
+    /**
+     * Change a cancellation's option to take effect IMMEDIATELY instead of
+     * at the end of the billing period — the admin-side switch, usable both
+     * BEFORE approval (a pending end-of-period request) and AFTER it (an
+     * approved request still waiting for its scheduled date). The service is
+     * cancelled now, the request is marked completed, and client + admins
+     * are notified exactly as an approved immediate cancellation is.
+     *
+     * A completed or rejected request is not switchable — the cancellation
+     * has already been carried out (or withdrawn), so there is nothing left
+     * to retime.
+     *
+     * @return array{success: bool, message: string, status: string}
+     */
+    public function switchToImmediate(int $requestId, int $adminId, ?string $notes = null): array
+    {
+        $request = $this->cancellations->findById($requestId);
+
+        if ($request === null) {
+            return ['success' => false, 'message' => 'Cancellation request not found.', 'status' => 'unknown'];
+        }
+
+        $status = (string) ($request['status'] ?? '');
+
+        if (!in_array($status, ['pending', 'approved'], true)) {
+            return ['success' => false, 'message' => "A {$status} cancellation cannot be switched — it has already been carried out or withdrawn.", 'status' => $status];
+        }
+
+        if (($request['cancellation_type'] ?? '') === 'immediate') {
+            return ['success' => false, 'message' => 'This request is already set to cancel immediately.', 'status' => $status];
+        }
+
+        $serviceId = (int) $request['service_id'];
+        $service = $this->services->findById($serviceId);
+
+        if ($service !== null && in_array((string) $service['status'], ['cancelled', 'terminated'], true)) {
+            // The service is already gone — just finish the record honestly.
+            $this->cancellations->approve($requestId, $adminId, $notes);
+            $this->cancellations->markCompleted($requestId);
+
+            return ['success' => true, 'message' => 'The service was already cancelled — the request was marked completed.', 'status' => 'completed'];
+        }
+
+        // Flip the stored option, approve if it was still pending (records
+        // reviewer + notes), then run the same path an approved immediate
+        // cancellation takes: cancel now, complete, notify.
+        $this->cancellations->updateType($requestId, 'immediate');
+
+        if ($status === 'pending') {
+            $this->cancellations->approve($requestId, $adminId, $notes);
+        }
+
+        $cancelled = $this->cancelService($serviceId);
+        $this->cancellations->markCompleted($requestId);
+        $this->notifyClientOfApproval((int) ($request['client_id'] ?? 0), $serviceId);
+        $this->notifyAdminsOfCancellationCompleted($serviceId, 'Immediate', 'completed', (string) ($request['reason'] ?? ''));
+
+        return [
+            'success' => true,
+            'message' => $cancelled
+                ? 'Changed to immediate — the service was cancelled now and the request completed.'
+                : 'Changed to immediate, but the service could not be cancelled automatically — please review it from the service page.',
+            'status' => 'completed',
+        ];
+    }
+
     public function rejectCancellation(int $requestId, int $adminId, string $notes): void
     {
         $request = $this->cancellations->findById($requestId);
@@ -224,11 +299,13 @@ final class CancellationRequestService
 
     /**
      * Cancel a service. Control-panel hosting (cPanel/CyberPanel) is
-     * terminated on the server through the provisioning module; VPS /
-     * dedicated / local services have no API termination for now and are
-     * simply marked cancelled. Never throws — a termination hiccup is
-     * reported to admins and surfaced as false (the service is still marked
-     * cancelled so billing stops).
+     * terminated on the server, and InterServer VPS / dedicated servers are
+     * cancelled through the provider's cancellation API, via the provisioning
+     * module (on success the service is marked terminated). Nocix dedicated
+     * servers and local services have no cancellation API and are simply
+     * marked cancelled. Never throws — a termination hiccup is
+     * reported to admins and surfaced as false (billing stops regardless —
+     * the request's unpaid invoices are cancelled either way).
      */
     private function cancelService(int $serviceId): bool
     {
@@ -267,9 +344,10 @@ final class CancellationRequestService
     }
 
     /**
-     * Whether a service lives on a control-panel server whose module can
-     * terminate the account. VPS/dedicated modules (interserver-*, nocix-*)
-     * are intentionally excluded — there is no API automation for them yet.
+     * Whether a service lives on a server whose module can cancel it for
+     * real: control panels that terminate the account, plus the InterServer
+     * VPS/dedicated modules whose DELETE endpoints cancel with the provider.
+     * nocix-* stays excluded — Nocix publishes no cancellation endpoint.
      *
      * @param array<string, mixed>|null $service
      */

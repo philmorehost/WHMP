@@ -54,6 +54,7 @@ final class ApiResourceController
         $search = trim((string) $request->query('search', ''));
 
         $pagination = $this->clients->paginate($search, $page, $perPage);
+        $pagination['data'] = ApiSanitizer::clientRows($pagination['data'] ?? []);
 
         return ApiResponse::success($pagination);
     }
@@ -74,7 +75,7 @@ final class ApiResourceController
             return ApiResponse::error('Client not found.', 'NOT_FOUND', 404);
         }
 
-        return ApiResponse::success(['client' => $client]);
+        return ApiResponse::success(['client' => ApiSanitizer::client($client)]);
     }
 
     /** GET /api/invoices — list invoices (paginated, optional status filter). */
@@ -133,7 +134,10 @@ final class ApiResourceController
         $status = trim((string) $request->query('status', ''));
         $status = $status !== '' ? $status : null;
 
-        return ApiResponse::success($this->services->paginate($status, $page, $perPage));
+        $pagination = $this->services->paginate($status, $page, $perPage);
+        $pagination['data'] = ApiSanitizer::serviceRows($pagination['data'] ?? []);
+
+        return ApiResponse::success($pagination);
     }
 
     /** GET /api/domains — list domains (paginated). */

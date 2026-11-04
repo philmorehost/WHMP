@@ -387,6 +387,45 @@ final class DomainServiceTest extends DatabaseTestCase
         $this->assertSame('777', $renewParams['registrarClientId']);
     }
 
+    /**
+     * Modules need the expiry the renewal is made against: ResellerClub's
+     * renew API requires it as the exp-date guard, and registrar-fetched
+     * dates are only accepted when they advance past it (a registry that
+     * has not propagated yet must never move the local date backwards —
+     * or leave a paid renewal stuck on the old cycle).
+     */
+    public function test_renew_passes_the_current_expiry_to_the_registrar(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $domainId = $this->createPendingDomainForFakeRegistrar('currentexpiry.test');
+        $this->domains->advanceRenewal($domainId, '2026-11-06', '2026-11-06');
+
+        $fake->respond('renew', ['success' => true, 'message' => 'ok']);
+        $service->renew($domainId, 1);
+
+        $this->assertSame('2026-11-06', $fake->lastCall('renew')['currentExpiry']);
+    }
+
+    /**
+     * A module returning no date must not leave the paid renewal stuck on
+     * the old expiry, and must not compute from "today" either (that eats
+     * the months still remaining before expiry). The service extends the
+     * CURRENT expiry by the renewed years — exactly what the registrar did.
+     */
+    public function test_renew_without_a_module_date_extends_the_current_expiry(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $domainId = $this->createPendingDomainForFakeRegistrar('fallback.test');
+        $this->domains->advanceRenewal($domainId, '2026-03-01', '2026-03-01');
+
+        $fake->respond('renew', ['success' => true, 'message' => 'ok']);
+        $service->renew($domainId, 1);
+
+        $domain = $this->domains->find($domainId);
+        $this->assertSame('2027-03-01', $domain['expiry_date']);
+        $this->assertSame($domain['expiry_date'], $domain['next_due_date']);
+    }
+
     public function test_get_contact_info_passes_the_stored_registrar_contact_id(): void
     {
         [$service, $fake] = $this->withFakeRegistrar();
@@ -535,5 +574,57 @@ final class DomainServiceTest extends DatabaseTestCase
         $this->assertSame('Domain', $contacts['first_name']);
         $this->assertSame('Owner', $contacts['last_name']);
         $this->assertSame('domainowner@example.test', $contacts['email']);
+    }
+
+    public function test_register_passes_the_saved_registrar_contact_id_and_persists_a_newly_learned_one(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $fake->respond('register', ['success' => true, 'message' => 'ok', 'registrarContactId' => '4242']);
+        $domainId = $this->createPendingDomainForFakeRegistrar('fakecontact.test');
+
+        $service->register($domainId, 1);
+
+        // First registration: no contact id known yet, and the module's
+        // answer is persisted onto the domain row (same treatment as the
+        // registrar's customer id).
+        $this->assertNull($fake->lastCall('register')['registrarContactId']);
+        $this->assertSame('4242', $this->domains->find($domainId)['registrar_contact_id']);
+
+        // A later registration passes the saved id back so the module reuses
+        // that exact contact instead of creating a duplicate.
+        $service->register($domainId, 1);
+        $this->assertSame('4242', $fake->lastCall('register')['registrarContactId']);
+    }
+
+    public function test_registrant_for_domain_reports_the_effective_registrant_and_its_missing_fields(): void
+    {
+        $domainId = $this->createPendingDomain('regcheck.test');
+
+        // The setUp client has only names + email — the profile fields a
+        // registrar needs are empty and must be reported as missing.
+        $result = $this->service->registrantForDomain($domainId);
+        $this->assertSame('Domain Owner', $result['contact']['name']);
+        $this->assertSame('domainowner@example.test', $result['contact']['email']);
+        $this->assertContains('address', $result['missing']);
+        $this->assertContains('city', $result['missing']);
+        $this->assertContains('ZIP/postal code', $result['missing']);
+        $this->assertContains('country', $result['missing']);
+        $this->assertContains('phone number', $result['missing']);
+
+        // A saved per-domain contact wins over the client profile and leaves
+        // nothing missing.
+        $this->domains->updateContactData($domainId, [
+            'name' => 'Ada Lovelace',
+            'email' => 'ada@example.test',
+            'address1' => '1 Analytical Way',
+            'city' => 'London',
+            'postcode' => 'W1',
+            'country' => 'GB',
+            'phone' => '+442012345678',
+        ]);
+
+        $result = $this->service->registrantForDomain($domainId);
+        $this->assertSame('Ada Lovelace', $result['contact']['name']);
+        $this->assertSame([], $result['missing']);
     }
 }

@@ -1669,6 +1669,53 @@
         syncTldBulkForm();
     });
 
+    // Payout destination form: the method select swaps which fields matter —
+    // bank fields only exist for a bank transfer, and the shared "account
+    // number" input relabels to a wallet address or Bybit UID/email. The
+    // server still validates the shape of whatever is submitted; this only
+    // keeps the form honest while the reseller types.
+    document.addEventListener('change', function (event) {
+        var select = event.target.closest ? event.target.closest('[data-payout-method]') : null;
+        if (!select) {
+            return;
+        }
+
+        var form = select.closest('form');
+        if (!form) {
+            return;
+        }
+
+        var method = select.value;
+
+        var bankFields = form.querySelector('[data-payout-bank-fields]');
+        if (bankFields) {
+            bankFields.hidden = method !== 'bank_transfer';
+            bankFields.style.display = method === 'bank_transfer' ? '' : 'none';
+        }
+
+        var labels = {
+            bank_transfer: 'Account number',
+            crypto_trc20: 'USDT (TRC-20) wallet address',
+            bybit: 'Bybit UID or account email'
+        };
+
+        var label = form.querySelector('[data-payout-number-label]');
+        if (label && labels[method]) {
+            label.textContent = labels[method];
+        }
+
+        var hints = {
+            bank_transfer: 'Sort code, IBAN or local account number.',
+            crypto_trc20: 'Starts with T, 34 characters. Double-check every character — crypto cannot be recalled.',
+            bybit: 'Your Bybit UID (8-12 digits) or the account email.'
+        };
+
+        var hint = form.querySelector('[data-payout-number-hint]');
+        if (hint && hints[method]) {
+            hint.textContent = hints[method];
+        }
+    });
+
     // WHMCS extension import: fetch the TLD list from the configured WHMCS
     // database, let the admin tick the ones they want, then push them through
     // the same bulk-add endpoint the manual form uses.
@@ -2995,7 +3042,7 @@
         });
     });
 
-    // Campaign target type switcher (All vs Inactive vs Group vs Individual vs External)
+    // Campaign target type switcher (All vs Inactive vs Group vs Individual vs Products vs External)
     document.addEventListener('change', function(event) {
         if (event.target.id === 'campaign-target-type') {
             var val = event.target.value;
@@ -3003,11 +3050,13 @@
             var individualField = document.getElementById('target-individual-field');
             var externalField = document.getElementById('target-external-field');
             var inactiveField = document.getElementById('target-inactive-field');
+            var productsField = document.getElementById('target-products-field');
 
             if (groupField) groupField.style.display = (val === 'group') ? 'block' : 'none';
             if (individualField) individualField.style.display = (val === 'individual') ? 'block' : 'none';
             if (externalField) externalField.style.display = (val === 'external') ? 'block' : 'none';
             if (inactiveField) inactiveField.style.display = (val === 'inactive') ? 'block' : 'none';
+            if (productsField) productsField.style.display = (val === 'products') ? 'block' : 'none';
         } else if (event.target.id === 'select-all-clients') {
             var isChecked = event.target.checked;
             var checkboxes = document.querySelectorAll('.client-checkbox');
@@ -3027,6 +3076,71 @@
             }
         }
     });
+
+    // Campaign product picker (audience target "📦 Clients with specific
+    // products"): a filter box + select-all over a checkbox list, scoped to
+    // [data-product-picker] so the create form and the edit form can each
+    // carry one instance without ids colliding.
+    //
+    // "Select all" only ticks the rows currently VISIBLE in the filtered
+    // list — that's what makes search + select-all compose ("VPS" → select
+    // all → just the VPS products). Rows hidden by the filter keep their
+    // state and still submit: hiding is a viewing choice, not an unselect.
+    function campaignProductPickerSync(picker) {
+        if (!picker) { return; }
+        var rows = picker.querySelectorAll('[data-product-row]');
+        var selectAll = picker.querySelector('[data-product-select-all]');
+        var count = picker.querySelector('[data-product-count]');
+        var checked = 0;
+        rows.forEach(function(row) {
+            var box = row.querySelector('[data-product-checkbox]');
+            if (box && box.checked) { checked++; }
+        });
+        if (count) { count.textContent = checked + ' of ' + rows.length + ' selected'; }
+        if (selectAll) {
+            selectAll.checked = rows.length > 0 && checked === rows.length;
+            selectAll.indeterminate = checked > 0 && checked < rows.length;
+        }
+    }
+
+    // Auto-search: the list filters as the admin types — no button, no reload.
+    document.addEventListener('input', function(event) {
+        if (!event.target.matches('[data-product-filter]')) { return; }
+        var picker = event.target.closest('[data-product-picker]');
+        if (!picker) { return; }
+        var needle = event.target.value.trim().toLowerCase();
+        var visible = 0;
+        picker.querySelectorAll('[data-product-row]').forEach(function(row) {
+            var label = row.querySelector('[data-product-label]');
+            var text = label ? label.textContent.toLowerCase() : '';
+            var show = needle === '' || text.indexOf(needle) !== -1;
+            row.style.display = show ? 'block' : 'none';
+            if (show) { visible++; }
+        });
+        var empty = picker.querySelector('[data-product-empty]');
+        if (empty) { empty.style.display = visible === 0 ? 'block' : 'none'; }
+        campaignProductPickerSync(picker);
+    });
+
+    document.addEventListener('change', function(event) {
+        if (event.target.matches('[data-product-select-all]')) {
+            var picker = event.target.closest('[data-product-picker]');
+            if (!picker) { return; }
+            var on = event.target.checked;
+            picker.querySelectorAll('[data-product-row]').forEach(function(row) {
+                if (row.style.display === 'none') { return; }
+                var box = row.querySelector('[data-product-checkbox]');
+                if (box) { box.checked = on; }
+            });
+            campaignProductPickerSync(picker);
+        } else if (event.target.matches('[data-product-checkbox]')) {
+            campaignProductPickerSync(event.target.closest('[data-product-picker]'));
+        }
+    });
+
+    // Initial counter / select-all state (the edit form renders with the
+    // stored selection already ticked).
+    document.querySelectorAll('[data-product-picker]').forEach(campaignProductPickerSync);
 
     // Client notification compose form (notifications/client-notifications-index.php)
     // — target type switcher (Individual vs Selected vs All) and a client-side

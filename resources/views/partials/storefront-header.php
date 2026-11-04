@@ -36,8 +36,9 @@
  *
  * Platform mode (`platform => true`) is the MAIN website wearing this chrome. It
  * adds the platform's own extras — company contact details, Knowledgebase,
- * network status, Affiliates, the Free Reseller link — and is never set on a
- * store's host, so none of those can appear on a reseller's website.
+ * network status, the public API documentation, Affiliates, the Free Reseller
+ * link — and is never set on a store's host, so none of those can appear on a
+ * reseller's website.
  */
 use CodeVault\Reseller\StorefrontIcons as Icon;
 
@@ -292,6 +293,9 @@ if ($platform) {
                     </div>
                 </div>
 
+                <?php if ($platform): ?>
+                    <a class="sf-nav__link<?= $isActive('/client/reseller/docs') ? ' is-active' : '' ?>" href="/client/reseller/docs">API</a>
+                <?php endif; ?>
                 <?php if ($freeResellerNav): ?>
                     <a class="sf-nav__link sf-nav__link--promo<?= $isActive('/free-reseller') ? ' is-active' : '' ?>" href="/free-reseller">Free Reseller <span class="sf-nav__pill">Free</span></a>
                 <?php endif; ?>
@@ -363,6 +367,7 @@ if ($platform) {
             <?php endif; ?>
             <a href="/client/tickets/create">Support</a>
             <?php if ($platform): ?>
+                <a href="/client/reseller/docs">API Docs</a>
                 <a class="sf-drawer__sub" href="/kb"><?= Icon::svg('code') ?>Knowledgebase</a>
                 <a class="sf-drawer__sub" href="/status"><?= Icon::svg('trend') ?>Network status</a>
             <?php endif; ?>

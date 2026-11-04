@@ -116,25 +116,65 @@ final class ResellerPayoutService
             );
         }
 
-        $currency = is_array($account['currency'] ?? null) ? $account['currency'] : [];
-        $rate = $this->currency->rateFor($currency);
+        // WHAT UNIT IS THE MONEY SENT IN?
+        //
+        // A bank transfer pays in the reseller's own display currency, at the
+        // rate locked the moment they asked — that rate is the whole FX decision
+        // made concrete, and it is why the row keeps currency_rate forever.
+        //
+        // A crypto or Bybit destination is different: USDT IS a dollar token and
+        // Bybit settles in USD, so there is no "naira sort code" to pay into.
+        // Denominating those payouts in the reseller's display currency would
+        // record a figure in a unit the money never existed in. They are
+        // therefore ALWAYS denominated in USD: the base amount converted at the
+        // USD rate LOCKED NOW, and stored with the USD row's id (null when USD
+        // is the base currency itself, per the schema's NULL convention). The
+        // reseller can switch their display currency as often as they like —
+        // the payout's recorded unit and figure never move.
+        $method = (string) ($destination['method'] ?? self::METHOD_BANK_TRANSFER);
+        $paysInUsd = ResellerPayoutDestinationRepository::paysInUsd($method);
+
+        if ($paysInUsd) {
+            $rate = $this->currency->rateForCode('USD');
+            $rate = $rate > 0 ? $rate : 1.0;
+            // USD at rate 1.0 IS the base currency (or indistinguishable from
+            // it) — the schema stores that case as currency_id NULL.
+            $currencyId = $rate === 1.0 ? null : $this->currency->currencyIdForCode('USD');
+        } else {
+            $currency = is_array($account['currency'] ?? null) ? $account['currency'] : [];
+            $rate = $this->currency->rateFor($currency);
+            $currencyId = $currency['id'] ?? null;
+        }
+
+        $snapshot = ResellerPayoutDestinationRepository::describe($destination);
+
+        if ($paysInUsd) {
+            // The frozen record must tell the ADMIN how to settle it: USDT on
+            // chain, or USD to the Bybit account — not a bank transfer.
+            $snapshot = ($snapshot === null ? '' : $snapshot . ' — ')
+                . ($method === ResellerPayoutDestinationRepository::METHOD_CRYPTO_TRC20
+                    ? 'to be paid in USDT (USD)'
+                    : 'to be paid in USD');
+        }
 
         try {
             $payoutId = $this->payouts->create([
                 'reseller_id' => $resellerId,
                 'client_id' => $account['store']['client_id'] ?? null,
                 'amount' => $this->currency->convert($amountBase, $rate),
-                'currency_id' => $currency['id'] ?? null,
+                'currency_id' => $currencyId,
                 'currency_rate' => $rate,
                 'amount_base' => $amountBase,
                 'status' => self::STATUS_PENDING,
-                'method' => self::METHOD_BANK_TRANSFER,
+                // The real method, so the queue and the record show how this
+                // payout settles — a crypto payout is not a bank transfer.
+                'method' => $method,
                 'reference' => null,
                 'note' => null,
                 // The destination as it reads NOW, frozen onto the row. If the
                 // reseller moves bank later, this payout's record still says
                 // where the money actually went (payout plan §8 Phase D).
-                'destination_snapshot' => ResellerPayoutDestinationRepository::describe($destination),
+                'destination_snapshot' => $snapshot,
                 'requested_at' => $now,
                 'decided_at' => null,
                 'decided_by' => null,

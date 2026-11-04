@@ -64,8 +64,16 @@ final class OrderController
 
         $results = $this->orders->paginate($status !== '' ? $status : null, $page, 15, $filters, $sort);
 
+        // Per-order count of pending domain registrations on this page, so the
+        // orders list shows which approvals will send a domain to the
+        // registrar — a domain-only order otherwise looks like any other row.
+        $pendingDomainsByOrder = App::container()
+            ->make(DomainRepository::class)
+            ->countPendingByOrderIds(array_map(static fn ($order): int => (int) $order['id'], $results['data'] ?? []));
+
         return $this->render('billing.orders-index', [
             'results' => $results,
+            'pendingDomainsByOrder' => $pendingDomainsByOrder,
             'storePending' => $this->storePendingOrders(),
             'statusFilter' => $status,
             'filters' => $filters,

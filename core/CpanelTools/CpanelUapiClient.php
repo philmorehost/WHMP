@@ -335,7 +335,17 @@ final class CpanelUapiClient
         if (!is_array($decoded)) {
             // Include the panel's exact text. Missing-module errors are sometimes
             // Perl compile output rather than JSON, and their wording is the only
-            // useful signal for the API 2 fallback.
+            // useful signal for the API 2 fallback. An Imunify360 WebShield
+            // challenge page, though, gets its own actionable message — it is
+            // the one non-JSON failure an admin can fix from this side.
+            if (self::webshieldChallenge($response['body'])) {
+                return [
+                    'success' => false,
+                    'message' => self::webshieldMessage() . self::excerpt($response['body']),
+                    'data' => [],
+                ];
+            }
+
             return [
                 'success' => false,
                 'message' => "Unexpected response (HTTP {$response['status']})." . self::excerpt($response['body']),
@@ -546,6 +556,74 @@ final class CpanelUapiClient
     }
 
     /**
+     * Detects the Imunify360 WebShield challenge ("Splash Screen" / CAPTCHA)
+     * in a non-JSON response body. When a server runs Imunify360's
+     * "cPanel account protection" (WEBSHIELD.panel_protection), WebShield
+     * answers requests to the panel ports with a JavaScript challenge page —
+     * a real browser passes it and gets a 24h cookie, but server-to-server
+     * API automation can never run JavaScript, so EVERY tools/SSO call fails
+     * with HTML instead of JSON. CloudLinux's documented resolution is to
+     * whitelist the calling server's IP (or disable panel protection); older
+     * WebShield builds (before 1.31.4) additionally loop on the challenge
+     * even for real browsers.
+     *
+     * Returning an actionable message here turns "Unexpected response
+     * (HTTP 200). Panel said: <!doctype html>…" — which admins cannot act on
+     * — into the one command that fixes it.
+     */
+    private static function webshieldChallenge(string $body): bool
+    {
+        if (stripos($body, 'imunify') !== false) {
+            return true;
+        }
+
+        foreach ([
+            'please wait while your request is being verified',
+            'webshield',
+            'checking your browser',
+            'ddos protection by',
+        ] as $marker) {
+            if (stripos($body, $marker) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The actionable message for a WebShield-challenged response. Includes
+     * this server's outbound IP when it can be resolved from APP_URL — that
+     * is the IP the WHM whitelist entry needs. DNS may fail or the billing
+     * site may sit behind a proxy, so the wording covers both cases.
+     */
+    private static function webshieldMessage(): string
+    {
+        $ip = '';
+        $siteUrl = trim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''));
+        $host = $siteUrl !== '' ? (string) parse_url($siteUrl, PHP_URL_HOST) : '';
+
+        if ($host !== '') {
+            $resolved = gethostbyname($host);
+
+            if ($resolved !== $host && filter_var($resolved, FILTER_VALIDATE_IP) !== false) {
+                $ip = $resolved;
+            }
+        }
+
+        $where = $ip !== ''
+            ? "Whitelist this billing system's outbound IP ({$ip}) on the WHM server"
+            : "Whitelist this billing system's outbound IP on the WHM server (resolve it from this site's direct address if it sits behind a proxy)";
+
+        return 'The hosting server’s Imunify360 WebShield answered instead of the panel API. '
+            . 'Server-to-server tools cannot pass its browser challenge, so every cPanel tool and quick-login fails until it is resolved. '
+            . $where . ' — run: imunify360-agent whitelist ip add ' . ($ip !== '' ? $ip : '<THIS_SERVER_IP>')
+            . ' (Imunify360 → Firewall → WhiteList). '
+            . 'Also update WebShield on the server (builds before 1.31.4 loop on the challenge even for real browsers), '
+            . 'or turn off cPanel account protection (WEBSHIELD.panel_protection) if the anti-bot check on panel logins is not wanted.';
+    }
+
+    /**
      * Same normalization CpanelProvisioningModule::decode() performs
      * (duplicated rather than shared — that class is `final` and this is a
      * separate bounded context, matching how CyberPanelProvisioningModule
@@ -566,6 +644,16 @@ final class CpanelUapiClient
         $decoded = json_decode($response['body'], true);
 
         if (!is_array($decoded)) {
+            // WebShield challenge pages get the actionable message; everything
+            // else keeps the generic shape error with the panel's own text.
+            if (self::webshieldChallenge($response['body'])) {
+                return [
+                    'success' => false,
+                    'message' => self::webshieldMessage() . self::excerpt($response['body']),
+                    'data' => [],
+                ];
+            }
+
             return [
                 'success' => false,
                 'message' => "Unexpected response (HTTP {$response['status']})." . self::excerpt($response['body']),

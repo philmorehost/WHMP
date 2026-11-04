@@ -34,6 +34,12 @@ use CodeVault\Provisioning\HttpClient;
  * populated lazily the first time contact info is saved — same pattern as
  * `registrar_domain_id`).
  *
+ * register()/transfer() assign a registrant contact to the order themselves
+ * (ensureRegistrantContact): reuse the saved ID, else find the client's by
+ * email, else create one from the registrant details. Skipping this makes the
+ * registrar reject the order with "The domain does not have assigned
+ * registrant" — the failure every first registration through the old code hit.
+ *
  * A separate, more fundamental ID underlies register/renew/transfer/contact
  * calls: every one of them takes a required "Id" that is a *customer*
  * record in ConnectReseller's own system (see their §C "Client" API) — not
@@ -100,7 +106,25 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => "Could not resolve a ConnectReseller customer record: {$customer['message']}"];
         }
 
-        $response = $this->call($registrar, 'domainorder', array_filter([
+        // An order without an assigned registrant contact is rejected by the
+        // registrar itself ("The domain does not have assigned registrant") —
+        // the exact failure every first registration through this module hit.
+        // Resolve or lazily create the registrant first and put its ID on the
+        // order. When no contact details are supplied at all (direct module
+        // callers), the order goes out unchanged — the registrar's own
+        // response then speaks for that setup.
+        $registrant = $this->ensureRegistrantContact(
+            $registrar,
+            (string) $customer['id'],
+            (array) ($params['contacts'] ?? []),
+            $params['registrarContactId'] ?? null
+        );
+
+        if (!$registrant['success']) {
+            return ['success' => false, 'message' => "Could not assign a registrant contact at ConnectReseller: {$registrant['message']}"];
+        }
+
+        $orderParams = array_filter([
             'ProductType' => '1',
             'Websitename' => $domain,
             'Duration' => (string) ($params['years'] ?? 1),
@@ -111,7 +135,13 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             'ns4' => $ns[3] ?? null,
             'Id' => $customer['id'],
             'isEnablePremium' => '0',
-        ], static fn ($v) => $v !== null));
+        ], static fn ($v) => $v !== null);
+
+        if ($registrant['id'] !== null) {
+            $orderParams['RegistrantContactId'] = $registrant['id'];
+        }
+
+        $response = $this->call($registrar, 'domainorder', $orderParams);
 
         $decoded = $this->decode($response);
 
@@ -128,6 +158,13 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
 
         if ($customer['created']) {
             $result['registrarClientId'] = $customer['id'];
+        }
+
+        // Report the registrant contact ID (looked up or newly created) so
+        // DomainService persists it on the domain row — every later contact
+        // read/save then reuses this exact contact instead of making another.
+        if ($registrant['id'] !== null) {
+            $result['registrarContactId'] = $registrant['id'];
         }
 
         // The register response has no domain ID — a follow-up lookup is
@@ -150,13 +187,33 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => "Could not resolve a ConnectReseller customer record: {$customer['message']}"];
         }
 
-        $response = $this->call($registrar, 'TransferOrder', [
+        // A transfer order is assigned to a registrant contact the same way a
+        // registration is — resolve (or lazily create) it up front rather than
+        // letting the registrar reject the order for the same reason.
+        $registrant = $this->ensureRegistrantContact(
+            $registrar,
+            (string) $customer['id'],
+            (array) ($params['contacts'] ?? []),
+            $params['registrarContactId'] ?? null
+        );
+
+        if (!$registrant['success']) {
+            return ['success' => false, 'message' => "Could not assign a registrant contact at ConnectReseller: {$registrant['message']}"];
+        }
+
+        $transferParams = [
             'OrderType' => '4',
             'Websitename' => $params['domain'],
             'IsWhoisProtection' => ($params['id_protection'] ?? false) ? 'true' : 'false',
             'AuthCode' => $params['eppCode'] ?? '',
             'Id' => $customer['id'],
-        ]);
+        ];
+
+        if ($registrant['id'] !== null) {
+            $transferParams['RegistrantContactId'] = $registrant['id'];
+        }
+
+        $response = $this->call($registrar, 'TransferOrder', $transferParams);
         $decoded = $this->decode($response);
 
         if (!$decoded['success']) {
@@ -167,6 +224,10 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
 
         if ($customer['created']) {
             $result['registrarClientId'] = $customer['id'];
+        }
+
+        if ($registrant['id'] !== null) {
+            $result['registrarContactId'] = $registrant['id'];
         }
 
         return $result;
@@ -206,8 +267,35 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         $result = [
             'success' => true,
             'message' => 'Domain renewed.',
-            'expiryDate' => $this->parseDate($decoded['data']['expiryDate'] ?? null) ?? date('Y-m-d', strtotime('+' . ($params['years'] ?? 1) . ' years')),
         ];
+
+        // Keep the registrar's own new expiry when the response carries one.
+        // The old `?? date('+N years')` fallback computed from TODAY, which
+        // silently ate the months still remaining before expiry — a renewal
+        // made five months early recorded only ~7 months of paid time.
+        // When the response has no date, expiryDate is left unset and
+        // DomainService extends the CURRENT expiry by the renewed years,
+        // the same way the registrar itself does.
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : [];
+
+        $fetched = null;
+
+        foreach (['expiryDate', 'expirydate', 'expiry_date', 'endDate', 'enddate'] as $key) {
+            $fetched = $this->parseDate($data[$key] ?? null);
+
+            if ($fetched !== null) {
+                break;
+            }
+        }
+
+        // Guarded like the other modules: a date no later than the expiry
+        // the renewal was made against is stale (registry not yet
+        // propagated), not the renewal's result.
+        $current = substr(trim((string) ($params['currentExpiry'] ?? '')), 0, 10);
+
+        if ($fetched !== null && ($current === '' || $fetched > $current)) {
+            $result['expiryDate'] = $fetched;
+        }
 
         // Report a newly-learned ID back so the client row gets linked and the
         // next renewal skips the lookup entirely.
@@ -384,6 +472,86 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
     }
 
     /**
+     * Maps the flat registrant fields DomainService passes onto
+     * ConnectReseller's AddRegistrantContact/ModifyRegistrantContact param
+     * names. Shared by saveContactInfo() and ensureRegistrantContact() so a
+     * lazily-created registrant at registration time carries exactly the same
+     * fields a later manual save would write.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, string>
+     */
+    private function registrantContactParams(array $contact): array
+    {
+        return array_filter([
+            'Name' => trim((string) ($contact['name'] ?? '')),
+            'EmailAddress' => (string) ($contact['email'] ?? ''),
+            'CompanyName' => (string) ($contact['company_name'] ?? '') ?: (string) ($contact['name'] ?? 'N/A'),
+            'Address' => (string) ($contact['address1'] ?? ''),
+            'City' => (string) ($contact['city'] ?? ''),
+            'StateName' => (string) ($contact['state'] ?? ''),
+            'CountryName' => (string) ($contact['country'] ?? ''),
+            'Zip' => (string) ($contact['postcode'] ?? ''),
+            'PhoneNo_cc' => (string) ($contact['phone_cc'] ?? '1'),
+            'PhoneNo' => (string) ($contact['phone'] ?? ''),
+        ], static fn ($v) => $v !== '');
+    }
+
+    /**
+     * Resolves (looking up first, creating only if needed) the ConnectReseller
+     * registrant contact a domain order must be assigned — the missing piece
+     * that made every first registration fail with the registrar's own
+     * "The domain does not have assigned registrant" response.
+     *
+     * Reuses an already-known `registrar_contact_id` when given, else finds
+     * the client's existing contact by email (the same search
+     * saveContactInfo/getContactInfo use), else creates one from the supplied
+     * registrant fields and reads its ID back. `id === null` with success
+     * means "nothing to go on" (no contact details supplied) — callers decide
+     * whether to proceed without an assigned registrant.
+     *
+     * @param array<string, mixed> $registrar
+     * @param array<string, mixed> $contact
+     * @return array{success: bool, id: ?string, created: bool, message: string}
+     */
+    private function ensureRegistrantContact(array $registrar, string $customerId, array $contact, ?string $existingContactId): array
+    {
+        $existing = trim((string) ($existingContactId ?? ''));
+
+        if ($existing !== '') {
+            return ['success' => true, 'id' => $existing, 'created' => false, 'message' => ''];
+        }
+
+        $email = trim((string) ($contact['email'] ?? ''));
+
+        if ($email === '') {
+            return ['success' => true, 'id' => null, 'created' => false, 'message' => 'No registrant contact details were supplied.'];
+        }
+
+        $found = $this->lookupContactId($registrar, $customerId, $email);
+
+        if ($found !== null) {
+            return ['success' => true, 'id' => $found, 'created' => true, 'message' => ''];
+        }
+
+        $added = $this->decode($this->call($registrar, 'AddRegistrantContact', $this->registrantContactParams($contact) + ['Id' => $customerId]));
+
+        if (!$added['success']) {
+            return ['success' => false, 'id' => null, 'created' => false, 'message' => $added['message']];
+        }
+
+        // AddRegistrantContact never returns the ID it just created — the
+        // same lazy-lookup pattern saveContactInfo() uses.
+        $found = $this->lookupContactId($registrar, $customerId, $email);
+
+        if ($found !== null) {
+            return ['success' => true, 'id' => $found, 'created' => true, 'message' => ''];
+        }
+
+        return ['success' => false, 'id' => null, 'created' => false, 'message' => 'The registrant contact was created but its contact ID could not be read back from the registrant search.'];
+    }
+
+    /**
      * Finds an existing registrant contact for a client, without creating
      * anything. Returns NULL whenever the contact cannot be identified — a
      * normal outcome, not an error.
@@ -431,19 +599,7 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
 
         // 'contacts' (plural) matches the existing convention Local/
         // Upperlink's saveContactInfo() already use for this same param.
-        $contact = $params['contacts'] ?? [];
-        $contactParams = array_filter([
-            'Name' => trim((string) ($contact['name'] ?? '')),
-            'EmailAddress' => (string) ($contact['email'] ?? ''),
-            'CompanyName' => (string) ($contact['company_name'] ?? '') ?: (string) ($contact['name'] ?? 'N/A'),
-            'Address' => (string) ($contact['address1'] ?? ''),
-            'City' => (string) ($contact['city'] ?? ''),
-            'StateName' => (string) ($contact['state'] ?? ''),
-            'CountryName' => (string) ($contact['country'] ?? ''),
-            'Zip' => (string) ($contact['postcode'] ?? ''),
-            'PhoneNo_cc' => (string) ($contact['phone_cc'] ?? '1'),
-            'PhoneNo' => (string) ($contact['phone'] ?? ''),
-        ], static fn ($v) => $v !== '');
+        $contactParams = $this->registrantContactParams((array) ($params['contacts'] ?? []));
 
         $registrarContactId = $params['registrarContactId'] ?? null;
 

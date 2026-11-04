@@ -228,8 +228,16 @@ $webhookUrl = static fn (string $slug): string => $baseUrl . '/pay/' . $slug . '
                 <?php else: ?>
                     <span class="admin-gw-badge admin-gw-badge--disabled">Disabled</span>
                 <?php endif; ?>
+                <?php $resellerEnabled = (int) ($gateway['reseller_enabled'] ?? 1) === 1; ?>
+                <span class="admin-gw-badge <?= $resellerEnabled ? 'admin-gw-badge--enabled' : 'admin-gw-badge--disabled' ?>"
+                      title="<?= $resellerEnabled ? 'Available to reseller customers' : 'Hidden from reseller customers — still available on the main site' ?>">
+                    Resellers: <?= $resellerEnabled ? 'On' : 'Off' ?>
+                </span>
                 <form method="post" action="/admin/gateways/<?= e($gateway['slug']) ?>/toggle" style="margin:0;"><?= csrf_field() ?>
                     <button class="admin-gw-btn" type="submit"><?= $gateway['is_enabled'] ? '🔌 Disable' : '✓ Enable' ?></button>
+                </form>
+                <form method="post" action="/admin/gateways/<?= e($gateway['slug']) ?>/toggle-reseller" style="margin:0;"><?= csrf_field() ?>
+                    <button class="admin-gw-btn" type="submit"><?= $resellerEnabled ? '🏪 Disable for Resellers' : '🏪 Enable for Resellers' ?></button>
                 </form>
             </div>
         </div>

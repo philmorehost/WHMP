@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CodeVault\Localization;
 
 use CodeVault\Clients\ClientAuthGuard;
+use CodeVault\Security\LocalRedirect;
 use CodeVault\Clients\ClientRepository;
 use CodeVault\Request;
 use CodeVault\Response;
@@ -36,6 +37,10 @@ final class LanguageSwitchController
 
         $redirectTo = (string) $request->input('redirect', '/store');
 
-        return Response::redirect(str_starts_with($redirectTo, '/') ? $redirectTo : '/store');
+        // A user-supplied target must stay a LOCAL path: '//evil.com' (and the
+        // backslash twin) is scheme-relative to browsers and used to slip past
+        // the old starts-with-'/' check — an open redirect. Same rule the
+        // currency switcher applies, via the one shared validator.
+        return Response::redirect(LocalRedirect::sanitize($redirectTo, '/store'));
     }
 }

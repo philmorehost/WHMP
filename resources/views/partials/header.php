@@ -113,6 +113,7 @@ $freeResellerNav = \CodeVault\Reseller\FreeResellerProgramme::advertFor(\CodeVau
 
         <a href="/client/invoices" style="color:var(--cv-text-primary); text-decoration:none;">Billing</a>
         <a href="/client/tickets" style="color:var(--cv-text-primary); text-decoration:none;">Support</a>
+        <a href="/client/reseller/docs" style="color:var(--cv-text-primary); text-decoration:none;">API</a>
         <?php if ($freeResellerNav): ?>
             <a href="/free-reseller" class="cv-nav-free-reseller">Free Reseller <span>FREE</span></a>
         <?php endif; ?>
@@ -134,6 +135,7 @@ $freeResellerNav = \CodeVault\Reseller\FreeResellerProgramme::advertFor(\CodeVau
         <a href="/client/emails">My Emails</a>
         <a href="/client/payment-methods">Payment Methods</a>
         <a href="/client/tickets">Support</a>
+        <a href="/client/reseller/docs">API Docs</a>
         <?php if ($freeResellerNav): ?>
             <a href="/free-reseller" style="font-weight:800;color:#16a34a;">🎁 Get Free Reseller</a>
         <?php endif; ?>

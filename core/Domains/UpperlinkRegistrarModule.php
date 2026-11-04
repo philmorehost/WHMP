@@ -11,17 +11,27 @@ use CodeVault\Provisioning\HttpClient;
  * Upperlink domain reseller module, built directly from the API spec
  * provided (endpoint, action list, and the exact HMAC auth algorithm).
  *
- * CONFIDENCE NOTE — read before trusting this in production: the spec
- * given fully documents every REQUEST (endpoint path, HTTP method, param
- * names) and the auth scheme, so those are implemented exactly as
- * specified. It does NOT document the RESPONSE shape anywhere (no example
- * JSON body was provided for any action). decode() below is a best-effort
- * guess at a conventional `{status, message, data}`-style response and
- * WILL likely need adjusting once tested against the real API or once
- * response examples are available — this is a materially lower-confidence
- * module than CpanelProvisioningModule (which was verified live) or even
- * the request-side-only ConnectReseller module (whose docs at least came
- * with worked examples).
+ * LIVE FINDING (registration flow): the addon rejects a registration with
+ * "The domain does not have an assigned registrant" unless the request's
+ * `contacts` array is ROLE-KEYED — contacts[registrant][firstname] etc. —
+ * which is the documented contract of the WHMCS "Domains Reseller" addon
+ * Upperlink runs (same shape published by HostAfrica, RouteAfrica and
+ * Hostraha, who run the same addon). The flat contact list the original
+ * spec implied was read as no contacts at all; register()/transfer() now
+ * send the full role-keyed structure.
+ *
+ * CONFIDENCE NOTE — response shapes: the spec fully documents every REQUEST
+ * (endpoint path, HTTP method, param names) and the auth scheme, so those
+ * are implemented exactly as specified. It originally did NOT document the
+ * RESPONSE shape anywhere. Live evidence since: the addon family's
+ * documented contract is JSON — {"result":"success|error","msg|message":...}
+ * (Upperlink runs the WHMCS "Domains Reseller" addon, same docs published by
+ * HostAfrica, WhoGoHost/GO54, Hostraha, Rad Web Hosting, Genious) — and real
+ * installs can wrap that JSON in PHP notices/BOM/HTML pollution, which used
+ * to fail json_decode and record every successful renewal as "Unexpected
+ * response (HTTP 200)". decode() below now salvages polluted JSON, and
+ * renew() fetches the new expiry from the registrar after a confirmed
+ * renewal instead of trusting the local computation.
  */
 final class UpperlinkRegistrarModule implements RegistrarModule
 {
@@ -37,7 +47,7 @@ final class UpperlinkRegistrarModule implements RegistrarModule
         return [
             'name' => 'Upperlink',
             'description' => 'Domain registration/transfer/renewal via the Upperlink reseller API.',
-            'version' => '1.0.0',
+            'version' => '1.1.0',
             'author' => 'CodeVault',
         ];
     }
@@ -52,11 +62,19 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function register(array $params): array
     {
+        // Upperlink runs the WHMCS "Domains Reseller" addon. Its register
+        // action only sees the registrant inside a ROLE-KEYED contacts array
+        // (contacts[registrant][firstname], contacts[registrant][phonenumber],
+        // ...) — the flat field list this module used to send was read as "no
+        // contacts at all", and the API answered every registration with
+        // "The domain does not have an assigned registrant". Same contract is
+        // documented verbatim by other hosts running this addon (HostAfrica,
+        // RouteAfrica, Hostraha).
         $response = $this->post($params['registrar'], '/order/domains/register', [
             'domain' => $params['domain'],
             'regperiod' => (string) ($params['years'] ?? 1),
             'nameservers' => $this->nameserverPayload($params['nameservers'] ?? []),
-            'contacts' => $params['contacts'] ?? [],
+            'contacts' => $this->roleContacts((array) ($params['contacts'] ?? [])),
             'addons' => [
                 'dnsmanagement' => 0,
                 'emailforwarding' => 0,
@@ -69,12 +87,14 @@ final class UpperlinkRegistrarModule implements RegistrarModule
 
     public function transfer(array $params): array
     {
+        // A transfer order is assigned a registrant the same way a
+        // registration is — same role-keyed contacts, same field names.
         $response = $this->post($params['registrar'], '/order/domains/transfer', [
             'domain' => $params['domain'],
             'eppcode' => $params['eppCode'] ?? '',
             'regperiod' => (string) ($params['years'] ?? 1),
             'nameservers' => $this->nameserverPayload($params['nameservers'] ?? []),
-            'contacts' => $params['contacts'] ?? [],
+            'contacts' => $this->roleContacts((array) ($params['contacts'] ?? [])),
         ]);
 
         return $this->toResult($response, 'Domain transfer initiated.');
@@ -87,7 +107,91 @@ final class UpperlinkRegistrarModule implements RegistrarModule
             'regperiod' => (string) ($params['years'] ?? 1),
         ]);
 
-        return $this->toResult($response, 'Domain renewed.');
+        $result = $this->toResult($response, 'Domain renewed.');
+
+        if (!$result['success']) {
+            return $result;
+        }
+
+        // The renewal has now happened at the registrar, so the new expiry
+        // date is whatever THE REGISTRAR says it is — fetched, not computed.
+        // DomainService::renew() prefers expiryDate over its own local
+        // current-expiry + years fallback, so this is what moves the local
+        // date the client renews against. Best-effort: when the read fails
+        // (or reports the pre-renewal date because the registry has not
+        // propagated yet) no expiryDate is returned and the local fallback
+        // extends the CURRENT expiry by the renewed years — never a date
+        // earlier than the domain already had, which would leave a renewed
+        // domain stuck on its old invoice cycle.
+        $fetched = $this->fetchedExpiry($params);
+        $current = substr(trim((string) ($params['currentExpiry'] ?? '')), 0, 10);
+
+        if ($fetched !== null && ($current === '' || $fetched > $current)) {
+            $result['expiryDate'] = $fetched;
+        }
+
+        return $result;
+    }
+
+    /**
+     * The domain's expiry as the registrar currently records it — the same
+     * discovery chain sync() uses, because no single info endpoint is
+     * confirmed across Upperlink installs. Null when no read yields a date.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function fetchedExpiry(array $params): ?string
+    {
+        $domainEnc = $this->enc($params['domain']);
+
+        foreach ([
+            ['POST', "/domains/{$domainEnc}/sync", ['domain' => $params['domain']]],
+            ['GET', "/domains/{$domainEnc}", null],
+            ['POST', '/domains/info', ['domain' => $params['domain']]],
+        ] as [$method, $path, $body]) {
+            $response = $body === null
+                ? $this->get($params['registrar'], $path)
+                : $this->post($params['registrar'], $path, $body);
+            $expiry = $this->expiryFromPayload($this->decode($response)['data'] ?? []);
+
+            if ($expiry !== null) {
+                return $expiry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Reads the expiry out of one decoded payload, across the field spellings
+     * registrar APIs use (camelCase, lowercase, snake_case) and both unix
+     * second/millisecond timestamps and date strings.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function expiryFromPayload(array $data): ?string
+    {
+        foreach (['expiryDate', 'expirydate', 'expiry_date', 'expires', 'validuntil', 'valid_till'] as $key) {
+            $value = $data[$key] ?? null;
+
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            if (is_numeric($value)) {
+                $seconds = (int) $value > 10_000_000_000 ? (int) $value / 1000 : (int) $value;
+
+                return date('Y-m-d', $seconds);
+            }
+
+            $timestamp = strtotime((string) $value);
+
+            if ($timestamp !== false) {
+                return date('Y-m-d', $timestamp);
+            }
+        }
+
+        return null;
     }
 
     public function getNameservers(array $params): array
@@ -629,6 +733,77 @@ final class UpperlinkRegistrarModule implements RegistrarModule
         ];
     }
 
+    /**
+     * The one registrant contact, in the WHMCS "Domains Reseller" addon's
+     * documented field set: firstname/lastname/fullname/companyname/email/
+     * address1/address2/city/state/postcode/country/phonenumber. DomainService
+     * expands what it passes here so every key exists, but empty profile
+     * fields still arrive as '' — the addon's server-side validators name any
+     * field they reject, which now surfaces verbatim on the domain page
+     * instead of the blanket "no assigned registrant".
+     *
+     * `state` falls back to the city: the addon's validators commonly require
+     * a non-empty state, and Nigerian registrants often only record a city
+     * (e.g. Aba) — leaving state empty would fail a required-text check.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, string>
+     */
+    private function registrantPayload(array $contact): array
+    {
+        $fullName = trim((string) ($contact['name'] ?? ''));
+        $first = trim((string) ($contact['first_name'] ?? ''));
+        $last = trim((string) ($contact['last_name'] ?? ''));
+
+        if ($fullName === '') {
+            $fullName = trim($first . ' ' . $last);
+        }
+
+        if ($fullName !== '' && ($first === '' || $last === '')) {
+            $parts = preg_split('/\s+/', $fullName, 2) ?: [];
+            $first = $parts[0] ?? '';
+            $last = $parts[1] ?? $last;
+        }
+
+        $city = trim((string) ($contact['city'] ?? ''));
+
+        return [
+            'firstname' => $first,
+            'lastname' => $last,
+            'fullname' => $fullName,
+            'companyname' => trim((string) ($contact['company_name'] ?? '')),
+            'email' => trim((string) ($contact['email'] ?? '')),
+            'address1' => trim((string) ($contact['address1'] ?? '')),
+            'address2' => trim((string) ($contact['address2'] ?? '')),
+            'city' => $city,
+            'state' => trim((string) ($contact['state'] ?? '')) !== '' ? trim((string) $contact['state']) : $city,
+            'postcode' => trim((string) ($contact['postcode'] ?? '')),
+            'country' => strtoupper(trim((string) ($contact['country'] ?? ''))),
+            'phonenumber' => trim((string) ($contact['phone'] ?? '')),
+        ];
+    }
+
+    /**
+     * contacts payload in the addon's role-keyed shape. The registrant's own
+     * details fill all four roles — the addon can default admin/tech/billing
+     * from the reseller's WHMCS client, but explicit is deterministic and
+     * matches what the other registrar modules here do.
+     *
+     * @param array<string, mixed> $contact
+     * @return array<string, array<string, string>>
+     */
+    private function roleContacts(array $contact): array
+    {
+        $registrant = $this->registrantPayload($contact);
+
+        return [
+            'registrant' => $registrant,
+            'admin' => $registrant,
+            'tech' => $registrant,
+            'billing' => $registrant,
+        ];
+    }
+
     /** @param array<int, string> $nameservers */
     private function nameserverPayload(array $nameservers): array
     {
@@ -662,9 +837,28 @@ final class UpperlinkRegistrarModule implements RegistrarModule
     }
 
     /**
-     * Best-effort normalization of an undocumented response shape — see
-     * the class docblock. Treats HTTP 200 plus the absence of an explicit
-     * error/failure indicator as success; adjust once real responses are seen.
+     * Normalizes a response, tolerating every body shape a real WHMCS
+     * "Domains Reseller" install produces. The addon's documented contract
+     * is JSON — `{"result":"success|error","msg|message":...}` — but the
+     * LIVE renewal failure this module shipped with proved the JSON does
+     * not always arrive clean: WHMCS hosts routinely emit PHP
+     * notices/warnings, debug footers or a UTF-8 BOM around the addon's
+     * output, and a byte of pollution before the `{` makes json_decode
+     * fail on the WHOLE body. That turned every successful renewal into
+     * "Unexpected response (HTTP 200)" — the domain WAS renewed at
+     * Upperlink while this app recorded an error and never moved the
+     * local expiry date. So:
+     *
+     *  1. decode the body as-is;
+     *  2. on failure, salvage the widest {...} span out of the polluted
+     *     body (BOM, notices, HTML wrappers, JSONP callbacks);
+     *  3. only a body with no JSON object in it at all is an error — and
+     *     its message now quotes a snippet of what actually came back,
+     *     because "Unexpected response (HTTP 200)" told an admin nothing
+     *     they could act on.
+     *
+     * Success/failure semantics are unchanged: HTTP 200 plus no explicit
+     * error/failure indicator in the decoded object.
      *
      * @param array{status: int, body: string} $response
      * @return array{success: bool, message: string, data: array<string, mixed>}
@@ -675,10 +869,10 @@ final class UpperlinkRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => 'Could not reach the Upperlink API.', 'data' => []];
         }
 
-        $decoded = json_decode($response['body'], true);
+        $decoded = $this->tryDecodeJson($response['body']);
 
-        if (!is_array($decoded)) {
-            return ['success' => false, 'message' => "Unexpected response (HTTP {$response['status']}).", 'data' => []];
+        if ($decoded === null) {
+            return ['success' => false, 'message' => $this->unreadableResponseMessage($response), 'data' => []];
         }
 
         $status = strtolower((string) ($decoded['status'] ?? ($decoded['result'] ?? '')));
@@ -695,11 +889,60 @@ final class UpperlinkRegistrarModule implements RegistrarModule
         $success = $response['status'] === 200 && !$explicitError;
 
         $fallbackMessage = $success ? 'OK' : "Upperlink API error (HTTP {$response['status']}).";
+        // The addon's documented message key is `msg` (WHMCS convention);
+        // some installs answer with `message` instead.
+        $message = (string) ($decoded['message'] ?? ($decoded['msg'] ?? ($decoded['error'] ?? $fallbackMessage)));
 
         return [
             'success' => $success,
-            'message' => (string) ($decoded['message'] ?? ($decoded['error'] ?? $fallbackMessage)),
+            'message' => $message,
             'data' => is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded,
         ];
+    }
+
+    /**
+     * Full-body decode first; on failure, the widest {...} span (a polluting
+     * prefix — BOM, PHP notice, HTML doctype — or suffix — debug footer,
+     * JSONP callback — around the addon's JSON).
+     *
+     * @return array<string, mixed>|null null when the body holds no JSON object at all
+     */
+    private function tryDecodeJson(string $body): ?array
+    {
+        $decoded = json_decode(ltrim($body, "\xEF\xBB\xBF \t\r\n"), true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        $start = strpos($body, '{');
+        $end = strrpos($body, '}');
+
+        if ($start !== false && $end !== false && $end > $start) {
+            $decoded = json_decode(substr($body, $start, $end - $start + 1), true);
+
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The old failure message here was "Unexpected response (HTTP 200)." —
+     * true, and useless: no way to tell a success the parser choked on from
+     * a login page or a crash. Now the message quotes what actually came
+     * back (tags stripped, whitespace collapsed, capped) so the admin can
+     * see and report the real body.
+     *
+     * @param array{status: int, body: string} $response
+     */
+    private function unreadableResponseMessage(array $response): string
+    {
+        $text = trim((string) preg_replace('/\s+/', ' ', strip_tags($response['body'])));
+        $snippet = $text !== '' ? mb_substr($text, 0, 160) : 'an empty body';
+
+        return "The registrar returned an unreadable response (HTTP {$response['status']}): {$snippet}";
     }
 }

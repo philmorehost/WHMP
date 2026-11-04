@@ -8,3 +8,4 @@ use CodeVault\Backup\BackupController;
 
 $router->get('/admin/backups', [BackupController::class, 'index']);
 $router->post('/admin/backups', [BackupController::class, 'trigger']);
+$router->post('/admin/backups/terminate', [BackupController::class, 'terminate']);

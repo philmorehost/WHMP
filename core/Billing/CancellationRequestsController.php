@@ -49,7 +49,13 @@ final class CancellationRequestsController
             $type === 'due_date' && $cancelDate !== '' ? $cancelDate : null
         );
 
-        return Response::redirect("/client/services/{$id}?msg=" . urlencode("Cancellation request submitted successfully."));
+        // Say what actually happened: an immediate option cancels the
+        // service right away, an end-of-period option schedules it.
+        $message = $type === 'immediate'
+            ? 'Your service has been cancelled immediately.'
+            : 'Cancellation scheduled — the service will end at the close of the current billing period. You can keep using it until then.';
+
+        return Response::redirect("/client/services/{$id}?msg=" . urlencode($message));
     }
 
     public function adminIndex(Request $request): Response
@@ -91,6 +97,23 @@ final class CancellationRequestsController
 
         $status = $result['status'] ?? 'approved';
         $message = urlencode($result['message'] ?? 'Cancellation approved.');
+
+        return Response::redirect("/admin/cancellations?status={$status}&notice={$message}");
+    }
+
+    /**
+     * Switch a pending or approved end-of-period cancellation to take effect
+     * immediately — "cancel it now instead", before or after approval.
+     */
+    public function adminSwitchImmediate(Request $request, array $params): Response
+    {
+        $admin = $this->adminGuard->current();
+        if (!$admin) return Response::redirect('/login');
+
+        $result = $this->service->switchToImmediate((int) $params['id'], (int) $admin['id'], (string) $request->input('notes', ''));
+
+        $status = $result['status'] ?? 'completed';
+        $message = urlencode($result['message'] ?? 'Cancellation switched to immediate.');
 
         return Response::redirect("/admin/cancellations?status={$status}&notice={$message}");
     }

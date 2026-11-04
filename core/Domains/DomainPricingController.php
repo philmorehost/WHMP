@@ -303,6 +303,52 @@ final class DomainPricingController
         return Response::redirect('/admin/domain-pricing');
     }
 
+    /**
+     * Delete every TICKED TLD at once — the checkboxes on the pricing table
+     * post here (the "Delete selected" button overrides the bulk-update
+     * form's action), so an admin clearing ten extensions does not have to
+     * press ten per-row Delete buttons and confirm ten times. One confirm
+     * covers the whole selection; the count is reported back.
+     */
+    public function bulkDelete(Request $request): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $ids = array_map('intval', (array) $request->input('ids', []));
+
+        if (array_filter($ids) === []) {
+            return $this->renderIndex('Tick at least one TLD to delete.');
+        }
+
+        $deleted = $this->pricing->deleteMany($ids);
+
+        return $this->renderIndex(
+            $deleted === 1
+                ? 'Deleted 1 TLD pricing row.'
+                : "Deleted {$deleted} TLD pricing rows."
+        );
+    }
+
+    private function renderIndex(?string $notice = null, ?string $error = null): Response
+    {
+        $pricingList = $this->pricing->all();
+
+        $content = $this->view->render('domains.pricing-index', [
+            'pricingList' => $pricingList,
+            'registrars' => $this->registrars->allEnabled(),
+            'spinnerEnabledCount' => count(array_filter($pricingList, static fn (array $p): bool => !empty($p['spinner_enabled']))),
+            'notice' => $notice,
+            'error' => $error,
+        ]);
+
+        return Response::html($this->view->render('layouts.admin', [
+            'title' => 'CodeVault Admin — Domain Pricing',
+            'content' => $content,
+        ]));
+    }
+
     private function requirePermission(): ?Response
     {
         if (!$this->guard->check()) {

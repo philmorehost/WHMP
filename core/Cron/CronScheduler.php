@@ -14,6 +14,13 @@ use Throwable;
  * Last-run times persist to a small JSON state file rather than a DB
  * table, so the scheduler itself has zero dependency on the schema that
  * later phases will still be building.
+ *
+ * Jobs may be registered eagerly (register) or lazily (registerLazy). A
+ * lazy registration carries only the job's name and cadence; the object —
+ * and the whole dependency graph behind it — is built on the first tick
+ * the job is actually due. That keeps a per-minute cron tick cheap: on an
+ * average tick nothing is due, so nothing is constructed and nothing is
+ * written; the tick's cost is one DB read plus a few checks.
  */
 class CronScheduler
 {
@@ -23,9 +30,24 @@ class CronScheduler
     /** @var array<int, CronJob> */
     private array $jobs = [];
 
+    /**
+     * Deferred registrations, in registration order:
+     * `['name' => string, 'freq' => int, 'factory' => callable(): CronJob]`.
+     *
+     * @var array<int, array{name: string, freq: int, factory: callable}>
+     */
+    private array $lazyJobs = [];
+
     private ?CronRunRepository $runs = null;
 
     private ?CronStateRepository $state = null;
+
+    /**
+     * Set when the DB store answered "exists but empty" while the JSON file
+     * still held timestamps — an upgrade from the file-era scheduler. The
+     * sweep then runs on the file's times and seeds the DB once afterwards.
+     */
+    private bool $seedPending = false;
 
     /** @var callable(): ?string|null Returns the admin's daily run time as "HH:MM", or null for "no constraint". */
     private $dailyRunTimeResolver = null;
@@ -76,6 +98,24 @@ class CronScheduler
         $this->jobs[] = $job;
     }
 
+    /**
+     * Registers a job by metadata, deferring its construction until a tick
+     * where it is actually due. `$factory` receives the container-free
+     * closure from the entry point and must return the CronJob.
+     *
+     * The name/cadence here must mirror the job class; if they ever drift,
+     * the scheduler notices on materialisation, trusts the real object and
+     * re-gates against its real `name()`/`frequencyMinutes()` before running
+     * anything — so drift can delay a run by at most one tick, never skip or
+     * double it.
+     *
+     * @param callable(): CronJob $factory
+     */
+    public function registerLazy(string $name, int $frequencyMinutes, callable $factory): void
+    {
+        $this->lazyJobs[] = ['name' => $name, 'freq' => $frequencyMinutes, 'factory' => $factory];
+    }
+
     /** @return array<int, CronJob> */
     public function jobs(): array
     {
@@ -93,19 +133,61 @@ class CronScheduler
 
         $dailyRunTime = $this->resolveDailyRunTime();
 
-        foreach ($this->jobs as $job) {
-            $name = $job->name();
-            $lastRun = $state[$name] ?? 0;
-            $dueAt = $lastRun + ($job->frequencyMinutes() * 60);
+        // Only the jobs that actually ran this tick change persisted state.
+        // End-of-tick writes used to save the entire table unconditionally —
+        // ~35 upserts per minute, ~50,000 a day, virtually all no-ops.
+        $changed = [];
+        $allPersisted = true;
 
-            if ($now < $dueAt) {
-                $results[$name] = ['ran' => false];
+        foreach ($this->entries() as $entry) {
+            $registeredName = $entry['name'];
+
+            // Cheap gate on registration metadata first, so a lazy job's
+            // object graph is never built for a tick it cannot run in.
+            if (!$this->isDue($entry['freq'], $state[$registeredName] ?? 0, $dailyRunTime, $now)) {
+                $results[$registeredName] = ['ran' => false];
                 continue;
             }
 
-            if (!$this->dailyWindowOpen($job, $dailyRunTime, $lastRun, $now)) {
-                $results[$name] = ['ran' => false];
-                continue;
+            $job = $entry['job'];
+
+            if ($job === null) {
+                try {
+                    $job = ($entry['factory'])();
+
+                    if (!$job instanceof CronJob) {
+                        throw new \RuntimeException(sprintf(
+                            'lazy factory returned %s, expected a CronJob',
+                            get_debug_type($job)
+                        ));
+                    }
+                } catch (Throwable $e) {
+                    // Construction failed — same handling as a failing job:
+                    // report, don't touch state, retry next tick.
+                    $results[$registeredName] = ['ran' => false, 'error' => $e->getMessage()];
+                    $this->runs?->record($registeredName, 'error', $e->getMessage(), [], 0);
+                    continue;
+                }
+
+                $name = $job->name();
+
+                if ($name !== $registeredName) {
+                    error_log(sprintf(
+                        'CronScheduler: lazy registration "%s" resolved to job "%s" — trusting the job class.',
+                        $registeredName,
+                        $name
+                    ));
+                }
+
+                // Re-gate on the job's own metadata, which is authoritative:
+                // a stale registered cadence (e.g. a settings-driven one) must
+                // not make the job run early.
+                if (!$this->isDue($job->frequencyMinutes(), $state[$name] ?? 0, $dailyRunTime, $now)) {
+                    $results[$name] = ['ran' => false];
+                    continue;
+                }
+            } else {
+                $name = $job->name();
             }
 
             $hooks?->fire(HookPoints::CRON_JOB_STARTED, ['job' => $name]);
@@ -115,13 +197,16 @@ class CronScheduler
             try {
                 $job->handle();
                 $state[$name] = $now;
+                $changed[$name] = true;
 
                 // Persist immediately, not just in the final saveState() below.
                 // A run killed part-way (a slow backup hitting the host's
                 // execution limit) would otherwise record nothing, so the same
                 // job restarts every tick and never completes — which is how a
                 // daily backup turns into a backup every minute.
-                $this->state?->saveOne($name, $now);
+                if ($this->state?->saveOne($name, $now) === false) {
+                    $allPersisted = false;
+                }
 
                 $results[$name] = ['ran' => true];
                 $stats = $job instanceof ReportsCronStats ? $job->stats() : [];
@@ -136,9 +221,56 @@ class CronScheduler
         }
 
         $hooks?->fire(HookPoints::DAILY_CRON_JOB, ['results' => $results]);
-        $this->saveState($state);
+
+        // A tick that ran nothing must not write anything either.
+        if ($changed !== [] && ($this->state === null || !$allPersisted)) {
+            $this->saveState($state, array_keys($changed));
+        }
+
+        // One-time migration: the DB store exists but was empty while the
+        // JSON file still had timestamps. Persist the file-era times so the
+        // upgrade doesn't treat every job as never-run (the old scheduler
+        // did this accidentally, by rewriting the full table every tick).
+        if ($this->seedPending && $this->state !== null) {
+            $this->seedPending = $this->state->save($state) !== true;
+        }
 
         return $results;
+    }
+
+    /**
+     * Every registration as a uniform entry, eager ones first, in the order
+     * they were registered (order matters: the activity report must see what
+     * the jobs above it recorded).
+     *
+     * @return array<int, array{name: string, freq: int, job: CronJob|null, factory: callable|null}>
+     */
+    private function entries(): array
+    {
+        $out = [];
+
+        foreach ($this->jobs as $job) {
+            $out[] = ['name' => $job->name(), 'freq' => $job->frequencyMinutes(), 'job' => $job, 'factory' => null];
+        }
+
+        foreach ($this->lazyJobs as $spec) {
+            $out[] = ['name' => $spec['name'], 'freq' => (int) $spec['freq'], 'job' => null, 'factory' => $spec['factory']];
+        }
+
+        return $out;
+    }
+
+    /**
+     * May the job run on this tick? Elapsed-time gate plus, for daily jobs,
+     * the admin's configured automation window.
+     */
+    private function isDue(int $frequencyMinutes, int $lastRun, ?string $dailyRunTime, int $now): bool
+    {
+        if ($now < $lastRun + ($frequencyMinutes * 60)) {
+            return false;
+        }
+
+        return $this->dailyWindowOpen($frequencyMinutes, $dailyRunTime, $lastRun, $now);
     }
 
     private function resolveDailyRunTime(): ?string
@@ -171,9 +303,9 @@ class CronScheduler
      * server that was asleep at 00:05 still catches up when it wakes rather
      * than silently skipping a day.
      */
-    private function dailyWindowOpen(CronJob $job, ?string $dailyRunTime, int $lastRun, int $now): bool
+    private function dailyWindowOpen(int $frequencyMinutes, ?string $dailyRunTime, int $lastRun, int $now): bool
     {
-        if ($dailyRunTime === null || $job->frequencyMinutes() < self::DAILY_THRESHOLD_MINUTES) {
+        if ($dailyRunTime === null || $frequencyMinutes < self::DAILY_THRESHOLD_MINUTES) {
             return true;
         }
 
@@ -193,25 +325,48 @@ class CronScheduler
     {
         $fromDb = $this->state?->load();
 
-        if ($fromDb !== null) {
+        if ($fromDb !== null && $fromDb !== []) {
             return $fromDb;
         }
 
-        if ($this->stateFile === null || !is_file($this->stateFile)) {
-            return [];
+        $fromFile = [];
+
+        if ($this->stateFile !== null && is_file($this->stateFile)) {
+            $contents = file_get_contents($this->stateFile);
+            $decoded = $contents === false ? [] : json_decode($contents, true);
+
+            if (is_array($decoded)) {
+                /** @var array<string, int> $decoded */
+                $fromFile = $decoded;
+            }
         }
 
-        $contents = file_get_contents($this->stateFile);
-        $decoded = $contents === false ? [] : json_decode($contents, true);
+        if ($fromDb !== null) {
+            // The store exists but is empty: a fresh install, or an upgrade
+            // from the JSON-file era. If the file still holds timestamps, run
+            // on them and seed the store once the sweep is done — without
+            // that, the first tick after an upgrade would treat every job
+            // as never-run.
+            $this->seedPending = $fromFile !== [];
 
-        return is_array($decoded) ? $decoded : [];
+            return $fromFile;
+        }
+
+        return $fromFile;
     }
 
-    /** @param array<string, int> $state */
-    private function saveState(array $state): void
+    /**
+     * @param array<string, int> $state
+     * @param array<int, string>|null $onlyKeys restrict the DB write to these job
+     *        names — the keys that actually changed. The JSON file fallback always
+     *        writes the full snapshot; the file is read as a whole.
+     */
+    private function saveState(array $state, ?array $onlyKeys = null): void
     {
+        $forDb = $onlyKeys === null ? $state : array_intersect_key($state, array_fill_keys($onlyKeys, true));
+
         // Database first: it is the only store guaranteed writable.
-        if ($this->state?->save($state) === true) {
+        if ($forDb !== [] && $this->state?->save($forDb) === true) {
             return;
         }
 

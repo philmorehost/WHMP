@@ -126,6 +126,7 @@ use CodeVault\Queue\SyncQueue;
 use CodeVault\Security\AccountLockRepository;
 use CodeVault\Security\BruteGuard;
 use CodeVault\Security\CountryRuleRepository;
+use CodeVault\Api\ApiRateLimiter;
 use CodeVault\Security\CsrfToken;
 use CodeVault\Security\GeoIpResolver;
 use CodeVault\Security\IpRuleRepository;
@@ -2009,6 +2010,26 @@ class Kernel
         /** @var SessionManager $session */
         $session = $this->container->make(SessionManager::class);
         $session->start();
+
+        // External REST API rate limiting — the docs have always advertised
+        // "429 Too many requests"; this is what enforces it, for every /api
+        // route in one place (authentication alone bounds nothing: a valid
+        // key could otherwise scrape install-wide endpoints as fast as the
+        // database would answer). Counted per source IP, BEFORE credentials
+        // are even looked at, so credential-guessing is bounded too.
+        if (str_starts_with($request->path(), '/api')) {
+            $limiter = new ApiRateLimiter($this->container->make(\CodeVault\Database::class));
+
+            if ($limiter->hit('ip:' . $request->ip())) {
+                return SecurityHeaders::apply(
+                    Response::json([
+                        'status' => 'error',
+                        'message' => 'Rate limit exceeded. Slow down and retry shortly.',
+                        'code' => 'RATE_LIMITED',
+                    ], 429)->withHeader('Retry-After', (string) ApiRateLimiter::retryAfter())
+                );
+            }
+        }
 
         if ($this->requiresCsrfCheck($request)) {
             /** @var CsrfToken $csrf */

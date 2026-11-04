@@ -64,6 +64,30 @@ final class GatewayController
     }
 
     /**
+     * Flips a gateway's availability for RESELLER customers only.
+     *
+     * Disabling here hides the gateway from clients of reseller storefronts
+     * (their invoice pages and payment panels) and rejects their payment
+     * attempts; the platform's own site keeps offering it. Independent of
+     * the global enable toggle above — a gateway that is globally disabled
+     * is hidden everywhere regardless of this flag.
+     */
+    public function toggleReseller(Request $request, array $params): Response
+    {
+        if ($denied = $this->requirePermission()) {
+            return $denied;
+        }
+
+        $gateway = $this->gateways->findBySlug((string) $params['slug']);
+
+        if ($gateway !== null) {
+            $this->gateways->setResellerEnabled($gateway['slug'], (int) ($gateway['reseller_enabled'] ?? 1) !== 1);
+        }
+
+        return Response::redirect('/admin/gateways');
+    }
+
+    /**
      * Generic across every gateway module (blueprint §10 — Manual was the
      * only gateway when this only handled 'bank_details'; R12 added
      * Paystack/Flutterwave, each with their own config fields, so this

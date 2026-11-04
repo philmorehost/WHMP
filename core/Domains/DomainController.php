@@ -218,9 +218,17 @@ final class DomainController
             $whoisResult = $this->whoisService->lookup((string) $domain['domain_name']);
         }
 
+        // What register() would submit as the registrant for this domain, and
+        // which required fields are still empty — shown on the page and
+        // enforced in registerDomain() BEFORE the registrar gets an order it
+        // can only reject with one of its cryptic "invalid registrant" errors.
+        $registrant = $this->domainService->registrantForDomain($id);
+
         return $this->render('domains.show', [
             'domain' => $domain,
             'registrars' => $this->registrars->allEnabled(),
+            'registrant' => $registrant['contact'],
+            'registrantMissing' => $registrant['missing'],
             'updated' => $request->query('updated') === '1',
             'registrarError' => $request->query('registrar_error'),
             'registered' => $request->query('registered') === '1',
@@ -537,6 +545,22 @@ final class DomainController
         }
 
         $effectiveSlug = $slug !== '' ? $slug : (string) $domain['registrar_slug'];
+
+        // Every registrar needs an assigned registrant with name, email,
+        // address, city, ZIP, country and phone; one that is missing any of
+        // these is rejected with an opaque API error (ResellerClub/LogicBoxes
+        // and ConnectReseller both). Catch it here instead, with the exact
+        // fields to fill and where.
+        $registrant = $this->domainService->registrantForDomain($id);
+
+        if ($registrant['missing'] !== []) {
+            return Response::redirect("/admin/domains/{$id}?register_error=" . urlencode(
+                'Cannot submit the registration yet — the registrant contact is missing: '
+                . implode(', ', $registrant['missing'])
+                . '. Fill them on this domain\'s Contact page (or the client\'s profile) and press Register again.'
+            ));
+        }
+
         $years = max(1, min(10, (int) $request->input('years', 1)));
         $result = $this->domainService->register($id, $years);
 

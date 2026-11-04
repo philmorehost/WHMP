@@ -38,6 +38,36 @@ final class DomainRepository
         return $this->db->select('SELECT * FROM domains WHERE order_id = ?', [$orderId]);
     }
 
+    /**
+     * How many still-pending registrations ride on each of the given orders —
+     * the "what approving this order will do" number the orders list shows so
+     * a domain-only order is recognisable before it is accepted.
+     *
+     * @param array<int, int> $orderIds
+     * @return array<int, int> order id => pending-domain count
+     */
+    public function countPendingByOrderIds(array $orderIds): array
+    {
+        $orderIds = array_values(array_unique(array_filter(array_map('intval', $orderIds), static fn ($id) => $id > 0)));
+
+        if ($orderIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+        $rows = $this->db->select(
+            "SELECT order_id, COUNT(*) AS pending FROM domains WHERE status = 'pending' AND order_id IN ({$placeholders}) GROUP BY order_id",
+            $orderIds
+        );
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[(int) $row['order_id']] = (int) $row['pending'];
+        }
+
+        return $counts;
+    }
+
     /** @return array{all: int, active: int, pending: int, expired: int} */
     public function countByStatus(): array
     {

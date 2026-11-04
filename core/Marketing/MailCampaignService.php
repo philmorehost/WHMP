@@ -12,8 +12,10 @@ use Throwable;
 
 /**
  * Mass-mail campaigns (blueprint §4.4/§5 marketing automation): sends an
- * admin-composed subject/body to every active client in a group (or every
- * active client, if no group is set), with recipient-specific client, domain,
+ * admin-composed subject/body to a resolved audience — every active client
+ * in a group, one individual client, clients holding selected products
+ * (active/suspended services), accounts with no active product or domain,
+ * and/or pasted external addresses — with recipient-specific client, domain,
  * billing and support merge fields substituted at send time and a unique
  * open-tracking pixel appended to each message.
  */
@@ -79,6 +81,44 @@ final class MailCampaignService
         }
 
         return array_keys($emails);
+    }
+
+    /**
+     * Normalises the admin's product selection into the canonical stored
+     * form: a comma-separated list of unique, sorted, positive product ids
+     * ("3,7,12"), or '' when nothing valid was selected.
+     *
+     * Accepts the multi-select's array (`product_ids[]` POST values), a
+     * pre-normalised comma string (edit-form round-trip) or null.
+     *
+     * @param mixed $raw array<int, mixed>|string|null
+     */
+    public static function parseProductIds(mixed $raw): string
+    {
+        $values = is_array($raw) ? $raw : (is_string($raw) && $raw !== '' ? explode(',', $raw) : []);
+
+        $ids = [];
+
+        foreach ($values as $value) {
+            $id = (int) $value;
+
+            if ($id > 0) {
+                $ids[$id] = true;
+            }
+        }
+
+        $ids = array_keys($ids);
+        sort($ids);
+
+        return implode(',', $ids);
+    }
+
+    /** @return array<int, int> */
+    public static function productIdsFromStored(?string $stored): array
+    {
+        $ids = array_map('intval', explode(',', (string) $stored));
+
+        return array_values(array_filter($ids, static fn (int $id): bool => $id > 0));
     }
 
     /**
@@ -186,7 +226,8 @@ final class MailCampaignService
                 $recipient['client_id'],
                 bin2hex(random_bytes(32)),
                 $recipient['email'],
-                true
+                true,
+                max(1, (int) ($campaign['round'] ?? 1))
             );
             $queued++;
         }
@@ -194,6 +235,87 @@ final class MailCampaignService
         // An empty audience would otherwise leave the campaign stuck in
         // "sending"; the cron's finalise step closes it on the next run.
         return $queued;
+    }
+
+    /**
+     * Sends a SENT campaign again — a new round of the same campaign.
+     *
+     * The audience is resolved fresh from the campaign's targeting, so it
+     * reflects the current client base (and any audience edit made since the
+     * last send), and new recipient rows are appended in a new round — the
+     * previous round's rows, with their sent/open history, are kept.
+     *
+     * $skipAlreadySent narrows the round to people with no recipient row yet
+     * (new sign-ups, or the externals added since): a campaign's audience
+     * grows between sends, and this is the "send to whoever hasn't got it"
+     * flavour of resend. Those who already received it keep their history
+     * untouched and get nothing new.
+     *
+     * Returns 0 — with the campaign left exactly as it was — when there is
+     * nothing to send: the campaign isn't in the 'sent' state, or the
+     * resolved audience is empty/already fully covered.
+     *
+     * @return int recipients queued into the new round
+     */
+    public function resend(int $campaignId, bool $skipAlreadySent = false): int
+    {
+        $campaign = $this->campaigns->find($campaignId);
+
+        if ($campaign === null || $campaign['status'] !== 'sent') {
+            return 0;
+        }
+
+        $recipients = $this->resolveRecipients($campaign);
+
+        if ($skipAlreadySent) {
+            $existing = $this->campaigns->existingRecipientKeys($campaignId);
+            $sentClientIds = array_fill_keys($existing['clientIds'], true);
+            $sentEmails = array_fill_keys($existing['emails'], true);
+
+            $recipients = array_values(array_filter(
+                $recipients,
+                static function (array $recipient) use ($sentClientIds, $sentEmails): bool {
+                    if ($recipient['client_id'] !== null) {
+                        return !isset($sentClientIds[$recipient['client_id']]);
+                    }
+
+                    return !isset($sentEmails[strtolower($recipient['email'])]);
+                }
+            ));
+        }
+
+        if ($recipients === []) {
+            // Nothing to send — leave the campaign untouched ('sent', its
+            // old round intact) rather than opening an empty round.
+            return 0;
+        }
+
+        $round = $this->campaigns->beginRound($campaignId);
+
+        if ($round === 0) {
+            // Lost a race (someone paused or deleted it between find() and
+            // here) — don't add roundless rows behind it.
+            return 0;
+        }
+
+        foreach ($recipients as $recipient) {
+            $this->campaigns->addRecipient(
+                $campaignId,
+                $recipient['client_id'],
+                bin2hex(random_bytes(32)),
+                $recipient['email'],
+                true,
+                $round
+            );
+        }
+
+        return count($recipients);
+    }
+
+    /** Deletes a draft, paused or sent campaign and its recipient history — see MailCampaignRepository::delete(). */
+    public function delete(int $campaignId): bool
+    {
+        return $this->campaigns->delete($campaignId);
     }
 
     /** Pauses a sending campaign — see MailCampaignRepository::pauseCampaign(). */
@@ -209,14 +331,39 @@ final class MailCampaignService
     }
 
     /**
-     * Edits a draft or paused campaign's subject/body — the "review, edit"
-     * step between pausing a campaign and resuming it. Recipients already
-     * sent keep whatever they were sent; anyone still pending gets the
-     * edited version once the campaign resumes.
+     * Edits a campaign's subject/body — the "review, edit" step between
+     * pausing a campaign and resuming it, or correcting an old campaign
+     * before sending it again. Recipients already sent keep whatever they
+     * were sent; anyone still pending gets the edited version once the
+     * campaign resumes.
+     *
+     * $audience, when provided, also rewrites the targeting (all six
+     * columns, so switching target type clears the old one) — the repository
+     * only applies it to 'draft' and 'sent' campaigns, where nothing is
+     * mid-flight. It is the audience rules that change; a sent campaign's
+     * existing recipient rows are history and stay as they are.
+     *
+     * @param array{client_group_id?: ?int, client_id?: ?int, external_emails?: ?string, only_inactive?: bool, product_ids?: ?string}|null $audience
      */
-    public function update(int $campaignId, string $subject, string $body): bool
+    public function update(int $campaignId, string $subject, string $body, ?array $audience = null): bool
     {
-        return $this->campaigns->update($campaignId, $subject, $body);
+        $updated = $this->campaigns->update($campaignId, $subject, $body);
+
+        if ($audience !== null) {
+            // Either write counts as an edit. The content UPDATE alone reports
+            // "changed nothing" (MySQL rowCount) when the subject/body are
+            // identical — an audience-only edit must still report success.
+            $updated = $this->campaigns->updateAudience(
+                $campaignId,
+                $audience['client_group_id'] ?? null,
+                $audience['client_id'] ?? null,
+                $audience['external_emails'] ?? null,
+                (bool) ($audience['only_inactive'] ?? false),
+                array_key_exists('product_ids', $audience) ? $audience['product_ids'] : null
+            ) || $updated;
+        }
+
+        return $updated;
     }
 
     /**
@@ -236,6 +383,11 @@ final class MailCampaignService
             // Accounts with no active service or domain — the re-engagement
             // audience (see ClientRepository::activeWithoutProductsOrDomains).
             $clients = $this->clients->activeWithoutProductsOrDomains();
+        } elseif (trim((string) ($campaign['product_ids'] ?? '')) !== '') {
+            // Active clients holding an active/suspended service of one of the
+            // selected products — the WHMCS-style product audience, resolved
+            // at send time so it always reflects who currently holds them.
+            $clients = $this->clients->activeForProducts(self::productIdsFromStored((string) $campaign['product_ids']));
         } elseif ($externalEmails !== [] && $campaign['client_group_id'] === null) {
             // External-only: must not fan out to the whole client base.
             $clients = [];
@@ -311,6 +463,9 @@ final class MailCampaignService
         } elseif (!empty($campaign['only_inactive'])) {
             // Accounts with no active service or domain — see resolveRecipients().
             $recipients = $this->clients->activeWithoutProductsOrDomains();
+        } elseif (trim((string) ($campaign['product_ids'] ?? '')) !== '') {
+            // Product audience — see resolveRecipients().
+            $recipients = $this->clients->activeForProducts(self::productIdsFromStored((string) $campaign['product_ids']));
         } elseif ($externalEmails !== [] && $campaign['client_group_id'] === null) {
             // An external-only campaign must not silently fan out to every
             // active client — that's the difference between mailing 20

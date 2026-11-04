@@ -29,9 +29,56 @@ final class ApiDocumentation
      * The whole public API surface. `example` is a runnable curl command, and
      * `returns` is the shape inside the envelope's `data`.
      *
+     * $baseUrl defaults to the site-relative path the docs have always shown.
+     * Pass the platform's absolute URL (see absoluteBaseUrl()) and every curl
+     * example is rewritten against it, so a reseller can copy a command
+     * straight into a terminal without pasting their portal's domain in
+     * by hand. `path` stays relative either way — that column is a path,
+     * not an address.
+     *
      * @return array<int, array{method: string, path: string, scope: string, summary: string, example: string, returns: string}>
      */
-    public static function endpoints(): array
+    public static function endpoints(string $baseUrl = self::BASE_URL): array
+    {
+        return self::withExampleBase(self::endpointTable(), $baseUrl);
+    }
+
+    /**
+     * The docs' base URL anchored to a scheme + host — the full address,
+     * including the billing portal's domain, that a reseller points their
+     * integration at. Shown on the docs page and baked into its examples.
+     */
+    public static function absoluteBaseUrl(string $scheme, string $host): string
+    {
+        return $scheme . '://' . $host . self::BASE_URL;
+    }
+
+    /** @param array<int, array{method: string, path: string, scope: string, summary: string, example: string, returns: string}> $endpoints */
+    private static function withExampleBase(array $endpoints, string $baseUrl): array
+    {
+        if ($baseUrl === self::BASE_URL) {
+            return $endpoints;
+        }
+
+        foreach ($endpoints as $i => $endpoint) {
+            $endpoints[$i]['example'] = str_replace(
+                self::BASE_URL . '/',
+                $baseUrl . '/',
+                $endpoint['example']
+            );
+        }
+
+        return $endpoints;
+    }
+
+    /**
+     * The endpoint table itself, with site-relative examples. Kept separate
+     * from endpoints() so the absolute-base rewrite above always starts from
+     * the relative text and can be applied idempotently.
+     *
+     * @return array<int, array{method: string, path: string, scope: string, summary: string, example: string, returns: string}>
+     */
+    private static function endpointTable(): array
     {
         return [
             [

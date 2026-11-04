@@ -44,6 +44,7 @@ $router->post('/admin/domain-pricing/bulk', [DomainPricingController::class, 'bu
 $router->post('/admin/domain-pricing/bulk-update', [DomainPricingController::class, 'bulkUpdate']);
 $router->post('/admin/domain-pricing/reorder', [DomainPricingController::class, 'reorder']);
 $router->post('/admin/domain-pricing/fetch-whmcs', [DomainPricingController::class, 'whmcsExtensions']);
+$router->post('/admin/domain-pricing/bulk-delete', [DomainPricingController::class, 'bulkDelete']);
 $router->post('/admin/domain-pricing/{id}/delete', [DomainPricingController::class, 'destroy']);
 
 $router->get('/admin/registrars', [RegistrarController::class, 'index']);

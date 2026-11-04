@@ -70,7 +70,8 @@ final class UpperlinkRegistrarModuleTest extends TestCase
 
         $this->module->renew(['domain' => 'renewthis.com', 'years' => 1, 'registrar' => $this->registrar]);
 
-        $this->assertStringEndsWith('/order/domains/renew', $this->http->lastRequest()['url']);
+        // renew() is the FIRST request; any follow-up expiry reads come after.
+        $this->assertStringEndsWith('/order/domains/renew', $this->http->requests[0]['url']);
     }
 
     public function test_get_nameservers_is_a_get_request_with_domain_in_the_path(): void
@@ -223,5 +224,175 @@ final class UpperlinkRegistrarModuleTest extends TestCase
 
         $this->assertTrue($result['success']);
         $this->assertArrayNotHasKey('status', $result, 'a missing status field must not default to "active"');
+    }
+
+    public function test_register_sends_role_keyed_contacts_in_the_addons_documented_field_names(): void
+    {
+        // Live finding: the WHMCS Domains Reseller addon Upperlink runs only
+        // recognises a registrant inside contacts[registrant][...] — the flat
+        // contact list this module used to send was read as none, and the API
+        // answered "The domain does not have an assigned registrant".
+        $this->http->respondWith(200, '{"status":"success"}');
+
+        $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'nameservers' => ['ns1.test', 'ns2.test'],
+            'id_protection' => true,
+            'contacts' => [
+                'name' => 'Chiemela Onugha',
+                'first_name' => 'Chiemela',
+                'last_name' => 'Onugha',
+                'company_name' => '',
+                'email' => 'chiemelaonugha6@gmail.com',
+                'address1' => 'Umuonyengwa Village, Obingwa LGA',
+                'city' => 'Aba',
+                'state' => '',
+                'postcode' => '451011',
+                'country' => 'ng',
+                'phone' => '07031448647',
+            ],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertStringContainsString('/order/domains/register', $this->http->lastRequest()['url']);
+        parse_str((string) $this->http->lastRequest()['body'], $fields);
+
+        foreach (['registrant', 'admin', 'tech', 'billing'] as $role) {
+            $this->assertSame('Chiemela', $fields['contacts'][$role]['firstname'], "{$role} role carries firstname");
+            $this->assertSame('Onugha', $fields['contacts'][$role]['lastname'], "{$role} role carries lastname");
+            $this->assertSame('Chiemela Onugha', $fields['contacts'][$role]['fullname'], "{$role} role carries fullname");
+            $this->assertSame('chiemelaonugha6@gmail.com', $fields['contacts'][$role]['email']);
+            $this->assertSame('Umuonyengwa Village, Obingwa LGA', $fields['contacts'][$role]['address1']);
+            $this->assertSame('Aba', $fields['contacts'][$role]['city']);
+            $this->assertSame('Aba', $fields['contacts'][$role]['state'], 'empty state falls back to the city — the addon validators commonly require one');
+            $this->assertSame('451011', $fields['contacts'][$role]['postcode']);
+            $this->assertSame('NG', $fields['contacts'][$role]['country'], 'country is upper-cased to the ISO alpha-2 the addon expects');
+            $this->assertSame('07031448647', $fields['contacts'][$role]['phonenumber']);
+        }
+
+        $this->assertSame('1', $fields['regperiod']);
+        $this->assertSame('ns1.test', $fields['nameservers']['ns1']);
+        $this->assertSame('ns2.test', $fields['nameservers']['ns2']);
+        $this->assertSame('1', $fields['addons']['idprotection']);
+    }
+
+    public function test_register_derives_first_and_last_name_from_a_combined_name(): void
+    {
+        $this->http->respondWith(200, '{"status":"success"}');
+
+        $this->module->register([
+            'domain' => 'newdomain.com',
+            'years' => 1,
+            'contacts' => ['name' => 'Ada Lovelace', 'email' => 'ada@example.test'],
+            'registrar' => $this->registrar,
+        ]);
+
+        parse_str((string) $this->http->lastRequest()['body'], $fields);
+        $this->assertSame('Ada', $fields['contacts']['registrant']['firstname']);
+        $this->assertSame('Lovelace', $fields['contacts']['registrant']['lastname']);
+        $this->assertSame('Ada Lovelace', $fields['contacts']['registrant']['fullname']);
+        $this->assertSame('ada@example.test', $fields['contacts']['registrant']['email']);
+    }
+
+    public function test_transfer_carries_the_same_role_keyed_contacts(): void
+    {
+        $this->http->respondWith(200, '{"status":"success"}');
+
+        $this->module->transfer([
+            'domain' => 'movemydomain.com',
+            'eppCode' => 'secret',
+            'years' => 1,
+            'contacts' => ['name' => 'Ada Lovelace', 'email' => 'ada@example.test', 'city' => 'London'],
+            'registrar' => $this->registrar,
+        ]);
+
+        $this->assertStringContainsString('/order/domains/transfer', $this->http->lastRequest()['url']);
+        parse_str((string) $this->http->lastRequest()['body'], $fields);
+        $this->assertSame('secret', $fields['eppcode']);
+        $this->assertSame('Ada', $fields['contacts']['registrant']['firstname']);
+        $this->assertSame('billing', array_key_last($fields['contacts']));
+        $this->assertSame('Lovelace', $fields['contacts']['billing']['lastname']);
+    }
+
+
+    /**
+     * THE production renewal bug: the addon answers a successful renewal
+     * with HTTP 200 whose JSON arrives wrapped in PHP-notice pollution,
+     * json_decode failed on the whole body, and the renewal was recorded
+     * as "Unexpected response (HTTP 200)" — the domain WAS renewed at
+     * Upperlink while the local expiry date never moved. The polluted body
+     * must be salvaged, and the new expiry fetched from the registrar.
+     */
+    public function test_renew_survives_a_polluted_success_body_and_fetches_the_new_expiry(): void
+    {
+        $this->http->respondInSequence([
+            [200, "<br />\n<b>Warning</b>: Undefined array key \"promo\" in <b>index.php</b> on line 42<br />\n{\"result\":\"success\",\"msg\":\"Domain has been renewed\"}\n<!-- uptime 0.02s -->"],
+            [200, '{"result":"success","data":{"expirydate":"2027-11-04"}}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'divine.com.ng', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('2027-11-04', $result['expiryDate']);
+    }
+
+    public function test_bom_prefixed_success_body_still_parses_and_expiry_reads_stop_after_three_misses(): void
+    {
+        $this->http->respondInSequence([
+            [200, "\xEF\xBB\xBF" . '{"status":"success"}'],
+            [200, '<html>not found</html>'],
+            [200, ''],
+            [200, '{"result":"error"}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'bom.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('expiryDate', $result);
+        $this->assertCount(4, $this->http->requests); // renew + 3 expiry reads, then stops
+    }
+
+    public function test_renew_ignores_a_fetched_expiry_not_later_than_the_old_one(): void
+    {
+        $this->http->respondInSequence([
+            [200, '{"result":"success"}'],
+            [200, '{"result":"success","data":{"expiryDate":"2026-11-06"}}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'stale.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('expiryDate', $result);
+    }
+
+    public function test_unreadable_body_fails_quoting_the_actual_response(): void
+    {
+        $this->http->respondWith(200, '<!DOCTYPE html><html><body>Please sign in to continue</body></html>');
+
+        $result = $this->module->renew(['domain' => 'html.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('unreadable response (HTTP 200)', $result['message']);
+        $this->assertStringContainsString('Please sign in to continue', $result['message']);
+    }
+
+    public function test_error_messages_read_the_addon_msg_key(): void
+    {
+        $this->http->respondWith(200, '{"result":"error","msg":"Domain has been renewed already"}');
+
+        $result = $this->module->renew(['domain' => 'dupe.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('Domain has been renewed already', $result['message']);
+    }
+
+    public function test_failed_renewal_makes_no_followup_expiry_reads(): void
+    {
+        $this->http->respondWith(200, '{"result":"error","msg":"nope"}');
+
+        $this->module->renew(['domain' => 'fail.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertCount(1, $this->http->requests);
     }
 }
