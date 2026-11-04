@@ -301,6 +301,12 @@ final class DomainService
             // own details rather than failing the renewal outright.
             'client' => $client ?? [],
             'registrarClientId' => $client['registrar_client_id'] ?? null,
+            // The expiry the domain currently carries locally. ResellerClub's
+            // renew API needs it as the exp-date concurrency guard; modules
+            // that fetch the new expiry compare against it so a stale read
+            // (registry not yet propagated) can never move the local date
+            // backwards or leave it unchanged after a paid renewal.
+            'currentExpiry' => $domain['expiry_date'] ?? null,
         ]);
 
         // Persist a customer ID the registrar resolved for us, exactly as

@@ -387,6 +387,45 @@ final class DomainServiceTest extends DatabaseTestCase
         $this->assertSame('777', $renewParams['registrarClientId']);
     }
 
+    /**
+     * Modules need the expiry the renewal is made against: ResellerClub's
+     * renew API requires it as the exp-date guard, and registrar-fetched
+     * dates are only accepted when they advance past it (a registry that
+     * has not propagated yet must never move the local date backwards —
+     * or leave a paid renewal stuck on the old cycle).
+     */
+    public function test_renew_passes_the_current_expiry_to_the_registrar(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $domainId = $this->createPendingDomainForFakeRegistrar('currentexpiry.test');
+        $this->domains->advanceRenewal($domainId, '2026-11-06', '2026-11-06');
+
+        $fake->respond('renew', ['success' => true, 'message' => 'ok']);
+        $service->renew($domainId, 1);
+
+        $this->assertSame('2026-11-06', $fake->lastCall('renew')['currentExpiry']);
+    }
+
+    /**
+     * A module returning no date must not leave the paid renewal stuck on
+     * the old expiry, and must not compute from "today" either (that eats
+     * the months still remaining before expiry). The service extends the
+     * CURRENT expiry by the renewed years — exactly what the registrar did.
+     */
+    public function test_renew_without_a_module_date_extends_the_current_expiry(): void
+    {
+        [$service, $fake] = $this->withFakeRegistrar();
+        $domainId = $this->createPendingDomainForFakeRegistrar('fallback.test');
+        $this->domains->advanceRenewal($domainId, '2026-03-01', '2026-03-01');
+
+        $fake->respond('renew', ['success' => true, 'message' => 'ok']);
+        $service->renew($domainId, 1);
+
+        $domain = $this->domains->find($domainId);
+        $this->assertSame('2027-03-01', $domain['expiry_date']);
+        $this->assertSame($domain['expiry_date'], $domain['next_due_date']);
+    }
+
     public function test_get_contact_info_passes_the_stored_registrar_contact_id(): void
     {
         [$service, $fake] = $this->withFakeRegistrar();

@@ -123,13 +123,52 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => $error];
         }
 
+        // renew.json takes the domain's CURRENT expiry timestamp as a
+        // concurrency guard (renew against the expiry you know). This used
+        // to read a `currentExpiryTimestamp` key nothing ever passed — the
+        // guard went out as an empty string on every renewal. DomainService
+        // now passes the local expiry as `currentExpiry`.
+        $currentExpiry = substr(trim((string) ($params['currentExpiry'] ?? '')), 0, 10);
+        $expDate = $currentExpiry !== '' ? (string) strtotime($currentExpiry) : '';
+
         $response = $this->call($registrar, 'POST', '/domains/renew.json', [
             'order-id' => $orderId,
             'years' => (string) ($params['years'] ?? 1),
-            'exp-date' => (string) ($params['currentExpiryTimestamp'] ?? ''),
+            'exp-date' => $expDate,
         ]);
 
-        return $this->toResult($response, 'Domain renewed.');
+        $decoded = $this->decode($response);
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        $result = ['success' => true, 'message' => 'Domain renewed.'];
+
+        // A successful renew answers with the updated order entity, whose
+        // `endtime` is the expiry as the registrar now records it — fetch
+        // the truth rather than compute it. Guarded against a registry that
+        // has not propagated yet: an endtime no later than the expiry the
+        // renewal was made against is ignored, letting DomainService's
+        // current-expiry + years fallback apply instead of recording a
+        // "new" date that is not new.
+        foreach (['endtime', 'new-endtime', 'newendtime', 'new_endtime'] as $key) {
+            $value = is_array($decoded['data'] ?? null) ? ($decoded['data'][$key] ?? null) : null;
+
+            if (!is_numeric($value) || (int) $value <= 0) {
+                continue;
+            }
+
+            $date = date('Y-m-d', (int) $value);
+
+            if ($currentExpiry === '' || $date > $currentExpiry) {
+                $result['expiryDate'] = $date;
+            }
+
+            break;
+        }
+
+        return $result;
     }
 
     /**
@@ -779,10 +818,34 @@ final class ResellerClubRegistrarModule implements RegistrarModule
             return ['success' => false, 'message' => 'Could not reach the ResellerClub API.', 'data' => []];
         }
 
-        $decoded = json_decode($response['body'], true);
+        $body = ltrim($response['body'], "\xEF\xBB\xBF \t\r\n");
+        $decoded = json_decode($body, true);
 
-        if ($decoded === null && $response['body'] !== 'null') {
-            return ['success' => false, 'message' => "Unexpected response (HTTP {$response['status']}).", 'data' => []];
+        // Salvage a JSON object out of a polluted body (PHP notices, BOM,
+        // HTML around the payload) — the same live failure class that turned
+        // Upperlink renewals into "Unexpected response (HTTP 200)".
+        if ($decoded === null && $body !== 'null') {
+            $start = strpos($response['body'], '{');
+            $end = strrpos($response['body'], '}');
+
+            if ($start !== false && $end !== false && $end > $start) {
+                $candidate = json_decode(substr($response['body'], $start, $end - $start + 1), true);
+
+                if (is_array($candidate)) {
+                    $decoded = $candidate;
+                }
+            }
+        }
+
+        if ($decoded === null && $body !== 'null') {
+            $text = trim((string) preg_replace('/\s+/', ' ', strip_tags($response['body'])));
+            $snippet = $text !== '' ? mb_substr($text, 0, 160) : 'an empty body';
+
+            return [
+                'success' => false,
+                'message' => "The registrar returned an unreadable response (HTTP {$response['status']}): {$snippet}",
+                'data' => [],
+            ];
         }
 
         $status = is_array($decoded) ? strtolower((string) ($decoded['status'] ?? '')) : '';

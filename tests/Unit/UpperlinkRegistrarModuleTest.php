@@ -70,7 +70,8 @@ final class UpperlinkRegistrarModuleTest extends TestCase
 
         $this->module->renew(['domain' => 'renewthis.com', 'years' => 1, 'registrar' => $this->registrar]);
 
-        $this->assertStringEndsWith('/order/domains/renew', $this->http->lastRequest()['url']);
+        // renew() is the FIRST request; any follow-up expiry reads come after.
+        $this->assertStringEndsWith('/order/domains/renew', $this->http->requests[0]['url']);
     }
 
     public function test_get_nameservers_is_a_get_request_with_domain_in_the_path(): void
@@ -312,5 +313,86 @@ final class UpperlinkRegistrarModuleTest extends TestCase
         $this->assertSame('Ada', $fields['contacts']['registrant']['firstname']);
         $this->assertSame('billing', array_key_last($fields['contacts']));
         $this->assertSame('Lovelace', $fields['contacts']['billing']['lastname']);
+    }
+
+
+    /**
+     * THE production renewal bug: the addon answers a successful renewal
+     * with HTTP 200 whose JSON arrives wrapped in PHP-notice pollution,
+     * json_decode failed on the whole body, and the renewal was recorded
+     * as "Unexpected response (HTTP 200)" — the domain WAS renewed at
+     * Upperlink while the local expiry date never moved. The polluted body
+     * must be salvaged, and the new expiry fetched from the registrar.
+     */
+    public function test_renew_survives_a_polluted_success_body_and_fetches_the_new_expiry(): void
+    {
+        $this->http->respondInSequence([
+            [200, "<br />\n<b>Warning</b>: Undefined array key \"promo\" in <b>index.php</b> on line 42<br />\n{\"result\":\"success\",\"msg\":\"Domain has been renewed\"}\n<!-- uptime 0.02s -->"],
+            [200, '{"result":"success","data":{"expirydate":"2027-11-04"}}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'divine.com.ng', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('2027-11-04', $result['expiryDate']);
+    }
+
+    public function test_bom_prefixed_success_body_still_parses_and_expiry_reads_stop_after_three_misses(): void
+    {
+        $this->http->respondInSequence([
+            [200, "\xEF\xBB\xBF" . '{"status":"success"}'],
+            [200, '<html>not found</html>'],
+            [200, ''],
+            [200, '{"result":"error"}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'bom.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('expiryDate', $result);
+        $this->assertCount(4, $this->http->requests); // renew + 3 expiry reads, then stops
+    }
+
+    public function test_renew_ignores_a_fetched_expiry_not_later_than_the_old_one(): void
+    {
+        $this->http->respondInSequence([
+            [200, '{"result":"success"}'],
+            [200, '{"result":"success","data":{"expiryDate":"2026-11-06"}}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'stale.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('expiryDate', $result);
+    }
+
+    public function test_unreadable_body_fails_quoting_the_actual_response(): void
+    {
+        $this->http->respondWith(200, '<!DOCTYPE html><html><body>Please sign in to continue</body></html>');
+
+        $result = $this->module->renew(['domain' => 'html.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('unreadable response (HTTP 200)', $result['message']);
+        $this->assertStringContainsString('Please sign in to continue', $result['message']);
+    }
+
+    public function test_error_messages_read_the_addon_msg_key(): void
+    {
+        $this->http->respondWith(200, '{"result":"error","msg":"Domain has been renewed already"}');
+
+        $result = $this->module->renew(['domain' => 'dupe.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('Domain has been renewed already', $result['message']);
+    }
+
+    public function test_failed_renewal_makes_no_followup_expiry_reads(): void
+    {
+        $this->http->respondWith(200, '{"result":"error","msg":"nope"}');
+
+        $this->module->renew(['domain' => 'fail.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertCount(1, $this->http->requests);
     }
 }

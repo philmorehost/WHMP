@@ -694,4 +694,22 @@ final class ConnectResellerRegistrarModuleTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertSame('9001', $result['registrarContactId']);
     }
+
+
+    /**
+     * A response carrying no expiry must NOT invent one from "today": the
+     * old `?? date('+N years')` fallback ate the months still remaining
+     * before expiry (renewing five months early recorded only ~7 paid
+     * months). Leaving expiryDate unset makes DomainService extend the
+     * CURRENT expiry by the renewed years, the way the registrar does.
+     */
+    public function test_renew_without_a_response_date_lets_the_service_extend_the_current_expiry(): void
+    {
+        $this->http->respondWith(200, '{"responseMsg":{"message":"Renewed","statusCode":200},"responseData":{"domainName":"renewme.com"}}');
+
+        $result = $this->module->renew(['domain' => 'renewme.com', 'years' => 1, 'registrarClientId' => '42', 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('expiryDate', $result);
+    }
 }

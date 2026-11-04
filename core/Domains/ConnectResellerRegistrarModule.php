@@ -267,8 +267,35 @@ final class ConnectResellerRegistrarModule implements RegistrarModule
         $result = [
             'success' => true,
             'message' => 'Domain renewed.',
-            'expiryDate' => $this->parseDate($decoded['data']['expiryDate'] ?? null) ?? date('Y-m-d', strtotime('+' . ($params['years'] ?? 1) . ' years')),
         ];
+
+        // Keep the registrar's own new expiry when the response carries one.
+        // The old `?? date('+N years')` fallback computed from TODAY, which
+        // silently ate the months still remaining before expiry — a renewal
+        // made five months early recorded only ~7 months of paid time.
+        // When the response has no date, expiryDate is left unset and
+        // DomainService extends the CURRENT expiry by the renewed years,
+        // the same way the registrar itself does.
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : [];
+
+        $fetched = null;
+
+        foreach (['expiryDate', 'expirydate', 'expiry_date', 'endDate', 'enddate'] as $key) {
+            $fetched = $this->parseDate($data[$key] ?? null);
+
+            if ($fetched !== null) {
+                break;
+            }
+        }
+
+        // Guarded like the other modules: a date no later than the expiry
+        // the renewal was made against is stale (registry not yet
+        // propagated), not the renewal's result.
+        $current = substr(trim((string) ($params['currentExpiry'] ?? '')), 0, 10);
+
+        if ($fetched !== null && ($current === '' || $fetched > $current)) {
+            $result['expiryDate'] = $fetched;
+        }
 
         // Report a newly-learned ID back so the client row gets linked and the
         // next renewal skips the lookup entirely.

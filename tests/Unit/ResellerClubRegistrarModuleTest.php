@@ -206,4 +206,54 @@ final class ResellerClubRegistrarModuleTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertArrayNotHasKey('registrarContactId', $result, 'an id the caller supplied is not reported back as newly learned');
     }
+
+
+    /**
+     * renew.json takes the domain's CURRENT expiry timestamp as a
+     * concurrency guard. The guard used to be read from a
+     * `currentExpiryTimestamp` key nothing ever passed, so every renewal
+     * sent it empty; DomainService now supplies `currentExpiry`. A
+     * successful renew also answers with the updated order entity whose
+     * `endtime` IS the new expiry — fetched, not computed.
+     */
+    public function test_renew_sends_the_current_expiry_as_the_exp_date_guard_and_fetches_the_new_date(): void
+    {
+        $this->http->respondInSequence([
+            [200, '"99"'],
+            [200, '{"endtime":' . (strtotime('2026-11-06') + 31536000) . '}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'renewme.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $renewUrl = $this->http->requests[1]['url'];
+        $this->assertStringContainsString('/domains/renew.json', $renewUrl);
+        $this->assertStringContainsString('exp-date=' . strtotime('2026-11-06'), $renewUrl);
+        $this->assertTrue($result['success']);
+        $this->assertSame(date('Y-m-d', strtotime('2026-11-06') + 31536000), $result['expiryDate']);
+    }
+
+    public function test_renew_ignores_an_endtime_that_has_not_advanced(): void
+    {
+        $this->http->respondInSequence([
+            [200, '"99"'],
+            [200, '{"endtime":' . strtotime('2026-11-06') . '}'],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'renewme.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('expiryDate', $result);
+    }
+
+    public function test_renew_survives_a_polluted_success_body(): void
+    {
+        $this->http->respondInSequence([
+            [200, '"99"'],
+            [200, "Warning: something\n{\"status\":\"success\"}"],
+        ]);
+
+        $result = $this->module->renew(['domain' => 'renewme.com', 'years' => 1, 'registrar' => $this->registrar, 'currentExpiry' => '2026-11-06']);
+
+        $this->assertTrue($result['success']);
+    }
 }

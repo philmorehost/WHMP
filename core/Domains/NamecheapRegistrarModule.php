@@ -97,7 +97,33 @@ final class NamecheapRegistrarModule implements RegistrarModule
             'Years' => (string) ($params['years'] ?? 1),
         ]);
 
-        return $this->toResult($response, 'Domain renewed.');
+        $decoded = $this->decode($response);
+
+        if (!$decoded['success']) {
+            return ['success' => false, 'message' => $decoded['message']];
+        }
+
+        $result = ['success' => true, 'message' => 'Domain renewed.'];
+
+        // The renew answer carries the registrar's own new expiry in
+        // DomainRenewResult@ExpirationDate (MM/DD/YYYY) — fetch the truth
+        // instead of leaving the caller to compute it. A date no later than
+        // the expiry the renewal was made against is a registry that has
+        // not propagated yet, so it is ignored in favour of the caller's
+        // current-expiry + years fallback.
+        $expiration = (string) ($decoded['xml']->CommandResponse->DomainRenewResult['ExpirationDate'] ?? '');
+        $timestamp = $expiration !== '' ? strtotime($expiration) : false;
+
+        if ($timestamp !== false) {
+            $date = date('Y-m-d', $timestamp);
+            $current = substr(trim((string) ($params['currentExpiry'] ?? '')), 0, 10);
+
+            if ($current === '' || $date > $current) {
+                $result['expiryDate'] = $date;
+            }
+        }
+
+        return $result;
     }
 
     public function getNameservers(array $params): array
