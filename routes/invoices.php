@@ -22,6 +22,13 @@ $router->post('/client/billable-items/{id}/cancel', [ClientInvoiceController::cl
 $router->get('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsForm']);
 $router->post('/client/wallet/add-funds', [ClientInvoiceController::class, 'addFundsSubmit']);
 
+// Manual crypto payments (USDT TRC-20): instructions + proof upload. The
+// pay button POSTs to /pay/crypto_manual which redirects here instead of
+// capturing — these pages still re-verify auth, ownership, gateway state
+// and the audience toggles themselves.
+$router->get('/client/invoices/{id}/crypto', [\CodeVault\Billing\ClientCryptoManualController::class, 'instructions']);
+$router->post('/client/invoices/{id}/crypto', [\CodeVault\Billing\ClientCryptoManualController::class, 'submit']);
+
 $router->post('/client/invoices/{id}/pay/{gateway}', [PaymentCallbackController::class, 'initiate']);
 // Server-issued init for on-page popup checkout — returns the reference and
 // amount the server decided, so the popup never chooses either itself.
@@ -30,6 +37,12 @@ $router->get('/pay/{gateway}/callback', [PaymentCallbackController::class, 'call
 $router->post('/pay/{gateway}/webhook', [PaymentCallbackController::class, 'webhook']);
 
 $router->get('/admin/invoices', [AdminInvoiceController::class, 'index']);
+
+// Manual crypto payment review queue (USDT TRC-20 proofs).
+$router->get('/admin/crypto-payments', [\CodeVault\Billing\AdminCryptoManualController::class, 'index']);
+$router->get('/admin/crypto-payments/{id}/proof', [\CodeVault\Billing\AdminCryptoManualController::class, 'proof']);
+$router->post('/admin/crypto-payments/{id}/approve', [\CodeVault\Billing\AdminCryptoManualController::class, 'approve']);
+$router->post('/admin/crypto-payments/{id}/reject', [\CodeVault\Billing\AdminCryptoManualController::class, 'reject']);
 // Literal paths must precede /admin/invoices/{id}: the router returns the
 // first pattern that matches, and {id} would otherwise swallow "create".
 $router->get('/admin/invoices/create', [AdminInvoiceController::class, 'createForm']);

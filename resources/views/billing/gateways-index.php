@@ -370,6 +370,37 @@ $webhookUrl = static fn (string $slug): string => $baseUrl . '/pay/' . $slug . '
                 <button type="button" class="cv-btn cv-btn--secondary" style="padding:2px var(--cv-space-2);font-size:var(--cv-text-xs);" data-copy-target="#webhook-paypal">Copy</button>
                 — add this in your PayPal app's Webhooks page, subscribed to PAYMENT.CAPTURE.COMPLETED and CHECKOUT.ORDER.APPROVED.
             </p>
+        <?php elseif ($gateway['slug'] === 'crypto_manual'): ?>
+            <form method="post" action="/admin/gateways/crypto_manual/config" style="margin-top:var(--cv-space-3);"><?= csrf_field() ?>
+                <div class="admin-gw-field">
+                    <label style="">USDT (TRC-20) Wallet Address</label>
+                    <input style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:var(--cv-bg-surface); color:var(--cv-text-primary); font-size:.9rem; font-family:monospace;" name="wallet_address" value="<?= e((string) ($config['wallet_address'] ?? '')) ?>" placeholder="TXYourTRC20WalletAddress33chars">
+                    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:4px;">Clients send USDT on the TRON network here and upload proof; you approve under Billing → Crypto Payments. Double-check the network — a wrong address loses the funds.</p>
+                </div>
+                <div class="admin-gw-field">
+                    <label style="">Payment Instructions Shown to Clients</label>
+                    <textarea style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:var(--cv-bg-surface); color:var(--cv-text-primary); font-size:.9rem;" name="instructions" rows="3" placeholder="e.g. Transfers confirm in 1–2 minutes; include the invoice number as memo."><?= e((string) ($config['instructions'] ?? '')) ?></textarea>
+                </div>
+                <div class="admin-gw-field">
+                    <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;">
+                        <input type="checkbox" name="enable_for_clients" value="1" <?= (int) ($config['enable_for_clients'] ?? 1) === 1 ? 'checked' : '' ?>>
+                        Available to platform clients
+                    </label>
+                    <label style="display:flex;align-items:center;gap:var(--cv-space-2);font-weight:600;cursor:pointer;margin-top:6px;">
+                        <input type="checkbox" name="enable_for_resellers" value="1" <?= (int) ($config['enable_for_resellers'] ?? 1) === 1 ? 'checked' : '' ?>>
+                        Available to resellers (paying their own invoices)
+                    </label>
+                    <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:4px;">Resellers' own storefront customers follow the "Reseller customers" toggle on this card and start disabled — they keep paying through your normal gateways.</p>
+                </div>
+                <div class="admin-gw-field">
+                    <label style="">Quote Currency (USD = default for crypto)</label>
+                    <input style="width:100%; padding:8px 12px; border:1px solid var(--cv-border-default); border-radius:6px; background:var(--cv-bg-surface); color:var(--cv-text-primary); font-size:.9rem;" name="gateway_currency" value="<?= e((string) ($config['gateway_currency'] ?? 'USD')) ?>" placeholder="USD">
+                </div>
+                <button class="admin-gw-btn-save" type="submit">Save Crypto Config</button>
+            </form>
+            <p style="color:var(--cv-text-secondary);font-size:var(--cv-text-xs);margin-top:var(--cv-space-2);">
+                No API or webhook — payments are approved by hand on <a href="/admin/crypto-payments">Crypto Payments</a>.
+            </p>
         <?php endif; ?>
     </div>
 <?php endforeach; ?>

@@ -28,7 +28,8 @@ final class PaymentGatewayRepository
 
     /**
      * The gateways a given CLIENT may see and pay with: everything enabled,
-     * minus the ones the admin switched off for reseller customers.
+     * minus the ones the admin switched off for reseller customers, minus
+     * any gateway whose own audience rules exclude this account.
      *
      * "Reseller customer" is a clients row with reseller_id set — the store
      * the account belongs to, the same distinction PLATFORM_ONLY draws
@@ -38,6 +39,12 @@ final class PaymentGatewayRepository
      * (fail open to the full list — the payment initiator re-checks with
      * the real client row anyway).
      *
+     * The manual crypto gateway adds its own layer on top: the admin can
+     * switch it off for PLATFORM CLIENTS or for RESELLERS (store owners
+     * paying their own invoices) independently. Storefront customers of
+     * resellers follow the reseller_enabled toggle above like every other
+     * gateway (crypto_manual is seeded with it OFF).
+     *
      * @param array<string, mixed>|null $client the clients row, or null
      * @return array<int, array<string, mixed>>
      */
@@ -45,13 +52,50 @@ final class PaymentGatewayRepository
     {
         $gateways = $this->allEnabled();
 
-        if (!self::isResellerClient($client)) {
-            return $gateways;
+        $isStorefront = self::isResellerClient($client);
+
+        if ($isStorefront) {
+            $gateways = array_values(array_filter(
+                $gateways,
+                static fn (array $gateway): bool => (int) ($gateway['reseller_enabled'] ?? 1) === 1
+            ));
+        }
+
+        $hasCrypto = false;
+
+        foreach ($gateways as $gateway) {
+            if ((string) ($gateway['slug'] ?? '') === CryptoManualGateway::SLUG) {
+                $hasCrypto = true;
+                break;
+            }
+        }
+
+        if (!$hasCrypto) {
+            return array_values($gateways);
+        }
+
+        // One cheap lookup, only when the crypto gateway is actually in the
+        // list: is this platform account a reseller (store owner)?
+        $isResellerOwner = false;
+
+        if (!$isStorefront && $client !== null) {
+            $isResellerOwner = $this->db->selectOne(
+                'SELECT id FROM resellers WHERE client_id = ? LIMIT 1',
+                [(int) $client['id']]
+            ) !== null;
         }
 
         return array_values(array_filter(
             $gateways,
-            static fn (array $gateway): bool => (int) ($gateway['reseller_enabled'] ?? 1) === 1
+            function (array $gateway) use ($isStorefront, $isResellerOwner): bool {
+                if ((string) ($gateway['slug'] ?? '') !== CryptoManualGateway::SLUG) {
+                    return true;
+                }
+
+                $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: [];
+
+                return CryptoManualGateway::audienceAllows($config, $isStorefront, $isResellerOwner);
+            }
         ));
     }
 

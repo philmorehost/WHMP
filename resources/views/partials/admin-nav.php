@@ -22,6 +22,7 @@ $groups = [
         '/admin/credit-notes' => 'Credit Notes',
         '/admin/billable-items' => 'Billable Items',
         '/admin/gateways' => 'Payment Gateways',
+        '/admin/crypto-payments' => 'Crypto Payments',
         '/admin/tax-rules' => 'Tax Rules',
         '/admin/currencies' => 'Currencies',
         '/admin/promotions' => 'Promotions',

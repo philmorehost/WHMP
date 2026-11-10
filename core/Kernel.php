@@ -21,6 +21,7 @@ use CodeVault\Billing\CancellationCronJob;
 use CodeVault\Billing\OrderCancellationService;
 use CodeVault\Billing\InvoiceCancellationService;
 use CodeVault\Billing\FlutterwaveGateway;
+use CodeVault\Billing\CryptoManualGateway;
 use CodeVault\Billing\ManualGateway;
 use CodeVault\Billing\PaystackGateway;
 use CodeVault\Billing\PayhubGateway;
@@ -850,6 +851,7 @@ class Kernel
             $manager->register(GatewayModule::class, 'flutterwave', $c->make(FlutterwaveGateway::class));
             $manager->register(GatewayModule::class, 'payhub', $c->make(PayhubGateway::class));
             $manager->register(GatewayModule::class, 'plisio', $c->make(PlisioGateway::class));
+            $manager->register(GatewayModule::class, 'crypto_manual', $c->make(CryptoManualGateway::class));
             $manager->register(GatewayModule::class, 'paypal', $c->make(PaypalGateway::class));
             $manager->register(ProvisioningModule::class, 'local', $c->make(LocalProvisioningModule::class));
             $manager->register(ProvisioningModule::class, 'cpanel', $c->make(CpanelProvisioningModule::class));

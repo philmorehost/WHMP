@@ -58,6 +58,17 @@ final class PaymentCallbackController
         $baseUrl = rtrim((string) $this->config->env('APP_URL', ''), '/');
         $clientName = trim((string) ($client['first_name'] ?? '') . ' ' . (string) ($client['last_name'] ?? ''));
 
+        // Manual crypto has no capture step: the client is sent to the
+        // instructions + proof-upload page (the USD quote is computed there,
+        // and locked when they submit). prepareCharge() above already did
+        // every auth/enabled/audience/config check, so this branch adds no
+        // way past them — it only changes what happens AFTER they pass.
+        if ($module instanceof CryptoManualGateway) {
+            $this->writeGatewayLog($slug, $invoiceId, (int) $client['id'], 'INITIATING', 'Manual crypto — client sent to the payment-instructions page.');
+
+            return Response::redirect("/client/invoices/{$invoiceId}/crypto");
+        }
+
         try {
             $result = $module->capture([
                 'config' => $prepared['config'],
@@ -257,6 +268,29 @@ final class PaymentCallbackController
             return $fail('disabled', $reason);
         }
 
+        $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
+
+        // The manual crypto gateway's audience toggles (clients / resellers)
+        // are enforced at the same choke point: a hand-crafted pay URL must
+        // not reach the upload page for an audience the admin switched off.
+        if ($module instanceof CryptoManualGateway) {
+            $isStorefront = PaymentGatewayRepository::isResellerClient($client);
+            $isResellerOwner = !$isStorefront
+                && $this->db->selectOne('SELECT id FROM resellers WHERE client_id = ? LIMIT 1', [$clientId]) !== null;
+
+            if (!CryptoManualGateway::audienceAllows($config, $isStorefront, $isResellerOwner)) {
+                $reason = "Gateway '{$slug}' is not enabled for this account type.";
+                $this->writeGatewayLog($slug, $invoiceId, $clientId, 'DISABLED', $reason);
+                return $fail('disabled', $reason);
+            }
+
+            if (!CryptoManualGateway::walletAddressIsValid(CryptoManualGateway::walletAddress($config))) {
+                $reason = 'Cryptocurrency payments are not configured — no valid USDT (TRC-20) wallet address is set in Admin → Gateways.';
+                $this->writeGatewayLog($slug, $invoiceId, $clientId, 'DISABLED', $reason);
+                return $fail('disabled', $reason);
+            }
+        }
+
         $remaining = round((float) $invoice['total'] - $this->transactions->totalCompletedForInvoice($invoiceId), 2);
 
         if ($remaining <= 0) {
@@ -264,7 +298,6 @@ final class PaymentCallbackController
             return $fail('settled', 'This invoice is already paid.');
         }
 
-        $config = json_decode((string) ($gatewayRow['config'] ?? '{}'), true) ?: [];
         $gatewayCurrency = strtoupper(trim((string) ($config['gateway_currency'] ?? 'NGN'))) ?: 'NGN';
         $reference = "cv-{$slug}-{$invoiceId}-" . bin2hex(random_bytes(6));
 

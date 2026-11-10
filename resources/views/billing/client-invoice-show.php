@@ -212,9 +212,19 @@ $companyDept ??= 'Payments Dept.';
                                     <strong style="color:#111827; display:block; margin-bottom:4px;"><?= e($gateway['name']) ?></strong>
                                     <?php
                                     $config = json_decode((string) ($gateway['config'] ?? '{}'), true) ?: [];
-                                    $hasKeys = !empty($config['secret_key']) || !empty($config['api_key']) || !empty($config['client_id']);
+                                    if ($gateway['slug'] === 'crypto_manual') {
+                                        // Configured = a wallet address exists; the API-key
+                                        // test below is meaningless for the manual crypto flow.
+                                        $hasKeys = trim((string) ($config['wallet_address'] ?? '')) !== '';
+                                    } else {
+                                        $hasKeys = !empty($config['secret_key']) || !empty($config['api_key']) || !empty($config['client_id']);
+                                    }
                                     ?>
-                                    <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Secure instant online payment processing.</p>
+                                    <?php if ($gateway['slug'] === 'crypto_manual'): ?>
+                                        <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Send USDT (TRC-20), upload your payment proof, and an admin approves it.</p>
+                                    <?php else: ?>
+                                        <p style="color:#6b7280; font-size:var(--cv-text-xs); margin:0 0 var(--cv-space-3) 0;">Secure instant online payment processing.</p>
+                                    <?php endif; ?>
                                     <?php if (!$hasKeys): ?>
                                         <div style="font-size:0.75rem; color:#b91c1c; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); padding:4px 8px; border-radius:4px; margin-bottom:8px;">
                                             ⚠️ API Keys Unconfigured in Admin
